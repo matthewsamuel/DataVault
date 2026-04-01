@@ -78,7 +78,7 @@ async def get_storage_breakdown() -> Dict[str, Any]:
         return {"error": str(e)}
 
 @router.get("/photo-on-this-day")
-async def get_photo_on_this_day() -> Dict[str, Any]:
+async def get_photo_on_this_day(allowed_folders: str = None) -> Dict[str, Any]:
     if not config:
         return {"error": "Config not loaded"}
          
@@ -94,8 +94,17 @@ async def get_photo_on_this_day() -> Dict[str, Any]:
     vault_root = config.VAULT_ROOT
     
     try:
-        # To avoid always returning from the first folder (A-Z), gather all dirs and shuffle
-        all_dirs = [x[0] for x in os.walk(vault_root)]
+        if allowed_folders:
+            # allow multiple comma-separated bases
+            bases = [Path(p.strip()) for p in allowed_folders.split(',')]
+            all_dirs = []
+            for base in bases:
+                if base.exists() and base.is_dir():
+                    all_dirs.extend([x[0] for x in os.walk(base)])
+            all_dirs = list(set(all_dirs))
+        else:
+            all_dirs = [x[0] for x in os.walk(vault_root)]
+            
         random.shuffle(all_dirs)
         
         # Check up to 50 random directories looking for a match

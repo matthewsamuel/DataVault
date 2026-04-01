@@ -11,6 +11,7 @@ let keurerIsAnimating = false;
 let keurerSelectedFolderForModal = null;
 let keurerMoveSelectedFolder = null;
 let keurerPreviewOpen = false;
+let keurerMoveHighlightIndex = -1;
 
 // Undo-geschiedenis: { file, decision, trash_path, moved_to }
 let keurerHistory = [];
@@ -480,8 +481,14 @@ async function keurerOpenMoveModal() {
 
     tree.forEach(f => keurerRenderMoveFolderNode(treeContainer, f, 0));
 
-    // Zet focus op zoekbalk
-    setTimeout(() => { if (searchEl) searchEl.focus(); }, 80);
+    // Zet focus op zoekbalk en voeg keyboard nav toe
+    keurerMoveHighlightIndex = -1;
+    setTimeout(() => {
+        if (searchEl) {
+            searchEl.focus();
+            searchEl.onkeydown = keurerHandleMoveSearchKeydown;
+        }
+    }, 80);
 }
 
 function keurerFilterMoveTree(query) {
@@ -489,8 +496,9 @@ function keurerFilterMoveTree(query) {
     const clearBtn      = document.getElementById('keurer-move-search-clear');
     if (clearBtn) clearBtn.style.display = query.length > 0 ? 'flex' : 'none';
 
-    // Reset selectie bij nieuwe zoekopdracht
+    // Reset selectie en highlight bij nieuwe zoekopdracht
     keurerMoveSelectedFolder = null;
+    keurerMoveHighlightIndex = -1;
     document.getElementById('btn-keurer-confirm-move').disabled = true;
 
     if (!query.trim()) {
@@ -530,6 +538,7 @@ function keurerFilterMoveTree(query) {
         for (const f of list) {
             const item = document.createElement('div');
             item.className = 'folder-item keurer-move-flat-item';
+            item.dataset.path = f.path;
 
             const icon = document.createElement('span');
             icon.className = 'folder-icon';
@@ -579,12 +588,84 @@ function keurerHighlight(name, query) {
     );
 }
 
+// ==================== KEYBOARD NAV IN MODAL ====================
+
+// Haal alleen zichtbare folder-items op (niet in collapsed containers)
+function keurerGetVisibleMoveItems() {
+    const all = document.querySelectorAll('#keurer-move-folder-tree .folder-item');
+    return Array.from(all).filter(el => {
+        // Controleer of het item of een parent verborgen is (collapsed)
+        let parent = el.parentElement;
+        while (parent && parent.id !== 'keurer-move-folder-tree') {
+            if (parent.classList.contains('collapsed')) return false;
+            parent = parent.parentElement;
+        }
+        return true;
+    });
+}
+
+function keurerHandleMoveSearchKeydown(e) {
+    const items = keurerGetVisibleMoveItems();
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (items.length === 0) return;
+        keurerMoveHighlightIndex = Math.min(items.length - 1, keurerMoveHighlightIndex + 1);
+        keurerUpdateMoveHighlight(items);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (items.length === 0) return;
+        keurerMoveHighlightIndex = Math.max(0, keurerMoveHighlightIndex - 1);
+        keurerUpdateMoveHighlight(items);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (keurerMoveHighlightIndex >= 0 && keurerMoveHighlightIndex < items.length) {
+            // Selecteer de map en bevestig verplaatsen
+            items[keurerMoveHighlightIndex].click();
+            keurerConfirmMove();
+        } else if (keurerMoveSelectedFolder) {
+            // Als er geen highlight is maar wel een geselecteerde map (via klik)
+            keurerConfirmMove();
+        }
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        keurerCloseMoveModal();
+    }
+}
+
+function keurerUpdateMoveHighlight(items) {
+    // Verwijder keyboard-focus van alle items in de tree
+    document.querySelectorAll('#keurer-move-folder-tree .folder-item.keyboard-focus')
+        .forEach(el => el.classList.remove('keyboard-focus'));
+
+    if (keurerMoveHighlightIndex >= 0 && keurerMoveHighlightIndex < items.length) {
+        const target = items[keurerMoveHighlightIndex];
+        target.classList.add('keyboard-focus');
+        target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+        // Selecteer de map meteen zodat de knop actief wordt
+        const path = target.dataset.path;
+        if (path) {
+            document.querySelectorAll('#keurer-move-folder-tree .folder-item')
+                .forEach(el => el.classList.remove('selected'));
+            target.classList.add('selected');
+            keurerMoveSelectedFolder = path;
+            document.getElementById('btn-keurer-confirm-move').disabled = false;
+        }
+    }
+}
+
 function keurerRenderMoveFolderNode(container, folder, depth) {
     const wrapper = document.createElement('div');
 
     const item = document.createElement('div');
     item.className = 'folder-item';
     item.style.paddingLeft = `${depth * 20 + 8}px`;
+    item.dataset.path = folder.path;
 
     const hasChildren = folder.children && folder.children.length > 0;
 
@@ -599,6 +680,10 @@ function keurerRenderMoveFolderNode(container, folder, depth) {
                 const isOpen = !childDiv.classList.contains('collapsed');
                 childDiv.classList.toggle('collapsed', isOpen);
                 chevron.classList.toggle('expanded', !isOpen);
+                // Reset keyboard highlight — zichtbare items zijn veranderd
+                keurerMoveHighlightIndex = -1;
+                document.querySelectorAll('#keurer-move-folder-tree .folder-item.keyboard-focus')
+                    .forEach(el => el.classList.remove('keyboard-focus'));
             }
         };
         item.appendChild(chevron);

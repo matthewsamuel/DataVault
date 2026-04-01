@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer
+from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline
 
 # Initialize FastAPI app
 app = FastAPI(title="DataVault Dashboard")
@@ -64,6 +64,7 @@ try:
     stats.init_router(config)
     chat.init_router(config)
     keurer.init_router(config, db)
+    timeline.init_router(config)
     
     print("DataVault Dashboard initialized successfully")
 
@@ -87,6 +88,7 @@ app.include_router(shows.router, prefix="/api/shows", tags=["shows"])
 app.include_router(chat.router, tags=["chat"])
 app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"])
+app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"])
 
 @app.post("/api/restart")
 async def restart_server():

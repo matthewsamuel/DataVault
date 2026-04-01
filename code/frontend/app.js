@@ -141,6 +141,9 @@ function switchMainView(view) {
     document.getElementById('section-keurer').classList.toggle('active', view === 'keurer');
     document.getElementById('section-keurer').classList.toggle('hidden', view !== 'keurer');
 
+    document.getElementById('section-timeline').classList.toggle('active', view === 'timeline');
+    document.getElementById('section-timeline').classList.toggle('hidden', view !== 'timeline');
+
     // Show/hide sidebar
     document.getElementById('sidebar').style.display = view === 'viewer' ? 'flex' : 'none';
 
@@ -159,6 +162,8 @@ function switchMainView(view) {
         }
     } else if (view === 'keurer') {
         if (typeof keurerInit === 'function') keurerInit();
+    } else if (view === 'timeline') {
+        if (typeof timelineInit === 'function') timelineInit();
     }
 }
 
@@ -1484,33 +1489,7 @@ async function fetchHomeWidgets() {
     }
 
     // 2. Photo OTD
-    try {
-        const res = await fetch(`${API_BASE}/api/stats/photo-on-this-day`);
-        const data = await res.json();
-        const loading = document.getElementById('photo-otd-loading');
-        const content = document.getElementById('photo-otd-content');
-
-        loading.style.display = 'none';
-        content.style.display = 'block';
-
-        if (data.photos && data.photos.length > 0) {
-            let itemsHtml = '';
-            data.photos.forEach(p => {
-                itemsHtml += `
-                    <div class="otd-item" onclick="openPhotoOTD('${p.path.replace(/'/g, "\\'")}')">
-                        <img src="${API_BASE}/api/thumb?path=${encodeURIComponent(p.path)}" class="otd-photo" alt="Photo">
-                        <div class="otd-title">${p.name}</div>
-                        <div class="otd-subtitle">${p.year}</div>
-                    </div>
-                `;
-            });
-            content.innerHTML = `<div class="otd-carousel">${itemsHtml}</div>`;
-        } else {
-            content.innerHTML = '<div class="storage-text">No photos from this day in past years.</div>';
-        }
-    } catch (e) {
-        document.getElementById('photo-otd-loading').textContent = 'Failed to load';
-    }
+    loadPhotoOtdWidget();
 
     // 3. Spotify OTD
     try {
@@ -1589,6 +1568,145 @@ async function openPhotoOTD(filePath) {
         openMediaModal(index);
     }
 }
+
+// ==================== PHOTO OTD SETTINGS ====================
+let otdCycleInterval = null;
+
+async function loadPhotoOtdWidget() {
+    try {
+        const loading = document.getElementById('photo-otd-loading');
+        const content = document.getElementById('photo-otd-content');
+        
+        // Show loading and clear interval
+        loading.style.display = 'flex';
+        content.style.display = 'none';
+        
+        if (otdCycleInterval) {
+            clearInterval(otdCycleInterval);
+            otdCycleInterval = null;
+        }
+
+        let otdAllowedFolders = JSON.parse(localStorage.getItem('otdAllowedFolders') || '[]');
+        const query = otdAllowedFolders.length > 0 ? `?allowed_folders=${encodeURIComponent(otdAllowedFolders.join(','))}` : '';
+        const res = await fetch(`${API_BASE}/api/stats/photo-on-this-day${query}`);
+        const data = await res.json();
+
+        loading.style.display = 'none';
+        content.style.display = 'block';
+
+        if (data.photos && data.photos.length > 0) {
+            let imagesHtml = '';
+            data.photos.forEach((p, index) => {
+                imagesHtml += `
+                    <div class="otd-large-image ${index === 0 ? 'active' : ''}" style="background-image: url('${API_BASE}/api/thumb?path=${encodeURIComponent(p.path)}'); background-size: cover; background-position: center;" onclick="openPhotoOTD('${p.path.replace(/'/g, "\\'")}')"></div>
+                    <div class="otd-large-overlay" style="display: ${index === 0 ? 'flex' : 'none'};">
+                        <div class="otd-large-title">${p.name}</div>
+                        <div class="otd-large-subtitle">${p.year}</div>
+                    </div>
+                `;
+            });
+            content.innerHTML = imagesHtml;
+            
+            if (data.photos.length > 1) {
+                let currentOtd = 0;
+                otdCycleInterval = setInterval(() => {
+                    const images = content.querySelectorAll('.otd-large-image');
+                    const overlays = content.querySelectorAll('.otd-large-overlay');
+                    if(images.length === 0) {
+                        clearInterval(otdCycleInterval);
+                        return;
+                    }
+                    images[currentOtd].classList.remove('active');
+                    overlays[currentOtd].style.display = 'none';
+                    
+                    currentOtd = (currentOtd + 1) % images.length;
+                    
+                    images[currentOtd].classList.add('active');
+                    overlays[currentOtd].style.display = 'flex';
+                }, 4000); // 4 seconds interval
+            }
+        } else {
+            content.innerHTML = '<div class="storage-text" style="display:flex;height:100%;align-items:center;justify-content:center;">No photos from this day in past years.</div>';
+        }
+    } catch (e) {
+        document.getElementById('photo-otd-loading').textContent = 'Failed to load';
+    }
+}
+
+function toggleOtdSettings(e) {
+    if (e) e.stopPropagation();
+    const panel = document.getElementById('otd-settings-panel');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        updateOtdSettingsList();
+        
+        const outsideClickListener = event => {
+            if (!panel.contains(event.target) && !event.target.classList.contains('otd-settings-icon')) {
+                panel.style.display = 'none';
+                document.removeEventListener('click', outsideClickListener);
+            }
+        };
+        document.addEventListener('click', outsideClickListener);
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+function updateOtdSettingsList() {
+    const list = document.getElementById('otd-settings-list');
+    list.innerHTML = '';
+    
+    if (!folderTree || folderTree.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;">No folders available</div>';
+        return;
+    }
+    
+    let allowed = JSON.parse(localStorage.getItem('otdAllowedFolders') || '[]');
+    const allSelected = allowed.length === 0;
+
+    folderTree.forEach(folder => {
+        const isChecked = allSelected || allowed.includes(folder.path);
+        const item = document.createElement('label');
+        item.className = 'otd-setting-item';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = folder.path;
+        checkbox.checked = isChecked;
+        checkbox.onchange = saveOtdSettings;
+        
+        const text = document.createElement('span');
+        text.textContent = folder.name;
+        
+        item.appendChild(checkbox);
+        item.appendChild(text);
+        list.appendChild(item);
+    });
+}
+
+function saveOtdSettings() {
+    const checkboxes = document.querySelectorAll('#otd-settings-list input[type="checkbox"]');
+    const allowed = [];
+    let allChecked = true;
+    
+    checkboxes.forEach(cb => {
+        if (cb.checked) {
+            allowed.push(cb.value);
+        } else {
+            allChecked = false;
+        }
+    });
+    
+    if (allChecked || allowed.length === 0) {
+        localStorage.removeItem('otdAllowedFolders');
+    } else {
+        localStorage.setItem('otdAllowedFolders', JSON.stringify(allowed));
+    }
+    
+    // Reload OTD widget
+    loadPhotoOtdWidget();
+}
+
 
 // ==================== SERVER RESTART ====================
 
@@ -2440,6 +2558,25 @@ function renderSpotifyStats(data) {
     const otdContainer = document.getElementById('on-this-day-container');
     const otdSubtitle = otdContainer ? otdContainer.querySelector('.section-subtitle') : null;
     const otdList = document.getElementById('on-this-day-list');
+
+    // Set today's date and start live clock
+    const otdDateEl = document.getElementById('otd-today-date');
+    const otdClockEl = document.getElementById('otd-live-clock');
+    if (otdDateEl) {
+        const now = new Date();
+        const opts = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+        otdDateEl.textContent = now.toLocaleDateString('nl-NL', opts);
+    }
+    if (otdClockEl) {
+        // Clear any existing interval
+        if (window._otdClockInterval) clearInterval(window._otdClockInterval);
+        const tickClock = () => {
+            const n = new Date();
+            otdClockEl.textContent = n.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        };
+        tickClock();
+        window._otdClockInterval = setInterval(tickClock, 1000);
+    }
     if (data.on_this_day && data.on_this_day.length > 0) {
         otdContainer.style.display = 'block';
         otdList.innerHTML = '';

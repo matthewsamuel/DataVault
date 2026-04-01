@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DataVault</title>
-    <link rel="stylesheet" href="style.css?v=28">
+    <link rel="stylesheet" href="style.css?v=29">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 
@@ -33,6 +33,9 @@
                 </button>
                 <button class="nav-tab" data-view="keurer" onclick="switchMainView('keurer')">
                     Keurer
+                </button>
+                <button class="nav-tab" data-view="timeline" onclick="switchMainView('timeline')">
+                    Timeline
                 </button>
             </div>
 
@@ -159,11 +162,18 @@
                         </div>
 
                         <div class="dynamic-widget" id="widget-photo-otd">
-                            <h4><i class="fas fa-camera-retro"></i> Photo On This Day</h4>
-                            <div class="widget-content">
+                            <div class="otd-header-flex">
+                                <h4><i class="fas fa-camera-retro"></i> Photo On This Day</h4>
+                                <i class="fas fa-cog otd-settings-icon" onclick="toggleOtdSettings(event)" title="Settings"></i>
+                            </div>
+                            <div class="widget-content otd-widget-envelope">
                                 <div class="loading-spinner" id="photo-otd-loading"></div>
-                                <div id="photo-otd-content" style="display: none;">
+                                <div id="photo-otd-content" class="otd-large-container" style="display: none;">
                                     <!-- Will be populated by JS -->
+                                </div>
+                                <div id="otd-settings-panel" class="otd-settings-panel" style="display: none;">
+                                    <h5>Filter Sources</h5>
+                                    <div id="otd-settings-list" class="otd-settings-list"></div>
                                 </div>
                             </div>
                         </div>
@@ -369,7 +379,14 @@
 
                 <!-- On This Day Section -->
                 <div class="on-this-day-section" id="on-this-day-container" style="display: none;">
-                    <h3>📅 On This Day</h3>
+                    <div class="otd-header-row">
+                        <h3>📅 On This Day</h3>
+                        <span class="otd-vs">vs</span>
+                        <div class="otd-date-block">
+                            <span class="otd-today-date" id="otd-today-date"></span>
+                            <span class="otd-live-clock" id="otd-live-clock"></span>
+                        </div>
+                    </div>
                     <p class="section-subtitle">What you were jamming to on this date in previous years</p>
                     <div id="on-this-day-list" class="spotify-list horizontal-scroll"></div>
                 </div>
@@ -468,6 +485,48 @@
                     &nbsp;·&nbsp; spatie = preview
                 </p>
 
+            </div>
+        </div>
+
+        <!-- TIMELINE SECTION -->
+        <div id="section-timeline" class="section hidden">
+            <div class="timeline-page">
+                <!-- Timeline Header -->
+                <div class="tl-header">
+                    <div class="tl-header-left">
+                        <h2 class="tl-title"><i class="fas fa-stream"></i> Timeline</h2>
+                        <span class="tl-current-date" id="timeline-current-date"></span>
+                    </div>
+                    <div class="tl-header-right">
+                        <button class="btn btn-secondary tl-folder-btn" onclick="timelineOpenFolderPicker()">
+                            <i class="fas fa-folder-plus"></i> Folders
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Folder Chips -->
+                <div class="tl-folder-chips-bar" id="timeline-folder-chips">
+                    <span class="tl-no-folders">No folders selected</span>
+                </div>
+
+                <!-- Info Bar -->
+                <div class="tl-info-bar" id="timeline-info-bar" style="display: none;"></div>
+
+                <!-- Slider / Scrubber -->
+                <div class="tl-slider-wrap" id="timeline-slider-wrap" style="display: none;">
+                    <div class="tl-slider-container">
+                        <div class="tl-slider-tooltip" id="timeline-slider-tooltip"></div>
+                        <input type="range" id="timeline-slider" class="tl-slider" min="0" max="1000" value="0">
+                    </div>
+                    <div class="tl-year-labels" id="timeline-year-labels"></div>
+                </div>
+
+                <!-- Photo Grid (virtualized) -->
+                <div class="tl-scroll-area" id="timeline-scroll">
+                    <div class="tl-virtual-content" id="timeline-virtual-content">
+                        <!-- Rendered by timeline.js -->
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -818,14 +877,37 @@
         </div>
     </div>
 
+    <!-- Timeline Folder Picker Modal -->
+    <div class="modal" id="modal-timeline-folders">
+        <div class="modal-container folder-selector-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-folder-plus"></i> Select Timeline Folders</h2>
+                <button class="modal-close" onclick="timelineCloseFolderPicker()" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body folder-selector-body">
+                <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 0.9rem;">Select one or more folders to include in your timeline. Photos from all selected folders will be displayed chronologically.</p>
+                <div class="folder-tree-container" id="timeline-folder-tree">
+                    <!-- Populated by timeline.js -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="timelineCloseFolderPicker()">Cancel</button>
+                <button class="btn btn-primary" onclick="timelineConfirmFolders()">
+                    <i class="fas fa-check"></i> Apply Selection
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container">
         <!-- Toasts will be added here dynamically -->
     </div>
 
-    <script src="app.js?v=28"></script>
+    <script src="app.js?v=29"></script>
     <script src="duplicates.js?v=10"></script>
     <script src="keurer.js?v=5"></script>
+    <script src="timeline.js?v=1"></script>
     <script src="wave-background.js?v=2"></script>
     <script src="resizable-sidebar.js?v=1"></script>
 </body>
