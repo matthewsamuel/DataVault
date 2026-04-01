@@ -1,0 +1,51 @@
+# Virtual environment
+venv/
+env/
+.venv
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+/tmp/datavault_server.log
+
+# Database & Cache
+*.db
+.datavault_cache/
+/thumbs
+
+# Node
+node_modules/
+*.tgz
+
+# Environment
+.env
+.env.local
+config.json
+
+# Build
+dist/
+build/
+
+# Temporary
+*.tmp
+*.temp

@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DataVault</title>
+    <link rel="stylesheet" href="style.css?v=28">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+    <div id="app">
+        <!-- Top Navigation -->
+        <nav class="top-nav">
+            <div class="nav-brand" onclick="restartServer()" title="Server herstarten" style="cursor:pointer;">DataVault</div>
+
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-view="home" onclick="switchMainView('home')">
+                    Home
+                </button>
+                <button class="nav-tab" data-view="viewer" onclick="switchMainView('viewer')">
+                    Files
+                </button>
+                <button class="nav-tab" data-view="duplicates" onclick="switchMainView('duplicates')">
+                    Duplicates
+                </button>
+                <button class="nav-tab" data-view="spotify" onclick="switchMainView('spotify')">
+                    Spotify Wrapped
+                </button>
+                <button class="nav-tab" data-view="shows" onclick="switchMainView('shows')">
+                    Shows
+                </button>
+                <button class="nav-tab" data-view="keurer" onclick="switchMainView('keurer')">
+                    Keurer
+                </button>
+            </div>
+
+            <div class="nav-actions">
+                <input type="text" class="search-input" id="global-search" placeholder="Search..."
+                    oninput="handleGlobalSearch(this.value)">
+
+                <div class="theme-toggle">
+                    <button class="theme-button" onclick="toggleThemeDropdown()">
+                        <span id="theme-label">Auto</span>
+                        <span>▼</span>
+                    </button>
+                    <div class="theme-dropdown" id="theme-dropdown">
+                        <button class="theme-option" data-theme="auto" onclick="setTheme('auto')">
+                            Auto (System)
+                        </button>
+                        <button class="theme-option" data-theme="light" onclick="setTheme('light')">
+                            Light
+                        </button>
+                        <button class="theme-option" data-theme="dark" onclick="setTheme('dark')">
+                            Dark
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <div class="main-layout">
+            <!-- Sidebar - only shown in viewer mode -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-header">
+                    <div class="sidebar-title">Folders</div>
+                    <div class="tree-controls">
+                        <button class="tree-control-btn" onclick="expandAllFolders()" title="Expand all">
+                            Expand
+                        </button>
+                        <button class="tree-control-btn" onclick="collapseAllFolders()" title="Collapse all">
+                            Collapse
+                        </button>
+                    </div>
+                </div>
+                <div class="folder-tree-container" id="folder-tree">
+                    <!-- Folder tree will be populated by JavaScript -->
+                </div>
+            </aside>
+
+            <!-- Main Content Area -->
+            <main class="main-content">
+                <!-- VIEWER SECTION -->
+                <!-- HOME SECTION -->
+                <div id="section-home" class="section hidden">
+                    <div class="home-container">
+                        <div class="home-header">
+                            <h1 class="home-title">DataVault</h1>
+                            <p class="home-subtitle">Access your digital archive</p>
+                        </div>
+
+                        <div class="home-stats-grid">
+                            <div class="stat-card">
+                                <i class="fas fa-hdd" style="color: var(--accent);"></i>
+                                <h3>DataVault Storage</h3>
+                                <p>Active & Accessibly Offline</p>
+                            </div>
+                            <div class="stat-card">
+                                <i class="fas fa-music" style="color: #1DB954;"></i>
+                                <h3>Listening DNA</h3>
+                                <p>Synced with Spotify</p>
+                            </div>
+                            <div class="stat-card">
+                                <i class="fas fa-shield-alt" style="color: #e74c3c;"></i>
+                                <h3>Privacy First</h3>
+                                <p>100% Local AI Model</p>
+                            </div>
+                        </div>
+
+                        <div class="app-grid" id="app-grid">
+                            <!-- App tiles will be populated by JavaScript -->
+                        </div>
+
+                        <!-- Chat Widget -->
+                        <div class="chat-widget">
+                            <div class="chat-header">
+                                <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
+                                <div class="chat-title">
+                                    <h3>Pasha (DataVault AI)</h3>
+                                    <span class="chat-status">Online (Qwen3:30b)</span>
+                                </div>
+                            </div>
+                            <div class="chat-messages" id="chat-messages">
+                                <div class="chat-message ai-message">
+                                    <div class="message-bubble">
+                                        Woof! I'm Pasha, your DataVault assistant. You can ask me questions about your
+                                        files or Spotify data!
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chat-input-container">
+                                <input type="text" id="chat-input" class="chat-input" placeholder="Type a message..."
+                                    onkeypress="handleChatKeyPress(event)">
+                                <button class="chat-send-btn" onclick="sendChatMessage()">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dynamic Home Widgets -->
+                    <div class="home-dynamic-widgets">
+                        <div class="dynamic-widget" id="widget-storage" style="cursor: pointer;"
+                            onclick="openStorageModal()">
+                            <h4><i class="fas fa-server"></i> Vault Storage</h4>
+                            <div class="widget-content">
+                                <div class="storage-loading">Calculating space...</div>
+                                <div class="storage-stats" style="display: none;">
+                                    <div class="storage-bar-container">
+                                        <div class="storage-bar" id="storage-bar-fill"></div>
+                                    </div>
+                                    <div class="storage-text">
+                                        <span id="storage-used-text">0 GB</span> / <span id="storage-total-text">0
+                                            GB</span> used (<span id="storage-free-text">0 GB</span> free)
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="dynamic-widget" id="widget-photo-otd">
+                            <h4><i class="fas fa-camera-retro"></i> Photo On This Day</h4>
+                            <div class="widget-content">
+                                <div class="loading-spinner" id="photo-otd-loading"></div>
+                                <div id="photo-otd-content" style="display: none;">
+                                    <!-- Will be populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="dynamic-widget" id="widget-spotify-otd">
+                            <h4><i class="fab fa-spotify" style="color: #1DB954;"></i> Spotify On This Day</h4>
+                            <div class="widget-content">
+                                <div class="loading-spinner" id="spotify-otd-loading"></div>
+                                <div id="spotify-otd-content" style="display: none;">
+                                    <!-- Will be populated by JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+        <div id="section-viewer" class="section hidden">
+            <div class="content-header">
+                <div class="breadcrumb" id="breadcrumb">
+                    <span class="breadcrumb-item active">Home</span>
+                </div>
+
+                <div class="content-toolbar">
+                    <div class=" toolbar-actions">
+                        <label class="toolbar-label">Sort by:</label>
+                        <select class="toolbar-select" id="sort-select" onchange="handleSort(this.value)">
+                            <option value="name">Name</option>
+                            <option value="date">Date Modified</option>
+                            <option value="size">Size</option>
+                        </select>
+                    </div>
+
+                    <div class="view-toggle">
+                        <button class="view-toggle-btn active" data-view="grid" onclick="toggleView('grid')">
+                            Grid
+                        </button>
+                        <button class="view-toggle-btn" data-view="list" onclick="toggleView('list')">
+                            List
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="content-scroll">
+                <div class="media-grid" id="media-grid">
+                    <!-- Media cards will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- DUPLICATES SECTION -->
+        <div id="section-duplicates" class="section hidden">
+            <div class="duplicates-container">
+                <div class="duplicates-header">
+                    <h1 class="duplicates-title">Duplicate Finder</h1>
+                    <div class="duplicates-subtitle">Select a folder to scan for duplicate files</div>
+                </div>
+
+                <!-- Folder Selection -->
+                <div class="folder-selection-panel">
+                    <div class="folder-selection-header">
+                        <span class="folder-selection-label">Selected Folder:</span>
+                        <span class="folder-selection-path" id="selected-folder-path">None</span>
+                    </div>
+                    <div class="folder-selection-actions">
+                        <button class="btn btn-secondary" id="btn-select-folder" onclick="openFolderSelector()">
+                            Select Folder
+                        </button>
+                        <button class="btn btn-primary" id="btn-scan-folder" onclick="scanSelectedFolder()" disabled>
+                            Scan for Duplicates
+                        </button>
+                        <button class="btn btn-secondary" id="btn-cancel-scan" onclick="cancelScan()"
+                            style="display: none;">
+                            Cancel Scan
+                        </button>
+                    </div>
+                </div>
+
+                <div class="status-panel" id="status-panel" style="display: none;">
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <div class="status-value" id="status-scanned">0</div>
+                            <div class="status-label">Files Scanned</div>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-value" id="status-found">0</div>
+                            <div class="status-label">Duplicates Found</div>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-value" id="status-timestamp">-</div>
+                            <div class="status-label">Last Scan</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="scan-progress-container" style="display: none;">
+                    <div class="progress-container">
+                        <div class="progress-bar" id="progress-bar" style="width: 0%;">0%</div>
+                    </div>
+                    <div class="progress-text" id="progress-text"></div>
+                </div>
+
+                <div class="filter-bar" id="filter-bar" style="display: none;">
+                    <div style="display: flex; gap: var(--space-md);">
+                        <button class="filter-chip active" data-filter="all" onclick="filterDuplicates('all')">
+                            All
+                        </button>
+                        <button class="filter-chip" data-filter="photos" onclick="filterDuplicates('photos')">
+                            Photos Only
+                        </button>
+                        <button class="filter-chip" data-filter="videos" onclick="filterDuplicates('videos')">
+                            Videos Only
+                        </button>
+                    </div>
+                    <button class="btn btn-danger" id="btn-remove-all" onclick="removeAllDuplicates()"
+                        style="margin-left: auto;">
+                        Remove All Duplicates
+                    </button>
+                </div>
+
+                <div class="media-grid" id="duplicates-grid">
+                    <!-- Duplicates will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+        <!-- Spotify View -->
+        <div id="section-spotify" class="section hidden">
+            <div class="spotify-header">
+                <h2>Your Spotify Wrapped</h2>
+                <div class="year-selector">
+                    <select id="spotify-year-select" onchange="loadSpotifyStats()">
+                        <option value="all">All Time</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="spotify-loading" class="spotify-loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Crunching the numbers...</p>
+            </div>
+
+            <div id="spotify-content" class="spotify-content" style="display: none;">
+                <!-- Summary Cards -->
+                <div class="spotify-stats-grid">
+                    <div class="stat-card total-time">
+                        <div class="stat-icon">⏱️</div>
+                        <div class="stat-value" id="stat-minutes">0</div>
+                        <div class="stat-label">Minutes Listened</div>
+                    </div>
+                    <div class="stat-card top-artist-card">
+                        <div class="stat-icon">🎤</div>
+                        <div class="stat-value" id="stat-top-artist">-</div>
+                        <div class="stat-label">Top Artist</div>
+                    </div>
+                    <div class="stat-card total-plays">
+                        <div class="stat-icon">▶️</div>
+                        <div class="stat-value" id="stat-plays">0</div>
+                        <div class="stat-label">Total Plays</div>
+                    </div>
+                    <div class="stat-card listening-personality" onclick="showDnaExplanation()">
+                        <div class="stat-icon">🧬</div>
+                        <div class="stat-value" id="stat-dna" style="font-size: 1.5rem;">-</div>
+                        <div class="stat-label">Listening DNA</div>
+                    </div>
+                </div>
+
+                <!-- New Insights Grid -->
+                <div class="spotify-stats-grid" style="margin-top: 20px;">
+                    <div class="stat-card" onclick="showInsightExplanation('record_day')" style="cursor: pointer;">
+                        <div class="stat-icon">🏆</div>
+                        <div class="stat-value" id="stat-record-day-hours" style="font-size: 1.5rem;">-</div>
+                        <div class="stat-label" id="stat-record-day-date">Record Listening Day</div>
+                    </div>
+                    <div class="stat-card" onclick="showInsightExplanation('top_binge')" style="cursor: pointer;">
+                        <div class="stat-icon">🔁</div>
+                        <div class="stat-value" id="stat-top-binge"
+                            style="font-size: 1.2rem; white-space: normal; word-wrap: break-word; line-height: 1.4;">
+                            None</div>
+                        <div class="stat-label" id="stat-top-binge-count">Top Consecutive Binge</div>
+                    </div>
+                    <div class="stat-card" onclick="showInsightExplanation('mainstream_score')"
+                        style="cursor: pointer;">
+                        <div class="stat-icon">📈</div>
+                        <div class="stat-value" id="stat-mainstream-score" style="font-size: 1.2rem;">-</div>
+                        <div class="stat-label" id="stat-mainstream-percent">Mainstream Score</div>
+                    </div>
+                    <div class="stat-card" onclick="showInsightExplanation('seasonal_mood')" style="cursor: pointer;">
+                        <div class="stat-icon">🌤️</div>
+                        <div class="stat-value" id="stat-seasonal-mood" style="font-size: 1.2rem;">-</div>
+                        <div class="stat-label">Seasonal Mood</div>
+                    </div>
+                </div>
+
+                <!-- Top Discoveries Section -->
+                <div class="on-this-day-section" id="discoveries-container" style="display: none; margin-top: 30px;">
+                    <h3>🌟 Top Discoveries</h3>
+                    <p class="section-subtitle">Your favorite new artists found this year</p>
+                    <div class="on-this-day-list" id="discoveries-list">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- On This Day Section -->
+                <div class="on-this-day-section" id="on-this-day-container" style="display: none;">
+                    <h3>📅 On This Day</h3>
+                    <p class="section-subtitle">What you were jamming to on this date in previous years</p>
+                    <div id="on-this-day-list" class="spotify-list horizontal-scroll"></div>
+                </div>
+
+                <!-- Top Lists -->
+                <div class="spotify-lists-container">
+                    <div class="spotify-list-section">
+                        <h3 class="spotify-section-heading"
+                            title="Your most-listened artists ranked by total listening time. Click an artist to search on Spotify.">
+                            🏆 Top Artists</h3>
+                        <div id="top-artists-list" class="spotify-list"></div>
+                    </div>
+                    <div class="spotify-list-section">
+                        <h3 class="spotify-section-heading"
+                            title="Your most-played tracks ranked by play count. Click a track to search on Spotify.">
+                            🎵 Top Tracks</h3>
+                        <div id="top-tracks-list" class="spotify-list"></div>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="spotify-charts-container">
+                    <div class="chart-wrapper">
+                        <h3 class="spotify-section-heading"
+                            title="Number of tracks played each month. Shows seasonal listening patterns across the year.">
+                            📅 Monthly Activity</h3>
+                        <div id="monthly-chart" class="simple-bar-chart"></div>
+                    </div>
+                    <div class="chart-wrapper">
+                        <h3 class="spotify-section-heading"
+                            title="Distribution of plays across every hour of the day. Shows when you listen most—morning, afternoon, evening, or night.">
+                            🕒 Hourly Activity</h3>
+                        <div id="hourly-chart" class="simple-bar-chart"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="section-shows" class="section hidden">
+            <div id="shows-container" class="shows-page">
+                <!-- Shows content injected by app.js -->
+            </div>
+        </div>
+
+        <!-- KEURER SECTION -->
+        <div id="section-keurer" class="section hidden">
+            <div class="keurer-layout">
+
+                <!-- Stats bar -->
+                <div class="keurer-stats-bar">
+                    <div id="keurer-stats-bar"><!-- gevuld door keurer.js --></div>
+                </div>
+
+                <!-- Map selector -->
+                <div class="keurer-folder-bar">
+                    <span class="keurer-folder-label">Map:</span>
+                    <span class="keurer-folder-path" id="keurer-folder-display">Geen map geselecteerd</span>
+                    <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem; flex-shrink: 0;"
+                        onclick="keurerOpenFolderPicker()">
+                        <i class="fas fa-folder-open"></i> Wijzigen
+                    </button>
+                </div>
+
+                <!-- Teller -->
+                <div class="keurer-remaining" id="keurer-remaining"></div>
+
+                <!-- Kaart -->
+                <div class="keurer-card-area" id="keurer-card-area">
+                    <div class="keurer-state-card">
+                        <span style="font-size: 4rem;">📁</span>
+                        <h3>Kies een map</h3>
+                        <p>Selecteer een map om foto's en video's te beoordelen.</p>
+                        <button class="btn btn-primary" onclick="keurerOpenFolderPicker()">
+                            <i class="fas fa-folder-open"></i> Map kiezen
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Actie-knoppen -->
+                <div class="keurer-action-buttons" id="keurer-action-buttons" style="display: none;">
+                    <button class="keurer-btn keurer-btn-keep" onclick="keurerDecideKeep()" title="Houden (← pijl)">
+                        <i class="fas fa-heart"></i>
+                    </button>
+                    <button class="keurer-btn keurer-btn-move" onclick="keurerDecideMove()" title="Verplaatsen (↑ pijl)">
+                        <i class="fas fa-folder-open"></i>
+                    </button>
+                    <button class="keurer-btn keurer-btn-delete" onclick="keurerDecideDelete()"
+                        title="Verwijderen (→ pijl)">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+
+                <!-- Hint -->
+                <p class="keurer-hint">
+                    ← houden &nbsp;|&nbsp; ↑ verplaatsen &nbsp;|&nbsp; → prullenmand &nbsp;|&nbsp; ↓ ongedaan
+                    &nbsp;·&nbsp; spatie = preview
+                </p>
+
+            </div>
+        </div>
+
+        </main>
+    </div>
+    </div>
+
+    <!-- Folder Selection Modal -->
+    <div class="modal" id="modal-folder-selector">
+        <div class="modal-container folder-selector-container">
+            <div class="modal-header">
+                <h2 class="modal-title">Select Folder to Scan</h2>
+                <button class="modal-close" onclick="closeFolderSelector()" aria-label="Close">×</button>
+            </div>
+
+            <div class="modal-body folder-selector-body">
+                <div class="folder-tree-container" id="folder-selector-tree">
+                    <!-- Folder tree will be populated -->
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeFolderSelector()">Cancel</button>
+                <button class="btn btn-primary" id="btn-confirm-folder" onclick="confirmFolderSelection()" disabled>
+                    Select Folder
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dynamic modals are handled by app.js -->
+
+    <!-- Side-by-Side Comparison Modal -->
+    <div class="modal" id="modal-comparison">
+        <div class="modal-container comparison-container">
+            <div class="modal-header">
+                <h2 class="modal-title">Delete Duplicate?</h2>
+                <button class="modal-close" onclick="closeComparisonModal()" aria-label="Close">×</button>
+            </div>
+
+            <div class="modal-body comparison-body">
+                <div class="comparison-grid">
+                    <div class="comparison-item">
+                        <div class="comparison-label">Original File</div>
+                        <div class="comparison-image-container">
+                            <img id="comparison-original-img" class="comparison-image" />
+                            <video id="comparison-original-video" class="comparison-image" controls
+                                style="display: none;"></video>
+                        </div>
+                        <div class="comparison-info">
+                            <div class="comparison-path" id="comparison-original-path"></div>
+                            <div class="comparison-size" id="comparison-original-size"></div>
+                        </div>
+                    </div>
+
+                    <div class="comparison-divider"></div>
+
+                    <div class="comparison-item">
+                        <div class="comparison-label duplicate-label">Duplicate File (Will be deleted)</div>
+                        <div class="comparison-image-container">
+                            <img id="comparison-duplicate-img" class="comparison-image" />
+                            <video id="comparison-duplicate-video" class="comparison-image" controls
+                                style="display: none;"></video>
+                        </div>
+                        <div class="comparison-info">
+                            <div class="comparison-path" id="comparison-duplicate-path"></div>
+                            <div class="comparison-size" id="comparison-duplicate-size"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeComparisonModal()">Cancel</button>
+                <button class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDelete()">
+                    Delete Duplicate
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Viewer -->
+    <div class="modal" id="modal-viewer" onclick="if(event.target === this) closeModal()">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modal-title">Media Viewer</h2>
+                <button class="modal-close" onclick="closeModal()" aria-label="Close">×</button>
+            </div>
+
+            <div class="modal-body" id="modal-body">
+                <!-- Media content will be inserted here -->
+                <!-- Navigation zones -->
+                <div class="modal-nav-zone left" onclick="navigateModal(-1)">
+                    <span class="modal-nav-arrow">‹</span>
+                </div>
+                <div class="modal-nav-zone right" onclick="navigateModal(1)">
+                    <span class="modal-nav-arrow">›</span>
+                </div>
+            </div>
+
+            <div class="modal-controls" id="modal-controls" style="display: none;">
+                <button class="modal-control-btn" onclick="zoomIn()">Zoom In</button>
+                <button class="modal-control-btn" onclick="zoomOut()">Zoom Out</button>
+                <button class="modal-control-btn" onclick="fitToScreen()">Fit to Screen</button>
+            </div>
+
+            <div class="modal-metadata" id="modal-metadata">
+                <!-- Metadata will be inserted here -->
+            </div>
+
+            <div class="modal-footer"
+                style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-md); border-top: 1px solid var(--border);">
+                <div style="display: flex; gap: var(--space-sm);">
+                    <button class="btn btn-secondary" id="btn-open-finder" onclick="openInFinder()">
+                        Open in Finder
+                    </button>
+                    <button class="btn btn-primary" id="btn-move-file" onclick="openMoveFileModal()">
+                        Move
+                    </button>
+                    <button class="btn btn-danger" id="btn-delete-file" onclick="confirmDeleteFile()">
+                        Delete
+                    </button>
+                </div>
+                <div style="flex: 1;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move File Modal -->
+    <div class="modal" id="modal-move-file">
+        <div class="move-modal-container">
+            <div class="move-modal-header">
+                <h2><i class="fas fa-exchange-alt"></i>Move File</h2>
+                <button class="modal-close" onclick="closeMoveFileModal()" aria-label="Close">&times;</button>
+            </div>
+            <div class="move-modal-body">
+                <div class="move-panel-file">
+                    <div class="move-file-thumb" id="move-file-preview"></div>
+                    <div class="move-file-meta">
+                        <div class="move-meta-label">FILE</div>
+                        <div class="move-meta-value" id="move-file-name"></div>
+                    </div>
+                    <div class="move-file-meta">
+                        <div class="move-meta-label">CURRENT LOCATION</div>
+                        <div class="move-meta-location" id="move-file-source"><i class="fas fa-folder"></i><span></span>
+                        </div>
+                    </div>
+                    <div class="move-file-meta move-file-dest-meta" id="move-dest-display" style="display:none;">
+                        <div class="move-meta-label">MOVE TO</div>
+                        <div class="move-meta-dest" id="move-dest-path"><i class="fas fa-folder-open"></i><span></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="move-panel-tree">
+                    <div class="move-tree-header">Select destination</div>
+                    <div class="move-tree-scroll" id="move-folder-tree"></div>
+                </div>
+            </div>
+            <div class="move-modal-footer">
+                <button class="btn btn-secondary" onclick="closeMoveFileModal()">Cancel</button>
+                <button class="btn btn-primary" id="btn-confirm-move" onclick="confirmMoveFile()" disabled><i
+                        class="fas fa-check"></i>Move Here</button>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <!-- Storage Details Modal -->
+    <div class="modal" id="modal-storage-details">
+        <div class="modal-container storage-modal-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-server"></i> Storage Breakdown</h2>
+                <button class="modal-close" onclick="closeStorageModal()" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="storage-breakdown-loading" id="storage-breakdown-loading">
+                    <div class="message-loading">
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                    </div>
+                </div>
+                <div class="storage-breakdown-content" id="storage-breakdown-content" style="display: none;">
+                    <ul class="storage-folder-list" id="storage-folder-list">
+                        <!-- Populated by JS -->
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeStorageModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Listening DNA Modal -->
+    <div class="modal" id="modal-dna-explanation">
+        <div class="modal-container dna-modal-container">
+            <div class="modal-header">
+                <h2 class="modal-title">🧬 Your Listening DNA</h2>
+                <button class="modal-close" onclick="closeDnaModal()" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body dna-modal-body">
+                <!-- Left: Hero Section -->
+                <div class="dna-hero">
+                    <div class="dna-art-container" id="dna-art-canvas">
+                        <!-- Dynamic art elements will be injected here -->
+                    </div>
+                    <div class="dna-hero-content">
+                        <div id="dna-modal-icon" class="dna-big-icon"></div>
+                        <h3 id="dna-modal-title" class="dna-hero-title"></h3>
+                        <p id="dna-modal-description" class="dna-hero-desc"></p>
+                    </div>
+                </div>
+
+                <!-- Right: All Types -->
+                <div class="dna-sidebar">
+                    <h4 class="dna-sidebar-title">Personalities</h4>
+                    <div class="dna-types-list">
+                        <div class="dna-type-item personality-early-bird" data-type="Early Bird">
+                            <span class="type-icon">🐦</span>
+                            <div class="type-info">
+                                <strong>Early Bird</strong>
+                                <span>5AM - 12PM</span>
+                            </div>
+                        </div>
+                        <div class="dna-type-item personality-daydreamer" data-type="Daydreamer">
+                            <span class="type-icon">☀️</span>
+                            <div class="type-info">
+                                <strong>Daydreamer</strong>
+                                <span>12PM - 6PM</span>
+                            </div>
+                        </div>
+                        <div class="dna-type-item personality-evening-chiller" data-type="Evening Chiller">
+                            <span class="type-icon">🌇</span>
+                            <div class="type-info">
+                                <strong>Evening Chiller</strong>
+                                <span>6PM - 11PM</span>
+                            </div>
+                        </div>
+                        <div class="dna-type-item personality-night-owl" data-type="Night Owl">
+                            <span class="type-icon">🦉</span>
+                            <div class="type-info">
+                                <strong>Night Owl</strong>
+                                <span>11PM - 5AM</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" style="width: 100%;" onclick="closeDnaModal()">Grootse DNA!</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic Insight Modal -->
+    <div class="modal" id="modal-insight-explanation">
+        <div class="modal-container dna-modal-container">
+            <div class="modal-header">
+                <h2 class="modal-title" id="insight-modal-header">Insight Details</h2>
+                <button class="modal-close" onclick="closeInsightModal()" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body dna-modal-body" style="display: block; text-align: center; padding: 2rem;">
+                <div id="insight-modal-icon" style="font-size: 4rem; margin-bottom: 1rem;">ℹ️</div>
+                <h3 id="insight-modal-title"
+                    style="margin-bottom: 1rem; color: var(--text-primary); font-size: 1.5rem;">Title</h3>
+                <p id="insight-modal-description" style="color: var(--text-secondary); line-height: 1.6;"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" style="width: 100%;" onclick="closeInsightModal()">Sluiten</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keurer: Verplaats naar map modal -->
+    <div class="modal" id="modal-keurer-move">
+        <div class="modal-container folder-selector-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-folder-open"></i> Verplaatsen naar...</h2>
+                <button class="modal-close" onclick="keurerCloseMoveModal()" aria-label="Sluiten">×</button>
+            </div>
+            <div class="keurer-move-topbar">
+                <div class="keurer-move-filename-row">
+                    <i class="fas fa-file"></i>
+                    <span id="keurer-move-filename"></span>
+                </div>
+                <div class="keurer-move-search-wrap">
+                    <i class="fas fa-search keurer-move-search-icon"></i>
+                    <input
+                        type="text"
+                        id="keurer-move-search"
+                        class="keurer-move-search"
+                        placeholder="Zoek map..."
+                        oninput="keurerFilterMoveTree(this.value)"
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                    <button class="keurer-move-search-clear" id="keurer-move-search-clear"
+                        onclick="keurerClearMoveSearch()" style="display:none;" title="Wissen">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body folder-selector-body">
+                <div class="folder-tree-container" id="keurer-move-folder-tree">
+                    <!-- Gevuld door keurer.js -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="keurerCloseMoveModal()">Annuleren</button>
+                <button class="btn btn-primary" id="btn-keurer-confirm-move" onclick="keurerConfirmMove()" disabled>
+                    <i class="fas fa-check"></i> Verplaatsen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keurer: Fullscreen preview overlay -->
+    <div id="keurer-preview-overlay" onclick="if(event.target===this)keurerClosePreview()">
+        <button class="keurer-preview-close" onclick="keurerClosePreview()" title="Sluiten (spatie / Esc)">
+            <i class="fas fa-times"></i>
+        </button>
+        <div id="keurer-preview-content"></div>
+        <div class="keurer-preview-bar">
+            <span id="keurer-preview-filename"></span>
+            <span class="keurer-preview-hint">spatie / Esc om te sluiten</span>
+        </div>
+    </div>
+
+    <!-- Keurer Folder Selector Modal -->
+    <div class="modal" id="modal-keurer-folder">
+        <div class="modal-container folder-selector-container">
+            <div class="modal-header">
+                <h2 class="modal-title">Kies een map om te keuren</h2>
+                <button class="modal-close" onclick="keurerCloseFolderPicker()" aria-label="Sluiten">×</button>
+            </div>
+            <div class="modal-body folder-selector-body">
+                <div class="folder-tree-container" id="keurer-folder-tree">
+                    <!-- Gevuld door keurer.js -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="keurerCloseFolderPicker()">Annuleren</button>
+                <button class="btn btn-primary" id="btn-keurer-confirm-folder" onclick="keurerConfirmFolderSelection()" disabled>
+                    Map selecteren
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container">
+        <!-- Toasts will be added here dynamically -->
+    </div>
+
+    <script src="app.js?v=28"></script>
+    <script src="duplicates.js?v=10"></script>
+    <script src="keurer.js?v=5"></script>
+    <script src="wave-background.js?v=2"></script>
+    <script src="resizable-sidebar.js?v=1"></script>
+</body>
+
+</html>

@@ -1,0 +1,1040 @@
+// DataVault - Foto Keurer (Tinder-style foto beoordeling)
+// Vereist: folderTree, showToast, API_BASE (uit app.js)
+
+// ==================== STAAT ====================
+
+let keurerFolder = localStorage.getItem('keurer_folder') || '';
+let keurerFileQueue = [];
+let keurerIndex = 0;
+let keurerStats = { total: 0, today: 0, goal: 20, streak: 0, goal_reached_today: false };
+let keurerIsAnimating = false;
+let keurerSelectedFolderForModal = null;
+let keurerMoveSelectedFolder = null;
+let keurerPreviewOpen = false;
+
+// Undo-geschiedenis: { file, decision, trash_path, moved_to }
+let keurerHistory = [];
+
+// ==================== INITIALISATIE ====================
+
+function keurerInit() {
+    try {
+        keurerLoadStats();
+
+        const display = document.getElementById('keurer-folder-display');
+        if (display) {
+            display.textContent = keurerFolder
+                ? keurerShortenPath(keurerFolder)
+                : 'Geen map geselecteerd';
+        }
+
+        if (keurerFolder) {
+            keurerLoadFiles();
+        } else {
+            keurerShowEmpty();
+        }
+    } catch (e) {
+        console.error('keurerInit fout:', e);
+        const cardArea = document.getElementById('keurer-card-area');
+        if (cardArea) {
+            cardArea.innerHTML = `<div class="keurer-state-card">
+                <span style="font-size:3rem">⚠️</span>
+                <h3>Initialisatie mislukt</h3>
+                <p style="color:var(--danger)">${keurerEsc(e.message)}</p>
+            </div>`;
+        }
+    }
+}
+
+// ==================== STATISTIEKEN ====================
+
+async function keurerLoadStats() {
+    try {
+        const res = await fetch(`${API_BASE}/api/keurer/stats`);
+        if (res.ok) {
+            keurerStats = await res.json();
+            keurerRenderStats();
+        }
+    } catch (e) {
+        console.warn('Keurer stats ophalen mislukt:', e);
+    }
+}
+
+function keurerRenderStats() {
+    const el = document.getElementById('keurer-stats-bar');
+    if (!el) return;
+
+    const streakIcon = keurerStats.streak > 0 ? '🔥' : '❄️';
+    const todayPct = Math.min(100, (keurerStats.today / keurerStats.goal) * 100);
+    const streakCls = keurerStats.streak > 0 ? 'streak-active' : '';
+    const goalCls = keurerStats.goal_reached_today ? 'goal-reached' : '';
+
+    el.innerHTML = `
+        <div class="keurer-stat ${streakCls}" title="${keurerStats.streak} opeenvolgende dag(en) met ${keurerStats.goal}+ beoordelingen">
+            <span class="keurer-stat-icon">${streakIcon}</span>
+            <span class="keurer-stat-value">${keurerStats.streak}</span>
+            <span class="keurer-stat-label">dag streak</span>
+        </div>
+        <div class="keurer-stat-divider"></div>
+        <div class="keurer-stat ${goalCls}" title="Dagdoel: ${keurerStats.goal} beoordelingen">
+            <span class="keurer-stat-icon">📅</span>
+            <div class="keurer-daily-block">
+                <div class="keurer-daily-bar">
+                    <div class="keurer-daily-fill" style="width: ${todayPct}%"></div>
+                </div>
+                <span class="keurer-stat-value">${keurerStats.today}<span class="keurer-stat-dim">/${keurerStats.goal}</span></span>
+            </div>
+            <span class="keurer-stat-label">vandaag</span>
+        </div>
+        <div class="keurer-stat-divider"></div>
+        <div class="keurer-stat" title="Totaal aantal beoordeelde bestanden ooit">
+            <span class="keurer-stat-icon">🏷️</span>
+            <span class="keurer-stat-value">${keurerStats.total.toLocaleString('nl-NL')}</span>
+            <span class="keurer-stat-label">totaal beoordeeld</span>
+        </div>
+    `;
+}
+
+// ==================== BESTANDEN LADEN ====================
+
+async function keurerLoadFiles() {
+    if (!keurerFolder) { keurerShowEmpty(); return; }
+
+    const cardArea = document.getElementById('keurer-card-area');
+    const btnArea  = document.getElementById('keurer-action-buttons');
+    if (btnArea) btnArea.style.display = 'none';
+    const remEl = document.getElementById('keurer-remaining');
+    if (remEl) remEl.textContent = '';
+
+    cardArea.innerHTML = `
+        <div class="keurer-state-card">
+            <div class="loading-spinner"></div>
+            <p style="margin-top: 16px;">Fotos laden...</p>
+        </div>`;
+
+    try {
+        const res = await fetch(`${API_BASE}/api/keurer/files?folder=${encodeURIComponent(keurerFolder)}`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        keurerFileQueue = data.files;
+        keurerIndex = 0;
+
+        if (remEl) {
+            const rem  = data.remaining || 0;
+            const done = data.decided  || 0;
+            remEl.textContent = `${rem} nog te beoordelen${done > 0 ? ` · ${done} al gedaan` : ''}`;
+        }
+
+        if (keurerFileQueue.length === 0) {
+            keurerShowDone(data.decided || 0);
+        } else {
+            keurerShowCard();
+        }
+    } catch (e) {
+        cardArea.innerHTML = `
+            <div class="keurer-state-card">
+                <span style="font-size: 3rem;">⚠️</span>
+                <h3>Laden mislukt</h3>
+                <p>${keurerEsc(e.message)}</p>
+                <button class="btn btn-secondary" onclick="keurerLoadFiles()">Opnieuw proberen</button>
+            </div>`;
+    }
+}
+
+function keurerShowEmpty() {
+    const cardArea = document.getElementById('keurer-card-area');
+    if (!cardArea) return;
+    const btnArea = document.getElementById('keurer-action-buttons');
+    if (btnArea) btnArea.style.display = 'none';
+    const remEl = document.getElementById('keurer-remaining');
+    if (remEl) remEl.textContent = '';
+
+    cardArea.innerHTML = `
+        <div class="keurer-state-card">
+            <span style="font-size: 4rem;">📁</span>
+            <h3>Kies een map</h3>
+            <p>Selecteer een map om foto's en video's te beoordelen.</p>
+            <button class="btn btn-primary" onclick="keurerOpenFolderPicker()">
+                <i class="fas fa-folder-open"></i> Map kiezen
+            </button>
+        </div>`;
+}
+
+function keurerShowDone(decidedCount) {
+    const cardArea = document.getElementById('keurer-card-area');
+    const btnArea  = document.getElementById('keurer-action-buttons');
+    if (btnArea) btnArea.style.display = 'none';
+
+    cardArea.innerHTML = `
+        <div class="keurer-state-card">
+            <span style="font-size: 4rem;">✅</span>
+            <h3>Map volledig beoordeeld!</h3>
+            <p>Alle ${decidedCount} bestanden in deze map zijn al beoordeeld.</p>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
+                <button class="btn btn-secondary" onclick="keurerOpenFolderPicker()">
+                    <i class="fas fa-folder"></i> Andere map
+                </button>
+            </div>
+        </div>`;
+}
+
+// ==================== KAART WEERGEVEN ====================
+
+function keurerShowCard() {
+    const cardArea = document.getElementById('keurer-card-area');
+    const btnArea  = document.getElementById('keurer-action-buttons');
+
+    if (keurerIndex >= keurerFileQueue.length) {
+        keurerLoadFiles();
+        return;
+    }
+
+    if (btnArea) btnArea.style.display = 'flex';
+
+    const file     = keurerFileQueue[keurerIndex];
+    const thumbUrl = `${API_BASE}/api/thumb?path=${encodeURIComponent(file.path)}`;
+    const fileUrl  = `${API_BASE}/api/file?path=${encodeURIComponent(file.path)}`;
+
+    const mediaHtml = file.is_video
+        ? `<video
+                class="keurer-card-img"
+                id="kc-video"
+                src="${fileUrl}"
+                autoplay muted loop playsinline
+                draggable="false"
+                onerror="keurerHandleThumbError(this)"
+           ></video>`
+        : `<img
+                class="keurer-card-img"
+                src="${thumbUrl}"
+                alt="${keurerEsc(file.name)}"
+                draggable="false"
+                onerror="keurerHandleThumbError(this)"
+           >`;
+
+    const undoAvail = keurerHistory.length > 0;
+
+    cardArea.innerHTML = `
+        <div class="keurer-card-wrapper">
+            <div class="keurer-card" id="keurer-card">
+
+                <!-- Overlays -->
+                <div class="keurer-card-overlay overlay-keep"   id="kc-overlay-keep">
+                    <div class="overlay-badge keep-badge"><i class="fas fa-heart"></i> HOUDEN</div>
+                </div>
+                <div class="keurer-card-overlay overlay-delete" id="kc-overlay-delete">
+                    <div class="overlay-badge delete-badge"><i class="fas fa-trash"></i> WEGGOOIEN</div>
+                </div>
+                <div class="keurer-card-overlay overlay-move"   id="kc-overlay-move">
+                    <div class="overlay-badge move-badge"><i class="fas fa-folder-open"></i> VERPLAATSEN</div>
+                </div>
+                <div class="keurer-card-overlay overlay-undo"   id="kc-overlay-undo">
+                    <div class="overlay-badge undo-badge"><i class="fas fa-undo"></i> ONGEDAAN</div>
+                </div>
+
+                ${mediaHtml}
+                <div class="keurer-card-fallback" id="kc-fallback" style="display:none;">
+                    <i class="fas fa-${file.is_video ? 'video' : 'image'}" style="font-size:3rem;color:var(--text-secondary);"></i>
+                    <span style="color:var(--text-secondary);margin-top:12px;font-size:0.85rem;text-align:center;padding:0 16px;">${keurerEsc(file.name)}</span>
+                </div>
+
+                <div class="keurer-card-footer">
+                    <span class="keurer-card-name" title="${keurerEsc(file.name)}">${keurerEsc(file.name)}</span>
+                    <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+                        ${undoAvail ? `<span class="keurer-undo-hint" title="Ongedaan maken (↓ pijl)"><i class="fas fa-undo"></i></span>` : ''}
+                        <span class="keurer-card-progress">${keurerIndex + 1} / ${keurerFileQueue.length}</span>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+    keurerSetupDrag(document.getElementById('keurer-card'));
+}
+
+function keurerHandleThumbError(el) {
+    el.style.display = 'none';
+    const fallback = document.getElementById('kc-fallback');
+    if (fallback) fallback.style.display = 'flex';
+}
+
+// ==================== BESLISSING & ANIMATIE ====================
+
+function keurerAnimateAndDecide(decision) {
+    if (keurerIsAnimating) return;
+    if (keurerIndex >= keurerFileQueue.length) return;
+
+    keurerIsAnimating = true;
+    const card = document.getElementById('keurer-card');
+    if (!card) { keurerIsAnimating = false; return; }
+
+    let flyX = 0, flyY = -60, rotate = 0;
+    if (decision === 'keep') {
+        flyX   = -Math.max(window.innerWidth * 1.1, 600);
+        rotate = -22;
+        const ol = document.getElementById('kc-overlay-keep');
+        if (ol) ol.style.opacity = '1';
+    } else {
+        flyX   = Math.max(window.innerWidth * 1.1, 600);
+        rotate = 22;
+        const ol = document.getElementById('kc-overlay-delete');
+        if (ol) ol.style.opacity = '1';
+    }
+
+    card.style.transition = 'transform 0.38s cubic-bezier(0.5,0,0.75,0), opacity 0.38s ease';
+    card.style.transform  = `translateX(${flyX}px) translateY(${flyY}px) rotate(${rotate}deg)`;
+    card.style.opacity    = '0';
+
+    keurerSendDecision(decision, keurerFileQueue[keurerIndex]);
+
+    setTimeout(() => {
+        keurerIndex++;
+        keurerIsAnimating = false;
+        const remEl = document.getElementById('keurer-remaining');
+        if (remEl) {
+            const rem = keurerFileQueue.length - keurerIndex;
+            remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
+        }
+        keurerShowCard();
+    }, 390);
+}
+
+// Animeer kaart omhoog weg en open move-modal
+function keurerAnimateUp() {
+    if (keurerIsAnimating) return;
+    if (keurerIndex >= keurerFileQueue.length) return;
+
+    keurerIsAnimating = true;
+    const card = document.getElementById('keurer-card');
+    if (!card) { keurerIsAnimating = false; return; }
+
+    const ol = document.getElementById('kc-overlay-move');
+    if (ol) ol.style.opacity = '1';
+
+    card.style.transition = 'transform 0.35s cubic-bezier(0.5,0,0.75,0), opacity 0.35s ease';
+    card.style.transform  = 'translateY(-120%) scale(0.85)';
+    card.style.opacity    = '0';
+
+    setTimeout(() => {
+        keurerIsAnimating = false;
+        keurerOpenMoveModal();
+    }, 350);
+}
+
+async function keurerSendDecision(decision, file) {
+    try {
+        const res = await fetch(`${API_BASE}/api/keurer/decide`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: file.path, folder: keurerFolder, decision }),
+        });
+        const data = res.ok ? await res.json() : {};
+
+        // Sla op in history voor undo (max 20)
+        keurerHistory.push({
+            file,
+            decision,
+            trash_path: data.trash_path || null,
+            moved_to:   null,
+        });
+        if (keurerHistory.length > 20) keurerHistory.shift();
+
+        keurerStats.today++;
+        keurerStats.total++;
+
+        if (!keurerStats.goal_reached_today && keurerStats.today >= keurerStats.goal) {
+            keurerStats.goal_reached_today = true;
+            if (keurerStats.streak === 0) keurerStats.streak = 1;
+            showToast('🎉 Dagdoel bereikt!', `Je hebt vandaag ${keurerStats.goal} fotos beoordeeld!`, 'success');
+        }
+
+        keurerRenderStats();
+    } catch (e) {
+        console.error('Beslissing opslaan mislukt:', e);
+        showToast('Fout', 'Beslissing kon niet worden opgeslagen', 'error');
+    }
+}
+
+function keurerDecideKeep()   { keurerAnimateAndDecide('keep'); }
+function keurerDecideDelete() { keurerAnimateAndDecide('delete'); }
+function keurerDecideMove()   { keurerAnimateUp(); }
+
+async function keurerUndo() {
+    if (keurerIsAnimating) return;
+    if (keurerHistory.length === 0) {
+        showToast('Undo', 'Geen actie om ongedaan te maken', 'info');
+        return;
+    }
+
+    const card = document.getElementById('keurer-card');
+    if (card) {
+        const ol = document.getElementById('kc-overlay-undo');
+        if (ol) ol.style.opacity = '1';
+        card.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+        card.style.transform  = 'translateY(80px) scale(0.92)';
+        card.style.opacity    = '0';
+    }
+
+    const entry = keurerHistory.pop();
+
+    try {
+        const res = await fetch(`${API_BASE}/api/keurer/undo`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path:       entry.file.path,
+                folder:     keurerFolder,
+                decision:   entry.decision,
+                trash_path: entry.trash_path,
+                moved_to:   entry.moved_to,
+            }),
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+
+        // Zet bestand terug in queue vóór huidige positie
+        keurerFileQueue.splice(keurerIndex, 0, entry.file);
+
+        // Stats bijwerken
+        keurerStats.today  = Math.max(0, keurerStats.today - 1);
+        keurerStats.total  = Math.max(0, keurerStats.total - 1);
+        keurerRenderStats();
+
+        const remEl = document.getElementById('keurer-remaining');
+        if (remEl) {
+            const rem = keurerFileQueue.length - keurerIndex;
+            remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
+        }
+
+        const label = entry.decision === 'delete' ? 'prullenmand' : entry.decision === 'move' ? 'verplaatsing' : 'bewaren';
+        showToast('Ongedaan gemaakt', `${label} teruggedraaid voor ${entry.file.name}`, 'success');
+
+    } catch (e) {
+        // Zet history terug als undo mislukt
+        keurerHistory.push(entry);
+        showToast('Fout', `Undo mislukt: ${e.message}`, 'error');
+    }
+
+    setTimeout(() => { keurerShowCard(); }, 320);
+}
+
+// ==================== VERPLAATS MODAL ====================
+
+// Gecachte platte lijst van alle mappen voor zoeken
+let _keurerFlatFolders = null;
+
+function keurerFlattenTree(folders, result = []) {
+    for (const f of folders) {
+        result.push({ name: f.name, path: f.path });
+        if (f.children && f.children.length > 0) {
+            keurerFlattenTree(f.children, result);
+        }
+    }
+    return result;
+}
+
+async function keurerOpenMoveModal() {
+    if (keurerIndex >= keurerFileQueue.length) { keurerShowCard(); return; }
+
+    const modal = document.getElementById('modal-keurer-move');
+    modal.classList.add('active');
+    keurerMoveSelectedFolder = null;
+    document.getElementById('btn-keurer-confirm-move').disabled = true;
+
+    // Zoekbalk resetten
+    const searchEl = document.getElementById('keurer-move-search');
+    const clearBtn = document.getElementById('keurer-move-search-clear');
+    if (searchEl) { searchEl.value = ''; }
+    if (clearBtn) clearBtn.style.display = 'none';
+
+    const nameEl = document.getElementById('keurer-move-filename');
+    if (nameEl) nameEl.textContent = keurerFileQueue[keurerIndex].name;
+
+    const treeContainer = document.getElementById('keurer-move-folder-tree');
+    treeContainer.innerHTML = '<div class="loading-spinner" style="margin:2rem auto;display:block;"></div>';
+
+    const tree = (typeof folderTree !== 'undefined' && folderTree.length > 0)
+        ? folderTree
+        : await (async () => {
+            try {
+                const res  = await fetch(`${API_BASE}/api/folders`);
+                const data = await res.json();
+                return data.folders || [];
+            } catch (_) { return []; }
+        })();
+
+    // Bouw platte lijst voor zoekfunctie
+    _keurerFlatFolders = keurerFlattenTree(tree);
+
+    treeContainer.innerHTML = '';
+
+    if (tree.length === 0) {
+        treeContainer.innerHTML = '<p style="color:var(--danger);padding:1rem;">Mappen konden niet geladen worden.</p>';
+        return;
+    }
+
+    tree.forEach(f => keurerRenderMoveFolderNode(treeContainer, f, 0));
+
+    // Zet focus op zoekbalk
+    setTimeout(() => { if (searchEl) searchEl.focus(); }, 80);
+}
+
+function keurerFilterMoveTree(query) {
+    const treeContainer = document.getElementById('keurer-move-folder-tree');
+    const clearBtn      = document.getElementById('keurer-move-search-clear');
+    if (clearBtn) clearBtn.style.display = query.length > 0 ? 'flex' : 'none';
+
+    // Reset selectie bij nieuwe zoekopdracht
+    keurerMoveSelectedFolder = null;
+    document.getElementById('btn-keurer-confirm-move').disabled = true;
+
+    if (!query.trim()) {
+        // Herstel de volledige boom
+        treeContainer.innerHTML = '';
+        const tree = (typeof folderTree !== 'undefined' && folderTree.length > 0) ? folderTree : [];
+        tree.forEach(f => keurerRenderMoveFolderNode(treeContainer, f, 0));
+        return;
+    }
+
+    const q = query.toLowerCase();
+
+    // Splits in "begint met" en "bevat"
+    const starts   = [];
+    const contains = [];
+
+    for (const f of (_keurerFlatFolders || [])) {
+        const nameLower = f.name.toLowerCase();
+        if (nameLower.startsWith(q))      starts.push(f);
+        else if (nameLower.includes(q))   contains.push(f);
+    }
+
+    treeContainer.innerHTML = '';
+
+    if (starts.length === 0 && contains.length === 0) {
+        treeContainer.innerHTML = '<p style="color:var(--text-secondary);padding:1rem 12px;font-size:0.85rem;">Geen mappen gevonden</p>';
+        return;
+    }
+
+    const render = (list, groupLabel) => {
+        if (list.length === 0) return;
+        const header = document.createElement('div');
+        header.className = 'keurer-move-group-label';
+        header.textContent = groupLabel;
+        treeContainer.appendChild(header);
+
+        for (const f of list) {
+            const item = document.createElement('div');
+            item.className = 'folder-item keurer-move-flat-item';
+
+            const icon = document.createElement('span');
+            icon.className = 'folder-icon';
+            icon.textContent = '📁';
+            item.appendChild(icon);
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'folder-name';
+            nameEl.innerHTML = keurerHighlight(f.name, q);
+            item.appendChild(nameEl);
+
+            // Volledig pad als subtekst
+            const pathEl = document.createElement('span');
+            pathEl.className = 'keurer-move-flat-path';
+            pathEl.textContent = keurerShortenPath(f.path);
+            item.appendChild(pathEl);
+
+            item.onclick = () => {
+                treeContainer.querySelectorAll('.folder-item').forEach(el => el.classList.remove('selected'));
+                item.classList.add('selected');
+                keurerMoveSelectedFolder = f.path;
+                document.getElementById('btn-keurer-confirm-move').disabled = false;
+            };
+
+            treeContainer.appendChild(item);
+        }
+    };
+
+    render(starts,   'Begint met "' + query + '"');
+    render(contains, 'Bevat "' + query + '"');
+}
+
+function keurerClearMoveSearch() {
+    const searchEl = document.getElementById('keurer-move-search');
+    if (searchEl) { searchEl.value = ''; searchEl.focus(); }
+    keurerFilterMoveTree('');
+}
+
+function keurerHighlight(name, query) {
+    // Markeer de eerste match (case-insensitief) vet
+    const idx = name.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return keurerEsc(name);
+    return (
+        keurerEsc(name.slice(0, idx)) +
+        '<mark class="keurer-hl">' + keurerEsc(name.slice(idx, idx + query.length)) + '</mark>' +
+        keurerEsc(name.slice(idx + query.length))
+    );
+}
+
+function keurerRenderMoveFolderNode(container, folder, depth) {
+    const wrapper = document.createElement('div');
+
+    const item = document.createElement('div');
+    item.className = 'folder-item';
+    item.style.paddingLeft = `${depth * 20 + 8}px`;
+
+    const hasChildren = folder.children && folder.children.length > 0;
+
+    if (hasChildren) {
+        const chevron = document.createElement('span');
+        chevron.className = 'folder-chevron';
+        chevron.innerHTML = '▶';
+        chevron.onclick = e => {
+            e.stopPropagation();
+            const childDiv = wrapper.querySelector(':scope > .folder-children');
+            if (childDiv) {
+                const isOpen = !childDiv.classList.contains('collapsed');
+                childDiv.classList.toggle('collapsed', isOpen);
+                chevron.classList.toggle('expanded', !isOpen);
+            }
+        };
+        item.appendChild(chevron);
+    } else {
+        const spacer = document.createElement('span');
+        spacer.style.cssText = 'width:16px;display:inline-block;flex-shrink:0;';
+        item.appendChild(spacer);
+    }
+
+    const icon = document.createElement('span');
+    icon.className = 'folder-icon';
+    icon.textContent = '📁';
+    item.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className = 'folder-name';
+    name.textContent = folder.name;
+    item.appendChild(name);
+
+    item.onclick = () => {
+        document.querySelectorAll('#keurer-move-folder-tree .folder-item').forEach(el => el.classList.remove('selected'));
+        item.classList.add('selected');
+        keurerMoveSelectedFolder = folder.path;
+        document.getElementById('btn-keurer-confirm-move').disabled = false;
+    };
+
+    wrapper.appendChild(item);
+
+    if (hasChildren) {
+        const childDiv = document.createElement('div');
+        childDiv.className = 'folder-children collapsed';
+        folder.children.forEach(child => keurerRenderMoveFolderNode(childDiv, child, depth + 1));
+        wrapper.appendChild(childDiv);
+    }
+
+    container.appendChild(wrapper);
+}
+
+function keurerCloseMoveModal() {
+    document.getElementById('modal-keurer-move').classList.remove('active');
+    keurerMoveSelectedFolder = null;
+    // Zoekbalk wissen
+    const searchEl = document.getElementById('keurer-move-search');
+    if (searchEl) searchEl.value = '';
+    const clearBtn = document.getElementById('keurer-move-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    // Kaart terugzetten als annuleren
+    keurerShowCard();
+}
+
+async function keurerConfirmMove() {
+    if (!keurerMoveSelectedFolder) return;
+    if (keurerIndex >= keurerFileQueue.length) return;
+
+    const file = keurerFileQueue[keurerIndex];
+    const btn  = document.getElementById('btn-keurer-confirm-move');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig...';
+
+    try {
+        const res = await fetch(`${API_BASE}/api/move-file`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_path: file.path,
+                destination_folder: keurerMoveSelectedFolder,
+            }),
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${res.status}`);
+        }
+
+        const movedData = await res.json();
+
+        document.getElementById('modal-keurer-move').classList.remove('active');
+        const destFolder = keurerMoveSelectedFolder;
+        keurerMoveSelectedFolder = null;
+
+        // Sla op in history voor undo
+        keurerHistory.push({
+            file,
+            decision:   'move',
+            trash_path: null,
+            moved_to:   movedData.new_path || null,
+        });
+        if (keurerHistory.length > 20) keurerHistory.shift();
+
+        // Verwijder bestand uit queue
+        keurerFileQueue.splice(keurerIndex, 1);
+
+        const remEl = document.getElementById('keurer-remaining');
+        if (remEl) {
+            const rem = keurerFileQueue.length - keurerIndex;
+            remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
+        }
+
+        showToast('Verplaatst', `Bestand verplaatst naar ${destFolder.split('/').pop()}`, 'success');
+        keurerShowCard();
+
+    } catch (e) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> Verplaatsen';
+        showToast('Fout', `Verplaatsen mislukt: ${e.message}`, 'error');
+    }
+}
+
+// ==================== PREVIEW FULLSCREEN ====================
+
+function keurerTogglePreview() {
+    if (keurerPreviewOpen) {
+        keurerClosePreview();
+    } else {
+        keurerOpenPreview();
+    }
+}
+
+function keurerOpenPreview() {
+    if (keurerIndex >= keurerFileQueue.length) return;
+
+    const file    = keurerFileQueue[keurerIndex];
+    const fileUrl = `${API_BASE}/api/file?path=${encodeURIComponent(file.path)}`;
+
+    let mediaHtml;
+    if (file.is_video) {
+        mediaHtml = `<video
+            src="${fileUrl}"
+            class="keurer-preview-media"
+            controls
+            autoplay
+            playsinline
+        ></video>`;
+    } else {
+        mediaHtml = `<img
+            src="${fileUrl}"
+            class="keurer-preview-media"
+            alt="${keurerEsc(file.name)}"
+            draggable="false"
+        >`;
+    }
+
+    const overlay = document.getElementById('keurer-preview-overlay');
+    document.getElementById('keurer-preview-content').innerHTML = mediaHtml;
+    document.getElementById('keurer-preview-filename').textContent = file.name;
+    overlay.classList.add('active');
+    keurerPreviewOpen = true;
+}
+
+function keurerClosePreview() {
+    const overlay = document.getElementById('keurer-preview-overlay');
+    overlay.classList.remove('active');
+
+    // Stop video als die speelt
+    const video = overlay.querySelector('video');
+    if (video) { video.pause(); video.src = ''; }
+
+    document.getElementById('keurer-preview-content').innerHTML = '';
+    keurerPreviewOpen = false;
+}
+
+// ==================== SWIPE / SLEEP ====================
+
+function keurerSetupDrag(card) {
+    if (!card) return;
+
+    let startX = 0, startY = 0;
+    let currentX = 0, currentY = 0;
+    let dragging = false;
+
+    function onStart(x, y) {
+        if (keurerIsAnimating) return;
+        dragging = true;
+        startX   = x;  startY   = y;
+        currentX = 0;  currentY = 0;
+        card.style.transition = 'none';
+    }
+
+    function onMove(x, y) {
+        if (!dragging) return;
+        currentX = x - startX;
+        currentY = y - startY;
+
+        // Bepaal dominante richting
+        const absX = Math.abs(currentX);
+        const absY = Math.abs(currentY);
+
+        if (absY > absX && currentY < -40) {
+            // Omhoog-swipe dominant → verplaatsen
+            const upProgress = Math.min(1, (-currentY - 40) / 100);
+            card.style.transform = `translateY(${currentY * 0.6}px) scale(${1 - upProgress * 0.05})`;
+
+            const olMove   = document.getElementById('kc-overlay-move');
+            const olKeep   = document.getElementById('kc-overlay-keep');
+            const olDelete = document.getElementById('kc-overlay-delete');
+            const olUndo   = document.getElementById('kc-overlay-undo');
+            if (olMove)   olMove.style.opacity   = Math.min(0.92, upProgress).toString();
+            if (olKeep)   olKeep.style.opacity   = '0';
+            if (olDelete) olDelete.style.opacity = '0';
+            if (olUndo)   olUndo.style.opacity   = '0';
+        } else if (absY > absX && currentY > 40 && keurerHistory.length > 0) {
+            // Omlaag-swipe dominant → undo
+            const downProgress = Math.min(1, (currentY - 40) / 100);
+            card.style.transform = `translateY(${currentY * 0.6}px) scale(${1 - downProgress * 0.05})`;
+
+            const olUndo   = document.getElementById('kc-overlay-undo');
+            const olKeep   = document.getElementById('kc-overlay-keep');
+            const olDelete = document.getElementById('kc-overlay-delete');
+            const olMove   = document.getElementById('kc-overlay-move');
+            if (olUndo)   olUndo.style.opacity   = Math.min(0.92, downProgress).toString();
+            if (olKeep)   olKeep.style.opacity   = '0';
+            if (olDelete) olDelete.style.opacity = '0';
+            if (olMove)   olMove.style.opacity   = '0';
+        } else {
+            // Links/rechts dominant
+            const rotate = currentX * 0.07;
+            card.style.transform = `translateX(${currentX}px) rotate(${rotate}deg)`;
+
+            const threshold = 60;
+            const olKeep   = document.getElementById('kc-overlay-keep');
+            const olDelete = document.getElementById('kc-overlay-delete');
+            const olMove   = document.getElementById('kc-overlay-move');
+            if (olMove) olMove.style.opacity = '0';
+
+            if (currentX < -threshold) {
+                const opacity = Math.min(0.92, (-currentX - threshold) / 80);
+                if (olKeep)   olKeep.style.opacity   = opacity.toString();
+                if (olDelete) olDelete.style.opacity = '0';
+            } else if (currentX > threshold) {
+                const opacity = Math.min(0.92, (currentX - threshold) / 80);
+                if (olDelete) olDelete.style.opacity = opacity.toString();
+                if (olKeep)   olKeep.style.opacity   = '0';
+            } else {
+                if (olKeep)   olKeep.style.opacity   = '0';
+                if (olDelete) olDelete.style.opacity = '0';
+            }
+        }
+    }
+
+    function onEnd() {
+        if (!dragging) return;
+        dragging = false;
+
+        const absX = Math.abs(currentX);
+        const absY = Math.abs(currentY);
+
+        if (absY > absX && currentY < -100) {
+            // Omhoog-swipe → verplaatsen
+            keurerAnimateUp();
+        } else if (absY > absX && currentY > 100 && keurerHistory.length > 0) {
+            // Omlaag-swipe → undo
+            keurerUndo();
+        } else if (currentX < -100) {
+            keurerAnimateAndDecide('keep');
+        } else if (currentX > 100) {
+            keurerAnimateAndDecide('delete');
+        } else {
+            // Terugveren
+            card.style.transition = 'transform 0.32s cubic-bezier(0.34,1.56,0.64,1)';
+            card.style.transform  = 'translateX(0) translateY(0) rotate(0) scale(1)';
+            ['kc-overlay-keep', 'kc-overlay-delete', 'kc-overlay-move', 'kc-overlay-undo'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.opacity = '0';
+            });
+        }
+    }
+
+    // Muis
+    card.addEventListener('mousedown', e => { e.preventDefault(); onStart(e.clientX, e.clientY); });
+    window.addEventListener('mousemove', e => { if (dragging) onMove(e.clientX, e.clientY); });
+    window.addEventListener('mouseup', onEnd);
+
+    // Touch
+    card.addEventListener('touchstart', e => onStart(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+    card.addEventListener('touchmove',  e => { if (dragging) onMove(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+    card.addEventListener('touchend',   onEnd);
+}
+
+// ==================== TOETSENBORD ====================
+
+document.addEventListener('keydown', function (e) {
+    const section = document.getElementById('section-keurer');
+    if (!section || !section.classList.contains('active')) return;
+
+    const moveModalActive = document.getElementById('modal-keurer-move').classList.contains('active');
+
+    // Enter in move-modal: bevestig verplaatsen
+    if (e.key === 'Enter' && moveModalActive) {
+        e.preventDefault();
+        if (keurerMoveSelectedFolder) keurerConfirmMove();
+        return;
+    }
+
+    // Spatie: toggle preview (niet als move-modal open is)
+    if (e.code === 'Space' && !moveModalActive) {
+        e.preventDefault();
+        keurerTogglePreview();
+        return;
+    }
+
+    // Escape: sluit preview of move-modal
+    if (e.key === 'Escape') {
+        if (keurerPreviewOpen) { keurerClosePreview(); return; }
+        if (moveModalActive)   { keurerCloseMoveModal(); return; }
+    }
+
+    // Andere toetsen: niet in modals of inputs
+    if (document.querySelector('.modal.active')) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    if (e.key === 'ArrowLeft')        { e.preventDefault(); keurerDecideKeep(); }
+    else if (e.key === 'ArrowRight')  { e.preventDefault(); keurerDecideDelete(); }
+    else if (e.key === 'ArrowUp')     { e.preventDefault(); keurerDecideMove(); }
+    else if (e.key === 'ArrowDown')   { e.preventDefault(); keurerUndo(); }
+});
+
+// ==================== BRON-MAP KIEZER ====================
+
+async function keurerOpenFolderPicker() {
+    const modal = document.getElementById('modal-keurer-folder');
+    modal.classList.add('active');
+    keurerSelectedFolderForModal = null;
+    document.getElementById('btn-keurer-confirm-folder').disabled = true;
+
+    const treeContainer = document.getElementById('keurer-folder-tree');
+    treeContainer.innerHTML = '<div class="loading-spinner" style="margin:2rem auto;display:block;"></div>';
+
+    const tree = (typeof folderTree !== 'undefined' && folderTree.length > 0)
+        ? folderTree
+        : await (async () => {
+            try {
+                const res  = await fetch(`${API_BASE}/api/folders`);
+                const data = await res.json();
+                return data.folders || [];
+            } catch (_) { return []; }
+        })();
+
+    treeContainer.innerHTML = '';
+
+    if (tree.length === 0) {
+        treeContainer.innerHTML = '<p style="color:var(--danger);padding:1rem;">Mappen konden niet geladen worden.</p>';
+        return;
+    }
+
+    tree.forEach(f => keurerRenderFolderNode(treeContainer, f, 0));
+}
+
+function keurerRenderFolderNode(container, folder, depth) {
+    const wrapper = document.createElement('div');
+
+    const item = document.createElement('div');
+    item.className = 'folder-item';
+    item.style.paddingLeft = `${depth * 20 + 8}px`;
+
+    const hasChildren = folder.children && folder.children.length > 0;
+
+    if (hasChildren) {
+        const chevron = document.createElement('span');
+        chevron.className = 'folder-chevron';
+        chevron.innerHTML = '▶';
+        chevron.onclick = e => {
+            e.stopPropagation();
+            const childDiv = wrapper.querySelector(':scope > .folder-children');
+            if (childDiv) {
+                const isOpen = !childDiv.classList.contains('collapsed');
+                childDiv.classList.toggle('collapsed', isOpen);
+                chevron.classList.toggle('expanded', !isOpen);
+            }
+        };
+        item.appendChild(chevron);
+    } else {
+        const spacer = document.createElement('span');
+        spacer.style.cssText = 'width:16px;display:inline-block;flex-shrink:0;';
+        item.appendChild(spacer);
+    }
+
+    const icon = document.createElement('span');
+    icon.className = 'folder-icon';
+    icon.textContent = '📁';
+    item.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className = 'folder-name';
+    name.textContent = folder.name;
+    item.appendChild(name);
+
+    item.onclick = () => {
+        document.querySelectorAll('#keurer-folder-tree .folder-item').forEach(el => el.classList.remove('selected'));
+        item.classList.add('selected');
+        keurerSelectedFolderForModal = folder.path;
+        document.getElementById('btn-keurer-confirm-folder').disabled = false;
+    };
+
+    wrapper.appendChild(item);
+
+    if (hasChildren) {
+        const childDiv = document.createElement('div');
+        childDiv.className = 'folder-children collapsed';
+        folder.children.forEach(child => keurerRenderFolderNode(childDiv, child, depth + 1));
+        wrapper.appendChild(childDiv);
+    }
+
+    container.appendChild(wrapper);
+}
+
+function keurerCloseFolderPicker() {
+    document.getElementById('modal-keurer-folder').classList.remove('active');
+    keurerSelectedFolderForModal = null;
+}
+
+function keurerConfirmFolderSelection() {
+    if (!keurerSelectedFolderForModal) return;
+    keurerFolder = keurerSelectedFolderForModal;
+    localStorage.setItem('keurer_folder', keurerFolder);
+
+    const display = document.getElementById('keurer-folder-display');
+    if (display) display.textContent = keurerShortenPath(keurerFolder);
+
+    keurerCloseFolderPicker();
+    keurerLoadFiles();
+}
+
+// ==================== HELPERS ====================
+
+function keurerShortenPath(p) {
+    const parts = p.split('/').filter(Boolean);
+    if (parts.length <= 2) return '/' + parts.join('/');
+    return `.../${parts.slice(-2).join('/')}`;
+}
+
+function keurerEsc(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}

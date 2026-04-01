@@ -1,0 +1,47 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash start.sh)",
+      "Bash(find /Volumes/T7/datavault_dashboard_dev -type f -size +100k ! -path \"*/venv/*\" ! -path \"*/__pycache__/*\" ! -path \"*/DataVault.app/*\" -exec ls -lh {})",
+      "Read(//Volumes/T7/datavault_dashboard_dev/**)",
+      "Bash(grep -n \"print\\\\|TODO\\\\|FIXME\\\\|XXX\\\\|DEBUG\" /Volumes/T7/datavault_dashboard_dev/backend/routes/*.py)",
+      "Bash(ls -lh /Volumes/T7/datavault_dashboard_dev/*.log)",
+      "Bash(xargs ls:*)",
+      "Bash(grep -rn \"console.error\\\\|console.warn\" /Volumes/T7/datavault_dashboard_dev/frontend/ --include=*.js)",
+      "Bash(ls /Volumes/T7/datavault_dashboard_dev/*.log /Volumes/T7/datavault_dashboard_dev/*.py /Volumes/T7/datavault_dashboard_dev/*.json /Volumes/T7/datavault_dashboard_dev/*.txt)",
+      "Bash(grep -n \"function.*{$\" /Volumes/T7/datavault_dashboard_dev/frontend/app.js)",
+      "Bash(bash stop_datavault.sh)",
+      "Bash(curl -s http://localhost:8000/api/main-folders)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(''''Mappen:'''', [f[''''name''''] for f in d.get\\(''''folders'''',[]\\)][:5]\\)\")",
+      "Bash(ls -la /Volumes/T7/datavault_dashboard_dev/frontend/*.js)",
+      "Bash(find . -name \".DS_Store\" -not -path \"./venv/*\" -delete)",
+      "Bash(python3 -m py_compile backend/*.py backend/routes/*.py)",
+      "Bash(wc -l /Volumes/T7/datavault_dashboard_dev/backend/*.py /Volumes/T7/datavault_dashboard_dev/backend/routes/*.py /Volumes/T7/datavault_dashboard_dev/frontend/*.js)",
+      "Bash(pip list:*)",
+      "Bash(grep -n \"import httpx\\\\|import aiohttp\\\\|import requests\" /Volumes/T7/datavault_dashboard_dev/backend/routes/*.py)",
+      "Bash(source venv/bin/activate)",
+      "Bash(python -c \"from backend.routes.chat import router, build_system_prompt, stream_ollama; print\\(''OK''\\)\")",
+      "Bash(source /Volumes/T7/datavault_dashboard_dev/venv/bin/activate)",
+      "Bash(python -c \":*)",
+      "Bash(curl -s http://localhost:11434/api/tags)",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(m[''''name'''']\\) for m in data.get\\(''''models'''',[]\\)]\")",
+      "Read(//private/tmp/**)",
+      "Bash(ls *.sh *.py Makefile)",
+      "Read(//^\\\\.section[^-]|^\\\\.section$/{flag=1} flag{print NR\"\"\"\": \"\"\"\"$0} /^\\\\.section[^-]|^\\\\.section$/{getline; if\\(/^\\\\.section[^-]|^\\\\.section$|^[^ ]|^\\\\./**)",
+      "Read(//^#section-|^\\\\.section[^-]/{found=1; line=$0; lineno=NR} found && /[{}]/**)",
+      "Read(//<div class=\"\"\"\"main-layout\"\"\"\">|<main|<\\\\/main>|<div id=\"\"\"\"section-|<div id=\"\"\"\"section-viewer\"\"\"\"/**)",
+      "Bash(osacompile -o /Volumes/T7/datavault_dashboard_dev/DataVault.app /Volumes/T7/datavault_dashboard_dev/main.applescript)",
+      "Bash(curl -s http://127.0.0.1:8000/api/health)",
+      "Bash(curl -s http://127.0.0.1:8000/api/spotify/stats?year=all)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); otd=d.get\\(''''on_this_day'''',[]\\); print\\(f''''on_this_day items: {len\\(otd\\)}''''\\); [print\\(f''''  {x[time]} \\({x[year]}\\) - {x[track]}''''\\) for x in otd[:10]]\")",
+      "Bash(python3 -c \":*)",
+      "Bash(find /Volumes/T7/datavault_dashboard_dev/backend -name \"*.pyc\" -delete)",
+      "Bash(find /Volumes/T7/datavault_dashboard_dev/backend -name \"__pycache__\" -type d -exec rm -rf {} +)",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
+    ],
+    "additionalDirectories": [
+      "/Volumes/T7/datavault_dashboard_dev/.claude"
+    ]
+  }
+}
