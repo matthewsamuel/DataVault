@@ -29,8 +29,8 @@
     let tlScrollContainer = null;
     let tlContentEl = null;
 
-    // Slider
     let tlSliderDragging = false;
+    let tlScrollTicking = false;
 
     // ── Persistence ───────────────────────────────────────
     function loadSavedFolders() {
@@ -406,16 +406,22 @@
         const viewStart = scrollTop - preloadPx;
         const viewEnd = scrollTop + viewHeight + preloadPx;
 
-        // Binary search for first visible row
+        // Binary search for first row traversing into view
+        let left = 0;
+        let right = tlLayoutRows.length - 1;
         let startIdx = 0;
-        let endIdx = tlLayoutRows.length - 1;
 
-        // Find first row that is in view
-        while (startIdx < tlLayoutRows.length && tlLayoutRows[startIdx].top + tlLayoutRows[startIdx].height < viewStart) {
-            startIdx++;
+        while (left <= right) {
+            const mid = Math.floor((left + right) / 2);
+            if (tlLayoutRows[mid].top + tlLayoutRows[mid].height < viewStart) {
+                left = mid + 1;
+            } else {
+                startIdx = mid;
+                right = mid - 1;
+            }
         }
-        // Find last row that is in view
-        endIdx = startIdx;
+
+        let endIdx = startIdx;
         while (endIdx < tlLayoutRows.length && tlLayoutRows[endIdx].top < viewEnd) {
             endIdx++;
         }
@@ -423,49 +429,70 @@
 
         // Skip if range hasn't changed
         if (startIdx === tlRenderedRange.start && endIdx === tlRenderedRange.end) return;
-
         tlRenderedRange = { start: startIdx, end: endIdx };
 
-        // Build fragment
-        const fragment = document.createDocumentFragment();
-
-        for (let i = startIdx; i <= endIdx; i++) {
-            const layoutRow = tlLayoutRows[i];
-
-            if (layoutRow.type === 'header') {
-                const header = document.createElement('div');
-                header.className = 'tl-group-header';
-                header.style.position = 'absolute';
-                header.style.top = `${layoutRow.top}px`;
-                header.style.left = '0';
-                header.style.right = '0';
-                header.style.height = `${layoutRow.height}px`;
-                header.textContent = layoutRow.label;
-                fragment.appendChild(header);
+        // Smart DOM Update (Dom Recycling)
+        const existingNodes = Array.from(tlContentEl.children);
+        const existingIndices = new Set();
+        
+        // Remove nodes that are out of bounds
+        existingNodes.forEach(node => {
+            const idx = parseInt(node.getAttribute('data-row-idx'), 10);
+            if (isNaN(idx) || idx < startIdx || idx > endIdx) {
+                tlContentEl.removeChild(node);
             } else {
-                const row = document.createElement('div');
-                row.className = 'tl-photo-row';
-                row.style.position = 'absolute';
-                row.style.top = `${layoutRow.top}px`;
-                row.style.left = '24px';
-                row.style.right = '24px';
-                row.style.height = `${ROW_HEIGHT}px`;
-                row.style.display = 'grid';
-                row.style.gridTemplateColumns = `repeat(${getColumns()}, 1fr)`;
-                row.style.gap = '10px';
+                existingIndices.add(idx);
+            }
+        });
 
-                layoutRow.rowFiles.forEach(fileIdx => {
-                    const file = tlFiles[fileIdx];
-                    const card = createPhotoCard(file, fileIdx);
-                    row.appendChild(card);
-                });
-
-                fragment.appendChild(row);
+        // Add nodes that are missing
+        const fragment = document.createDocumentFragment();
+        for (let i = startIdx; i <= endIdx; i++) {
+            if (!existingIndices.has(i)) {
+                fragment.appendChild(renderRowNode(i));
             }
         }
+        
+        if (fragment.childElementCount > 0) {
+            tlContentEl.appendChild(fragment);
+        }
+    }
 
-        tlContentEl.innerHTML = '';
-        tlContentEl.appendChild(fragment);
+    function renderRowNode(rowIndex) {
+        const layoutRow = tlLayoutRows[rowIndex];
+
+        if (layoutRow.type === 'header') {
+            const header = document.createElement('div');
+            header.className = 'tl-group-header';
+            header.setAttribute('data-row-idx', rowIndex);
+            header.style.position = 'absolute';
+            header.style.top = `${layoutRow.top}px`;
+            header.style.left = '0';
+            header.style.right = '0';
+            header.style.height = `${layoutRow.height}px`;
+            header.textContent = layoutRow.label;
+            return header;
+        } else {
+            const row = document.createElement('div');
+            row.className = 'tl-photo-row';
+            row.setAttribute('data-row-idx', rowIndex);
+            row.style.position = 'absolute';
+            row.style.top = `${layoutRow.top}px`;
+            row.style.left = '24px';
+            row.style.right = '24px';
+            row.style.height = `${ROW_HEIGHT}px`;
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = `repeat(${getColumns()}, 1fr)`;
+            row.style.gap = '10px';
+
+            layoutRow.rowFiles.forEach(fileIdx => {
+                const file = tlFiles[fileIdx];
+                const card = createPhotoCard(file, fileIdx);
+                row.appendChild(card);
+            });
+
+            return row;
+        }
     }
 
     function createPhotoCard(file, index) {
@@ -595,9 +622,15 @@
 
     // ── Scroll Handler ────────────────────────────────────
     function onTimelineScroll() {
-        renderVisibleRows();
-        updateSliderFromScroll();
-        updateCurrentDateLabel();
+        if (!tlScrollTicking) {
+            window.requestAnimationFrame(() => {
+                renderVisibleRows();
+                updateSliderFromScroll();
+                updateCurrentDateLabel();
+                tlScrollTicking = false;
+            });
+            tlScrollTicking = true;
+        }
     }
 
     function updateCurrentDateLabel() {
@@ -607,10 +640,13 @@
         const label = document.getElementById('timeline-current-date');
         if (!label) return;
 
-        // Find the header row closest to current scroll position
-        for (let i = tlLayoutRows.length - 1; i >= 0; i--) {
-            if (tlLayoutRows[i].type === 'header' && tlLayoutRows[i].top <= scrollTop + 60) {
-                label.textContent = tlLayoutRows[i].label;
+        // Find the header row closest to current scroll position using the rendered range
+        let searchStart = Math.min(tlRenderedRange.end >= 0 ? tlRenderedRange.end : tlLayoutRows.length - 1, tlLayoutRows.length - 1);
+        for (let i = searchStart; i >= 0; i--) {
+            if (tlLayoutRows[i] && tlLayoutRows[i].type === 'header' && tlLayoutRows[i].top <= scrollTop + 60) {
+                if (label.textContent !== tlLayoutRows[i].label) {
+                    label.textContent = tlLayoutRows[i].label;
+                }
                 return;
             }
         }

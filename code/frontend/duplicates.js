@@ -16,103 +16,33 @@ function openFolderSelector() {
     const modal = document.getElementById('modal-folder-selector');
     const tree = document.getElementById('folder-selector-tree');
 
-    // Render folder tree in modal
-    tree.innerHTML = '';
-    if (folderTree && folderTree.length > 0) {
-        folderTree.forEach(folder => {
-            const element = createFolderSelectorElement(folder, 0);
-            tree.appendChild(element);
-        });
-    } else {
-        tree.innerHTML = '<p class="text-center">No folders available</p>';
-    }
+    renderFolderTree(tree, folderTree, {
+        onSelect: (path) => {
+            selectedFolderForModal = path;
+            document.getElementById('btn-confirm-folder').disabled = false;
+        },
+    });
 
     modal.classList.add('active');
+
+    if (window._dupNav) window._dupNav.nav.resetIndex();
+    window._dupNav = activateFolderTreeModal({
+        modalId: 'modal-folder-selector',
+        containerId: 'folder-selector-tree',
+        onSelect: (item) => {
+            const path = item.dataset.path;
+            if (path) item.click();
+        },
+        onConfirm: () => { if (selectedFolderForModal) confirmFolderSelection(); },
+        onClose: closeFolderSelector,
+    });
 }
 
 function closeFolderSelector() {
     const modal = document.getElementById('modal-folder-selector');
     modal.classList.remove('active');
+    if (window._dupNav) window._dupNav.nav.resetIndex();
     selectedFolderForModal = null;
-}
-
-function createFolderSelectorElement(folder, depth) {
-    const div = document.createElement('div');
-
-    const item = document.createElement('div');
-    item.className = 'folder-item';
-    item.style.paddingLeft = `${depth * 20 + 8}px`;
-
-    const hasChildren = folder.children && folder.children.length > 0;
-
-    // Chevron (only if has children)
-    if (hasChildren) {
-        const chevron = document.createElement('span');
-        chevron.className = 'folder-chevron';
-        chevron.innerHTML = '▶';
-        chevron.onclick = (e) => {
-            e.stopPropagation();
-            const childrenDiv = div.querySelector('.folder-children');
-            if (childrenDiv) {
-                childrenDiv.classList.toggle('collapsed');
-                chevron.classList.toggle('expanded');
-            }
-        };
-        item.appendChild(chevron);
-    } else {
-        const spacer = document.createElement('span');
-        spacer.style.width = '16px';
-        spacer.style.display = 'inline-block';
-        item.appendChild(spacer);
-    }
-
-    // Folder icon
-    const icon = document.createElement('span');
-    icon.className = 'folder-icon';
-    icon.innerHTML = '📁';
-    item.appendChild(icon);
-
-    // Folder name
-    const name = document.createElement('span');
-    name.className = 'folder-name';
-    name.textContent = folder.name;
-    item.appendChild(name);
-
-    // Click handler for folder selection
-    item.onclick = () => selectFolderInModal(folder.path, item);
-
-    div.appendChild(item);
-
-    // Children (collapsed by default)
-    if (hasChildren) {
-        const childrenDiv = document.createElement('div');
-        childrenDiv.className = 'folder-children collapsed';
-
-        folder.children.forEach(child => {
-            const childElement = createFolderSelectorElement(child, depth + 1);
-            childrenDiv.appendChild(childElement);
-        });
-
-        div.appendChild(childrenDiv);
-    }
-
-    return div;
-}
-
-function selectFolderInModal(path, itemElement) {
-    // Remove previous selection
-    document.querySelectorAll('#folder-selector-tree .folder-item').forEach(item => {
-        item.classList.remove('selected');
-    });
-
-    // Add selection to clicked item
-    itemElement.classList.add('selected');
-
-    // Store selected folder
-    selectedFolderForModal = path;
-
-    // Enable confirm button
-    document.getElementById('btn-confirm-folder').disabled = false;
 }
 
 function confirmFolderSelection() {

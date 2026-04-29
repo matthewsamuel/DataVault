@@ -479,16 +479,18 @@ async function keurerOpenMoveModal() {
         return;
     }
 
-    tree.forEach(f => keurerRenderMoveFolderNode(treeContainer, f, 0));
+    keurerRenderMoveTree(treeContainer, tree);
 
-    // Zet focus op zoekbalk en voeg keyboard nav toe
-    keurerMoveHighlightIndex = -1;
-    setTimeout(() => {
-        if (searchEl) {
-            searchEl.focus();
-            searchEl.onkeydown = keurerHandleMoveSearchKeydown;
-        }
-    }, 80);
+    // Keyboard nav via centraal systeem
+    if (window._keurerMoveNav) window._keurerMoveNav.nav.resetIndex();
+    window._keurerMoveNav = activateFolderTreeModal({
+        modalId: 'modal-keurer-move',
+        containerId: 'keurer-move-folder-tree',
+        onSelect: (item) => { if (item.dataset.path) item.click(); },
+        onConfirm: () => { if (keurerMoveSelectedFolder) keurerConfirmMove(); },
+        onClose: keurerCloseMoveModal,
+        focusSelector: '#keurer-move-search',
+    });
 }
 
 function keurerFilterMoveTree(query) {
@@ -1029,69 +1031,27 @@ async function keurerOpenFolderPicker() {
         return;
     }
 
-    tree.forEach(f => keurerRenderFolderNode(treeContainer, f, 0));
-}
+    renderFolderTree(treeContainer, tree, {
+        onSelect: (path) => {
+            keurerSelectedFolderForModal = path;
+            document.getElementById('btn-keurer-confirm-folder').disabled = false;
+        },
+    });
 
-function keurerRenderFolderNode(container, folder, depth) {
-    const wrapper = document.createElement('div');
-
-    const item = document.createElement('div');
-    item.className = 'folder-item';
-    item.style.paddingLeft = `${depth * 20 + 8}px`;
-
-    const hasChildren = folder.children && folder.children.length > 0;
-
-    if (hasChildren) {
-        const chevron = document.createElement('span');
-        chevron.className = 'folder-chevron';
-        chevron.innerHTML = '▶';
-        chevron.onclick = e => {
-            e.stopPropagation();
-            const childDiv = wrapper.querySelector(':scope > .folder-children');
-            if (childDiv) {
-                const isOpen = !childDiv.classList.contains('collapsed');
-                childDiv.classList.toggle('collapsed', isOpen);
-                chevron.classList.toggle('expanded', !isOpen);
-            }
-        };
-        item.appendChild(chevron);
-    } else {
-        const spacer = document.createElement('span');
-        spacer.style.cssText = 'width:16px;display:inline-block;flex-shrink:0;';
-        item.appendChild(spacer);
-    }
-
-    const icon = document.createElement('span');
-    icon.className = 'folder-icon';
-    icon.textContent = '📁';
-    item.appendChild(icon);
-
-    const name = document.createElement('span');
-    name.className = 'folder-name';
-    name.textContent = folder.name;
-    item.appendChild(name);
-
-    item.onclick = () => {
-        document.querySelectorAll('#keurer-folder-tree .folder-item').forEach(el => el.classList.remove('selected'));
-        item.classList.add('selected');
-        keurerSelectedFolderForModal = folder.path;
-        document.getElementById('btn-keurer-confirm-folder').disabled = false;
-    };
-
-    wrapper.appendChild(item);
-
-    if (hasChildren) {
-        const childDiv = document.createElement('div');
-        childDiv.className = 'folder-children collapsed';
-        folder.children.forEach(child => keurerRenderFolderNode(childDiv, child, depth + 1));
-        wrapper.appendChild(childDiv);
-    }
-
-    container.appendChild(wrapper);
+    // Keyboard nav
+    if (window._keurerFolderNav) window._keurerFolderNav.nav.resetIndex();
+    window._keurerFolderNav = activateFolderTreeModal({
+        modalId: 'modal-keurer-folder',
+        containerId: 'keurer-folder-tree',
+        onSelect: (item) => { if (item.dataset.path) item.click(); },
+        onConfirm: () => { if (keurerSelectedFolderForModal) keurerConfirmFolderSelection(); },
+        onClose: keurerCloseFolderPicker,
+    });
 }
 
 function keurerCloseFolderPicker() {
     document.getElementById('modal-keurer-folder').classList.remove('active');
+    if (window._keurerFolderNav) window._keurerFolderNav.nav.resetIndex();
     keurerSelectedFolderForModal = null;
 }
 

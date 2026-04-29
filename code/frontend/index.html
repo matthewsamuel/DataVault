@@ -697,7 +697,7 @@
                 <h2 class="modal-title"><i class="fas fa-server"></i> Storage Breakdown</h2>
                 <button class="modal-close" onclick="closeStorageModal()" aria-label="Close">×</button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" style="padding: 24px; max-height: 70vh; overflow-y: auto; display: flex; flex-direction: column;">
                 <div class="storage-breakdown-loading" id="storage-breakdown-loading">
                     <div class="message-loading">
                         <div class="dot"></div>
@@ -706,9 +706,51 @@
                     </div>
                 </div>
                 <div class="storage-breakdown-content" id="storage-breakdown-content" style="display: none;">
-                    <ul class="storage-folder-list" id="storage-folder-list">
-                        <!-- Populated by JS -->
-                    </ul>
+                    <!-- Breadcrumb Navigation -->
+                    <div class="storage-breadcrumb" id="storage-breadcrumb" style="display: none; margin-bottom: 16px;">
+                        <button class="storage-breadcrumb-btn" onclick="storageNavigateToRoot()" style="margin-right: 8px;">
+                            <i class="fas fa-home"></i> Root
+                        </button>
+                        <span id="storage-breadcrumb-path" style="color: var(--text-secondary); font-size: 0.85rem;"></span>
+                    </div>
+
+                    <!-- Summary Card -->
+                    <div class="storage-summary-card" id="storage-summary" style="display: none; margin-bottom: 20px; padding: 16px; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.1) 0%, rgba(var(--accent-rgb), 0.05) 100%); border: 1px solid var(--accent); border-radius: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px;">Total Storage</div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent);" id="storage-total-display">0 GB</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px;">Largest Folder</div>
+                                <div style="font-size: 1rem; font-weight: 600; color: var(--text-primary);" id="storage-largest-display">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tabs for switching between views -->
+                    <div class="storage-tabs" id="storage-tabs" style="display: none; margin-bottom: 16px;">
+                        <button class="storage-tab-btn active" data-tab="subfolders" onclick="storageShowTab('subfolders')">
+                            <i class="fas fa-folder"></i> Subfolders
+                        </button>
+                        <button class="storage-tab-btn" data-tab="largest-files" onclick="storageShowTab('largest-files')">
+                            <i class="fas fa-file"></i> Largest Files
+                        </button>
+                    </div>
+
+                    <!-- Subfolders List -->
+                    <div id="storage-tab-subfolders" class="storage-tab-content">
+                        <ul class="storage-folder-list" id="storage-folder-list">
+                            <!-- Populated by JS -->
+                        </ul>
+                    </div>
+
+                    <!-- Largest Files List -->
+                    <div id="storage-tab-largest-files" class="storage-tab-content" style="display: none;">
+                        <ul class="storage-files-list" id="storage-files-list">
+                            <!-- Populated by JS -->
+                        </ul>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">

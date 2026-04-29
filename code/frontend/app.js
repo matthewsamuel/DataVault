@@ -370,154 +370,28 @@ async function loadFolders() {
             expandedFolders = new Set(JSON.parse(savedExpanded));
         }
 
-        renderFolderTree();
+        renderSidebarFolderTree();
     } catch (error) {
         console.error('Error loading folders:', error);
         showToast('Error', 'Failed to load folders', 'error');
     }
 }
 
-function renderFolderTree() {
+function renderSidebarFolderTree() {
     const container = document.getElementById('folder-tree');
-    container.innerHTML = '';
-
-    folderTree.forEach(folder => {
-        const element = createFolderElement(folder, 0);
-        container.appendChild(element);
+    if (!container) return;
+    renderFolderTree(container, folderTree, {
+        itemClass: 'folder-item',
+        addDepthClass: true,
+        indent: 20,
+        indentBase: 0,
+        expandedPaths: expandedFolders,
+        selectedPath: currentFolder,
+        iconMode: 'emoji-state',
+        separateClicks: true,
+        onSelect: (path) => selectFolder(path),
+        onToggle: () => localStorage.setItem('expandedFolders', JSON.stringify([...expandedFolders])),
     });
-}
-
-function createFolderElement(folder, depth) {
-    const div = document.createElement('div');
-
-    // Container for the row (Header)
-    const row = document.createElement('div');
-    row.className = `folder-row depth-${depth}`;
-    row.style.paddingLeft = `${depth * 20}px`; // Indent entire row
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.style.cursor = 'pointer';
-    row.style.userSelect = 'none';
-
-    // 1. Chevron/Spacer (Left - Fixed Width)
-    const chevronContainer = document.createElement('div');
-    chevronContainer.className = 'folder-chevron-container';
-    chevronContainer.style.width = '30px';
-    chevronContainer.style.height = '32px'; // Match row height
-    chevronContainer.style.display = 'flex';
-    chevronContainer.style.alignItems = 'center';
-    chevronContainer.style.justifyContent = 'center';
-    chevronContainer.style.flexShrink = '0';
-
-    const hasChildren = folder.children && folder.children.length > 0;
-    const isExpanded = expandedFolders.has(folder.path);
-
-    if (hasChildren) {
-        const chevron = document.createElement('span');
-        chevron.className = 'folder-chevron' + (isExpanded ? ' expanded' : '');
-        chevron.innerHTML = '▶';
-        chevron.style.pointerEvents = 'none'; // Click is handled by container
-
-        // Chevron Click Handler - SEPARATE from Row
-        chevronContainer.onclick = (e) => {
-            e.stopPropagation();
-            toggleFolder(folder.path);
-        };
-        chevronContainer.style.cursor = 'pointer';
-        chevronContainer.title = "Toggle Folder";
-        chevronContainer.appendChild(chevron);
-    }
-
-    row.appendChild(chevronContainer);
-
-    // 2. Folder Content (Icon + Name) - The rest of the row
-    const contentContainer = document.createElement('div');
-    contentContainer.className = 'folder-content';
-    contentContainer.style.flex = '1';
-    contentContainer.style.display = 'flex';
-    contentContainer.style.alignItems = 'center';
-    contentContainer.style.gap = '8px';
-    contentContainer.style.overflow = 'hidden';
-    contentContainer.style.paddingRight = '10px';
-
-    // Icon Container - CLICK TO TOGGLE
-    const iconContainer = document.createElement('span');
-    iconContainer.className = 'folder-icon-wrapper';
-    iconContainer.style.cursor = 'pointer';
-    iconContainer.style.display = 'flex';
-    iconContainer.style.alignItems = 'center';
-    iconContainer.title = "Toggle Folder";
-
-    iconContainer.onclick = (e) => {
-        e.stopPropagation();
-        toggleFolder(folder.path);
-    };
-
-    const icon = document.createElement('span');
-    icon.className = 'folder-icon';
-    let iconEmoji = '📁';
-    if (currentFolder === folder.path) {
-        iconEmoji = '🗂️';
-    } else if (depth === 0) {
-        iconEmoji = hasChildren && isExpanded ? '📂' : '📦';
-    } else {
-        iconEmoji = hasChildren && isExpanded ? '📂' : '📁';
-    }
-    icon.innerHTML = iconEmoji;
-
-    iconContainer.appendChild(icon);
-    contentContainer.appendChild(iconContainer);
-
-    // Name - CLICK TO SELECT
-    const name = document.createElement('span');
-    name.className = 'folder-name';
-    name.textContent = folder.name;
-    name.onclick = (e) => {
-        e.stopPropagation();
-        selectFolder(folder.path);
-    };
-    contentContainer.appendChild(name);
-
-    row.appendChild(contentContainer);
-
-    // Highlight if selected
-    if (currentFolder === folder.path) {
-        row.classList.add('selected');
-        // Add visual indicator to content container too
-        contentContainer.style.fontWeight = 'bold';
-        contentContainer.style.color = 'var(--accent)';
-    }
-
-    div.appendChild(row);
-
-    // 3. Children (Recursive)
-    if (hasChildren) {
-        const childrenDiv = document.createElement('div');
-        childrenDiv.className = 'folder-children' + (isExpanded ? '' : ' collapsed');
-        // No margin-left here, indentation is handled by padding-left in rows
-
-        folder.children.forEach(child => {
-            const childElement = createFolderElement(child, depth + 1);
-            childrenDiv.appendChild(childElement);
-        });
-
-        div.appendChild(childrenDiv);
-    }
-
-    return div;
-}
-
-function toggleFolder(path) {
-    if (expandedFolders.has(path)) {
-        expandedFolders.delete(path);
-    } else {
-        expandedFolders.add(path);
-    }
-
-    // Save state
-    localStorage.setItem('expandedFolders', JSON.stringify([...expandedFolders]));
-
-    renderFolderTree();
 }
 
 function expandAllFolders() {
@@ -532,19 +406,19 @@ function expandAllFolders() {
 
     addAllPaths(folderTree);
     localStorage.setItem('expandedFolders', JSON.stringify([...expandedFolders]));
-    renderFolderTree();
+    renderSidebarFolderTree();
 }
 
 function collapseAllFolders() {
     expandedFolders.clear();
     localStorage.setItem('expandedFolders', JSON.stringify([]));
-    renderFolderTree();
+    renderSidebarFolderTree();
 }
 
 async function selectFolder(path) {
     currentFolder = path;
     await loadMedia(path);
-    renderFolderTree(); // Re-render to update selection
+    renderSidebarFolderTree(); // Re-render to update selection
     updateBreadcrumb(path);
 }
 
@@ -1160,13 +1034,30 @@ function openMoveFileModal(fileData = null) {
         previewEl.innerHTML = `<img src="${API_BASE}/api/thumb?path=${encodeURIComponent(fileToMove.path)}" alt="Preview" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">`;
     }
 
-    renderMoveFolderTree();
+    renderMoveFolderTreeUI();
     modal.classList.add('active');
+
+    // Activate keyboard navigation
+    if (window._moveNav) window._moveNav.nav.resetIndex();
+    window._moveNav = activateFolderTreeModal({
+        modalId: 'modal-move-file',
+        containerId: 'move-folder-tree',
+        itemSelector: '.move-folder-node',
+        childrenSelector: '.move-folder-children',
+        invertCollapse: true,
+        onSelect: (item) => {
+            const path = item.dataset.path;
+            if (path) selectMoveDestination(path);
+        },
+        onConfirm: () => { if (selectedMoveFolder) confirmMoveFile(); },
+        onClose: closeMoveFileModal,
+    });
 }
 
 function closeMoveFileModal() {
     const modal = document.getElementById('modal-move-file');
     if (modal) modal.classList.remove('active');
+    if (window._moveNav) { window._moveNav.nav.resetIndex(); }
 
     fileToMove = null;
     selectedMoveFolder = null;
@@ -1177,83 +1068,20 @@ function closeMoveFileModal() {
     }
 }
 
-function renderMoveFolderTree() {
+function renderMoveFolderTreeUI() {
     const container = document.getElementById('move-folder-tree');
     if (!container) return;
-    container.innerHTML = '';
-
-    const createFolderNode = (folder, depth, parentEl) => {
-        const hasChildren = folder.children && folder.children.length > 0;
-
-        // Wrapper for this folder + its children
-        const wrapper = document.createElement('div');
-
-        // The clickable row
-        const row = document.createElement('div');
-        row.className = 'move-folder-node' + (selectedMoveFolder === folder.path ? ' selected' : '');
-        row.style.paddingLeft = `${depth * 16}px`;
-
-        // Chevron
-        const chevron = document.createElement('span');
-        chevron.className = 'folder-chevron' + (hasChildren ? '' : ' no-children');
-        chevron.innerHTML = '<i class="fas fa-chevron-right"></i>';
-
-        // Folder icon
-        const icon = document.createElement('i');
-        icon.className = `fas fa-folder${selectedMoveFolder === folder.path ? '-open' : ''} folder-icon`;
-
-        // Folder name
-        const name = document.createElement('span');
-        name.className = 'folder-name';
-        name.textContent = folder.name;
-        name.title = folder.path;
-
-        row.appendChild(chevron);
-        row.appendChild(icon);
-        row.appendChild(name);
-
-        // Children container
-        const childrenContainer = document.createElement('div');
-        childrenContainer.className = 'move-folder-children';
-
-        // Click on chevron toggles expand/collapse
-        chevron.onclick = (e) => {
-            e.stopPropagation();
-            if (!hasChildren) return;
-            const isExpanded = chevron.classList.contains('expanded');
-            chevron.classList.toggle('expanded');
-            childrenContainer.classList.toggle('expanded');
-        };
-
-        // Click on the row selects the folder
-        row.onclick = (e) => {
-            e.stopPropagation();
-            selectMoveDestination(folder.path);
-            // Also expand if has children
-            if (hasChildren && !chevron.classList.contains('expanded')) {
-                chevron.classList.add('expanded');
-                childrenContainer.classList.add('expanded');
-            }
-        };
-
-        wrapper.appendChild(row);
-
-        // Build children recursively
-        if (hasChildren) {
-            folder.children.forEach(child => createFolderNode(child, depth + 1, childrenContainer));
-        }
-
-        wrapper.appendChild(childrenContainer);
-        parentEl.appendChild(wrapper);
-    };
-
-    if (folderTree && folderTree.length > 0) {
-        folderTree.forEach(folder => createFolderNode(folder, 0, container));
-    } else {
-        container.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">No folders available</div>';
-    }
-
-    // Scroll to top
+    renderFolderTree(container, folderTree, {
+        itemClass: 'move-folder-node',
+        childrenClass: 'move-folder-children',
+        collapseMode: 'expanded',
+        indent: 16,
+        indentBase: 0,
+        iconMode: 'fontawesome',
+        selectedPath: selectedMoveFolder,
+        chevronHtml: '<i class="fas fa-chevron-right"></i>',
+        onSelect: (path) => selectMoveDestination(path),
+    });
     container.scrollTop = 0;
 }
 
@@ -1282,7 +1110,7 @@ function selectMoveDestination(path) {
     }
 
     // Re-render to show selection highlight
-    renderMoveFolderTree();
+    renderMoveFolderTreeUI();
 }
 
 async function confirmMoveFile() {
@@ -1559,7 +1387,7 @@ async function openPhotoOTD(filePath) {
     // Laad de map
     currentFolder = folder;
     await loadMedia(folder);
-    renderFolderTree();
+    renderSidebarFolderTree();
     updateBreadcrumb(folder);
 
     // Zoek de foto in de geladen bestanden en open de modal
@@ -1886,38 +1714,168 @@ function closeDnaModal() {
 
 // ==================== STORAGE MODAL ====================
 
+let storageNavigationStack = [];
+
+const folderIcons = {
+    'aftermovies': 'fa-film',
+    'library': 'fa-book',
+    'muziek': 'fa-music',
+    'RAW': 'fa-image',
+    'data': 'fa-database',
+    'school': 'fa-graduation-cap',
+    'RAW_DUPLICATES': 'fa-clone',
+    'TRASH': 'fa-trash'
+};
+
+function getFolderIcon(folderName) {
+    return folderIcons[folderName] || 'fa-folder';
+}
+
 async function openStorageModal() {
+    storageNavigationStack = [];
+    await storageNavigateToPath(null);
+}
+
+async function storageNavigateToPath(folderPath) {
     const modal = document.getElementById('modal-storage-details');
     const loading = document.getElementById('storage-breakdown-loading');
     const content = document.getElementById('storage-breakdown-content');
     const list = document.getElementById('storage-folder-list');
+    const filesList = document.getElementById('storage-files-list');
+    const summaryCard = document.getElementById('storage-summary');
+    const breadcrumb = document.getElementById('storage-breadcrumb');
+    const breadcrumbPath = document.getElementById('storage-breadcrumb-path');
+    const tabs = document.getElementById('storage-tabs');
+    const totalDisplay = document.getElementById('storage-total-display');
+    const largestDisplay = document.getElementById('storage-largest-display');
 
     modal.classList.add('active');
     loading.style.display = 'flex';
     content.style.display = 'none';
 
     try {
-        const res = await fetch(`${API_BASE}/api/stats/storage-breakdown`);
+        const params = folderPath ? `?folder_path=${encodeURIComponent(folderPath)}` : '';
+        const res = await fetch(`${API_BASE}/api/stats/storage-breakdown-nested${params}`);
         const data = await res.json();
 
+        if (data.error) {
+            list.innerHTML = '<li>Fout bij laden van data.</li>';
+            loading.style.display = 'none';
+            content.style.display = 'block';
+            return;
+        }
+
         list.innerHTML = '';
-        if (data.breakdown) {
-            for (const [folder, gb] of Object.entries(data.breakdown)) {
-                const li = document.createElement('li');
-                li.className = 'storage-folder-item';
-                li.innerHTML = `<span class="storage-folder-name">${folder}</span><span class="storage-folder-size">${gb} GB</span>`;
-                list.appendChild(li);
-            }
+        filesList.innerHTML = '';
+
+        const entries = Object.entries(data.breakdown || {}).sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
+        const total = entries.reduce((sum, [, gb]) => sum + parseFloat(gb), 0);
+
+        if (folderPath) {
+            breadcrumb.style.display = 'flex';
+            breadcrumbPath.textContent = `/ ${folderPath}`;
+            tabs.style.display = 'flex';
+            summaryCard.style.display = 'block';
         } else {
-            list.innerHTML = '<li>Geen data beschikbaar.</li>';
+            breadcrumb.style.display = 'none';
+            tabs.style.display = 'none';
+            summaryCard.style.display = 'block';
+        }
+
+        totalDisplay.textContent = `${total.toFixed(2)} GB`;
+        if (entries.length > 0) {
+            largestDisplay.textContent = `${entries[0][0]} (${entries[0][1]} GB)`;
+        }
+
+        entries.forEach(([folder, gb]) => {
+            const percent = total > 0 ? (parseFloat(gb) / total * 100).toFixed(1) : 0;
+            const li = document.createElement('li');
+            li.className = 'storage-folder-item';
+            li.style.cursor = 'pointer';
+
+            const icon = getFolderIcon(folder);
+            const newPath = folderPath ? `${folderPath}/${folder}` : folder;
+
+            li.innerHTML = `
+                <div class="storage-folder-header">
+                    <span class="storage-folder-name"><i class="fas ${icon}"></i>${folder}</span>
+                    <span class="storage-folder-size">${gb} GB</span>
+                </div>
+                <div class="storage-progress-bar">
+                    <div class="storage-progress-fill" style="width: ${percent}%"></div>
+                </div>
+                <div class="storage-folder-percent">${percent}% van totale opslag</div>
+            `;
+
+            li.onclick = () => storageNavigateToPath(newPath);
+            list.appendChild(li);
+        });
+
+        if (folderPath) {
+            const filesRes = await fetch(`${API_BASE}/api/stats/largest-files?folder_path=${encodeURIComponent(folderPath)}&limit=20`);
+            const filesData = await filesRes.json();
+
+            if (filesData.files) {
+                filesData.files.forEach(file => {
+                    const li = document.createElement('li');
+                    li.className = 'storage-file-item';
+
+                    const filename = file.name;
+                    const ext = filename.split('.').pop().toLowerCase();
+                    let fileIcon = 'fa-file';
+
+                    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) fileIcon = 'fa-image';
+                    else if (['mp4', 'mov', 'avi', 'mkv'].includes(ext)) fileIcon = 'fa-video';
+                    else if (['mp3', 'wav', 'flac', 'aac'].includes(ext)) fileIcon = 'fa-music';
+                    else if (['pdf', 'doc', 'docx', 'txt'].includes(ext)) fileIcon = 'fa-file-text';
+                    else if (['zip', 'rar', '7z'].includes(ext)) fileIcon = 'fa-file-archive';
+
+                    const displaySize = file.size_gb > 1 ? `${file.size_gb.toFixed(2)} GB` : `${file.size_mb.toFixed(2)} MB`;
+
+                    li.innerHTML = `
+                        <div class="storage-file-header">
+                            <span class="storage-file-name"><i class="fas ${fileIcon}"></i>${filename}</span>
+                            <span class="storage-file-size">${displaySize}</span>
+                        </div>
+                        <div class="storage-file-path">${file.path}</div>
+                    `;
+
+                    filesList.appendChild(li);
+                });
+            }
         }
 
         loading.style.display = 'none';
         content.style.display = 'block';
     } catch (e) {
+        console.error(e);
         loading.style.display = 'none';
         list.innerHTML = '<li>Fout bij laden van storage data.</li>';
         content.style.display = 'block';
+    }
+}
+
+function storageNavigateToRoot() {
+    storageNavigateToPath(null);
+}
+
+function storageShowTab(tabName) {
+    const subfoldersBtn = document.querySelector('[data-tab="subfolders"]');
+    const filesBtn = document.querySelector('[data-tab="largest-files"]');
+    const subfoldersContent = document.getElementById('storage-tab-subfolders');
+    const filesContent = document.getElementById('storage-tab-largest-files');
+
+    subfoldersBtn.classList.remove('active');
+    filesBtn.classList.remove('active');
+    subfoldersContent.classList.remove('active');
+    filesContent.classList.remove('active');
+
+    if (tabName === 'subfolders') {
+        subfoldersBtn.classList.add('active');
+        subfoldersContent.classList.add('active');
+    } else {
+        filesBtn.classList.add('active');
+        filesContent.classList.add('active');
     }
 }
 

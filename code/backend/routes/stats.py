@@ -2,7 +2,9 @@ from fastapi import APIRouter
 from pathlib import Path
 import shutil
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
+import os
+import subprocess
 
 from backend.config import Config
 from backend.routes.spotify import parse_spotify_data
@@ -73,7 +75,95 @@ async def get_storage_breakdown() -> Dict[str, Any]:
         # Sort by size descending
         sorted_breakdown = dict(sorted(breakdown.items(), key=lambda item: item[1], reverse=True))
         return {"breakdown": sorted_breakdown}
-        
+
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/storage-breakdown-nested")
+async def get_storage_breakdown_nested(folder_path: str = None) -> Dict[str, Any]:
+    """Get storage breakdown for a specific folder and its subfolders."""
+    if not config:
+        return {"error": "Config not loaded"}
+
+    vault_path = config.VAULT_ROOT
+    target_path = vault_path / folder_path if folder_path else vault_path
+
+    if not target_path.exists() or not target_path.is_dir():
+        return {"error": "Path does not exist"}
+
+    try:
+        target_path.relative_to(vault_path)
+    except ValueError:
+        return {"error": "Path is outside vault"}
+
+    breakdown = {}
+    try:
+        entries = [entry for entry in os.scandir(target_path) if entry.is_dir() and not entry.name.startswith('.')]
+
+        if not entries:
+            return {"breakdown": {}, "path": folder_path or "/"}
+
+        cmd = ["du", "-sm"] + [entry.name for entry in entries]
+        result = subprocess.run(cmd, cwd=str(target_path), capture_output=True, text=True, check=False)
+
+        if result.returncode == 0 or result.returncode == 1:
+            for line in result.stdout.strip().split('\n'):
+                if line:
+                    parts = line.split('\t')
+                    if len(parts) >= 2:
+                        size_mb = int(parts[0])
+                        folder_name = parts[1]
+                        gb_size = round(size_mb / 1024, 2)
+                        if gb_size > 0:
+                            breakdown[folder_name] = gb_size
+
+        sorted_breakdown = dict(sorted(breakdown.items(), key=lambda item: item[1], reverse=True))
+        return {"breakdown": sorted_breakdown, "path": folder_path or "/"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/largest-files")
+async def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[str, Any]:
+    """Get largest files in a specific folder."""
+    if not config:
+        return {"error": "Config not loaded"}
+
+    vault_path = config.VAULT_ROOT
+    target_path = vault_path / folder_path if folder_path else vault_path
+
+    if not target_path.exists() or not target_path.is_dir():
+        return {"error": "Path does not exist"}
+
+    try:
+        target_path.relative_to(vault_path)
+    except ValueError:
+        return {"error": "Path is outside vault"}
+
+    files_with_sizes = []
+
+    try:
+        for root, _, files in os.walk(target_path):
+            for filename in files:
+                file_path = Path(root) / filename
+                try:
+                    size_bytes = file_path.stat().st_size
+                    size_mb = round(size_bytes / (1024 * 1024), 2)
+
+                    if size_mb > 0:
+                        rel_path = str(file_path.relative_to(vault_path))
+                        files_with_sizes.append({
+                            "name": filename,
+                            "path": rel_path,
+                            "size_mb": size_mb,
+                            "size_gb": round(size_mb / 1024, 2)
+                        })
+                except Exception:
+                    pass
+
+        sorted_files = sorted(files_with_sizes, key=lambda x: x['size_mb'], reverse=True)[:limit]
+        return {"files": sorted_files, "path": folder_path or "/"}
+
     except Exception as e:
         return {"error": str(e)}
 
