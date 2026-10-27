@@ -1,95 +1,192 @@
 """
 DataVault Dashboard - Safe File Operations
-CRITICAL: Uses only os.rename() / os.replace() to preserve metadata
-NO shutil.move(), NO copy-then-delete
+
+CRITICAL: every move of an archive file in the app goes through move_no_overwrite().
+- One atomic rename on the same volume: mtime, birthtime, EXIF, extended
+  attributes and Finder flags all stay with the file (it is the same inode).
+- Never overwrites: the rename itself is exclusive (macOS renamex_np with
+  RENAME_EXCL, elsewhere os.link + unlink of the old name), so even two moves
+  racing for the same name cannot clobber each other.
+- No copy-then-delete fallback: a cross-volume move is refused.
+- Only regular files: directories and symlinks are refused.
 """
+import ctypes
+import ctypes.util
+import errno
 import os
+import stat
+import sys
 from pathlib import Path
 from typing import Tuple
+
 
 class FileOperationError(Exception):
     """Raised when file operation fails"""
     pass
 
+
 class CrossDeviceError(FileOperationError):
     """Raised when trying to move across devices"""
     pass
 
-def safe_rename(src: Path, dst: Path, allow_cross_device: bool = False) -> None:
-    """
-    MANDATORY: Safe file rename using os.rename() or os.replace() ONLY.
-    
-    This preserves ALL metadata including:
-    - Modified time
-    - Created time  
-    - EXIF data
-    - macOS extended attributes
-    
-    Args:
-        src: Source file path
-        dst: Destination file path
-        allow_cross_device: If True, allows fallback (DISABLED BY DEFAULT)
-    
-    Raises:
-        FileOperationError: If operation fails
-        CrossDeviceError: If cross-device move attempted without flag
-    """
-    if not src.exists():
-        raise FileOperationError(f"Source file does not exist: {src}")
-    
-    # Ensure destination directory exists
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        # Primary method: os.replace() - atomic rename, handles existing files
-        os.replace(str(src), str(dst))
-    except OSError as e:
-        # Check if it's a cross-device error (errno 18)
-        if e.errno == 18:  # EXDEV - Cross-device link
-            if not allow_cross_device:
-                raise CrossDeviceError(
-                    f"Cannot move across devices: {src} -> {dst}\n"
-                    f"Source and destination must be on the same volume.\n"
-                    f"This operation is blocked to preserve metadata."
-                ) from e
-            else:
-                # Unsafe fallback - only if explicitly enabled
-                # This is logged and should be surfaced to the user
-                print(f"WARNING: Cross-device move detected, using fallback: {src} -> {dst}")
-                import shutil
-                shutil.move(str(src), str(dst))
-        else:
-            raise FileOperationError(f"Failed to move file: {e}") from e
 
-def handle_conflict(dst_path: Path, suffix_prefix: str = "DUP") -> Path:
+class DestinationExistsError(FileOperationError):
+    """Raised when the exact destination is taken and renaming is not allowed"""
+    pass
+
+
+MAX_CONFLICT_SUFFIX = 9999
+
+# Flags that make rename() fail with EPERM; the owner can clear and restore them
+_USER_LOCK_FLAGS = getattr(stat, "UF_IMMUTABLE", 0) | getattr(stat, "UF_APPEND", 0)
+
+# macOS <stdio.h>: renamex_np(from, to, RENAME_EXCL) fails with EEXIST instead of replacing
+_RENAME_EXCL = 0x00000004
+_renamex_np = None
+if sys.platform == "darwin":
+    try:
+        _libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        _renamex_np = _libc.renamex_np
+        _renamex_np.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        _renamex_np.restype = ctypes.c_int
+    except (OSError, AttributeError):
+        _renamex_np = None
+
+
+def _link_then_unlink(src: Path, dst: Path) -> None:
+    """Exclusive move for systems without renamex_np: hard link, verify, drop old name."""
+    os.link(src, dst, follow_symlinks=False)  # EEXIST if dst is taken
+    src_st = os.lstat(src)
+    dst_st = os.lstat(dst)
+    if (src_st.st_dev, src_st.st_ino) != (dst_st.st_dev, dst_st.st_ino):
+        raise FileOperationError(f"Hard link check failed for {src} -> {dst}")
+    os.unlink(src)  # the data stays reachable via dst (same inode)
+
+
+def _exclusive_rename(src: Path, dst: Path) -> None:
+    """Atomically rename src to dst; raises OSError(EEXIST) if dst exists."""
+    if _renamex_np is not None:
+        if _renamex_np(os.fsencode(src), os.fsencode(dst), _RENAME_EXCL) == 0:
+            return
+        err = ctypes.get_errno()
+        if err not in (errno.ENOTSUP, errno.EINVAL):
+            raise OSError(err, os.strerror(err), str(src), None, str(dst))
+        # Filesystem without RENAME_EXCL support: fall through to the link method
+    _link_then_unlink(src, dst)
+
+
+def conflict_name(path: Path, counter: int, suffix_prefix: str = "DUP") -> Path:
+    """name.ext -> name_DUP_001.ext"""
+    return path.parent / f"{path.stem}_{suffix_prefix}_{counter:03d}{path.suffix}"
+
+
+def move_no_overwrite(
+    src: Path,
+    dst: Path,
+    rename_on_conflict: bool = True,
+    suffix_prefix: str = "DUP",
+) -> Path:
     """
-    Handle filename conflict by adding suffix.
-    
-    Args:
-        dst_path: Desired destination path
-        suffix_prefix: Prefix for suffix (DUP or RESTORED)
-    
-    Returns:
-        Non-conflicting path with suffix like _DUP_001
+    MANDATORY: the only way the app moves an archive file.
+
+    Moves the regular file src to dst without ever replacing an existing file.
+    If dst is taken, the next free name dst_DUP_001.ext, _DUP_002, ... is used
+    (or DestinationExistsError when rename_on_conflict is False).
+    Locked files (uchg/uappnd) are unlocked for the rename and locked again.
+
+    Returns the final destination path.
+
+    Raises:
+        FileOperationError: source missing, not a regular file, or move failed
+        CrossDeviceError: source and destination are on different volumes
+        DestinationExistsError: dst taken and rename_on_conflict is False
     """
-    if not dst_path.exists():
-        return dst_path
-    
-    # Extract parts
-    parent = dst_path.parent
-    stem = dst_path.stem
-    suffix = dst_path.suffix
-    
-    # Find next available number
-    counter = 1
-    while True:
-        new_name = f"{stem}_{suffix_prefix}_{counter:03d}{suffix}"
-        new_path = parent / new_name
-        if not new_path.exists():
-            return new_path
-        counter += 1
-        if counter > 9999:  # Safety limit
-            raise FileOperationError("Too many conflicting files")
+    src = Path(src)
+    dst = Path(dst)
+
+    try:
+        src_st = os.lstat(src)
+    except FileNotFoundError:
+        raise FileOperationError(f"Source file does not exist: {src}")
+    if stat.S_ISLNK(src_st.st_mode):
+        raise FileOperationError(f"Refusing to move a symlink: {src}")
+    if not stat.S_ISREG(src_st.st_mode):
+        raise FileOperationError(f"Refusing to move something that is not a regular file: {src}")
+
+    if os.path.abspath(src) == os.path.abspath(dst):
+        raise FileOperationError(f"Source and destination are the same: {src}")
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if os.stat(dst.parent).st_dev != src_st.st_dev:
+        raise CrossDeviceError(
+            f"Cannot move across volumes: {src} -> {dst}. "
+            "Source and destination must be on the same volume to keep all metadata."
+        )
+
+    flags = getattr(src_st, "st_flags", 0)
+    lock_flags = flags & _USER_LOCK_FLAGS
+    if lock_flags:
+        try:
+            os.chflags(src, flags & ~lock_flags, follow_symlinks=False)
+        except OSError as e:
+            raise FileOperationError(f"Cannot unlock {src}: {e}") from e
+
+    candidate = dst
+    counter = 0
+    try:
+        while True:
+            try:
+                _exclusive_rename(src, candidate)
+                break
+            except OSError as e:
+                if e.errno == errno.EEXIST:
+                    if not rename_on_conflict:
+                        raise DestinationExistsError(f"Destination already exists: {candidate}") from e
+                    counter += 1
+                    if counter > MAX_CONFLICT_SUFFIX:
+                        raise FileOperationError(f"Too many conflicting files for {dst}") from e
+                    candidate = conflict_name(dst, counter, suffix_prefix)
+                    continue
+                if e.errno == errno.EXDEV:
+                    raise CrossDeviceError(f"Cannot move across volumes: {src} -> {candidate}") from e
+                raise FileOperationError(f"Failed to move {src} -> {candidate}: {e}") from e
+    except Exception:
+        if lock_flags:
+            try:
+                os.chflags(src, flags, follow_symlinks=False)
+            except OSError:
+                pass
+        raise
+
+    if lock_flags:
+        try:
+            os.chflags(candidate, flags, follow_symlinks=False)
+        except OSError as e:
+            print(f"WARNING: moved {candidate} but could not restore its lock flag: {e}")
+    return candidate
+
+
+def files_identical(a: Path, b: Path, chunk_size: int = 1024 * 1024) -> bool:
+    """Byte-for-byte comparison (no cached hashes): same size and same content."""
+    if os.stat(a).st_size != os.stat(b).st_size:
+        return False
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        while True:
+            ca = fa.read(chunk_size)
+            cb = fb.read(chunk_size)
+            if ca != cb:
+                return False
+            if not ca:
+                return True
+
+
+def is_inside(path: Path, folder: Path) -> bool:
+    """True if path (after resolving symlinks and '..') lies inside folder."""
+    try:
+        return Path(path).resolve().is_relative_to(Path(folder).resolve())
+    except (OSError, RuntimeError, ValueError):
+        return False
+
 
 def recreate_folder_structure(
     src_path: Path,
@@ -98,18 +195,18 @@ def recreate_folder_structure(
 ) -> Path:
     """
     Recreate relative folder structure from source to destination.
-    
+
     Example:
         src_path: /vault/RAW/2010/100D3000a/DSC_0120.JPG
         src_root: /vault/RAW
         dst_root: /vault/RAW_DUPLICATES
         returns:  /vault/RAW_DUPLICATES/2010/100D3000a/DSC_0120.JPG
-    
+
     Args:
         src_path: Full path to source file
         src_root: Root directory of source
         dst_root: Root directory of destination
-    
+
     Returns:
         Full path to destination file preserving structure
     """
@@ -120,11 +217,12 @@ def recreate_folder_structure(
         raise FileOperationError(
             f"Source path {src_path} is not under {src_root}"
         )
-    
+
     # Construct destination path
     dst_path = dst_root / rel_path
-    
+
     return dst_path
+
 
 def safe_move_with_structure(
     src_path: Path,
@@ -133,30 +231,15 @@ def safe_move_with_structure(
     conflict_suffix: str = "DUP"
 ) -> Tuple[Path, bool]:
     """
-    Move file preserving folder structure, handle conflicts.
-    
-    Args:
-        src_path: Source file to move
-        src_root: Source root directory
-        dst_root: Destination root directory
-        conflict_suffix: Suffix for conflicting files
-    
+    Move file preserving folder structure, never overwriting.
+
     Returns:
         Tuple of (destination_path, was_conflict)
-    
+
     Raises:
         FileOperationError: If operation fails
         CrossDeviceError: If cross-device move attempted
     """
-    # Recreate structure
-    dst_path = recreate_folder_structure(src_path, src_root, dst_root)
-    
-    # Handle conflicts
-    was_conflict = dst_path.exists()
-    if was_conflict:
-        dst_path = handle_conflict(dst_path, conflict_suffix)
-    
-    # Perform safe rename
-    safe_rename(src_path, dst_path, allow_cross_device=False)
-    
-    return dst_path, was_conflict
+    wanted = recreate_folder_structure(src_path, src_root, dst_root)
+    final = move_no_overwrite(src_path, wanted, suffix_prefix=conflict_suffix)
+    return final, final != wanted

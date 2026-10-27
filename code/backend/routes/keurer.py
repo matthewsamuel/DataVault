@@ -5,9 +5,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pathlib import Path
 from typing import Dict, Any
 import random
-from datetime import datetime
 
 from backend.config import Config, validate_path_in_vault, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS
+from backend.file_ops import move_no_overwrite
 
 router = APIRouter()
 
@@ -114,16 +114,9 @@ def decide_file(body: Dict[str, Any]) -> Dict[str, Any]:
         if file_path.exists() and file_path.is_file():
             try:
                 config.TRASH_FOLDER.mkdir(parents=True, exist_ok=True)
-                dest = config.TRASH_FOLDER / file_path.name
 
-                # Naambotsing: voeg tijdstempel toe
-                if dest.exists():
-                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    dest = config.TRASH_FOLDER / f"{file_path.stem}_{ts}{file_path.suffix}"
-
-                # Verplaats met behoud van metadata
-                from backend.routes.media import _safe_move_file
-                _safe_move_file(file_path, dest)
+                # Verplaats met behoud van metadata; naambotsing wordt naam_DUP_001.ext
+                dest = move_no_overwrite(file_path, config.TRASH_FOLDER / file_path.name)
                 trash_path = str(dest)
             except Exception as e:
                 raise HTTPException(
@@ -158,8 +151,6 @@ def undo_decision(body: Dict[str, Any]) -> Dict[str, Any]:
     if not path_str or not folder_str:
         raise HTTPException(status_code=400, detail="Ontbrekende velden")
 
-    from backend.routes.media import _safe_move_file
-
     restored_path = None
 
     if decision == "delete" and trash_path:
@@ -167,7 +158,7 @@ def undo_decision(body: Dict[str, Any]) -> Dict[str, Any]:
         original = Path(path_str)
         if trash.exists():
             try:
-                _safe_move_file(trash, original)
+                move_no_overwrite(trash, original, rename_on_conflict=False)
                 restored_path = str(original)
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Terugzetten mislukt: {e}")
@@ -177,7 +168,7 @@ def undo_decision(body: Dict[str, Any]) -> Dict[str, Any]:
         original = Path(path_str)
         if src.exists():
             try:
-                _safe_move_file(src, original)
+                move_no_overwrite(src, original, rename_on_conflict=False)
                 restored_path = str(original)
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Terugzetten mislukt: {e}")

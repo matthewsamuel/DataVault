@@ -5,11 +5,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
 from typing import Dict, Any
-import os
 import shutil
 from datetime import datetime
 
 from backend.config import Config, validate_path_in_vault, is_video
+from backend.file_ops import move_no_overwrite, is_inside, FileOperationError, CrossDeviceError
 
 router = APIRouter()
 
@@ -193,7 +193,7 @@ def delete_to_trash_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/api/move-file")
 def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Move a file to a different folder.
+    Move a file to a different folder (never overwrites; a name clash gets _DUP_001).
     
     Body: { 
         "source_path": "/full/path/to/file.jpg",
@@ -204,127 +204,48 @@ def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
-    try:
-        source_path_str = body.get("source_path")
-        destination_folder_str = body.get("destination_folder")
-        
-        if not source_path_str or not destination_folder_str:
-            raise HTTPException(
-                status_code=400, 
-                detail="Missing 'source_path' or 'destination_folder' in request body"
-            )
-        
-        source_path = Path(source_path_str)
-        destination_folder = Path(destination_folder_str)
-        
-        # Validate both paths are within vault
-        if not validate_path_in_vault(source_path, config.VAULT_ROOT):
-            raise HTTPException(status_code=403, detail="Access denied: source path outside vault")
-        
-        if not validate_path_in_vault(destination_folder, config.VAULT_ROOT):
-            raise HTTPException(status_code=403, detail="Access denied: destination path outside vault")
-        
-        # Check source file exists
-        if not source_path.exists() or not source_path.is_file():
-            raise HTTPException(status_code=404, detail="Source file not found")
-        
-        # Ensure destination folder exists
-        destination_folder.mkdir(parents=True, exist_ok=True)
-        
-        # Determine destination path with collision handling
-        destination_filename = source_path.name
-        destination_path = destination_folder / destination_filename
-        
-        # If file already exists in destination, append timestamp
-        if destination_path.exists():
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            stem = source_path.stem
-            suffix = source_path.suffix
-            destination_filename = f"{stem}_{timestamp}{suffix}"
-            destination_path = destination_folder / destination_filename
-        
-        # Move file preserving ALL metadata (creation date, EXIF, xattrs, etc.)
-        _safe_move_file(source_path, destination_path)
-        
-        return {
-            "success": True,
-            "new_path": str(destination_path),
-            "message": f"File moved to {destination_folder.name}/{destination_filename}"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to move file: {str(e)}")
-
-
-def _safe_move_file(source: Path, destination: Path):
-    """
-    Move a file while preserving ALL metadata (creation date, modification date,
-    EXIF, extended attributes, resource forks).
+    source_path_str = body.get("source_path")
+    destination_folder_str = body.get("destination_folder")
     
-    Handles macOS 'uchg' (user immutable / locked) files by temporarily
-    clearing the flag, then restoring it on the destination.
-    
-    Strategy:
-    1. Clear any immutable flags on the source file
-    2. Try os.rename() — atomic, preserves everything (works on same filesystem)
-    3. Fallback: use macOS-native 'ditto' which preserves all HFS+/APFS metadata,
-       then delete the original.
-    4. Restore original flags on the destination
-    """
-    import subprocess, stat
-    
-    # Save and clear immutable flags (uchg, schg, etc.)
-    original_stat = os.stat(str(source))
-    original_flags = original_stat.st_flags
-    has_flags = original_flags != 0
-    
-    if has_flags:
-        try:
-            os.chflags(str(source), 0)
-        except OSError as e:
-            raise RuntimeError(f"Cannot clear file flags on source: {e}")
-    
-    try:
-        # Strategy 1: os.rename (atomic, same filesystem, preserves everything)
-        try:
-            os.rename(str(source), str(destination))
-            # Restore flags on destination
-            if has_flags:
-                os.chflags(str(destination), original_flags)
-            return
-        except OSError:
-            pass
-        
-        # Strategy 2: macOS ditto (preserves ALL metadata including creation date)
-        result = subprocess.run(
-            ['/usr/bin/ditto', str(source), str(destination)],
-            capture_output=True, text=True
+    if not source_path_str or not destination_folder_str:
+        raise HTTPException(
+            status_code=400, 
+            detail="Missing 'source_path' or 'destination_folder' in request body"
         )
-        
-        # ditto may print warnings but still succeed
-        if not destination.exists():
-            raise RuntimeError(f"ditto failed: {result.stderr.strip()}")
-        
-        if destination.stat().st_size != original_stat.st_size:
-            # Size mismatch — don't delete original, restore flags
-            destination.unlink()
-            raise RuntimeError("File size mismatch after copy, aborting move")
-        
-        # Safe to delete original now (flags already cleared above)
-        os.remove(str(source))
-        
-        # Restore flags on destination
-        if has_flags:
-            os.chflags(str(destination), original_flags)
     
-    except Exception:
-        # If anything goes wrong, try to restore flags on source
-        if has_flags and source.exists():
-            try:
-                os.chflags(str(source), original_flags)
-            except OSError:
-                pass
-        raise
-
+    source_path = Path(source_path_str)
+    destination_folder = Path(destination_folder_str)
+    
+    # Validate both paths are within vault and outside the app's cache
+    if not validate_path_in_vault(source_path, config.VAULT_ROOT):
+        raise HTTPException(status_code=403, detail="Access denied: source path outside vault")
+    
+    if not validate_path_in_vault(destination_folder, config.VAULT_ROOT):
+        raise HTTPException(status_code=403, detail="Access denied: destination path outside vault")
+    
+    if is_inside(source_path, config.CACHE_FOLDER) or is_inside(destination_folder, config.CACHE_FOLDER):
+        raise HTTPException(status_code=403, detail="Access denied: cache folder")
+    
+    # Only regular files, never folders or symlinks
+    if source_path.is_symlink() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Source file not found")
+    
+    if destination_folder.exists() and not destination_folder.is_dir():
+        raise HTTPException(status_code=400, detail="Destination is not a folder")
+    
+    if destination_folder.resolve() == source_path.parent.resolve():
+        raise HTTPException(status_code=400, detail="File is already in this folder")
+    
+    try:
+        # Atomic, metadata-preserving, never overwrites (see backend/file_ops.py)
+        destination_path = move_no_overwrite(source_path, destination_folder / source_path.name)
+    except CrossDeviceError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except FileOperationError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to move file: {e}")
+    
+    return {
+        "success": True,
+        "new_path": str(destination_path),
+        "message": f"File moved to {destination_folder.name}/{destination_path.name}"
+    }

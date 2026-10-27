@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from backend.config import Config
-from backend.file_ops import safe_move_with_structure, FileOperationError, CrossDeviceError
+from backend.file_ops import safe_move_with_structure, move_no_overwrite, FileOperationError, CrossDeviceError
 
 router = APIRouter()
 
@@ -192,19 +192,12 @@ async def undo_last_delete_endpoint() -> Dict[str, Any]:
             continue
         
         try:
-            # Check if original location is now occupied
-            if src_path.exists():
-                # Add RESTORED suffix
-                from backend.file_ops import handle_conflict
-                src_path = handle_conflict(src_path, suffix_prefix="RESTORED")
-            
-            # Move back using safe rename
-            from backend.file_ops import safe_rename
-            safe_rename(dst_path, src_path, allow_cross_device=False)
+            # Move back; if the original location is taken, use name_RESTORED_001.ext
+            restored_path = move_no_overwrite(dst_path, src_path, suffix_prefix="RESTORED")
             
             # Invalidate hash cache
             db.invalidate_hash(dst_path)
-            db.invalidate_hash(src_path)
+            db.invalidate_hash(restored_path)
             
             restored += 1
         
