@@ -312,3 +312,68 @@ def test_malformed_json_values_give_400_not_500(client, vault, inbox):
         assert r.status_code == 400, (bad_id, r.status_code)
     assert (inbox / "IMG_0002.JPG").exists()
     assert client.get("/api/keurer/stats").json()["total"] == 0
+
+
+def test_new_decision_on_same_path_keeps_the_earlier_move_undoable(client, config, vault, inbox):
+    """A new file that later appears where a moved file was is judged without losing the move's undo."""
+    photo = inbox / "IMG_0002.JPG"
+    data = photo.read_bytes()
+    dest = vault / "library" / "Familie"
+    move_id = _decide(client, photo, "move", destination_folder=str(dest)).json()["id"]
+
+    photo.write_bytes(b"nieuwe foto, zelfde naam")
+    names = [f["name"] for f in client.get("/api/keurer/files", params={"folder": str(inbox)}).json()["files"]]
+    assert "IMG_0002.JPG" in names
+    delete_id = _decide(client, photo, "delete").json()["id"]
+
+    history = client.get("/api/keurer/history").json()["entries"]
+    assert [e["id"] for e in history] == [delete_id, move_id]
+    r = client.post("/api/keurer/undo", json={"id": move_id})
+    assert r.status_code == 200, r.text
+    assert photo.read_bytes() == data
+    # The trashed newcomer is still safe and its undo now reports the occupied place
+    assert (config.TRASH_FOLDER / "IMG_0002.JPG").read_bytes() == b"nieuwe foto, zelfde naam"
+    assert client.post("/api/keurer/undo", json={"id": delete_id}).status_code == 409
+
+
+def test_migration_4_rebuild_keeps_every_row_id_and_counter(tmp_path, monkeypatch):
+    """The keurer_decisions rebuild copies every row unchanged and never reuses an old id."""
+    from backend import migrations
+    db_path = tmp_path / "datavault.db"
+    make_legacy_db(db_path)
+    monkeypatch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:3])
+    assert migrations.migrate(db_path) == [1, 2, 3]
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("INSERT INTO keurer_decisions (path, folder, decision, dest_path, dest_ino, dest_size) "
+                     "VALUES ('/v/RAW/weg.jpg', '/v/RAW', 'move', '/v/library/weg.jpg', 77, 1234)")
+        undone = conn.execute("INSERT INTO keurer_decisions (path, folder, decision) "
+                              "VALUES ('/v/RAW/terug.jpg', '/v/RAW', 'keep')").lastrowid
+        conn.execute("DELETE FROM keurer_decisions WHERE id = ?", (undone,))  # an undone decision
+        before = conn.execute("SELECT * FROM keurer_decisions ORDER BY id").fetchall()
+    monkeypatch.undo()
+
+    db = Database(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION
+        after = conn.execute(
+            "SELECT id, path, folder, decision, decided_at, dest_path, dest_ino, dest_size "
+            "FROM keurer_decisions ORDER BY id").fetchall()
+        assert after == before and len(after) == 61
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert len(list((tmp_path / migrations.BACKUP_DIR_NAME).glob("datavault-v3-*.db"))) == 1
+
+    stats = db.get_keurer_stats()
+    assert stats["streak"] == 3 and stats["total"] == 60
+    assert db.get_rating("/v/RAW/a.jpg") == 1150
+    assert db.get_delete_operations("run-1")[0]["dst_path"] == "/v/RAW_DUPLICATES/b.jpg"
+
+    # The id of the undone decision is never handed out again
+    new_id = db.record_keurer_decision("/v/RAW/weg.jpg", "/v/RAW", "keep")
+    assert new_id > undone
+    # ...and the earlier move row for the same path is kept next to it
+    rows = [(r["id"], r["decision"]) for r in db.get_recent_keurer_decisions(limit=3)]
+    assert rows[:2] == [(new_id, "keep"), (61, "move")]
+    # keep/delete stay unique per path: a second judgement replaces the first
+    newer = db.record_keurer_decision("/v/RAW/weg.jpg", "/v/RAW", "delete", "/v/TRASH/weg.jpg", 1, 2)
+    assert [r["decision"] for r in db.get_recent_keurer_decisions(limit=2)] == ["delete", "move"]
+    assert db.get_keurer_decision(new_id) is None and db.get_keurer_decision(newer)

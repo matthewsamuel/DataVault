@@ -98,11 +98,63 @@ def _m003_keurer_dest_fingerprint(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE keurer_decisions ADD COLUMN dest_size INTEGER")
 
 
+def _m004_keurer_keep_move_history(conn: sqlite3.Connection):
+    """
+    UNIQUE(path, folder) let a new decision on a path silently replace an
+    earlier 'move' row (and with it the only record of where that file went).
+    Rebuild keurer_decisions so uniqueness only applies to keep/delete rows.
+    Every row is copied with its own id, and the AUTOINCREMENT counter is kept,
+    so an id that was already used (e.g. by an undone decision) is never reused.
+    """
+    row = conn.execute(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'keurer_decisions'"
+    ).fetchone()
+    old_seq = row[0] if row else 0
+    count_before = conn.execute("SELECT COUNT(*) FROM keurer_decisions").fetchone()[0]
+
+    conn.execute("""
+        CREATE TABLE keurer_decisions_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL,
+            folder TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            dest_path TEXT,
+            dest_ino INTEGER,
+            dest_size INTEGER
+        )
+    """)
+    columns = "id, path, folder, decision, decided_at, dest_path, dest_ino, dest_size"
+    conn.execute(f"INSERT INTO keurer_decisions_new ({columns}) SELECT {columns} FROM keurer_decisions")
+    count_after = conn.execute("SELECT COUNT(*) FROM keurer_decisions_new").fetchone()[0]
+    if count_after != count_before:
+        raise RuntimeError(f"keurer_decisions copy incomplete: {count_after} of {count_before} rows")
+
+    conn.execute("DROP TABLE keurer_decisions")
+    conn.execute("ALTER TABLE keurer_decisions_new RENAME TO keurer_decisions")
+    conn.execute(
+        "CREATE UNIQUE INDEX idx_keurer_path_folder ON keurer_decisions(path, folder) "
+        "WHERE decision != 'move'"
+    )
+    conn.execute("CREATE INDEX idx_keurer_folder ON keurer_decisions(folder)")
+    conn.execute("CREATE INDEX idx_keurer_date ON keurer_decisions(decided_at)")
+
+    new = conn.execute(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'keurer_decisions'"
+    ).fetchone()
+    if new is None:
+        if old_seq:
+            conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('keurer_decisions', ?)", (old_seq,))
+    elif new[0] < old_seq:
+        conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'keurer_decisions'", (old_seq,))
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
     (2, "keurer_undo_paths", _m002_keurer_undo_paths),
     (3, "keurer_dest_fingerprint", _m003_keurer_dest_fingerprint),
+    (4, "keurer_keep_move_history", _m004_keurer_keep_move_history),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

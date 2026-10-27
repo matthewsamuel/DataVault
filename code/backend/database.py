@@ -242,7 +242,9 @@ class Database:
         dest_size: Optional[int] = None,
     ) -> int:
         """
-        Sla een houd/verwijder/verplaats-beslissing op (of overschrijf een eerdere).
+        Sla een houd/verwijder/verplaats-beslissing op. Een houd/verwijder-beslissing
+        vervangt een eerdere houd/verwijder-beslissing voor hetzelfde pad; verplaats-
+        beslissingen blijven altijd staan (migratie 4), zodat hun undo niet verloren gaat.
         dest_path is waar het bestand nu staat (TRASH of doelmap), nodig voor undo;
         dest_ino en dest_size identificeren dat bestand (een rename houdt de inode).
         Geeft het id van de beslissing terug.

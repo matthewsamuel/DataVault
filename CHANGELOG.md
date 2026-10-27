@@ -44,6 +44,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   niets teruggezet en zie je een melding. Database-migratie 3 bewaart hiervoor per beslissing
   een kenmerk van het verplaatste bestand; bestaande beslissingen, streaks en ratings blijven
   behouden.
+- Komt er later een nieuw bestand op de plek van een in de Keurer verplaatst bestand en beoordeel
+  je dat, dan blijft het eerdere verplaatsen gewoon ongedaan te maken. Voorheen verdween die
+  undo stilletjes. Database-migratie 4 herbouwt hiervoor de beslissingentabel; alle
+  beslissingen blijven met hun eigen nummer bewaard en vooraf wordt een back-up gemaakt.
 
 ### Opgeruimd
 - Verwijderd: de kapotte vault-brede duplicatenscan (`/api/raw_duplicates/scan` en
