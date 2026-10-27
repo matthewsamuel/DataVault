@@ -445,13 +445,15 @@ async function keurerOpenMoveModal() {
     const modal = document.getElementById('modal-keurer-move');
     modal.classList.add('active');
     keurerMoveSelectedFolder = null;
+    keurerMoveHighlightIndex = -1;
     document.getElementById('btn-keurer-confirm-move').disabled = true;
 
-    // Zoekbalk resetten
+    // Zoekbalk resetten en direct focussen
     const searchEl = document.getElementById('keurer-move-search');
     const clearBtn = document.getElementById('keurer-move-search-clear');
     if (searchEl) { searchEl.value = ''; }
     if (clearBtn) clearBtn.style.display = 'none';
+    requestAnimationFrame(() => { if (searchEl) searchEl.focus(); });
 
     const nameEl = document.getElementById('keurer-move-filename');
     if (nameEl) nameEl.textContent = keurerFileQueue[keurerIndex].name;
@@ -992,8 +994,9 @@ document.addEventListener('keydown', function (e) {
         if (moveModalActive)   { keurerCloseMoveModal(); return; }
     }
 
-    // Andere toetsen: niet in modals of inputs
+    // Andere toetsen: niet in modals of inputs of preview
     if (document.querySelector('.modal.active')) return;
+    if (keurerPreviewOpen) return;
     const tag = document.activeElement && document.activeElement.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 

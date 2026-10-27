@@ -59,7 +59,7 @@ def get_vault_context() -> str:
     # Spotify top artiesten
     try:
         from backend.routes.spotify import parse_spotify_data
-        data = parse_spotify_data(None, None)
+        data = parse_spotify_data()
         top_artists = data.get('top_artists', [])[:5]
         if top_artists:
             artist_list = ', '.join(a['name'] for a in top_artists)
@@ -67,7 +67,7 @@ def get_vault_context() -> str:
             lines.append(f"Spotify top artiesten: {artist_list}")
             if total_min > 0:
                 lines.append(f"Totaal Spotify luistertijd: {total_min:,} minuten")
-    except Exception:
+    except Exception as e:
         pass
 
     return '\n'.join(lines)
@@ -82,17 +82,23 @@ Antwoord altijd kort en bondig in het Nederlands. Je bent vriendelijk en behulpz
 {vault_context}
 =========================
 
-Je kunt de app besturen met een <<ACTION>> tag op de LAATSTE REGEL van je antwoord.
-Gebruik dit ALLEEN als de gebruiker er expliciet om vraagt of navigatie logisch is.
+Je bestuurt de app STILZWIJGEND via <<ACTION>> tags op de LAATSTE REGEL van je antwoord.
+BELANGRIJK: Praat NOOIT over acties, syntax of technische details. Doe ze gewoon.
 
 Beschikbare acties:
-- Map openen in viewer:    <<ACTION: {{"action": "open_folder", "target": "mapnaam"}}>>
-- Foto's op datum tonen:  <<ACTION: {{"action": "show_photos", "date": "YYYY-MM-DD"}}>>
-- Specifiek bestand:       <<ACTION: {{"action": "open_file", "path": "/volledig/pad"}}>>
-- Tab wisselen:            <<ACTION: {{"action": "open_tab", "target": "viewer"}}>> (ook: spotify, shows, home)
-- Duplicaten scannen:      <<ACTION: {{"action": "scan_duplicates"}}>>
+- Foto('s) zoeken op naam:   <<ACTION: {{"action": "search_photos", "query": "zoekterm"}}>>
+- Foto's op datum tonen:    <<ACTION: {{"action": "show_photos", "date": "YYYY-MM-DD"}}>>
+- Map openen in viewer:     <<ACTION: {{"action": "open_folder", "target": "mapnaam"}}>>
+- Tab wisselen:             <<ACTION: {{"action": "open_tab", "target": "viewer"}}>> (ook: spotify, shows, home)
+- Specifiek bestand openen: <<ACTION: {{"action": "open_file", "path": "/volledig/pad"}}>>
+- Duplicaten scannen:       <<ACTION: {{"action": "scan_duplicates"}}>>
 
-Gewone vragen beantwoord je zonder actie. Geef nooit een <<ACTION>> tag tenzij de gebruiker iets wil openen/navigeren."""
+Gedragsregels:
+- Gebruikt ALTIJD een <<ACTION>> als iemand iets wil zien, openen of zoeken.
+- Als iemand een foto/afbeelding vraagt → search_photos met relevant zoekwoord.
+- Als iemand een map wil openen → open_folder.
+- NOOIT uitleg geven over hoe acties werken.
+- Antwoorden ZEER KORT (1-2 zinnen max). De actie doet het werk."""
 
 
 async def stream_ollama(ollama_messages: list, model: str) -> AsyncGenerator[str, None]:

@@ -5,7 +5,7 @@ Generate and cache thumbnails for photos and videos
 import hashlib
 from pathlib import Path
 from typing import Optional
-from PIL import Image
+from PIL import Image, ImageOps
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
@@ -53,6 +53,9 @@ def generate_photo_thumbnail(file_path: Path, output_path: Path) -> bool:
     """
     try:
         with Image.open(file_path) as img:
+            # Roteer volgens EXIF-oriëntatie zodat thumbnails altijd rechtop staan
+            img = ImageOps.exif_transpose(img)
+
             # Convert RGBA to RGB if needed
             if img.mode in ('RGBA', 'LA', 'P'):
                 # Create white background

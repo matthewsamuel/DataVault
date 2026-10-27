@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DataVault</title>
-    <link rel="stylesheet" href="style.css?v=30">
+    <link rel="stylesheet" href="style.css?v=32">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 
@@ -84,7 +84,6 @@
 
             <!-- Main Content Area -->
             <main class="main-content">
-                <!-- VIEWER SECTION -->
                 <!-- HOME SECTION -->
                 <div id="section-home" class="section hidden">
                     <div class="home-container">
@@ -117,14 +116,16 @@
                                 <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
                                 <div class="chat-title">
                                     <h3>Pasha (DataVault AI)</h3>
-                                    <span class="chat-status">Online (Qwen3:30b)</span>
+                                    <span class="chat-status">Online (Phi3.5:latest)</span>
                                 </div>
+                                <button class="chat-fullscreen-toggle" onclick="openChatFullscreen()" title="Volledig scherm">
+                                    <i class="fas fa-expand"></i>
+                                </button>
                             </div>
                             <div class="chat-messages" id="chat-messages">
                                 <div class="chat-message ai-message">
                                     <div class="message-bubble">
-                                        Woof! I'm Pasha, your DataVault assistant. You can ask me questions about your
-                                        files or Spotify data!
+                                        Woof! Ik ben Pasha, jouw DataVault-assistent. Je kunt me vragen stellen over je bestanden of Spotify-gegevens!
                                     </div>
                                 </div>
                             </div>
@@ -739,14 +740,14 @@
                     </div>
 
                     <!-- Subfolders List -->
-                    <div id="storage-tab-subfolders" class="storage-tab-content">
+                    <div id="storage-tab-subfolders" class="storage-tab-content active">
                         <ul class="storage-folder-list" id="storage-folder-list">
                             <!-- Populated by JS -->
                         </ul>
                     </div>
 
                     <!-- Largest Files List -->
-                    <div id="storage-tab-largest-files" class="storage-tab-content" style="display: none;">
+                    <div id="storage-tab-largest-files" class="storage-tab-content">
                         <ul class="storage-files-list" id="storage-files-list">
                             <!-- Populated by JS -->
                         </ul>
@@ -859,6 +860,7 @@
                         class="keurer-move-search"
                         placeholder="Zoek map..."
                         oninput="keurerFilterMoveTree(this.value)"
+                        onkeydown="keurerHandleMoveSearchKeydown(event)"
                         autocomplete="off"
                         spellcheck="false"
                     >
@@ -942,10 +944,38 @@
         <!-- Toasts will be added here dynamically -->
     </div>
 
+    <!-- Chat Fullscreen Modal -->
+    <div class="chat-fullscreen-modal" id="chat-fullscreen-modal" onclick="if(event.target === this) closeChatFullscreen()">
+        <div class="chat-fullscreen-wrapper">
+            <div class="chat-widget" style="height: 100%; max-width: 100%; margin: 0; border-radius: 0;">
+                <div class="chat-header">
+                    <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
+                    <div class="chat-title">
+                        <h3>Pasha (DataVault AI)</h3>
+                        <span class="chat-status">Online (Phi3.5:latest)</span>
+                    </div>
+                    <button class="chat-fullscreen-toggle" onclick="closeChatFullscreen()" title="Sluiten">
+                        <i class="fas fa-compress"></i>
+                    </button>
+                </div>
+                <div class="chat-messages" id="chat-messages-fullscreen">
+                    <!-- Messages shared with home chat -->
+                </div>
+                <div class="chat-input-container">
+                    <input type="text" id="chat-input-fullscreen" class="chat-input" placeholder="Type a message..."
+                        onkeypress="handleChatKeyPressFullscreen(event)">
+                    <button class="chat-send-btn" onclick="sendChatMessageFullscreen()">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="folder-tree.js?v=1"></script>
-    <script src="app.js?v=31"></script>
+    <script src="app.js?v=33"></script>
     <script src="duplicates.js?v=11"></script>
-    <script src="keurer.js?v=6"></script>
+    <script src="keurer.js?v=8"></script>
     <script src="timeline.js?v=2"></script>
     <script src="wave-background.js?v=2"></script>
     <script src="resizable-sidebar.js?v=1"></script>

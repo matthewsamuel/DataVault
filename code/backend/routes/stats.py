@@ -196,11 +196,8 @@ async def get_photo_on_this_day(allowed_folders: str = None) -> Dict[str, Any]:
             all_dirs = [x[0] for x in os.walk(vault_root)]
             
         random.shuffle(all_dirs)
-        
-        # Check up to 50 random directories looking for a match
-        dirs_to_check = all_dirs[:50]
-        
-        for root in dirs_to_check:
+
+        for root in all_dirs:
             try:
                 for filename in os.listdir(root):
                     file_path = Path(root) / filename
@@ -298,6 +295,36 @@ async def get_photos_by_date(date: str) -> Dict[str, Any]:
                         pass
         
         return {"photos": valid_photos}
-             
+
     except Exception as e:
          return {"error": str(e)}
+
+
+@router.get("/search-photos")
+async def search_photos(query: str, limit: int = 5) -> Dict[str, Any]:
+    """Zoek foto's op bestandsnaam die de query bevat (case-insensitive)."""
+    if not config or not query.strip():
+        return {"photos": []}
+
+    query_lower = query.lower()
+    results = []
+
+    IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.gif', '.bmp', '.webp',
+                        '.tiff', '.tif', '.raw', '.cr2', '.nef', '.arw', '.dng', '.raf'}
+
+    try:
+        for root, dirs, files in os.walk(config.VAULT_ROOT):
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            for filename in files:
+                ext = Path(filename).suffix.lower()
+                if ext in IMAGE_EXTENSIONS and query_lower in filename.lower():
+                    results.append({
+                        "path": str(Path(root) / filename),
+                        "name": filename
+                    })
+                    if len(results) >= limit:
+                        return {"photos": results}
+    except Exception:
+        pass
+
+    return {"photos": results}

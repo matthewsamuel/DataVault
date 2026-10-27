@@ -1358,7 +1358,7 @@ async function fetchHomeWidgets() {
                         if (placeholder) placeholder.replaceWith(img);
                     }
                 })
-                .catch(() => {}); // blijf placeholder tonen bij fout
+                .catch(() => { }); // blijf placeholder tonen bij fout
         } else {
             content.innerHTML = '<div class="storage-text">No tracks played on this day.</div>';
         }
@@ -1404,11 +1404,11 @@ async function loadPhotoOtdWidget() {
     try {
         const loading = document.getElementById('photo-otd-loading');
         const content = document.getElementById('photo-otd-content');
-        
+
         // Show loading and clear interval
         loading.style.display = 'flex';
         content.style.display = 'none';
-        
+
         if (otdCycleInterval) {
             clearInterval(otdCycleInterval);
             otdCycleInterval = null;
@@ -1434,21 +1434,21 @@ async function loadPhotoOtdWidget() {
                 `;
             });
             content.innerHTML = imagesHtml;
-            
+
             if (data.photos.length > 1) {
                 let currentOtd = 0;
                 otdCycleInterval = setInterval(() => {
                     const images = content.querySelectorAll('.otd-large-image');
                     const overlays = content.querySelectorAll('.otd-large-overlay');
-                    if(images.length === 0) {
+                    if (images.length === 0) {
                         clearInterval(otdCycleInterval);
                         return;
                     }
                     images[currentOtd].classList.remove('active');
                     overlays[currentOtd].style.display = 'none';
-                    
+
                     currentOtd = (currentOtd + 1) % images.length;
-                    
+
                     images[currentOtd].classList.add('active');
                     overlays[currentOtd].style.display = 'flex';
                 }, 4000); // 4 seconds interval
@@ -1467,7 +1467,7 @@ function toggleOtdSettings(e) {
     if (panel.style.display === 'none') {
         panel.style.display = 'block';
         updateOtdSettingsList();
-        
+
         const outsideClickListener = event => {
             if (!panel.contains(event.target) && !event.target.classList.contains('otd-settings-icon')) {
                 panel.style.display = 'none';
@@ -1483,12 +1483,12 @@ function toggleOtdSettings(e) {
 function updateOtdSettingsList() {
     const list = document.getElementById('otd-settings-list');
     list.innerHTML = '';
-    
+
     if (!folderTree || folderTree.length === 0) {
         list.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;">No folders available</div>';
         return;
     }
-    
+
     let allowed = JSON.parse(localStorage.getItem('otdAllowedFolders') || '[]');
     const allSelected = allowed.length === 0;
 
@@ -1496,16 +1496,16 @@ function updateOtdSettingsList() {
         const isChecked = allSelected || allowed.includes(folder.path);
         const item = document.createElement('label');
         item.className = 'otd-setting-item';
-        
+
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.value = folder.path;
         checkbox.checked = isChecked;
         checkbox.onchange = saveOtdSettings;
-        
+
         const text = document.createElement('span');
         text.textContent = folder.name;
-        
+
         item.appendChild(checkbox);
         item.appendChild(text);
         list.appendChild(item);
@@ -1516,7 +1516,7 @@ function saveOtdSettings() {
     const checkboxes = document.querySelectorAll('#otd-settings-list input[type="checkbox"]');
     const allowed = [];
     let allChecked = true;
-    
+
     checkboxes.forEach(cb => {
         if (cb.checked) {
             allowed.push(cb.value);
@@ -1524,13 +1524,13 @@ function saveOtdSettings() {
             allChecked = false;
         }
     });
-    
+
     if (allChecked || allowed.length === 0) {
         localStorage.removeItem('otdAllowedFolders');
     } else {
         localStorage.setItem('otdAllowedFolders', JSON.stringify(allowed));
     }
-    
+
     // Reload OTD widget
     loadPhotoOtdWidget();
 }
@@ -1770,6 +1770,9 @@ async function storageNavigateToPath(folderPath) {
 
         const entries = Object.entries(data.breakdown || {}).sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
         const total = entries.reduce((sum, [, gb]) => sum + parseFloat(gb), 0);
+
+        // Reset tab naar subfolders bij elke navigatie
+        storageShowTab('subfolders');
 
         if (folderPath) {
             breadcrumb.style.display = 'flex';
@@ -2688,6 +2691,10 @@ async function sendChatMessage() {
     userMsg.innerHTML = `<div class="message-bubble">${escapeHTML(message)}</div>`;
     messagesContainer.appendChild(userMsg);
     window.chatHistory.push({ role: 'user', content: message });
+    // Houd context klein: max 10 berichten (5 user + 5 assistant)
+    if (window.chatHistory.length > 10) {
+        window.chatHistory.shift();
+    }
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
     // AI bubble met loading dots — wordt live gevuld via streaming
@@ -2837,20 +2844,25 @@ function executeAIAction(actionData) {
                         if (data.photos && data.photos.length > 0) {
                             const container = document.createElement('div');
                             container.className = 'chat-message ai-message';
+                            const bubble = document.createElement('div');
+                            bubble.className = 'message-bubble';
+                            bubble.style.cssText = 'background: transparent; border: none; padding: 0;';
 
-                            let imagesHtml = '';
+                            const grid = document.createElement('div');
+                            grid.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px;';
+
                             data.photos.slice(0, 10).forEach(p => {
-                                const escapedPath = p.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-                                imagesHtml += `<img src="${API_BASE}/api/thumb?path=${encodeURIComponent(p.path)}" style="width: 100px; height: 100px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.1);" title="${p.path.split('/').pop()}" onclick="openFileInViewer('${escapedPath}')">`;
+                                const img = document.createElement('img');
+                                img.src = `${API_BASE}/api/thumb?path=${encodeURIComponent(p.path)}`;
+                                img.style.cssText = 'width: 100px; height: 100px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.1);';
+                                img.title = p.path.split('/').pop();
+                                img.dataset.path = p.path;
+                                img.addEventListener('click', () => openFileInViewer(img.dataset.path));
+                                grid.appendChild(img);
                             });
 
-                            container.innerHTML = `
-                                <div class="message-bubble" style="background: transparent; border: none; padding: 0;">
-                                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                                        ${imagesHtml}
-                                    </div>
-                                </div>
-                            `;
+                            bubble.appendChild(grid);
+                            container.appendChild(bubble);
                             chatMessages.appendChild(container);
                             chatMessages.scrollTop = chatMessages.scrollHeight;
                         } else {
@@ -2874,7 +2886,220 @@ function executeAIAction(actionData) {
             }
             break;
 
+        case 'search_photos':
+            if (actionData.query) {
+                const chatMessages = document.getElementById('chat-messages');
+                const loadingBubble = document.createElement('div');
+                loadingBubble.className = 'chat-message ai-message';
+                loadingBubble.innerHTML = `<div class="message-bubble"><div class="message-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>`;
+                chatMessages.appendChild(loadingBubble);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                fetch(`${API_BASE}/api/stats/search-photos?query=${encodeURIComponent(actionData.query)}&limit=5`)
+                    .then(res => res.json())
+                    .then(data => {
+                        loadingBubble.remove();
+                        if (data.photos && data.photos.length > 0) {
+                            const container = document.createElement('div');
+                            container.className = 'chat-message ai-message';
+                            const bubble = document.createElement('div');
+                            bubble.className = 'message-bubble';
+                            bubble.style.cssText = 'background: transparent; border: none; padding: 0;';
+                            const grid = document.createElement('div');
+                            grid.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px;';
+
+                            data.photos.forEach(p => {
+                                const img = document.createElement('img');
+                                img.src = `${API_BASE}/api/thumb?path=${encodeURIComponent(p.path)}`;
+                                img.style.cssText = 'width: 120px; height: 120px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1);';
+                                img.title = p.name;
+                                img.dataset.path = p.path;
+                                img.addEventListener('click', () => openFileInViewer(img.dataset.path));
+                                grid.appendChild(img);
+                            });
+
+                            bubble.appendChild(grid);
+                            container.appendChild(bubble);
+                            chatMessages.appendChild(container);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        } else {
+                            const errorBubble = document.createElement('div');
+                            errorBubble.className = 'chat-message ai-message';
+                            errorBubble.innerHTML = `<div class="message-bubble">Ik kon geen foto's vinden met de naam "${escapeHTML(actionData.query)}".</div>`;
+                            chatMessages.appendChild(errorBubble);
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+                    })
+                    .catch(() => loadingBubble.remove());
+            }
+            break;
+
         default:
             console.warn("Unknown AI action:", actionData.action);
+    }
+}
+
+function openChatFullscreen() {
+    const modal = document.getElementById('chat-fullscreen-modal');
+    if (modal) {
+        syncChatMessages('to-fullscreen');
+        modal.classList.add('active');
+        document.addEventListener('keydown', handleFullscreenEscape);
+        setTimeout(() => {
+            const input = document.getElementById('chat-input-fullscreen');
+            if (input) input.focus();
+        }, 100);
+    }
+}
+
+function closeChatFullscreen() {
+    const modal = document.getElementById('chat-fullscreen-modal');
+    if (modal) {
+        syncChatMessages('to-home');
+        modal.classList.remove('active');
+        document.removeEventListener('keydown', handleFullscreenEscape);
+    }
+}
+
+function handleFullscreenEscape(e) {
+    if (e.key === 'Escape') {
+        closeChatFullscreen();
+    }
+}
+
+function syncChatMessages(direction) {
+    const homeContainer = document.getElementById('chat-messages');
+    const fullscreenContainer = document.getElementById('chat-messages-fullscreen');
+
+    if (direction === 'to-fullscreen' && homeContainer && fullscreenContainer) {
+        fullscreenContainer.innerHTML = homeContainer.innerHTML;
+    } else if (direction === 'to-home' && homeContainer && fullscreenContainer) {
+        homeContainer.innerHTML = fullscreenContainer.innerHTML;
+    }
+}
+
+function handleChatKeyPressFullscreen(e) {
+    if (e.key === 'Enter') {
+        sendChatMessageFullscreen();
+    }
+}
+
+async function sendChatMessageFullscreen() {
+    const inputEl = document.getElementById('chat-input-fullscreen');
+    const message = inputEl.value.trim();
+
+    if (!message) return;
+
+    inputEl.value = '';
+    inputEl.disabled = true;
+    const btn = document.querySelector('.chat-fullscreen-modal .chat-send-btn');
+    if (btn) btn.disabled = true;
+
+    const messagesContainer = document.getElementById('chat-messages-fullscreen');
+    const homeContainer = document.getElementById('chat-messages');
+
+    // Add user message
+    const userMsg = document.createElement('div');
+    userMsg.className = 'chat-message user-message';
+    userMsg.innerHTML = `<div class="message-bubble">${escapeHTML(message)}</div>`;
+    messagesContainer.appendChild(userMsg);
+    if (homeContainer) homeContainer.appendChild(userMsg.cloneNode(true));
+
+    window.chatHistory.push({ role: 'user', content: message });
+    if (window.chatHistory.length > 10) {
+        window.chatHistory.shift();
+    }
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    // AI bubble with loading dots
+    const aiMsg = document.createElement('div');
+    aiMsg.className = 'chat-message ai-message';
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    bubble.innerHTML = `<div class="message-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
+    aiMsg.appendChild(bubble);
+    messagesContainer.appendChild(aiMsg);
+    if (homeContainer) homeContainer.appendChild(aiMsg.cloneNode(true));
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    let fullText = '';
+    let firstToken = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/chat/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: window.chatHistory, model: 'phi3.5:latest' })
+        });
+
+        if (!response.ok) throw new Error(`Server returned ${response.status}`);
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            sseBuffer += decoder.decode(value, { stream: true });
+            const lines = sseBuffer.split('\n');
+            sseBuffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const event = JSON.parse(line.slice(6));
+
+                    if (event.error) {
+                        bubble.innerHTML = `<span style="color: var(--danger)">${escapeHTML(event.error)}</span>`;
+                        return;
+                    }
+
+                    if (event.token) {
+                        if (firstToken) {
+                            bubble.innerHTML = '';
+                            firstToken = false;
+                        }
+                        fullText += event.token;
+                        bubble.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+                        if (homeContainer) {
+                            const lastHomeMsg = homeContainer.querySelector('.ai-message:last-child .message-bubble');
+                            if (lastHomeMsg) lastHomeMsg.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
+                        }
+                    }
+
+                    if (event.done) {
+                        const actionMatch = fullText.match(/<<ACTION:\s*({.*?})\s*>>/s);
+                        if (actionMatch) {
+                            try {
+                                const actionData = JSON.parse(actionMatch[1]);
+                                setTimeout(() => executeAIAction(actionData), 1000);
+                            } catch (parseErr) {
+                                console.error('Action parse error:', parseErr);
+                            }
+                            fullText = fullText.replace(/<<ACTION:[\s\S]*?>>/, '').trim();
+                            bubble.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
+                            if (homeContainer) {
+                                const lastHomeMsg = homeContainer.querySelector('.ai-message:last-child .message-bubble');
+                                if (lastHomeMsg) lastHomeMsg.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
+                            }
+                        }
+                        window.chatHistory.push({ role: 'assistant', content: fullText });
+                    }
+                } catch (_) { }
+            }
+        }
+
+    } catch (e) {
+        console.error('Chat error:', e);
+        bubble.innerHTML = `<span style="color: var(--danger)">Fout: Kan Ollama niet bereiken. Draait de server en Ollama?</span>`;
+    } finally {
+        inputEl.disabled = false;
+        if (btn) btn.disabled = false;
+        inputEl.focus();
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 }
