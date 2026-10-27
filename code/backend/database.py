@@ -8,6 +8,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 import uuid
 
+from backend import migrations
+
 class Database:
     """SQLite database manager"""
     
@@ -21,81 +23,8 @@ class Database:
         return sqlite3.connect(str(self.db_path))
     
     def _init_db(self):
-        """Initialize database tables"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        # Table 1: File hashes cache
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS file_hashes (
-                path TEXT PRIMARY KEY,
-                size INTEGER NOT NULL,
-                mtime REAL NOT NULL,
-                sha256 TEXT NOT NULL,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Table 2: Delete runs for undo
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS delete_runs (
-                run_id TEXT PRIMARY KEY,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                total_files INTEGER DEFAULT 0
-            )
-        """)
-        
-        # Table 3: Individual delete operations
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS delete_operations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id TEXT NOT NULL,
-                src_path TEXT NOT NULL,
-                dst_path TEXT NOT NULL,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (run_id) REFERENCES delete_runs(run_id)
-            )
-        """)
-
-        # Table 4: File Ratings (ELO)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS file_ratings (
-                path TEXT PRIMARY KEY,
-                rating INTEGER DEFAULT 1000,
-                votes INTEGER DEFAULT 0,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # Table 5: Show Settings (Folder toggle)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS show_settings (
-                path TEXT PRIMARY KEY,
-                enabled BOOLEAN DEFAULT 1,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # Table 6: Keurer decisions (Tinder-style foto beoordeling)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS keurer_decisions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                path TEXT NOT NULL,
-                folder TEXT NOT NULL,
-                decision TEXT NOT NULL,
-                decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(path, folder)
-            )
-        """)
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_keurer_folder ON keurer_decisions(folder)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_keurer_date ON keurer_decisions(decided_at)"
-        )
-
-        conn.commit()
-        conn.close()
+        """Create or upgrade the schema via numbered migrations (see migrations.py)"""
+        migrations.migrate(self.db_path)
 
     # Rating methods
     def get_rating(self, path: str) -> int:

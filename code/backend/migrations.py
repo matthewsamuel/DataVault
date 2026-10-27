@@ -1,0 +1,150 @@
+"""
+DataVault Dashboard - SQLite schema migrations
+
+Every schema change is a numbered migration that runs exactly once, inside a
+transaction. Before any pending migration runs on an existing database, a full
+copy is written to <cache>/db_backups/, so ratings, streaks and undo data can
+always be recovered. Migrations only add; they never drop user data.
+"""
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+from typing import Callable, List, Tuple
+
+BACKUP_DIR_NAME = "db_backups"
+BACKUPS_TO_KEEP = 10
+
+
+def _m001_baseline(conn: sqlite3.Connection):
+    """Schema as it existed before migrations were introduced (no-op on old DBs)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS file_hashes (
+            path TEXT PRIMARY KEY,
+            size INTEGER NOT NULL,
+            mtime REAL NOT NULL,
+            sha256 TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS delete_runs (
+            run_id TEXT PRIMARY KEY,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            total_files INTEGER DEFAULT 0
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS delete_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            src_path TEXT NOT NULL,
+            dst_path TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (run_id) REFERENCES delete_runs(run_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS file_ratings (
+            path TEXT PRIMARY KEY,
+            rating INTEGER DEFAULT 1000,
+            votes INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS show_settings (
+            path TEXT PRIMARY KEY,
+            enabled BOOLEAN DEFAULT 1,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS keurer_decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL,
+            folder TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(path, folder)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_keurer_folder ON keurer_decisions(folder)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_keurer_date ON keurer_decisions(decided_at)")
+
+
+# (version, name, function) - append only, never renumber or edit an applied migration
+MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
+    (1, "baseline", _m001_baseline),
+]
+
+LATEST_VERSION = MIGRATIONS[-1][0]
+
+
+def get_schema_version(conn: sqlite3.Connection) -> int:
+    """Highest applied migration, 0 for a database that predates migrations."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+    return row[0] or 0
+
+
+def _has_user_tables(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+        "AND name NOT IN ('schema_version', 'sqlite_sequence')"
+    ).fetchone()
+    return row[0] > 0
+
+
+def backup_database(conn: sqlite3.Connection, db_path: Path, from_version: int) -> Path:
+    """Consistent copy via the SQLite backup API; keeps the newest BACKUPS_TO_KEEP."""
+    backup_dir = db_path.parent / BACKUP_DIR_NAME
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup_path = backup_dir / f"{db_path.stem}-v{from_version}-{stamp}.db"
+    target = sqlite3.connect(str(backup_path))
+    try:
+        conn.backup(target)
+    finally:
+        target.close()
+
+    backups = sorted(backup_dir.glob(f"{db_path.stem}-v*.db"))
+    for old in backups[:-BACKUPS_TO_KEEP]:
+        old.unlink()  # only our own backup copies, never archive files
+    return backup_path
+
+
+def migrate(db_path: Path) -> List[int]:
+    """Bring the database at db_path up to LATEST_VERSION. Returns applied versions."""
+    conn = sqlite3.connect(str(db_path), isolation_level=None)
+    applied: List[int] = []
+    try:
+        current = get_schema_version(conn)
+        pending = [m for m in MIGRATIONS if m[0] > current]
+        if not pending:
+            return applied
+
+        if _has_user_tables(conn):
+            backup_database(conn, db_path, current)
+
+        for version, name, fn in pending:
+            conn.execute("BEGIN")
+            try:
+                fn(conn)
+                conn.execute(
+                    "INSERT INTO schema_version (version, name) VALUES (?, ?)",
+                    (version, name),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            applied.append(version)
+        return applied
+    finally:
+        conn.close()
