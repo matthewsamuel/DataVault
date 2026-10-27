@@ -233,28 +233,36 @@ class Database:
         return [row[0] for row in results]
 
     def record_keurer_decision(
-        self, path: str, folder: str, decision: str, dest_path: Optional[str] = None
+        self,
+        path: str,
+        folder: str,
+        decision: str,
+        dest_path: Optional[str] = None,
+        dest_ino: Optional[int] = None,
+        dest_size: Optional[int] = None,
     ) -> int:
         """
         Sla een houd/verwijder/verplaats-beslissing op (of overschrijf een eerdere).
-        dest_path is waar het bestand nu staat (TRASH of doelmap), nodig voor undo.
+        dest_path is waar het bestand nu staat (TRASH of doelmap), nodig voor undo;
+        dest_ino en dest_size identificeren dat bestand (een rename houdt de inode).
         Geeft het id van de beslissing terug.
         """
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT OR REPLACE INTO keurer_decisions (path, folder, decision, dest_path, decided_at)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT OR REPLACE INTO keurer_decisions
+                (path, folder, decision, dest_path, dest_ino, dest_size, decided_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
-            (path, folder, decision, dest_path),
+            (path, folder, decision, dest_path, dest_ino, dest_size),
         )
         decision_id = cursor.lastrowid
         conn.commit()
         conn.close()
         return decision_id
 
-    _KEURER_COLUMNS = "id, path, folder, decision, dest_path, decided_at"
+    _KEURER_COLUMNS = "id, path, folder, decision, dest_path, decided_at, dest_ino, dest_size"
 
     @staticmethod
     def _keurer_row(row) -> Dict[str, Any]:
@@ -265,6 +273,8 @@ class Database:
             "decision": row[3],
             "dest_path": row[4],
             "decided_at": row[5],
+            "dest_ino": row[6],
+            "dest_size": row[7],
         }
 
     def get_keurer_decision(self, decision_id: int) -> Optional[Dict[str, Any]]:

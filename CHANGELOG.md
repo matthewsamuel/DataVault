@@ -35,6 +35,12 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Database-migratie 2 voegt de kolom voor het doelpad toe; bestaande beslissingen, streaks
   en ratings blijven behouden. Oude weggooi-beslissingen van vóór deze versie kunnen niet
   automatisch worden teruggezet (het pad werd toen niet bewaard).
+- Undo controleert nu ook dat het bestand in de prullenmand of doelmap echt hetzelfde bestand
+  is dat de Keurer daar neerzette (en niet een andere foto met dezelfde naam, bijvoorbeeld
+  nadat je de prullenmand in Finder hebt opgeruimd). Is het een ander bestand, dan wordt er
+  niets teruggezet en zie je een melding. Database-migratie 3 bewaart hiervoor per beslissing
+  een kenmerk van het verplaatste bestand; bestaande beslissingen, streaks en ratings blijven
+  behouden.
 
 ### Opgeruimd
 - Verwijderd: de kapotte vault-brede duplicatenscan (`/api/raw_duplicates/scan` en

@@ -3,9 +3,10 @@ DataVault Dashboard - Foto Keurer (Tinder-style foto beoordeling)
 """
 from fastapi import APIRouter, HTTPException, Query
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
 import os
 import random
+import stat
 import threading
 
 from backend.config import Config, validate_path_in_vault, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS
@@ -131,11 +132,44 @@ def _undo_entry(rec: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _fingerprint(path: Path) -> Tuple[Optional[int], Optional[int]]:
+    """Inode en grootte van het verplaatste bestand (een rename houdt de inode)."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return None, None
+    return st.st_ino, st.st_size
+
+
+def _dest_state(rec: Dict[str, Any]) -> str:
+    """
+    Staat het verplaatste bestand nog op dest_path?
+    'ok'      - ja, zelfde inode en grootte als bij de beslissing
+    'missing' - er staat geen gewoon bestand meer
+    'other'   - er staat een ander (of gewijzigd) bestand met dezelfde naam
+    'unknown' - beslissing van vóór migratie 3, niet te controleren
+    """
+    try:
+        st = os.lstat(rec["dest_path"])
+    except OSError:
+        return "missing"
+    if not stat.S_ISREG(st.st_mode):
+        return "missing"
+    if rec.get("dest_ino") is None or rec.get("dest_size") is None:
+        return "unknown"
+    if (st.st_ino, st.st_size) != (rec["dest_ino"], rec["dest_size"]):
+        return "other"
+    return "ok"
+
+
 def _is_undoable(rec: Dict[str, Any]) -> bool:
     if rec["decision"] == "keep":
         return True
-    dest = rec.get("dest_path")
-    return bool(dest) and _is_regular_file(Path(dest)) and not os.path.lexists(rec["path"])
+    return (
+        bool(rec.get("dest_path"))
+        and _dest_state(rec) == "ok"
+        and not os.path.lexists(rec["path"])
+    )
 
 
 @router.post("/decide")
@@ -194,9 +228,11 @@ def decide_file(body: Dict[str, Any]) -> Dict[str, Any]:
         except FileOperationError as e:
             _refuse(500, f"Verplaatsen mislukt: {e}")
 
+        dest_ino, dest_size = _fingerprint(dest_path) if dest_path else (None, None)
         try:
             decision_id = db.record_keurer_decision(
-                path_str, folder_str, decision, str(dest_path) if dest_path else None
+                path_str, folder_str, decision, str(dest_path) if dest_path else None,
+                dest_ino, dest_size,
             )
         except Exception as e:
             # Zonder record kan undo het bestand niet terugvinden: zet het meteen terug
@@ -237,7 +273,9 @@ def undo_decision(body: Dict[str, Any]) -> Dict[str, Any]:
     Maak een beslissing ongedaan op basis van alleen haar id.
     Alle paden komen uit de database, nooit van de client, en worden opnieuw gecontroleerd:
     - het originele pad moet in de vault liggen en vrij zijn (anders 409);
-    - bij 'delete' moet het bestand in TRASH staan, bij 'move' in de vault.
+    - bij 'delete' moet het bestand in TRASH staan, bij 'move' in de vault;
+    - het bestand op dest_path moet hetzelfde bestand zijn (inode en grootte),
+      anders 410: een later bestand met dezelfde naam wordt nooit teruggezet.
     """
     if not config:
         raise HTTPException(status_code=500, detail="Configuratie niet geïnitialiseerd")
@@ -267,9 +305,17 @@ def undo_decision(body: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 _check_archive_path(source, "verplaatst bestand")
 
-            if not _is_regular_file(source):
-                place = "de prullenmand" if rec["decision"] == "delete" else "de doelmap"
+            place = "de prullenmand" if rec["decision"] == "delete" else "de doelmap"
+            state = _dest_state(rec)
+            if state == "missing":
                 _refuse(410, f"{original.name} staat niet meer in {place}")
+            if state == "other":
+                _refuse(410, f"{source.name} in {place} is een ander bestand dan het bestand dat "
+                             "hier werd verplaatst; er wordt niets teruggezet")
+            if state == "unknown":
+                _refuse(409, f"Van deze oudere beslissing kan niet gecontroleerd worden of "
+                             f"{source.name} in {place} nog hetzelfde bestand is; "
+                             "zet het zo nodig handmatig terug")
             if os.path.lexists(original):
                 _refuse(409, f"Op de oorspronkelijke plek staat al een bestand {original.name}; "
                              "er wordt niets overschreven")

@@ -211,3 +211,82 @@ def test_undo_of_legacy_delete_is_refused(client, config, vault):
     assert client.get("/api/keurer/history").json()["entries"] == []
     r = client.post("/api/keurer/undo", json={"id": legacy_id})
     assert r.status_code == 409
+
+
+def test_undo_refuses_a_different_file_on_the_trash_name(client, config, vault, tmp_path):
+    """TRASH tidied by hand, then another same-named photo lands on the freed name: undo must not swap them."""
+    fam = vault / "library/Familie/same.jpg"
+    ita = vault / "library/Reis Italië/same.jpg"
+    fam.write_bytes(b"F1-content")
+    ita.write_bytes(b"F2-content")
+
+    id1 = _decide(client, fam, "delete").json()["id"]
+    trash = config.TRASH_FOLDER / "same.jpg"
+    trash.rename(tmp_path / "opgeruimd.jpg")  # leaves TRASH outside the app
+    r2 = _decide(client, ita, "delete").json()
+    assert r2["dest_path"] == str(trash)
+
+    assert [e["id"] for e in client.get("/api/keurer/history").json()["entries"]] == [r2["id"]]
+    r = client.post("/api/keurer/undo", json={"id": id1})
+    assert r.status_code == 410
+    assert not fam.exists()
+    assert trash.read_bytes() == b"F2-content"
+
+    assert client.post("/api/keurer/undo", json={"id": r2["id"]}).status_code == 200
+    assert ita.read_bytes() == b"F2-content"
+
+
+def test_migration_3_keeps_version_2_data(tmp_path, monkeypatch):
+    """A database at schema 2 (with dest_path rows) keeps ratings, streak, undo data and decisions."""
+    from backend import migrations
+    db_path = tmp_path / "datavault.db"
+    make_legacy_db(db_path)
+    monkeypatch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:2])
+    assert migrations.migrate(db_path) == [1, 2]
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("INSERT INTO keurer_decisions (path, folder, decision, dest_path) "
+                     "VALUES ('/v/RAW/weg.jpg', '/v/RAW', 'delete', '/v/TRASH/weg.jpg')")
+    monkeypatch.undo()
+
+    db = Database(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION
+    stats = db.get_keurer_stats()
+    assert stats["streak"] == 3 and stats["total"] == 61
+    assert db.get_rating("/v/RAW/a.jpg") == 1150
+    assert db.get_delete_operations("run-1")[0]["dst_path"] == "/v/RAW_DUPLICATES/b.jpg"
+    row = db.get_recent_keurer_decisions(limit=1)[0]
+    assert (row["dest_path"], row["dest_ino"], row["dest_size"]) == ("/v/TRASH/weg.jpg", None, None)
+    assert len(list((tmp_path / migrations.BACKUP_DIR_NAME).glob("datavault-v2-*.db"))) == 1
+
+
+def test_decide_stores_fingerprint_and_unverifiable_rows_are_refused(client, config, inbox):
+    photo = inbox / "IMG_0002.JPG"
+    body = _decide(client, photo, "delete").json()
+    trash = config.TRASH_FOLDER / "IMG_0002.JPG"
+    with _db(config) as conn:
+        ino, size = conn.execute("SELECT dest_ino, dest_size FROM keurer_decisions WHERE id = ?",
+                                 (body["id"],)).fetchone()
+    assert (ino, size) == (trash.stat().st_ino, trash.stat().st_size)
+
+    # A row written between migration 2 and 3 has a dest_path but no fingerprint
+    with _db(config) as conn:
+        conn.execute("UPDATE keurer_decisions SET dest_ino = NULL, dest_size = NULL WHERE id = ?", (body["id"],))
+    assert client.get("/api/keurer/history").json()["entries"] == []
+    assert client.post("/api/keurer/undo", json={"id": body["id"]}).status_code == 409
+    assert trash.exists() and not photo.exists()
+
+
+def test_undo_of_move_refuses_a_different_file_in_the_destination(client, vault, inbox):
+    dest = vault / "library" / "Familie"
+    photo = inbox / "IMG_0002.JPG"
+    move_id = _decide(client, photo, "move", destination_folder=str(dest)).json()["id"]
+    moved = dest / "IMG_0002.JPG"
+    data = moved.read_bytes()
+    # The user swaps the file for another one with the same name in Finder
+    moved.rename(vault / "RAW/misc/elders.jpg")
+    moved.write_bytes(b"ander bestand")
+
+    assert client.post("/api/keurer/undo", json={"id": move_id}).status_code == 410
+    assert moved.read_bytes() == b"ander bestand" and not photo.exists()
+    assert (vault / "RAW/misc/elders.jpg").read_bytes() == data

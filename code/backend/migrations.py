@@ -83,10 +83,26 @@ def _m002_keurer_undo_paths(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE keurer_decisions ADD COLUMN dest_path TEXT")
 
 
+def _m003_keurer_dest_fingerprint(conn: sqlite3.Connection):
+    """
+    Remember which file a Keurer decision moved: inode number and size of the
+    file at dest_path. A rename keeps the inode, so undo can tell the moved file
+    apart from a different, same-named file that later took its place in TRASH.
+    (st_dev is not stored: it changes when an external disk is mounted again.)
+    NULL for 'keep' and for rows written before this migration.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(keurer_decisions)")}
+    if "dest_ino" not in columns:
+        conn.execute("ALTER TABLE keurer_decisions ADD COLUMN dest_ino INTEGER")
+    if "dest_size" not in columns:
+        conn.execute("ALTER TABLE keurer_decisions ADD COLUMN dest_size INTEGER")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
     (2, "keurer_undo_paths", _m002_keurer_undo_paths),
+    (3, "keurer_dest_fingerprint", _m003_keurer_dest_fingerprint),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
