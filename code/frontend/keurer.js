@@ -13,8 +13,11 @@ let keurerMoveSelectedFolder = null;
 let keurerPreviewOpen = false;
 let keurerMoveHighlightIndex = -1;
 
-// Undo-geschiedenis: { file, decision, trash_path, moved_to }
+// Undo-stapel (nieuwste achteraan): { id, decision, folder, file }.
+// De server bewaart waar elk bestand heen ging; undo stuurt alleen het id.
 let keurerHistory = [];
+const KEURER_UNDO_MAX = 20;
+let keurerUndoBusy = false;
 
 // ==================== INITIALISATIE ====================
 
@@ -29,11 +32,14 @@ function keurerInit() {
                 : 'Geen map geselecteerd';
         }
 
-        if (keurerFolder) {
-            keurerLoadFiles();
-        } else {
-            keurerShowEmpty();
-        }
+        // Undo-stapel eerst van de server halen, zodat hij een herlaad overleeft
+        keurerLoadHistory().finally(() => {
+            if (keurerFolder) {
+                keurerLoadFiles();
+            } else {
+                keurerShowEmpty();
+            }
+        });
     } catch (e) {
         console.error('keurerInit fout:', e);
         const cardArea = document.getElementById('keurer-card-area');
@@ -58,6 +64,54 @@ async function keurerLoadStats() {
         }
     } catch (e) {
         console.warn('Keurer stats ophalen mislukt:', e);
+    }
+}
+
+// Statistieken altijd van de server overnemen (na beslissing of undo)
+function keurerApplyStats(stats) {
+    if (!stats) { keurerLoadStats(); return; }
+    const wasReached = keurerStats.goal_reached_today;
+    keurerStats = stats;
+    keurerRenderStats();
+    if (!wasReached && stats.goal_reached_today) {
+        showToast('🎉 Dagdoel bereikt!', `Je hebt vandaag ${stats.goal} fotos beoordeeld!`, 'success');
+    }
+}
+
+// ==================== UNDO-STAPEL ====================
+
+async function keurerLoadHistory() {
+    try {
+        const res = await fetch(`${API_BASE}/api/keurer/history`);
+        if (!res.ok) return;
+        const data = await res.json();
+        // Server geeft nieuwste eerst; de stapel heeft de nieuwste achteraan
+        keurerHistory = (data.entries || []).slice(0, KEURER_UNDO_MAX).reverse();
+    } catch (e) {
+        console.warn('Keurer undo-geschiedenis ophalen mislukt:', e);
+    }
+}
+
+function keurerDropHistory(id) {
+    keurerHistory = keurerHistory.filter(e => e.id !== id);
+}
+
+function keurerPushHistory(data) {
+    keurerHistory.push({ id: data.id, decision: data.decision, folder: data.folder, file: data.file });
+    if (keurerHistory.length > KEURER_UNDO_MAX) keurerHistory.shift();
+}
+
+// Foutmelding uit een API-antwoord halen
+async function keurerErrorDetail(res) {
+    const err = await res.json().catch(() => ({}));
+    return err.detail || `HTTP ${res.status}`;
+}
+
+function keurerUpdateRemaining() {
+    const remEl = document.getElementById('keurer-remaining');
+    if (remEl) {
+        const rem = keurerFileQueue.length - keurerIndex;
+        remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
     }
 }
 
@@ -288,16 +342,19 @@ function keurerAnimateAndDecide(decision) {
     card.style.transform  = `translateX(${flyX}px) translateY(${flyY}px) rotate(${rotate}deg)`;
     card.style.opacity    = '0';
 
-    keurerSendDecision(decision, keurerFileQueue[keurerIndex]);
+    const result = keurerSendDecision(decision, keurerFileQueue[keurerIndex]);
 
-    setTimeout(() => {
-        keurerIndex++;
-        keurerIsAnimating = false;
-        const remEl = document.getElementById('keurer-remaining');
-        if (remEl) {
-            const rem = keurerFileQueue.length - keurerIndex;
-            remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
+    // Pas na het antwoord van de server door naar de volgende kaart;
+    // mislukt de beslissing, dan komt dezelfde kaart terug.
+    setTimeout(async () => {
+        const outcome = await result;
+        if (outcome === 'ok') {
+            keurerIndex++;
+        } else if (outcome === 'gone') {
+            keurerFileQueue.splice(keurerIndex, 1);
         }
+        keurerIsAnimating = false;
+        keurerUpdateRemaining();
         keurerShowCard();
     }, 390);
 }
@@ -324,6 +381,7 @@ function keurerAnimateUp() {
     }, 350);
 }
 
+// Geeft 'ok', 'gone' (bestand bestaat niet meer) of 'failed' terug
 async function keurerSendDecision(decision, file) {
     try {
         const res = await fetch(`${API_BASE}/api/keurer/decide`, {
@@ -331,30 +389,23 @@ async function keurerSendDecision(decision, file) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: file.path, folder: keurerFolder, decision }),
         });
-        const data = res.ok ? await res.json() : {};
-
-        // Sla op in history voor undo (max 20)
-        keurerHistory.push({
-            file,
-            decision,
-            trash_path: data.trash_path || null,
-            moved_to:   null,
-        });
-        if (keurerHistory.length > 20) keurerHistory.shift();
-
-        keurerStats.today++;
-        keurerStats.total++;
-
-        if (!keurerStats.goal_reached_today && keurerStats.today >= keurerStats.goal) {
-            keurerStats.goal_reached_today = true;
-            if (keurerStats.streak === 0) keurerStats.streak = 1;
-            showToast('🎉 Dagdoel bereikt!', `Je hebt vandaag ${keurerStats.goal} fotos beoordeeld!`, 'success');
+        if (!res.ok) {
+            const detail = await keurerErrorDetail(res);
+            if (res.status === 404) {
+                showToast('Overgeslagen', `${file.name}: ${detail}`, 'warning');
+                return 'gone';
+            }
+            showToast('Fout', `Beslissing mislukt voor ${file.name}: ${detail}`, 'error');
+            return 'failed';
         }
-
-        keurerRenderStats();
+        const data = await res.json();
+        keurerPushHistory({ id: data.id, decision, folder: keurerFolder, file });
+        keurerApplyStats(data.stats);
+        return 'ok';
     } catch (e) {
         console.error('Beslissing opslaan mislukt:', e);
-        showToast('Fout', 'Beslissing kon niet worden opgeslagen', 'error');
+        showToast('Fout', 'Beslissing kon niet worden opgeslagen (server niet bereikbaar)', 'error');
+        return 'failed';
     }
 }
 
@@ -363,7 +414,7 @@ function keurerDecideDelete() { keurerAnimateAndDecide('delete'); }
 function keurerDecideMove()   { keurerAnimateUp(); }
 
 async function keurerUndo() {
-    if (keurerIsAnimating) return;
+    if (keurerIsAnimating || keurerUndoBusy) return;
     if (keurerHistory.length === 0) {
         showToast('Undo', 'Geen actie om ongedaan te maken', 'info');
         return;
@@ -378,47 +429,42 @@ async function keurerUndo() {
         card.style.opacity    = '0';
     }
 
-    const entry = keurerHistory.pop();
+    const entry = keurerHistory[keurerHistory.length - 1];
+    keurerUndoBusy = true;
 
     try {
         const res = await fetch(`${API_BASE}/api/keurer/undo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                path:       entry.file.path,
-                folder:     keurerFolder,
-                decision:   entry.decision,
-                trash_path: entry.trash_path,
-                moved_to:   entry.moved_to,
-            }),
+            body: JSON.stringify({ id: entry.id }),
         });
 
         if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
+            const detail = await keurerErrorDetail(res);
+            // 404/409/410: deze stap kan niet (meer) terug; haal hem van de stapel
+            if ([404, 409, 410].includes(res.status)) keurerDropHistory(entry.id);
+            throw new Error(detail);
         }
 
-        // Zet bestand terug in queue vóór huidige positie
-        keurerFileQueue.splice(keurerIndex, 0, entry.file);
+        const data = await res.json();
+        keurerDropHistory(entry.id);
+        keurerApplyStats(data.stats);
 
-        // Stats bijwerken
-        keurerStats.today  = Math.max(0, keurerStats.today - 1);
-        keurerStats.total  = Math.max(0, keurerStats.total - 1);
-        keurerRenderStats();
-
-        const remEl = document.getElementById('keurer-remaining');
-        if (remEl) {
-            const rem = keurerFileQueue.length - keurerIndex;
-            remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
+        // Alleen terug in de wachtrij als de beslissing bij de huidige map hoort
+        const file = data.file || entry.file;
+        if (data.folder === keurerFolder && !keurerFileQueue.some(f => f.path === file.path)) {
+            keurerFileQueue.splice(keurerIndex, 0, file);
         }
+        keurerUpdateRemaining();
 
         const label = entry.decision === 'delete' ? 'prullenmand' : entry.decision === 'move' ? 'verplaatsing' : 'bewaren';
-        showToast('Ongedaan gemaakt', `${label} teruggedraaid voor ${entry.file.name}`, 'success');
+        const where = data.folder === keurerFolder ? '' : ` (in ${keurerShortenPath(data.folder)})`;
+        showToast('Ongedaan gemaakt', `${label} teruggedraaid voor ${file.name}${where}`, 'success');
 
     } catch (e) {
-        // Zet history terug als undo mislukt
-        keurerHistory.push(entry);
         showToast('Fout', `Undo mislukt: ${e.message}`, 'error');
+    } finally {
+        keurerUndoBusy = false;
     }
 
     setTimeout(() => { keurerShowCard(); }, 320);
@@ -481,7 +527,7 @@ async function keurerOpenMoveModal() {
         return;
     }
 
-    keurerRenderMoveTree(treeContainer, tree);
+    tree.forEach(f => keurerRenderMoveFolderNode(treeContainer, f, 0));
 
     // Keyboard nav via centraal systeem
     if (window._keurerMoveNav) window._keurerMoveNav.nav.resetIndex();
@@ -748,45 +794,37 @@ async function keurerConfirmMove() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig...';
 
     try {
-        const res = await fetch(`${API_BASE}/api/move-file`, {
+        const res = await fetch(`${API_BASE}/api/keurer/decide`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                source_path: file.path,
+                path: file.path,
+                folder: keurerFolder,
+                decision: 'move',
                 destination_folder: keurerMoveSelectedFolder,
             }),
         });
 
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
-        }
+        if (!res.ok) throw new Error(await keurerErrorDetail(res));
 
         const movedData = await res.json();
 
         document.getElementById('modal-keurer-move').classList.remove('active');
         const destFolder = keurerMoveSelectedFolder;
         keurerMoveSelectedFolder = null;
+        btn.innerHTML = '<i class="fas fa-check"></i> Verplaatsen';
 
-        // Sla op in history voor undo
-        keurerHistory.push({
-            file,
-            decision:   'move',
-            trash_path: null,
-            moved_to:   movedData.new_path || null,
-        });
-        if (keurerHistory.length > 20) keurerHistory.shift();
+        // Server bewaart de verplaatsing; undo gaat via het id
+        keurerPushHistory({ id: movedData.id, decision: 'move', folder: keurerFolder, file });
+        keurerApplyStats(movedData.stats);
 
         // Verwijder bestand uit queue
         keurerFileQueue.splice(keurerIndex, 1);
+        keurerUpdateRemaining();
 
-        const remEl = document.getElementById('keurer-remaining');
-        if (remEl) {
-            const rem = keurerFileQueue.length - keurerIndex;
-            remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
-        }
-
-        showToast('Verplaatst', `Bestand verplaatst naar ${destFolder.split('/').pop()}`, 'success');
+        const newName = (movedData.dest_path || '').split('/').pop();
+        const renamed = newName && newName !== file.name ? ` als ${newName}` : '';
+        showToast('Verplaatst', `Bestand verplaatst naar ${destFolder.split('/').pop()}${renamed}`, 'success');
         keurerShowCard();
 
     } catch (e) {

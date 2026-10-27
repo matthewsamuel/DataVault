@@ -72,9 +72,21 @@ def _m001_baseline(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_keurer_date ON keurer_decisions(decided_at)")
 
 
+def _m002_keurer_undo_paths(conn: sqlite3.Connection):
+    """
+    Keurer undo runs server-side: remember where a decision put the file.
+    path stays the original location; dest_path is the TRASH or move target
+    (NULL for 'keep' and for rows written before this migration).
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(keurer_decisions)")}
+    if "dest_path" not in columns:
+        conn.execute("ALTER TABLE keurer_decisions ADD COLUMN dest_path TEXT")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
+    (2, "keurer_undo_paths", _m002_keurer_undo_paths),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

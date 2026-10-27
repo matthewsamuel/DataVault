@@ -15,3 +15,21 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Verplaatsen naar een andere schijf wordt geweigerd met een duidelijke melding, in plaats van
   stilletjes te kopiëren en het origineel te wissen.
 - Mappen en snelkoppelingen (symlinks) worden nooit als bestand verplaatst.
+
+### Foto Keurer
+- Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het
+  bestand naartoe ging (prullenmand of doelmap). Undo stuurt alleen nog het nummer van de
+  beslissing, controleert opnieuw beide paden en weigert als er inmiddels een ander bestand
+  op de oorspronkelijke plek staat. Er wordt nooit iets overschreven.
+- De undo-stapel (laatste 20 acties) overleeft het herladen van de pagina.
+- Undo werkt ook na het wisselen van map: de beslissing wordt in haar eigen map teruggedraaid.
+- Teller, dagdoel en streak komen na elke beslissing en undo rechtstreeks van de server en
+  lopen dus niet meer uit de pas.
+- Mislukt een beslissing of undo, dan zie je een foutmelding en blijft de kaart staan, in
+  plaats van een valse "gelukt". Een bestand dat intussen verdwenen is, wordt overgeslagen
+  met een melding.
+- Verplaatsen in de Keurer: de mappenlijst in het verplaatsvenster verscheen niet meer; dat
+  is opgelost. Verplaatsen telt (zoals voorheen) niet mee voor het dagdoel.
+- Database-migratie 2 voegt de kolom voor het doelpad toe; bestaande beslissingen, streaks
+  en ratings blijven behouden. Oude weggooi-beslissingen van vóór deze versie kunnen niet
+  automatisch worden teruggezet (het pad werd toen niet bewaard).

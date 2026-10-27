@@ -217,38 +217,85 @@ class Database:
     # Keurer methods
 
     def get_keurer_decided_paths(self, folder: str) -> List[str]:
-        """Geeft alle al beoordeelde paden terug voor een specifieke map."""
+        """
+        Geeft alle al beoordeelde paden terug voor een specifieke map.
+        Verplaatsingen tellen niet mee: komt zo'n bestand ooit terug, dan mag
+        het opnieuw beoordeeld worden.
+        """
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT path FROM keurer_decisions WHERE folder = ?", (folder,)
+            "SELECT path FROM keurer_decisions WHERE folder = ? AND decision != 'move'",
+            (folder,),
         )
         results = cursor.fetchall()
         conn.close()
         return [row[0] for row in results]
 
-    def delete_keurer_decision(self, path: str, folder: str):
-        """Verwijder een beslissing (voor undo)."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "DELETE FROM keurer_decisions WHERE path = ? AND folder = ?",
-            (path, folder),
-        )
-        conn.commit()
-        conn.close()
-
-    def record_keurer_decision(self, path: str, folder: str, decision: str):
-        """Sla een houd/verwijder-beslissing op (of overschrijf een eerdere)."""
+    def record_keurer_decision(
+        self, path: str, folder: str, decision: str, dest_path: Optional[str] = None
+    ) -> int:
+        """
+        Sla een houd/verwijder/verplaats-beslissing op (of overschrijf een eerdere).
+        dest_path is waar het bestand nu staat (TRASH of doelmap), nodig voor undo.
+        Geeft het id van de beslissing terug.
+        """
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT OR REPLACE INTO keurer_decisions (path, folder, decision, decided_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT OR REPLACE INTO keurer_decisions (path, folder, decision, dest_path, decided_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
-            (path, folder, decision),
+            (path, folder, decision, dest_path),
         )
+        decision_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return decision_id
+
+    _KEURER_COLUMNS = "id, path, folder, decision, dest_path, decided_at"
+
+    @staticmethod
+    def _keurer_row(row) -> Dict[str, Any]:
+        return {
+            "id": row[0],
+            "path": row[1],
+            "folder": row[2],
+            "decision": row[3],
+            "dest_path": row[4],
+            "decided_at": row[5],
+        }
+
+    def get_keurer_decision(self, decision_id: int) -> Optional[Dict[str, Any]]:
+        """Een enkele beslissing op id, of None."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT {self._KEURER_COLUMNS} FROM keurer_decisions WHERE id = ?",
+            (decision_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return self._keurer_row(row) if row else None
+
+    def get_recent_keurer_decisions(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """De nieuwste beslissingen eerst (voor de undo-stapel)."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT {self._KEURER_COLUMNS} FROM keurer_decisions ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [self._keurer_row(r) for r in rows]
+
+    def delete_keurer_decision_by_id(self, decision_id: int):
+        """Verwijder een beslissing (na een geslaagde undo)."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM keurer_decisions WHERE id = ?", (decision_id,))
         conn.commit()
         conn.close()
 
@@ -259,13 +306,15 @@ class Database:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(*) FROM keurer_decisions")
+        # Verplaatsingen tellen (zoals altijd) niet mee voor dagdoel en streak
+        cursor.execute("SELECT COUNT(*) FROM keurer_decisions WHERE decision != 'move'")
         total = cursor.fetchone()[0]
 
         cursor.execute(
             """
             SELECT COUNT(*) FROM keurer_decisions
             WHERE DATE(decided_at, 'localtime') = DATE('now', 'localtime')
+              AND decision != 'move'
             """
         )
         today = cursor.fetchone()[0]
@@ -275,6 +324,7 @@ class Database:
             """
             SELECT DATE(decided_at, 'localtime') AS day, COUNT(*) AS cnt
             FROM keurer_decisions
+            WHERE decision != 'move'
             GROUP BY day
             ORDER BY day DESC
             LIMIT 400
