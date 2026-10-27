@@ -4,17 +4,36 @@ Loads paths from config.json with graceful degradation
 """
 import json
 import os
+import tempfile
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+# Default config location: code/config.json (next to the backend package)
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
+
+
+def resolve_config_path(explicit: Optional[str] = None) -> Path:
+    """
+    Pick the config file: explicit argument > $DATAVAULT_CONFIG > code/config.json.
+    The environment override lets tests and development point at a test vault
+    without touching the real config.
+    """
+    if explicit:
+        return Path(explicit)
+    env_path = os.environ.get("DATAVAULT_CONFIG")
+    if env_path:
+        return Path(env_path)
+    return DEFAULT_CONFIG_PATH
 
 class Config:
     """Configuration loaded from config.json"""
     
-    def __init__(self, config_path: str = "config.json"):
-        self.config_path = Path(config_path)
+    def __init__(self, config_path: Optional[str] = None):
+        self.config_path = resolve_config_path(config_path)
         self._load_config()
         self._init_paths()
-        
+        self._guard_test_mode()
+
     def _load_config(self):
         """Load configuration from JSON file"""
         if not self.config_path.exists():
@@ -46,6 +65,27 @@ class Config:
         # Derived paths
         self.DB_PATH = self.CACHE_FOLDER / "datavault.db"
         self.THUMB_CACHE_PATH = self.CACHE_FOLDER / "thumbs"
+
+    def _guard_test_mode(self):
+        """
+        Safety net: with DATAVAULT_TESTING=1 every configured folder must live
+        inside the system temp directory, so a test run can never reach a real archive.
+        """
+        if os.environ.get("DATAVAULT_TESTING") != "1":
+            return
+        temp_root = Path(tempfile.gettempdir()).resolve()
+        for name, path in [
+            ("vault_root", self.VAULT_ROOT),
+            ("raw_folder", self.RAW_FOLDER),
+            ("duplicates_folder", self.DUPLICATES_FOLDER),
+            ("trash_folder", self.TRASH_FOLDER),
+            ("cache_folder", self.CACHE_FOLDER),
+        ]:
+            if not path.resolve().is_relative_to(temp_root):
+                raise RuntimeError(
+                    f"DATAVAULT_TESTING=1 but {name} ({path}) is outside {temp_root}; "
+                    "refusing to run tests against a real archive."
+                )
     
     def validate_paths(self) -> Dict[str, bool]:
         """

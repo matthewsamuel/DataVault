@@ -1,10 +1,11 @@
 """
 DataVault Dashboard - FastAPI Application
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
+from typing import Optional
 import os
 
 # Ensure ffmpeg is in PATH for video thumbnails
@@ -20,77 +21,103 @@ from backend.config import Config
 from backend.database import Database
 from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline
 
-# Initialize FastAPI app
-app = FastAPI(title="DataVault Dashboard")
 
-# CORS for local development
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def create_app(config_path: Optional[str] = None) -> FastAPI:
+    """
+    Build the application. Config comes from config_path, $DATAVAULT_CONFIG
+    or code/config.json (see backend.config.resolve_config_path).
+    Run with: uvicorn --factory backend.main:create_app
+    """
+    # Telemetry is explicitly off: DataVault never sends data anywhere
+    app = FastAPI(
+        title="DataVault Dashboard",
+        telemetry={
+            "tracing": False,
+            "metrics": False,
+            "logs": False,
+            "operation_spans": False,
+            "auto_configure": False,
+        },
+    )
 
-# Initialize configuration and database (Sync to avoid race conditions with first requests)
-try:
-    # Load configuration
-    config_path = Path(__file__).parent.parent / "config.json"
-    config = Config(str(config_path))
-    
-    # Validate paths (but don't fail if T7 not mounted)
-    path_status = config.validate_paths()
-    
-    if not path_status["vault_root"]:
-        print("WARNING: Vault root not found. Is T7 mounted?")
-        print(f"Expected path: {config.VAULT_ROOT}")
-    else:
-        print(f"Vault root found: {config.VAULT_ROOT}")
-        
-        # Ensure cache directories exist
-        config.ensure_cache_dirs()
-        config.ensure_duplicates_folder()
-    
-    # Initialize database
-    db = Database(config.DB_PATH)
-    print(f"Database initialized: {config.DB_PATH}")
-    
-    # Initialize routes with config and database
-    folders.init_router(config)
-    media.init_router(config, db)
-    duplicates.init_router(config, db)
-    spotify.init_router(config)
-    shows.init_router(config, db)
-    stats.init_router(config)
-    chat.init_router(config)
-    keurer.init_router(config, db)
-    timeline.init_router(config)
-    
-    print("DataVault Dashboard initialized successfully")
+    # CORS for local development
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-except Exception as e:
-    print(f"ERROR during initialization: {e}")
-    import traceback
-    traceback.print_exc()
+    config = None
+    try:
+        # Load configuration
+        config = Config(config_path)
 
-@app.on_event("startup")
-async def startup_event():
-    """Startup tasks (async)"""
-    # Any future async startup tasks go here
-    pass
+        # Validate paths (but don't fail if T7 not mounted)
+        path_status = config.validate_paths()
 
-# Register routes
-app.include_router(folders.router)
-app.include_router(media.router)
-app.include_router(duplicates.router)
-app.include_router(spotify.router, prefix="/api/spotify", tags=["spotify"])
-app.include_router(shows.router, prefix="/api/shows", tags=["shows"])
-app.include_router(chat.router, tags=["chat"])
-app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
-app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"])
-app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"])
+        if not path_status["vault_root"]:
+            print("WARNING: Vault root not found. Is T7 mounted?")
+            print(f"Expected path: {config.VAULT_ROOT}")
+        else:
+            print(f"Vault root found: {config.VAULT_ROOT}")
 
-@app.post("/api/restart")
+            # Ensure cache directories exist
+            config.ensure_cache_dirs()
+            config.ensure_duplicates_folder()
+
+        # Initialize database
+        db = Database(config.DB_PATH)
+        print(f"Database initialized: {config.DB_PATH}")
+
+        # Initialize routes with config and database
+        folders.init_router(config)
+        media.init_router(config, db)
+        duplicates.init_router(config, db)
+        spotify.init_router(config)
+        shows.init_router(config, db)
+        stats.init_router(config)
+        chat.init_router(config)
+        keurer.init_router(config, db)
+        timeline.init_router(config)
+
+        print("DataVault Dashboard initialized successfully")
+
+    except RuntimeError:
+        # Safety guards (e.g. test mode pointing at a real vault) must stop startup
+        raise
+    except Exception as e:
+        print(f"ERROR during initialization: {e}")
+        import traceback
+        traceback.print_exc()
+
+    app.state.config = config
+
+    # Register routes
+    app.include_router(folders.router)
+    app.include_router(media.router)
+    app.include_router(duplicates.router)
+    app.include_router(spotify.router, prefix="/api/spotify", tags=["spotify"])
+    app.include_router(shows.router, prefix="/api/shows", tags=["shows"])
+    app.include_router(chat.router, tags=["chat"])
+    app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
+    app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"])
+    app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"])
+    app.include_router(core_router)
+
+    # Serve frontend static files — MOET als allerlaatste staan, anders vangt het API-routes op
+    frontend_path = Path(__file__).parent.parent / "frontend"
+    if frontend_path.exists():
+        app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
+
+    return app
+
+
+core_router = APIRouter()
+
+
+@core_router.post("/api/restart")
 async def restart_server():
     """
     Sluit de huidige server af en start hem opnieuw op.
@@ -115,8 +142,8 @@ fi
 sleep 1
 cd "{project_root}"
 export PATH="/usr/local/bin:$PATH"
-nohup "{python_exec}" -m uvicorn backend.main:app \\
-    --host 127.0.0.1 --port 8000 --reload \\
+nohup "{python_exec}" -m uvicorn --factory backend.main:create_app \\
+    --host 127.0.0.1 --port 8000 \\
     >> /tmp/datavault_server.log 2>&1 &
 """
     subprocess.Popen(
@@ -129,9 +156,10 @@ nohup "{python_exec}" -m uvicorn backend.main:app \\
     return {"status": "restarting"}
 
 
-@app.get("/api/health")
-async def health_check():
+@core_router.get("/api/health")
+async def health_check(request: Request):
     """Health check endpoint"""
+    config = request.app.state.config
     if not config:
         raise HTTPException(status_code=503, detail="Configuration not loaded")
 
@@ -144,11 +172,6 @@ async def health_check():
         "paths": path_status
     }
 
-# Serve frontend static files — MOET als allerlaatste staan, anders vangt het API-routes op
-frontend_path = Path(__file__).parent.parent / "frontend"
-if frontend_path.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(create_app(), host="127.0.0.1", port=8000)
