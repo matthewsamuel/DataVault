@@ -20,9 +20,9 @@ DataVault Dashboard is a full-featured web application for organizing, analyzing
 - **Multi-View Display** — Grid view (thumbnail-based), list view (sortable by name/date/size), and fullscreen modal viewer with zoom and pan controls
 
 #### Duplicate Detection & Management
-- **Content-Addressed Deduplication** — Find exact duplicates using SHA-256 hashing with intelligent cache validation (90%+ hit rate on large vaults)
-- **Safe Removal** — Move duplicates to separate folder preserving directory structure, with full undo support and no metadata loss
-- **Folder-Level Scanning** — Scan any folder for duplicates within that folder or across entire vault
+- **Content-Addressed Deduplication** — Find exact duplicates using xxHash3-128 hashing (size pre-filter first) with cache validation
+- **Safe Removal** — Move duplicates to RAW_DUPLICATES preserving directory structure, only after a byte-for-byte compare with the kept original; full undo, no metadata loss
+- **Folder-Level Scanning** — Scan any folder for duplicates within that folder (and its subfolders)
 
 #### Gamified Photo Curation (Foto Keurer)
 - **Swipe-Based Interface** — Four-directional gesture controls (left/right/up/down) + keyboard shortcuts for intuitive rapid rating
@@ -68,7 +68,7 @@ backend/
 ├── main.py                    # FastAPI initialization, route registration, server restart
 ├── config.py                  # Configuration loader, path validation, media type definitions
 ├── database.py                # SQLite abstraction (caching, ratings, decisions, undo tracking)
-├── scanner.py                 # File discovery, hashing (SHA-256, xxHash3), duplicate detection
+├── scanner.py                 # File discovery, xxHash3 hashing, per-folder duplicate detection
 ├── file_ops.py                # Safe atomic file operations with metadata preservation
 ├── thumbnail.py               # Thumbnail generation (PIL) with cache validation
 ├── progress.py                # Progress state tracking for long-running operations
@@ -76,7 +76,7 @@ backend/
 └── routes/
     ├── folders.py             # Folder tree enumeration, recursive traversal
     ├── media.py               # Individual file operations, thumbnail serving, file downloads
-    ├── duplicates.py          # Duplicate scanning (vault-wide or folder-specific), batch removal, undo
+    ├── duplicates.py          # Per-folder duplicate scan, verified single removal, undo
     ├── spotify.py             # Spotify JSON parsing, stats aggregation, year filtering
     ├── shows.py               # Slideshow generation, weighted sampling, ELO ratings
     ├── chat.py                # LLM chat with Ollama, context injection, action tags, streaming
@@ -143,37 +143,29 @@ UI Update (render, toast notification)
 **Problem:** Large vaults accumulate identical files across folders. Manual identification is impossible; naive approaches are too slow.
 
 **Solution:**
-- **Content-Addressed Hashing:** SHA-256 identifies duplicates by file content, not name
-- **Smart Caching:** Hash cache validated by file size + mtime; invalidated on any change
-- **Two-Pass Scanning:** 
-  1. Build hash index of entire vault (all files → hashes)
-  2. Find RAW files with exact matches elsewhere
+- **Per-Folder Scan** (`POST /api/duplicates/scan_folder`, `scanner.find_duplicates_in_folder`):
+  1. Walk the chosen folder and group media files by size (different sizes can never be duplicates)
+  2. Hash only the files that share a size, in parallel, with xxHash3-128
+  3. Within each hash group the first file is the kept original; the others are reported as `duplicate_of` it
+- **Smart Caching:** Hashes are cached in SQLite and validated by file size + mtime; invalidated on any change
 - **Progress Tracking:** Real-time phase updates, file counts, cancellation support
-- **Safe Removal:** Moves duplicates to separate folder preserving structure; transactional undo
-
-**Performance:** 50k files scanned in 15-30 seconds (cached) vs. 5-10 minutes (uncached)
+- **Verified Removal** (`POST /api/duplicates/delete_single`): right before moving, the server checks that the
+  file is a regular file outside RAW_DUPLICATES/TRASH/cache, that the kept original still exists inside the vault,
+  and that both files are **byte-for-byte identical** (`file_ops.files_identical`, no cached hash). Only then is the
+  duplicate moved to RAW_DUPLICATES with its folder structure, via `move_no_overwrite`. So the last copy of a photo
+  can never be moved away, even if the folder changed since the scan.
+- **Undo:** every removal is recorded per run; `POST /api/raw_duplicates/undo_last` moves the last run back.
+  A file that took the original place is never overwritten: the restored file then gets `name_RESTORED_001.ext`.
 
 **Code Example:**
 ```python
-def compute_hash(file_path: Path, db: Database) -> str:
-    """Compute hash with cache validation"""
-    stat = file_path.stat()
-    cached = db.get_cached_hash(file_path, stat.st_size, stat.st_mtime)
-    if cached:
-        return cached  # Cache hit
-    
-    # Full file scan with 8KB chunks
-    sha256 = hashlib.sha256()
-    with open(file_path, 'rb') as f:
-        while chunk := f.read(8192):
-            sha256.update(chunk)
-    
-    hash_hex = sha256.hexdigest()
-    db.store_hash(file_path, stat.st_size, stat.st_mtime, hash_hex)
-    return hash_hex
+# duplicates.delete_single, shortened
+if not files_identical(src_path, keeper):
+    raise HTTPException(409, "Original changed since the scan; scan again")
+dst_path, was_conflict = safe_move_with_structure(real_src, base_folder, config.DUPLICATES_FOLDER.resolve())
 ```
 
-**Algorithms:** SHA-256 (canonical), xxHash3-128 (10x faster for speed-critical paths)
+**Algorithm:** xxHash3-128 to find candidates quickly; a full byte compare decides before anything moves.
 
 ---
 
@@ -471,8 +463,7 @@ CREATE TABLE show_settings (
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| Duplicate scan (50k files, cached) | 15-30s | Hash cache hit rate 90%+ |
-| Duplicate scan (50k files, uncached) | 5-10min | Full SHA-256 computation |
+| Duplicate scan (one folder) | depends on size | Size pre-filter, then parallel xxHash3 (cached) |
 | Thumbnail generation | 50-100ms | Per image with PIL |
 | Thumbnail cache hit | <10ms | Validated by mtime |
 | Video frame extraction | 100-300ms | Via ffmpeg |
@@ -517,7 +508,7 @@ CREATE TABLE show_settings (
 - **Virtual Scrolling** — Efficient rendering of large datasets
 - **Gesture Detection** — Touch/mouse event handling with angle/distance thresholds
 - **State Machine Pattern** — View switching, phase-based progress tracking
-- **Content-Addressed Hashing** — Deduplication via SHA-256
+- **Content-Addressed Hashing** — Deduplication via xxHash3-128, confirmed by a byte compare
 - **ELO Rating System** — Probability-weighted random sampling
 - **Security Hardening** — Path validation, vault boundary enforcement
 - **Error Handling** — Graceful degradation, cross-device detection, comprehensive logging
@@ -640,7 +631,7 @@ DataVault/
 - **Security:** Path validation, vault boundary enforcement, graceful error handling
 
 ### Data Processing & Algorithms
-- **Content-Addressed Hashing:** SHA-256 deduplication with smart caching
+- **Content-Addressed Hashing:** xxHash3-128 deduplication with smart caching and a byte compare before any move
 - **Date Extraction & Indexing:** Temporal organization with year-based jumping
 - **Probability-Based Sampling:** ELO rating system for weighted randomness
 - **Recursive Traversal:** Efficient folder scanning with exclusion filters
