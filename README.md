@@ -355,25 +355,16 @@ Listening time: 45,000 minutes
 
 ### 1. Safe File Operations (Metadata Preservation)
 
-**Key Insight:** Standard approaches (copy → delete) lose all metadata. Solution: Use atomic `os.replace()` exclusively.
+**Key Insight:** Standard approaches (copy → delete) lose metadata, and a plain `os.rename()` silently overwrites an existing file. Solution: every move goes through one helper, `file_ops.move_no_overwrite()`.
 
 **Benefits:**
-- Single atomic operation (no intermediate state)
-- Preserves mtime, ctime, EXIF, extended attributes
-- Detects and rejects cross-device moves (prevents silent metadata loss)
+- Single atomic, *exclusive* rename (`renamex_np(RENAME_EXCL)` on macOS, `os.link` + unlink elsewhere): an existing file is never replaced, a clash becomes `name_DUP_001.ext`
+- Same inode, so mtime, birthtime, EXIF, extended attributes and Finder locks are preserved
+- Refuses cross-volume moves, directories and symlinks instead of falling back to copy + delete
 
 ```python
-def safe_rename(src: Path, dst: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.replace(str(src), str(dst))  # Atomic, metadata-preserving
-    except OSError as e:
-        if e.errno == 18:  # EXDEV - Cross-device link
-            raise CrossDeviceError(
-                f"Cannot move across volumes: {src} → {dst}\n"
-                "Metadata cannot be preserved. Use same volume."
-            )
-        raise FileOperationError(str(e))
+final_path = move_no_overwrite(src, dst)                  # picks name_DUP_001.ext on a clash
+move_no_overwrite(trash_file, original, rename_on_conflict=False)  # undo: 409 if taken
 ```
 
 ### 2. Smart Caching with Validity Tracking

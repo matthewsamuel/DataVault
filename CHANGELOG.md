@@ -15,6 +15,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Verplaatsen naar een andere schijf wordt geweigerd met een duidelijke melding, in plaats van
   stilletjes te kopiëren en het origineel te wissen.
 - Mappen en snelkoppelingen (symlinks) worden nooit als bestand verplaatst.
+- Lukt verplaatsen in de viewer niet, dan zie je nu waarom (bijv. "staat al in deze map")
+  in plaats van alleen "Failed to move file".
 
 ### Foto Keurer
 - Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het

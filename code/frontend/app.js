@@ -1131,9 +1131,13 @@ async function confirmMoveFile() {
             })
         });
 
-        if (!response.ok) throw new Error('Failed to move file');
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${response.status}`);
+        }
 
-        showToast('Moved', 'File successfully moved', 'success');
+        const moved = await response.json();
+        showToast('Moved', moved.message || 'File successfully moved', 'success');
 
         // Remove from current view
         if (activeShow) {
@@ -1169,7 +1173,7 @@ async function confirmMoveFile() {
 
     } catch (e) {
         console.error('Move error:', e);
-        showToast('Error', 'Failed to move file', 'error');
+        showToast('Error', `Failed to move file: ${e.message}`, 'error');
         btn.innerHTML = originalText;
         btn.disabled = false;
     }
