@@ -290,3 +290,25 @@ def test_undo_of_move_refuses_a_different_file_in_the_destination(client, vault,
     assert client.post("/api/keurer/undo", json={"id": move_id}).status_code == 410
     assert moved.read_bytes() == b"ander bestand" and not photo.exists()
     assert (vault / "RAW/misc/elders.jpg").read_bytes() == data
+
+
+def test_malformed_json_values_give_400_not_500(client, vault, inbox):
+    photo = str(inbox / "IMG_0002.JPG")
+    folder = str(inbox)
+    bad_bodies = [
+        {"path": 123, "folder": folder, "decision": "keep"},
+        {"path": ["a"], "folder": folder, "decision": "keep"},
+        {"path": {"x": 1}, "folder": folder, "decision": "delete"},
+        {"path": photo, "folder": 5, "decision": "keep"},
+        {"path": photo, "folder": folder, "decision": ["keep"]},
+        {"path": photo, "folder": folder, "decision": "move", "destination_folder": 5},
+        {"path": photo, "folder": folder, "decision": "move", "destination_folder": ["x"]},
+    ]
+    for body in bad_bodies:
+        r = client.post("/api/keurer/decide", json=body)
+        assert r.status_code == 400, (body, r.status_code, r.text)
+    for bad_id in (2 ** 70, -1, 0, 2 ** 63):
+        r = client.post("/api/keurer/undo", json={"id": bad_id})
+        assert r.status_code == 400, (bad_id, r.status_code)
+    assert (inbox / "IMG_0002.JPG").exists()
+    assert client.get("/api/keurer/stats").json()["total"] == 0

@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Dict, Any
 
 from backend.config import Config, validate_path_in_vault, is_video
-from backend.file_ops import move_no_overwrite, is_inside, FileOperationError, CrossDeviceError
+from backend.file_ops import (
+    move_no_overwrite, is_inside, FileOperationError, CrossDeviceError, DestinationFolderError,
+)
 
 router = APIRouter()
 
@@ -112,8 +114,8 @@ def open_in_finder_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
     file_path_str = body.get("path")
-    if not file_path_str:
-        raise HTTPException(status_code=400, detail="Missing 'path' in request body")
+    if not file_path_str or not isinstance(file_path_str, str):
+        raise HTTPException(status_code=400, detail="Missing or invalid 'path' in request body")
         
     file_path = Path(file_path_str)
     
@@ -154,6 +156,8 @@ def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
             status_code=400, 
             detail="Missing 'source_path' or 'destination_folder' in request body"
         )
+    if not isinstance(source_path_str, str) or not isinstance(destination_folder_str, str):
+        raise HTTPException(status_code=400, detail="'source_path' and 'destination_folder' must be strings")
     
     source_path = Path(source_path_str)
     destination_folder = Path(destination_folder_str)
@@ -183,6 +187,8 @@ def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
         destination_path = move_no_overwrite(source_path, destination_folder / source_path.name)
     except CrossDeviceError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except DestinationFolderError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except FileOperationError as e:
         raise HTTPException(status_code=500, detail=f"Failed to move file: {e}")
     

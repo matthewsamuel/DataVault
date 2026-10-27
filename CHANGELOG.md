@@ -17,6 +17,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Mappen en snelkoppelingen (symlinks) worden nooit als bestand verplaatst.
 - Lukt verplaatsen in de viewer niet, dan zie je nu waarom (bijv. "staat al in deze map")
   in plaats van alleen "Failed to move file".
+- Ongeldige verzoeken (bijv. een doelmap "onder" een bestand, of een getal waar een pad
+  hoort) geven nu een nette foutmelding in plaats van een serverfout. Er werd en wordt in die
+  gevallen niets verplaatst.
 
 ### Foto Keurer
 - Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het

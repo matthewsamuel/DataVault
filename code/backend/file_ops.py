@@ -35,6 +35,11 @@ class DestinationExistsError(FileOperationError):
     pass
 
 
+class DestinationFolderError(FileOperationError):
+    """Raised when the destination folder cannot be created (e.g. a file is in the way)"""
+    pass
+
+
 MAX_CONFLICT_SUFFIX = 9999
 
 # Flags that make rename() fail with EPERM; the owner can clear and restore them
@@ -98,6 +103,7 @@ def move_no_overwrite(
 
     Raises:
         FileOperationError: source missing, not a regular file, or move failed
+        DestinationFolderError: the destination folder cannot be created
         CrossDeviceError: source and destination are on different volumes
         DestinationExistsError: dst taken and rename_on_conflict is False
     """
@@ -116,7 +122,10 @@ def move_no_overwrite(
     if os.path.abspath(src) == os.path.abspath(dst):
         raise FileOperationError(f"Source and destination are the same: {src}")
 
-    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise DestinationFolderError(f"Cannot create destination folder {dst.parent}: {e}") from e
     if os.stat(dst.parent).st_dev != src_st.st_dev:
         raise CrossDeviceError(
             f"Cannot move across volumes: {src} -> {dst}. "

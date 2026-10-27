@@ -190,7 +190,11 @@ def decide_file(body: Dict[str, Any]) -> Dict[str, Any]:
     folder_str = body.get("folder")
     decision = body.get("decision")
 
-    if not path_str or not folder_str or decision not in ("keep", "delete", "move"):
+    if (
+        not path_str or not isinstance(path_str, str)
+        or not folder_str or not isinstance(folder_str, str)
+        or not isinstance(decision, str) or decision not in ("keep", "delete", "move")
+    ):
         _refuse(400, "Ontbrekende of ongeldige velden")
 
     file_path = Path(path_str)
@@ -209,13 +213,12 @@ def decide_file(body: Dict[str, Any]) -> Dict[str, Any]:
             if decision == "delete":
                 if is_inside(file_path, config.TRASH_FOLDER):
                     _refuse(400, "Bestand staat al in de prullenmand")
-                config.TRASH_FOLDER.mkdir(parents=True, exist_ok=True)
                 dest_path = move_no_overwrite(file_path, config.TRASH_FOLDER / file_path.name)
 
             elif decision == "move":
                 dest_str = body.get("destination_folder")
-                if not dest_str:
-                    _refuse(400, "Geen doelmap opgegeven")
+                if not dest_str or not isinstance(dest_str, str):
+                    _refuse(400, "Geen (geldige) doelmap opgegeven")
                 dest_folder = Path(dest_str)
                 _check_archive_path(dest_folder, "doelmap")
                 if not dest_folder.is_dir():
@@ -281,7 +284,10 @@ def undo_decision(body: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Configuratie niet geïnitialiseerd")
 
     decision_id = body.get("id")
-    if not isinstance(decision_id, int) or isinstance(decision_id, bool):
+    if (
+        not isinstance(decision_id, int) or isinstance(decision_id, bool)
+        or not 0 < decision_id < 2 ** 63  # SQLite INTEGER is 64-bit
+    ):
         _refuse(400, "Ontbrekend of ongeldig beslissing-id")
 
     with _file_lock:

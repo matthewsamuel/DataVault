@@ -56,3 +56,15 @@ def test_removed_dead_routes_are_gone(client, vault):
         assert r.status_code in (404, 405), url
     assert photo.exists()
     assert not (vault / "TRASH" / "UPPER.JPEG").exists()
+
+
+def test_move_file_malformed_values_and_folder_under_a_file(client, vault):
+    src = vault / "RAW/misc/UPPER.JPEG"
+    for body in ({"source_path": 1, "destination_folder": str(vault / "library")},
+                 {"source_path": str(src), "destination_folder": ["x"]}):
+        assert client.post("/api/move-file", json=body).status_code == 400
+    assert client.post("/api/open-in-finder", json={"path": 42}).status_code == 400
+
+    r = _move(client, src, vault / "RAW/misc/notes.txt/sub")
+    assert r.status_code == 400, r.text
+    assert src.exists() and (vault / "RAW/misc/notes.txt").read_text() == "geen media"
