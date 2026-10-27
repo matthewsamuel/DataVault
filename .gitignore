@@ -49,3 +49,6 @@ build/
 # Temporary
 *.tmp
 *.temp
+
+# Personal Claude Code settings
+.claude/settings.local.json
