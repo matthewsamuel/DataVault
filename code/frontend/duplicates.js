@@ -373,7 +373,7 @@ async function confirmDelete() {
     btnDelete.textContent = 'Deleting...';
 
     try {
-        const response = await fetch(`${API_BASE}/api/duplicates/delete_single?file_path=${encodeURIComponent(currentComparisonData.path)}`, {
+        const response = await fetch(`${API_BASE}/api/duplicates/delete_single?file_path=${encodeURIComponent(currentComparisonData.path)}&duplicate_of=${encodeURIComponent(currentComparisonData.duplicate_of)}`, {
             method: 'POST'
         });
 
@@ -446,7 +446,7 @@ async function removeAllDuplicates() {
             btnRemoveAll.textContent = `Removing... ${i + 1}/${count}`;
 
             try {
-                const response = await fetch(`${API_BASE}/api/duplicates/delete_single?file_path=${encodeURIComponent(dup.path)}`, {
+                const response = await fetch(`${API_BASE}/api/duplicates/delete_single?file_path=${encodeURIComponent(dup.path)}&duplicate_of=${encodeURIComponent(dup.duplicate_of)}`, {
                     method: 'POST'
                 });
 

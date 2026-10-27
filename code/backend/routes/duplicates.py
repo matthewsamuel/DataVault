@@ -3,10 +3,14 @@ DataVault Dashboard - Duplicates Routes
 """
 from fastapi import APIRouter, HTTPException
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import os
 
-from backend.config import Config
-from backend.file_ops import safe_move_with_structure, move_no_overwrite, FileOperationError, CrossDeviceError
+from backend.config import Config, validate_path_in_vault
+from backend.file_ops import (
+    safe_move_with_structure, move_no_overwrite, files_identical, is_inside,
+    FileOperationError, CrossDeviceError,
+)
 
 router = APIRouter()
 
@@ -20,6 +24,11 @@ def init_router(cfg: Config, database):
     global config, db
     config = cfg
     db = database
+
+
+def _protected_folders() -> List[Path]:
+    """Folders the duplicates tool never takes files out of"""
+    return [config.DUPLICATES_FOLDER, config.TRASH_FOLDER, config.CACHE_FOLDER]
 
 @router.get("/api/raw_duplicates/progress")
 async def get_scan_progress_endpoint():
@@ -56,7 +65,7 @@ async def get_duplicates_endpoint() -> Dict[str, Any]:
     }
 
 @router.post("/api/raw_duplicates/undo_last")
-async def undo_last_delete_endpoint() -> Dict[str, Any]:
+def undo_last_delete_endpoint() -> Dict[str, Any]:
     """
     Undo the most recent delete operation.
     Moves files back from RAW_DUPLICATES to RAW.
@@ -88,8 +97,14 @@ async def undo_last_delete_endpoint() -> Dict[str, Any]:
         dst_path = Path(op["dst_path"])  # Current location
         src_path = Path(op["src_path"])  # Original location
         
+        # Re-validate what the database says before moving anything
+        if not is_inside(dst_path, config.DUPLICATES_FOLDER) or not validate_path_in_vault(src_path, config.VAULT_ROOT):
+            errors.append(f"Refused to restore {dst_path}: path outside RAW_DUPLICATES or vault")
+            skipped += 1
+            continue
+        
         # Skip if file no longer exists at destination
-        if not dst_path.exists():
+        if dst_path.is_symlink() or not dst_path.is_file():
             skipped += 1
             continue
         
@@ -142,7 +157,6 @@ async def scan_folder_for_duplicates(folder_path: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Folder not found")
     
     # Validate folder is in vault
-    from backend.config import validate_path_in_vault
     if not validate_path_in_vault(folder, config.VAULT_ROOT):
         raise HTTPException(status_code=403, detail="Folder must be within vault")
     
@@ -165,67 +179,110 @@ async def scan_folder_for_duplicates(folder_path: str) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
 
+def _find_keeper(file_path: Path) -> Optional[str]:
+    """The original the last folder scan paired with this duplicate."""
+    for dup in last_scan_results:
+        if dup.get("path") == str(file_path):
+            return dup.get("duplicate_of")
+    return None
+
+
 @router.post("/api/duplicates/delete_single")
-async def delete_single_duplicate(file_path: str) -> Dict[str, Any]:
+def delete_single_duplicate(file_path: str, duplicate_of: Optional[str] = None) -> Dict[str, Any]:
     """
-    Delete a single duplicate file (move to RAW_DUPLICATES).
+    Move a single duplicate file to RAW_DUPLICATES.
+    
+    Only after checking, right before the move, that the kept original
+    (duplicate_of, or the one from the last scan) still exists and is
+    byte-for-byte identical, so the last copy of a photo can never be moved away.
     """
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
     src_path = Path(file_path)
     
-    if not src_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Validate file is in vault
-    from backend.config import validate_path_in_vault
+    # Validate file is in vault and is a plain file (no folders, no symlinks)
     if not validate_path_in_vault(src_path, config.VAULT_ROOT):
         raise HTTPException(status_code=403, detail="File must be within vault")
+    
+    if not os.path.lexists(src_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    if src_path.is_symlink() or not src_path.is_file():
+        raise HTTPException(status_code=400, detail="Only regular files can be moved")
+    
+    for folder in _protected_folders():
+        if is_inside(src_path, folder):
+            raise HTTPException(status_code=400, detail=f"Refusing files inside {folder.name}")
+    
+    keeper_str = duplicate_of or _find_keeper(src_path)
+    if not keeper_str:
+        raise HTTPException(
+            status_code=409,
+            detail="Unknown original for this file; scan the folder again"
+        )
+    keeper = Path(keeper_str)
+    
+    if not validate_path_in_vault(keeper, config.VAULT_ROOT):
+        raise HTTPException(status_code=403, detail="Original must be within vault")
+    
+    if keeper.is_symlink() or not keeper.is_file() or any(is_inside(keeper, f) for f in _protected_folders()):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Kept original no longer exists: {keeper}. Nothing was moved; scan again"
+        )
+    
+    if os.path.samefile(src_path, keeper):
+        raise HTTPException(status_code=409, detail="File and original are the same file")
+    
+    if not files_identical(src_path, keeper):
+        raise HTTPException(
+            status_code=409,
+            detail=f"File is no longer identical to {keeper.name}. Nothing was moved; scan again"
+        )
     
     # Ensure duplicates folder exists
     config.ensure_duplicates_folder()
     
-    # Create delete run
-    run_id = db.create_delete_run()
-    
     try:
+        # Compare real locations (resolves /var -> /private/var style aliases);
+        # the file itself is not a symlink, so only its folders are resolved
+        real_src = src_path.parent.resolve() / src_path.name
+        
         # Determine which folder to use as base
         # If file is in RAW, use RAW as base, otherwise use vault root
-        if src_path.is_relative_to(config.RAW_FOLDER):
-            base_folder = config.RAW_FOLDER
+        if real_src.is_relative_to(config.RAW_FOLDER.resolve()):
+            base_folder = config.RAW_FOLDER.resolve()
         else:
-            base_folder = config.VAULT_ROOT
+            base_folder = config.VAULT_ROOT.resolve()
         
-        # Move file preserving structure
+        # Move file preserving structure (never overwrites, see file_ops)
         dst_path, was_conflict = safe_move_with_structure(
-            src_path,
+            real_src,
             base_folder,
-            config.DUPLICATES_FOLDER,
+            config.DUPLICATES_FOLDER.resolve(),
             conflict_suffix="DUP"
         )
-        
-        # Record operation for undo
-        db.record_delete_operation(run_id, src_path, dst_path)
-        
-        # Invalidate hash cache for both paths
-        db.invalidate_hash(src_path)
-        db.invalidate_hash(dst_path)
-        
-        return {
-            "run_id": run_id,
-            "moved": True,
-            "src_path": str(src_path),
-            "dst_path": str(dst_path),
-            "was_conflict": was_conflict
-        }
     
     except CrossDeviceError as e:
-        raise HTTPException(status_code=500, detail=f"CRITICAL: Cross-device move blocked for {src_path}: {str(e)}")
+        raise HTTPException(status_code=409, detail=f"CRITICAL: Cross-device move blocked for {src_path}: {str(e)}")
 
     except FileOperationError as e:
         raise HTTPException(status_code=500, detail=f"Failed to move {src_path}: {str(e)}")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error moving {src_path}: {str(e)}")
-
+    # Record operation for undo
+    run_id = db.create_delete_run()
+    db.record_delete_operation(run_id, src_path, dst_path)
+    
+    # Invalidate hash cache for both paths
+    db.invalidate_hash(src_path)
+    db.invalidate_hash(dst_path)
+    
+    return {
+        "run_id": run_id,
+        "moved": True,
+        "src_path": str(src_path),
+        "dst_path": str(dst_path),
+        "duplicate_of": str(keeper),
+        "was_conflict": was_conflict
+    }

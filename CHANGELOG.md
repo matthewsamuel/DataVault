@@ -40,3 +40,13 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   `/api/delete-to-trash` (verplaatste zonder bescherming tegen overschrijven),
   `/api/main-folders` en de losse `dateFixer`-scripts. De duplicatenscan per map, de
   voortgang, annuleren en "laatste ongedaan maken" blijven gewoon werken.
+
+### Duplicaten
+- "Duplicaat verwijderen" en "Alles verwijderen" controleren vlak voor het verplaatsen of het
+  bewaarde origineel nog bestaat en byte voor byte identiek is. Is het origineel intussen
+  verplaatst of gewijzigd, dan wordt er niets verplaatst en krijg je een melding om opnieuw
+  te scannen. Zo kan de laatste kopie van een foto nooit meer weggezet worden.
+- Alleen gewone bestanden worden verplaatst: mappen, snelkoppelingen en bestanden in
+  RAW_DUPLICATES, TRASH of de cache worden geweigerd. (Voorheen kon één verzoek de hele
+  RAW-map verplaatsen.)
+- Een geweigerd verzoek laat geen lege "verwijder-run" meer achter in de undo-geschiedenis.
