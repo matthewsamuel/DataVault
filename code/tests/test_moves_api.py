@@ -41,3 +41,18 @@ def test_move_file_refuses_folders_symlinks_and_outside_paths(client, vault, tmp
 
     r = _move(client, vault / "RAW" / "misc" / "UPPER.JPEG", vault / "RAW" / "misc")
     assert r.status_code == 400
+
+
+def test_removed_dead_routes_are_gone(client, vault):
+    """Broken or unused routes were removed; none of them may still move files."""
+    photo = vault / "RAW" / "misc" / "UPPER.JPEG"
+    for method, url, kwargs in [
+        ("post", "/api/raw_duplicates/scan", {}),
+        ("post", "/api/raw_duplicates/delete", {}),
+        ("post", "/api/delete-to-trash", {"json": {"path": str(photo)}}),
+        ("get", "/api/main-folders", {}),
+    ]:
+        r = getattr(client, method)(url, **kwargs)
+        assert r.status_code in (404, 405), url
+    assert photo.exists()
+    assert not (vault / "TRASH" / "UPPER.JPEG").exists()

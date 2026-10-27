@@ -5,8 +5,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
 from typing import Dict, Any
-import shutil
-from datetime import datetime
 
 from backend.config import Config, validate_path_in_vault, is_video
 from backend.file_ops import move_no_overwrite, is_inside, FileOperationError, CrossDeviceError
@@ -133,62 +131,6 @@ def open_in_finder_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to open in Finder: {str(e)}")
-
-@router.post("/api/delete-to-trash")
-def delete_to_trash_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Move a file to the trash folder.
-    
-    Body: { "path": "/full/path/to/file.jpg" }
-    Returns: { "success": true, "trash_path": "..." }
-    """
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
-    
-    try:
-        file_path_str = body.get("path")
-        
-        if not file_path_str:
-            raise HTTPException(status_code=400, detail="Missing 'path' in request body")
-        
-        file_path = Path(file_path_str)
-        
-        # Validate file path is within vault
-        if not validate_path_in_vault(file_path, config.VAULT_ROOT):
-            raise HTTPException(status_code=403, detail="Access denied: path outside vault")
-        
-        # Check file exists
-        if not file_path.exists() or not file_path.is_file():
-            raise HTTPException(status_code=404, detail="File not found")
-        
-        # Ensure trash folder exists
-        config.TRASH_FOLDER.mkdir(parents=True, exist_ok=True)
-        
-        # Determine trash path with collision handling
-        trash_filename = file_path.name
-        trash_path = config.TRASH_FOLDER / trash_filename
-        
-        # If file already exists in trash, append timestamp
-        if trash_path.exists():
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            name_parts = file_path.stem
-            extension = file_path.suffix
-            trash_filename = f"{name_parts}_{timestamp}{extension}"
-            trash_path = config.TRASH_FOLDER / trash_filename
-        
-        # Move file to trash
-        shutil.move(str(file_path), str(trash_path))
-        
-        return {
-            "success": True,
-            "trash_path": str(trash_path),
-            "message": f"File moved to trash: {trash_filename}"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to move file to trash: {str(e)}")
 
 @router.post("/api/move-file")
 def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:

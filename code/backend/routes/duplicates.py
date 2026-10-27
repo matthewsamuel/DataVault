@@ -47,110 +47,12 @@ async def cancel_scan_endpoint():
     return {"status": "cancelled"}
 
 
-@router.post("/api/raw_duplicates/scan")
-async def scan_duplicates_endpoint() -> Dict[str, Any]:
-    """Scan RAW folder for duplicates"""
-    global last_scan_results
-    
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
-    
-    if not config.RAW_FOLDER.exists():
-        raise HTTPException(status_code=404, detail="RAW folder not found")
-    
-    try:
-        from backend.scanner import find_duplicates
-        
-        duplicates = find_duplicates(config, db)
-        last_scan_results = duplicates
-        
-        return {
-            "total_scanned": len(duplicates),
-            "duplicates_found": len(duplicates),
-            "duplicates": duplicates
-        }
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
-
 @router.get("/api/raw_duplicates")
 async def get_duplicates_endpoint() -> Dict[str, Any]:
     """Get last scan results"""
     return {
         "duplicates_found": len(last_scan_results),
         "duplicates": last_scan_results
-    }
-
-@router.post("/api/raw_duplicates/delete")
-async def delete_duplicates_endpoint() -> Dict[str, Any]:
-    """
-    Delete (move) duplicates from RAW to RAW_DUPLICATES.
-    Records operation in database for undo.
-    """
-    global last_scan_results
-    
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
-    
-    if not last_scan_results:
-        raise HTTPException(status_code=400, detail="No duplicates to delete. Run scan first.")
-    
-    # Ensure duplicates folder exists
-    config.ensure_duplicates_folder()
-    
-    # Create delete run
-    run_id = db.create_delete_run()
-    
-    moved = 0
-    skipped = 0
-    errors = []
-    
-    for dup in last_scan_results:
-        src_path = Path(dup["raw_path"])
-        
-        # Skip if file no longer exists
-        if not src_path.exists():
-            skipped += 1
-            continue
-        
-        try:
-            # Move file preserving structure
-            dst_path, was_conflict = safe_move_with_structure(
-                src_path,
-                config.RAW_FOLDER,
-                config.DUPLICATES_FOLDER,
-                conflict_suffix="DUP"
-            )
-            
-            # Record operation for undo
-            db.record_delete_operation(run_id, src_path, dst_path)
-            
-            # Invalidate hash cache for both paths
-            db.invalidate_hash(src_path)
-            db.invalidate_hash(dst_path)
-            
-            moved += 1
-        
-        except CrossDeviceError as e:
-            errors.append(f"CRITICAL: Cross-device move blocked for {src_path}: {str(e)}")
-            skipped += 1
-
-        except FileOperationError as e:
-            errors.append(f"Failed to move {src_path}: {str(e)}")
-            skipped += 1
-
-        except Exception as e:
-            errors.append(f"Unexpected error moving {src_path}: {str(e)}")
-            skipped += 1
-    
-    # Clear scan results after delete
-    last_scan_results = []
-    
-    return {
-        "run_id": run_id,
-        "moved": moved,
-        "skipped": skipped,
-        "errors": errors
     }
 
 @router.post("/api/raw_duplicates/undo_last")

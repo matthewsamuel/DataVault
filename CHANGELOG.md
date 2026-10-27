@@ -33,3 +33,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Database-migratie 2 voegt de kolom voor het doelpad toe; bestaande beslissingen, streaks
   en ratings blijven behouden. Oude weggooi-beslissingen van vóór deze versie kunnen niet
   automatisch worden teruggezet (het pad werd toen niet bewaard).
+
+### Opgeruimd
+- Verwijderd: de kapotte vault-brede duplicatenscan (`/api/raw_duplicates/scan` en
+  `/api/raw_duplicates/delete`) met de bijbehorende scannercode, het ongebruikte
+  `/api/delete-to-trash` (verplaatste zonder bescherming tegen overschrijven),
+  `/api/main-folders` en de losse `dateFixer`-scripts. De duplicatenscan per map, de
+  voortgang, annuleren en "laatste ongedaan maken" blijven gewoon werken.
