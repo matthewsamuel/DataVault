@@ -729,15 +729,21 @@ def purge_missing(db, keep: Callable[[str], bool] = lambda path: False) -> int:
 # ---------- queries ----------
 
 ORIENTATIONS = ("landscape", "portrait", "square")
+# Ties are broken by id (the order the index found the files in, which follows the
+# sorted walk), not by path: a long path in every sort record made a deep page of a
+# 100k library three times slower. Names keep the path, so equal names go by folder.
 SORTS = {
-    "taken": "m.taken ASC, m.path ASC",
-    "-taken": "m.taken DESC, m.path DESC",
+    "taken": "m.taken ASC, m.id ASC",
+    "-taken": "m.taken DESC, m.id DESC",
     "name": "m.name ASC, m.path ASC",
     "-name": "m.name DESC, m.path DESC",
-    "size": "m.size ASC, m.path ASC",
-    "-size": "m.size DESC, m.path ASC",
+    "size": "m.size ASC, m.id ASC",
+    "-size": "m.size DESC, m.id ASC",
     "added": "m.added_at ASC, m.id ASC",
     "-added": "m.added_at DESC, m.id DESC",
+    # Shows rating (query() joins file_ratings as r); files nobody voted on come last
+    "rating": "r.rating IS NULL, r.rating ASC, m.taken ASC, m.id ASC",
+    "-rating": "r.rating IS NULL, r.rating DESC, m.taken DESC, m.id DESC",
     "path": "m.path ASC",
     "random": "random()",
 }
@@ -767,7 +773,13 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
       min_rating    Shows rating at least this (files never voted on are left out)
       orientation   'landscape' | 'portrait' | 'square' (as shown, after rotation)
       month_day     (month, day): taken on that day of any year (local time)
+      month_days    a list of such (month, day) pairs (any of them)
+      month         1..12: taken in that month of any year (local time)
       exclude_year  leave out this (local) year
+      camera_contains  the camera make or model contains this text (case-insensitive)
+      keurer        'keep': the Keurer kept it; 'undecided': no Keurer decision on this path
+      capture_date  'known': a date from EXIF or the video itself; 'missing': only the
+                    date of the file (birth or modification time), or none
     Hidden (missing) rows are never returned.
     """
     filters = filters or {}
@@ -813,6 +825,10 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
         if filters.get(key):
             clauses.append(f"m.{key} = ? COLLATE NOCASE")
             args.append(filters[key])
+    if filters.get("camera_contains"):
+        pattern = "%" + "".join("\\" + c if c in "%_\\" else c for c in str(filters["camera_contains"])) + "%"
+        clauses.append("(m.camera_model LIKE ? ESCAPE '\\' OR m.camera_make LIKE ? ESCAPE '\\')")
+        args.extend([pattern, pattern])
     if filters.get("has_gps") is True:
         clauses.append("m.lat IS NOT NULL")
     elif filters.get("has_gps") is False:
@@ -836,10 +852,30 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
             raise ValueError(f"orientation must be one of {', '.join(ORIENTATIONS)}")
         op = {"landscape": ">", "portrait": "<", "square": "="}[orientation]
         clauses.append(f"m.width IS NOT NULL AND m.height IS NOT NULL AND m.width {op} m.height")
+    month_days = []
     if filters.get("month_day") is not None:
-        month, day = filters["month_day"]
-        clauses.append("strftime('%m-%d', m.taken, 'unixepoch', 'localtime') = ?")
-        args.append(f"{int(month):02d}-{int(day):02d}")
+        month_days.append(filters["month_day"])
+    month_days.extend(filters.get("month_days") or [])
+    if month_days:
+        any_of("strftime('%m-%d', m.taken, 'unixepoch', 'localtime')",
+               [f"{int(month):02d}-{int(day):02d}" for month, day in month_days])
+    if filters.get("month") is not None:
+        clauses.append("strftime('%m', m.taken, 'unixepoch', 'localtime') = ?")
+        args.append(f"{int(filters['month']):02d}")
+    keurer = filters.get("keurer")
+    if keurer == "keep":
+        clauses.append("EXISTS (SELECT 1 FROM keurer_decisions k WHERE k.path = m.path AND k.decision = 'keep')")
+    elif keurer == "undecided":
+        clauses.append("NOT EXISTS (SELECT 1 FROM keurer_decisions k WHERE k.path = m.path)")
+    elif keurer is not None:
+        raise ValueError("keurer must be 'keep' or 'undecided'")
+    capture = filters.get("capture_date")
+    if capture == "known":
+        clauses.append("m.taken_source IN ('exif', 'video')")
+    elif capture == "missing":
+        clauses.append("(m.taken_source IS NULL OR m.taken_source NOT IN ('exif', 'video'))")
+    elif capture is not None:
+        raise ValueError("capture_date must be 'known' or 'missing'")
     if filters.get("exclude_year") is not None:
         clauses.append("strftime('%Y', m.taken, 'unixepoch', 'localtime') != ?")
         args.append(f"{int(filters['exclude_year']):04d}")
@@ -858,18 +894,34 @@ def query(db, filters: Optional[Dict[str, Any]] = None, sort: str = "taken",
     """
     The media rows matching filters (see _where), sorted (SORTS), one page of them.
     Each row is a dict of ROW_COLUMNS, plus rating and votes when the file was voted on.
+
+    A deferred join: the sort and the offset run over the ids and the sort keys only,
+    and the full rows are read for the ids of this page. Sorting every full row (paths,
+    camera names, ...) up to a deep offset made page 250 of 500 take most of a second.
     """
     if sort not in SORTS:
         raise ValueError(f"sort must be one of {', '.join(SORTS)}")
     where, args = _where(filters)
     limit = max(0, min(int(limit), MAX_LIMIT))
     offset = max(0, int(offset))
+    if not limit:
+        return []
+    order = SORTS[sort]
+    # file_ratings is only needed in the sort for the rating sorts
+    ratings = "LEFT JOIN file_ratings r ON r.path = m.path " if "r." in order else ""
     columns = ", ".join(f"m.{c}" for c in ROW_COLUMNS)
     with db._connect() as conn:
+        ids = [row[0] for row in conn.execute(
+            f"SELECT m.id FROM media m {ratings}WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
+            (*args, limit, offset)).fetchall()]
+        if not ids:
+            return []
         rows = conn.execute(
             f"SELECT {columns}, r.rating, r.votes FROM media m LEFT JOIN file_ratings r ON r.path = m.path "
-            f"WHERE {where} ORDER BY {SORTS[sort]} LIMIT ? OFFSET ?", (*args, limit, offset)).fetchall()
-    return [_item(row) for row in rows]
+            f"WHERE m.id IN ({', '.join('?' * len(ids))})", ids).fetchall()
+    by_id = {row[0]: row for row in rows}
+    # In the order of the sort (a row removed between the two reads is left out)
+    return [_item(by_id[i]) for i in ids if i in by_id]
 
 
 def count(db, filters: Optional[Dict[str, Any]] = None) -> int:
@@ -889,19 +941,73 @@ def date_histogram(db, filters: Optional[Dict[str, Any]] = None) -> List[Tuple[i
     return [tuple(row) for row in rows]
 
 
-def selection_version(db, filters: Optional[Dict[str, Any]] = None) -> str:
+def year_groups(db, filters: Optional[Dict[str, Any]] = None,
+                per_year: int = 60) -> List[Tuple[int, int, List[Dict[str, Any]]]]:
     """
-    A short tag that changes when the rows matching filters change (a row added,
-    removed, hidden, shown again, re-read or moved), and stays the same for writes
-    elsewhere in the index or a pass that changes nothing. For a client that pages
-    through one selection. Ratings are not part of it.
+    The matching rows grouped by local capture year, newest year first:
+    [(year, rows in that year, the first per_year of them by capture time)].
+    For 'on this day' (filters with month_day): one query, whatever the number of years.
+    """
+    where, args = _where(filters)
+    per_year = max(0, min(int(per_year), MAX_LIMIT))
+    columns = ", ".join(f"m.{c}" for c in ROW_COLUMNS)
+    year = "CAST(strftime('%Y', m.taken, 'unixepoch', 'localtime') AS INTEGER)"
+    with db._connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM (SELECT {columns}, r.rating, r.votes, {year} AS y, "
+            f"ROW_NUMBER() OVER (PARTITION BY {year} ORDER BY m.taken, m.path) AS rn, "
+            f"COUNT(*) OVER (PARTITION BY {year}) AS n "
+            f"FROM media m LEFT JOIN file_ratings r ON r.path = m.path WHERE {where} AND m.taken IS NOT NULL) "
+            "WHERE rn <= ? ORDER BY y DESC, rn ASC", (*args, max(per_year, 1))).fetchall()
+    groups: List[Tuple[int, int, List[Dict[str, Any]]]] = []
+    for row in rows:
+        y, n = row[-3], row[-1]
+        if not groups or groups[-1][0] != y:
+            groups.append((y, n, []))
+        if per_year:
+            groups[-1][2].append(_item(row[:-3]))
+    return groups
+
+
+def facets(db) -> Dict[str, Any]:
+    """
+    What a filter bar can offer, over every visible row: the capture years, the
+    cameras (make, model) and the file types, each with how many files have it.
+    """
+    year = "CAST(strftime('%Y', taken, 'unixepoch', 'localtime') AS INTEGER)"
+    with db._connect() as conn:
+        years = conn.execute(f"SELECT {year} AS y, COUNT(*) FROM media WHERE missing = 0 AND taken IS NOT NULL "
+                             "GROUP BY y ORDER BY y DESC").fetchall()
+        cameras = conn.execute(
+            "SELECT camera_make, camera_model, COUNT(*) AS n FROM media WHERE missing = 0 "
+            "AND (camera_make IS NOT NULL OR camera_model IS NOT NULL) "
+            "GROUP BY camera_make, camera_model ORDER BY n DESC, camera_make, camera_model").fetchall()
+        exts = conn.execute("SELECT kind, ext, COUNT(*) AS n FROM media WHERE missing = 0 "
+                            "GROUP BY kind, ext ORDER BY n DESC, ext").fetchall()
+    return {"years": [list(r) for r in years],
+            "cameras": [{"make": make, "model": model, "count": n} for make, model, n in cameras],
+            "exts": [{"kind": kind, "ext": ext, "count": n} for kind, ext, n in exts]}
+
+
+def selection_info(db, filters: Optional[Dict[str, Any]] = None) -> Tuple[int, str]:
+    """
+    (count, version) of the rows matching filters, in one read. The version is a short
+    tag that changes when those rows change (a row added, removed, hidden, shown again,
+    re-read or moved), and stays the same for writes elsewhere in the index or a pass
+    that changes nothing. For a client that pages through one selection. Ratings are
+    not part of it.
     """
     where, args = _where(filters)
     with db._connect() as conn:
         n, ids, newest = conn.execute(
             f"SELECT COUNT(*), COALESCE(SUM(m.id), 0), COALESCE(MAX(m.indexed_at), 0) FROM media m WHERE {where}",
             args).fetchone()
-    return f"{n:x}.{ids:x}.{int(newest * 1000):x}"
+    return n, f"{n:x}.{ids:x}.{int(newest * 1000):x}"
+
+
+def selection_version(db, filters: Optional[Dict[str, Any]] = None) -> str:
+    """The version of selection_info() alone."""
+    return selection_info(db, filters)[1]
 
 
 def timeline_page(db, roots: Sequence[Path], offset: int, limit: Optional[int]) -> List[Tuple]:

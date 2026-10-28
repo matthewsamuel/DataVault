@@ -133,6 +133,7 @@ function jobIsAuto(job) {
 async function jobsLibraryRefresh() {
     if (jobDock.libraryLoading) return;
     jobDock.libraryLoading = true;
+    const lastPass = jobDock.library ? jobDock.library.last_pass_at : undefined;
     try {
         jobDock.library = await jobsRequest('/api/library/status');
     } catch (error) {
@@ -141,6 +142,9 @@ async function jobsLibraryRefresh() {
         jobDock.libraryLoading = false;
     }
     if (typeof homeRenderLibraryStats === 'function') homeRenderLibraryStats(jobDock.library);
+    // Een ronde is klaar: Albums telt en laadt opnieuw (alleen als er iets veranderde)
+    if (lastPass !== undefined && jobDock.library && jobDock.library.last_pass_at !== lastPass
+        && typeof albumsLibraryUpdated === 'function') albumsLibraryUpdated();
     renderJobDock();
 }
 

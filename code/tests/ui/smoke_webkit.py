@@ -44,7 +44,7 @@ VENV_PYTHON = CODE_DIR / "venv" / "bin" / "python"
 BIG_FOLDER = "Groot"
 BIG_FILES = 1500
 MAX_THUMBS_ON_OPEN = 100
-VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings"]
+VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings", "albums"]
 A11Y_CHECKS = Path(__file__).with_name("a11y_checks.js")
 
 
@@ -493,6 +493,181 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.input_value("#global-search") == "", "search: 'Zoekopdracht wissen' left the search")
             page.keyboard.press("Escape")
 
+            # Albums: the library with filters (a virtualized grid that loads per page), smart albums
+            # saved from the filters, an address that can be bookmarked, and 'op deze dag' per year
+            # (the server indexes the vault by itself; each poll asks once more whether it is done)
+            page.wait_for_function("fetchJSON(`${API_BASE}/api/library/status`).then(s => { window.__libReady = s.ready; })"
+                                   " && window.__libReady === true", timeout=30000, polling=500)
+            tiles = "document.querySelectorAll('#albums-content .albums-tile').length"
+            step("albums: open", lambda: (page.keyboard.press("g"), page.keyboard.press("a"),
+                                          page.wait_for_selector("#albums-content .albums-tile img", timeout=10000)), 0.6)
+            total = page.evaluate("fetchJSON(`${API_BASE}/api/library/browse?limit=1`).then(d => d.total)")
+            count = page.evaluate("document.querySelector('#albums-count .albums-count-number').textContent")
+            expect(total > BIG_FILES and count == f"{total:,}".replace(",", "."),
+                   f"albums: {count!r} shown, the library has {total}")
+            expect(page.evaluate(tiles) < 300, f"albums: {page.evaluate(tiles)} tiles drawn on open")
+            step("albums: scroll to the end", lambda: page.evaluate(
+                "document.getElementById('albums-scroll').scrollTop = 1e7"), 1.2)
+            end = page.evaluate("(() => { const t = [...document.querySelectorAll('#albums-content .albums-tile:not(.is-placeholder)')];"
+                                " return [t.length, Math.max(...t.map(x => +x.dataset.index))]; })()")
+            expect(end[0] < 300 and end[1] == total - 1, f"albums: at the end {end} (of {total})")
+            page.evaluate("document.getElementById('albums-scroll').scrollTop = 0")
+            page.wait_for_timeout(400)
+            # Keyboard: arrows and Enter open the viewer; at the end of a page it loads the next one
+            step("albums: arrows and Enter", lambda: (
+                page.focus("#albums-content .albums-tile[tabindex='0']"), page.keyboard.press("ArrowRight"),
+                page.keyboard.press("Enter")), 0.6)
+            expect(page.evaluate("isViewerOpen() && viewer.index") == 1, "albums: Enter did not open the second tile")
+            step("albums: viewer past the first page", lambda: page.evaluate(
+                "viewer.index = viewer.items.length - 1; renderViewerFile(); nextFile()"), 1.2)
+            expect(page.evaluate("viewer.index") == 200 and page.evaluate("viewer.items.length") >= 400,
+                   f"albums: the viewer did not go on into the next page ({page.evaluate('[viewer.index, viewer.items.length]')})")
+            step("albums: close the viewer", lambda: page.keyboard.press("Escape"), 0.4)
+            expect(page.evaluate("document.activeElement.classList.contains('albums-tile')"),
+                   "albums: focus did not go back to the grid after the viewer")
+            # Filters: a kind pill and a year narrow the grid and end up in the address
+            step("albums: only videos", lambda: page.click("#albums-kinds [data-kind='video']"), 0.8)
+            videos = page.evaluate("fetchJSON(`${API_BASE}/api/library/browse?kind=video&limit=1`).then(d => d.total)")
+            expect(page.evaluate("location.hash") == "#albums?kind=video" and page.evaluate(tiles) == videos,
+                   f"albums: kind filter gave {page.evaluate('location.hash')} with {page.evaluate(tiles)} tiles (expected {videos})")
+            step("albums: photos of 2019", lambda: (
+                page.click("#albums-kinds [data-kind='video']"), page.click("#albums-kinds [data-kind='photo']"),
+                page.select_option("#albums-when", "y:2019")), 0.8)
+            expect(page.evaluate("location.hash") == "#albums?kind=photo&year=2019" and page.evaluate(tiles) == 4,
+                   f"albums: photos of 2019 gave {page.evaluate('location.hash')} and {page.evaluate(tiles)} tiles")
+            # Save as a smart album (Enter in the name field), then change it and delete it again
+            step("albums: save as album", lambda: (page.click("#albums-save-new"),
+                                                   page.wait_for_function("document.activeElement.id === 'album-name'")), 0.3)
+            expect_focus_trapped("modal-album", "albums: save window")
+            page.focus("#album-name")
+            step("albums: Enter saves", lambda: (page.keyboard.press("Meta+A"), page.keyboard.type("Zomer smoke"),
+                                                 page.keyboard.press("Enter")), 1.0)
+            saved = page.evaluate("[location.hash, document.getElementById('albums-title-text').textContent,"
+                                  " [...document.querySelectorAll('#albums-side-albums .albums-side-name')].map(e => e.textContent)]")
+            expect(saved[0].startswith("#albums/album/") and saved[1] == "Zomer smoke" and "Zomer smoke" in saved[2],
+                   f"albums: saving the album gave {saved}")
+            step("albums: bookmark reload", lambda: (page.reload(), page.wait_for_load_state("networkidle"),
+                                                     page.wait_for_selector("#albums-content .albums-tile img", timeout=10000)), 0.5)
+            expect(page.evaluate("[currentMainView(), location.hash, document.getElementById('albums-title-text').textContent]")
+                   == ["albums", saved[0], "Zomer smoke"], "albums: a bookmarked album did not open again")
+            step("albums: change the album", lambda: page.click("#albums-kinds [data-kind='video']"), 0.8)
+            expect(page.is_visible("#albums-save-changes") and "?" in page.evaluate("location.hash"),
+                   "albums: a changed album offers no 'Wijzigingen bewaren'")
+            step("albums: undo the change", lambda: page.click("#albums-header-actions .btn-ghost"), 0.8)
+            step("albums: delete the album", lambda: (page.click("#albums-edit"), page.click("#album-delete"),
+                                                      page.click("#album-delete")), 1.0)
+            expect("Zomer smoke" not in page.evaluate("[...document.querySelectorAll('#albums-side-albums .albums-side-name')]"
+                                                      ".map(e => e.textContent)"), "albums: the album was not deleted")
+            step("albums: folder window", lambda: (page.click("#albums-folder-btn"),
+                                                   page.wait_for_selector("#albums-folder-tree .folder-item", timeout=5000)), 0.3)
+            expect_focus_trapped("modal-albums-folder", "albums: folder window")
+            step("albums: close the folder window", lambda: page.keyboard.press("Escape"), 0.3)
+            # Op deze dag: from Home, and for 14 July (the beach photos of 2019), per year
+            step("albums: 'Alles bekijken' on Home", lambda: (page.evaluate("switchMainView('home')"),
+                                                             page.click(".otd-see-all")), 0.8)
+            expect(page.evaluate("[currentMainView(), location.hash]") == ["albums", "#albums/op-deze-dag"],
+                   f"albums: 'Alles bekijken' opened {page.evaluate('location.hash')}")
+            step("albums: 14 July", lambda: (page.evaluate("location.hash = '#albums/op-deze-dag/07-14'"),
+                                             page.wait_for_selector(".albums-otd-year", timeout=5000)), 0.6)
+            otd = page.evaluate("""(async () => {
+                const d = await fetchJSON(`${API_BASE}/api/library/on-this-day?date=07-14`);
+                return {api: d.years.map(g => [g.year, g.items.length]),
+                        shown: [...document.querySelectorAll('.albums-otd-year')].map(s =>
+                            [+s.querySelector('.albums-otd-year-number').textContent, s.querySelectorAll('.albums-tile').length]),
+                        title: document.querySelector('.albums-otd-year-title span').textContent};
+            })()""")
+            expect(otd["shown"] == otd["api"] and otd["api"] and otd["api"][0][0] == 2019
+                   and otd["title"].endswith("jaar geleden"), f"albums: op deze dag {otd}")
+            step("albums: next day with the button", lambda: page.click("[aria-label='Volgende dag']"), 0.6)
+            expect(page.evaluate("location.hash") == "#albums/op-deze-dag/07-15", "albums: the next day did not open")
+            step("albums: op deze dag in the viewer", lambda: (
+                page.evaluate("location.hash = '#albums/op-deze-dag/07-14'"),
+                page.wait_for_selector(".albums-otd-year .albums-tile", timeout=5000),
+                page.focus(".albums-otd-year .albums-tile[tabindex='0']"), page.keyboard.press("ArrowRight"),
+                page.keyboard.press("Enter")), 0.6)
+            expect(page.evaluate("isViewerOpen() && viewer.index === 1 && viewer.items.length") == sum(n for _, n in otd["api"]),
+                   "albums: a photo of op deze dag did not open in the viewer with all its photos")
+            step("albums: close the photo", lambda: page.keyboard.press("Escape"), 0.4)
+            # PageDown/PageUp in op deze dag (as in the grid): never off to the page
+            step("albums: PageDown in op deze dag", lambda: (
+                page.focus(".albums-otd-year .albums-tile[tabindex='0']"), page.keyboard.press("End"),
+                page.keyboard.press("PageUp"), page.wait_for_timeout(200)), 0.2)
+            expect(page.evaluate("document.activeElement.classList.contains('albums-tile') && document.activeElement.dataset.index") == "0",
+                   f"albums: PageUp in op deze dag left the focus on {page.evaluate('document.activeElement.outerHTML.slice(0, 80)')}")
+            # 'Alle N bekijken' opens exactly the N of that year: the page asks for one photo per
+            # year here, so the button shows, and the grid must then count the year's total
+            page.route("**/api/library/on-this-day*", lambda route: route.continue_(
+                url=route.request.url.replace("per_year=60", "per_year=1")))
+            try:
+                step("albums: 'Alle N bekijken'", lambda: (
+                    page.evaluate("albumsOtdShift(0)"),
+                    page.wait_for_selector(".albums-otd-year-head .btn", timeout=5000),
+                    page.click(".albums-otd-year-head .btn"),
+                    page.wait_for_selector("#albums-count .albums-count-number", timeout=5000),
+                    page.wait_for_timeout(600)), 0.2)
+            except PlaywrightError as e:
+                problems.append(f"albums: 'Alle N bekijken' did not show or open: {str(e).splitlines()[0]}")
+            page.unroute("**/api/library/on-this-day*")
+            all_n = page.evaluate("""[location.hash, (document.querySelector('#albums-count .albums-count-number') || {}).textContent,
+                                      document.activeElement.id]""")
+            year_total = sum(n for y, n in otd["api"] if y == 2019)
+            expect(all_n[0].startswith("#albums?") and "capture_date=known" in all_n[0] and all_n[1] == str(year_total)
+                   and all_n[2] == "albums-title", f"albums: 'Alle {year_total} bekijken' opened {all_n}")
+
+            # Review fixes: bad bookmarks, an inline date check, the iPhone camera, three header
+            # buttons on one row at 1024, the short search text, focus after removing a chip
+            step("albums: a bookmark with year=abc", lambda: (
+                page.evaluate("location.hash = '#albums?kind=photo&year=abc'"), page.wait_for_timeout(900)), 0.2)
+            bad = page.evaluate("""[location.hash, !!document.querySelector('#albums-state .empty-state-error'),
+                                    [...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Adres aangepast'))]""")
+            expect(bad == ["#albums?kind=photo", False, True], f"albums: year=abc gave {bad}")
+            step("albums: an end date before the start", lambda: (
+                page.select_option("#albums-when", "range"),
+                page.evaluate("""(() => { const set = (id, v) => { const el = document.getElementById(id); el.value = v;
+                                  el.dispatchEvent(new Event('change')); };
+                                  set('albums-from', '2020-01-01'); set('albums-to', '2019-01-01'); })()"""),
+                page.wait_for_timeout(600)), 0.2)
+            rng = page.evaluate("""[(document.getElementById('albums-range-error') || {}).hidden, location.hash,
+                                    !!document.querySelector('#albums-state .empty-state-error'),
+                                    document.querySelector('#albums-when').getBoundingClientRect().top
+                                    === document.querySelector('#albums-sort').getBoundingClientRect().top]""")
+            expect(rng == [False, "#albums?kind=photo&date_from=2020-01-01", False, True],
+                   f"albums: a reversed date range gave {rng}")
+            step("albums: remove a chip with the keyboard", lambda: (
+                page.focus("#albums-chips .chip-remove"), page.keyboard.press("Enter"), page.wait_for_timeout(500)), 0.2)
+            expect(page.evaluate("document.activeElement !== document.body && !!document.activeElement.closest('#albums-browse')"),
+                   f"albums: focus fell to {page.evaluate('document.activeElement.tagName')} after removing a chip")
+            iphone = page.evaluate("""(async () => (await fetchJSON(`${API_BASE}/api/library/albums`))
+                                          .albums.find(a => a.builtin === 'iphone').id)()""")
+            step("albums: the iPhone album", lambda: (
+                page.evaluate(f"location.hash = '#albums/album/{iphone}'"), page.wait_for_timeout(800)), 0.2)
+            expect(page.evaluate("document.getElementById('albums-camera').selectedOptions[0].textContent") == "Bevat 'iPhone'",
+                   "albums: the camera list does not show the iPhone filter")
+            side_names = "[...document.querySelectorAll('#albums-side-albums .albums-side-name')].map(e => e.textContent)"
+            try:
+                step("albums: hide the iPhone album", lambda: (
+                    page.click("#albums-edit"), page.click("#album-hidden-row"), page.click("#album-save"),
+                    page.wait_for_selector(".toast .toast-action", timeout=5000)), 0.3)
+            except PlaywrightError as e:
+                problems.append(f"albums: hiding showed no toast with an action: {str(e).splitlines()[0]}")
+            expect("iPhone" not in page.evaluate(side_names) and page.evaluate("document.activeElement.id") == "albums-title",
+                   f"albums: hiding left {page.evaluate(side_names)} with focus on {page.evaluate('document.activeElement.id')}")
+            try:
+                step("albums: undo hiding from the toast", lambda: (
+                    page.click(".toast .toast-action", timeout=5000), page.wait_for_timeout(800)), 0.2)
+            except PlaywrightError:
+                problems.append("albums: no 'Ongedaan maken' in a toast after hiding")
+            expect("iPhone" in page.evaluate(side_names), f"albums: 'Ongedaan maken' left {page.evaluate(side_names)}")
+            page.set_viewport_size({"width": 1024, "height": 768})
+            step("albums: a changed album at 1024", lambda: (
+                page.click("#albums-kinds [data-kind='photo']"), page.wait_for_timeout(600)), 0.2)
+            head = page.evaluate("""[[...document.querySelectorAll('#albums-header-actions button')].map(b => Math.round(b.getBoundingClientRect().top)),
+                                     document.getElementById('global-search').placeholder]""")
+            expect(len(head[0]) == 3 and len(set(head[0])) == 1 and head[1] == "Zoeken…",
+                   f"albums: at 1024 the header buttons sit at {head[0]}, search says {head[1]!r}")
+            page.set_viewport_size({"width": 1400, "height": 900})
+            page.evaluate("albumsShow(null, {}, '-taken')")
+
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
             # and a screenshot to look at
             shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
@@ -509,10 +684,15 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     if theme == "light":
                         for control in page.evaluate("__unnamedControls()"):
                             problems.append(f"unnamed control on {view}: {control}")
-                # The Spotify windows (DNA and an explanation) too
-                for name, opener, closer in (("spotify-dna", "showDnaExplanation()", "closeDnaModal()"),
-                                             ("spotify-uitleg", "showInsightExplanation('record_day')", "closeInsightModal()")):
-                    page.evaluate(f"switchMainView('spotify'); {opener}")
+                # The Spotify windows (DNA and an explanation), 'op deze dag' and the album window too
+                for name, opener, closer in (("spotify-dna", "switchMainView('spotify'); showDnaExplanation()", "closeDnaModal()"),
+                                             ("spotify-uitleg", "switchMainView('spotify'); showInsightExplanation('record_day')",
+                                              "closeInsightModal()"),
+                                             ("albums-otd", "albumsOpenOnThisDay(7, 14)", "albumsShow(null, {})"),
+                                             ("albums-album", "albumsShow(null, {kind: ['photo']}); "
+                                              "setTimeout(() => document.getElementById('albums-save-new').click(), 300)",
+                                              "albumsCloseDialog()")):
+                    page.evaluate(opener)
                     page.wait_for_timeout(500)
                     page.screenshot(path=str(shots / f"{name}_{theme}.png"))
                     page.add_script_tag(path=str(A11Y_CHECKS))

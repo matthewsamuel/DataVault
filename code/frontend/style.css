@@ -1558,6 +1558,12 @@ textarea.input {
     line-height: var(--lh-snug);
 }
 
+/* Een knop in de melding (showToast(..., action)), bijv. 'Ongedaan maken' */
+.toast-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
 /* ---------- Lege, mislukte en ladende stukken (ui.js) ---------- */
 
 .empty-state {
@@ -3493,6 +3499,10 @@ a.breadcrumb-item:hover {
     .theme-button .theme-caret {
         display: none;
     }
+
+    .search-input {
+        width: 216px;
+    }
 }
 
 @media (max-width: 1240px) {
@@ -3506,9 +3516,9 @@ a.breadcrumb-item:hover {
     }
 }
 
-/* Onder 1180 px alleen het logo, zodat er tussen het menu en het zoekveld altijd minstens
+/* Onder 1280 px alleen het logo, zodat er tussen het menu en het zoekveld altijd minstens
    --space-xl lucht blijft (zie navgap in de smoke-test) */
-@media (max-width: 1180px) {
+@media (max-width: 1280px) {
     .nav-brand-name {
         display: none;
     }
@@ -3526,6 +3536,28 @@ a.breadcrumb-item:hover {
 
     .search-input {
         width: 184px;
+    }
+}
+
+/* Onder 1100 px (tien onderdelen sinds Albums): iets smallere tabs en een kort zoekveld zonder
+   de /-hint, zodat het hele menu blijft passen (navgap in de smoke-test) */
+@media (max-width: 1100px) {
+    .nav-tab {
+        padding: 0 var(--space-sm);
+    }
+
+    .nav-tab.active::after {
+        left: var(--space-sm);
+        right: var(--space-sm);
+    }
+
+    .search-input {
+        width: 148px;
+        padding-right: var(--space-md);
+    }
+
+    .nav-search .search-kbd {
+        display: none;
     }
 }
 
@@ -8884,5 +8916,694 @@ button.otd-settings-icon:hover {
 
     .settings-row-label {
         min-width: 0;
+    }
+}
+
+/* ==================== ALBUMS: FILTERS, SLIMME ALBUMS, OP DEZE DAG ==================== */
+/* library.js. Zijbalk met de bibliotheek en de slimme albums; rechts een kop met filters en een
+   gevirtualiseerd raster dat binnenin scrollt (vensterhoog, zoals de tijdlijn), of 'op deze dag'
+   per jaar. Alles uit de gedeelde bouwstenen: .page-header, .pill, .select, .chip, .thumb-tile. */
+
+.main-layout:has(#section-albums.active),
+.main-content:has(> #section-albums.active) {
+    min-height: 0;
+}
+
+/* Vensterhoog en binnenin scrollend: de ruimte voor het takenpaneel zit onderaan in de lijsten */
+.main-content:has(> #section-albums.active) {
+    padding-bottom: 0;
+}
+
+#section-albums.active {
+    overflow: hidden;
+}
+
+.albums-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+}
+
+/* ---- Zijbalk ---- */
+
+.albums-sidebar {
+    width: 240px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xl);
+    padding: var(--space-2xl) var(--space-md) max(var(--space-4xl), var(--job-dock-space, 0px));
+    overflow-y: auto;
+    background: var(--surface-card);
+    border-right: 1px solid var(--border-hairline);
+}
+
+.albums-side-group > .albums-side-title {
+    display: block;
+    padding: 0 var(--space-sm);
+    margin-bottom: var(--space-sm);
+}
+
+.albums-side-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-left: var(--space-sm);
+    margin-bottom: var(--space-xs);
+}
+
+.albums-side-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.albums-side-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    height: var(--control-h);
+    padding: 0 var(--space-sm);
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.albums-side-item:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+}
+
+.albums-side-item.active {
+    background: var(--accent-subtle);
+    color: var(--accent-text);
+}
+
+.albums-side-item:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.albums-side-icon {
+    width: 16px;
+    flex: none;
+    text-align: center;
+    font-size: var(--icon-sm);
+    color: var(--text-tertiary);
+}
+
+.albums-side-item.active .albums-side-icon {
+    color: var(--accent-text);
+}
+
+.albums-side-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.albums-side-count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    color: var(--text-tertiary);
+}
+
+.albums-side-item.active .albums-side-count {
+    color: var(--accent-text);
+}
+
+/* Een verborgen album (alleen te zien na 'Verborgen albums tonen'): rustiger, met een oogje */
+.albums-side-item.is-hidden .albums-side-name {
+    color: var(--text-tertiary);
+}
+
+.albums-side-flag {
+    font-size: var(--icon-xs);
+    color: var(--text-tertiary);
+}
+
+.albums-side-note {
+    margin: 0;
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-snug);
+    color: var(--text-secondary);
+}
+
+.albums-side-extra {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-sm) 0;
+}
+
+.albums-side-link {
+    font-size: var(--fs-xs);
+}
+
+.albums-side-list > .albums-side-link {
+    align-self: flex-start;
+    margin-left: var(--space-sm);
+}
+
+/* ---- Hoofdvlak ---- */
+
+.albums-main {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.albums-pane {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.albums-pane[hidden] {
+    display: none;
+}
+
+.albums-top {
+    flex: none;
+    width: 100%;
+    max-width: var(--page-max);
+    margin: 0 auto;
+    padding: var(--space-2xl) var(--page-gutter) var(--space-md);
+}
+
+.albums-header {
+    flex-wrap: wrap;
+    margin-bottom: var(--space-lg);
+}
+
+/* De titel krijgt minstens 320 px; passen de knoppen er dan niet naast, dan gaan ze samen
+   (als één rij) onder de titel, in plaats van één knop alleen op een tweede regel */
+.albums-header > div:first-child {
+    flex: 1 1 320px;
+    min-width: 0;
+}
+
+.albums-header-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: var(--space-sm);
+}
+
+.albums-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.albums-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.albums-more {
+    padding: var(--space-sm);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+}
+
+.albums-more[hidden],
+.albums-range[hidden],
+.albums-clear[hidden],
+.albums-more-count[hidden],
+.albums-loading[hidden],
+.albums-otd-folders[hidden],
+.album-hidden-row[hidden],
+#album-delete[hidden] {
+    display: none;
+}
+
+.albums-kinds {
+    display: inline-flex;
+    gap: var(--space-xs);
+}
+
+.albums-filter-spacer {
+    flex: 1;
+}
+
+/* Het label blijft bij zijn keuzelijst, ook als de rij afbreekt */
+.albums-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-left: auto;
+}
+
+.albums-sort-label {
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.albums-range {
+    gap: var(--space-sm);
+}
+
+.albums-range-label {
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.albums-range .input {
+    width: 150px;
+}
+
+/* Een begindatum na de einddatum: meteen hier gezegd, het raster blijft staan */
+.albums-range-error {
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--danger-text);
+}
+
+.albums-range-error[hidden],
+.albums-new-hint[hidden] {
+    display: none;
+}
+
+.albums-range .input[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
+/* '+ Nieuw slim album': de uitleg onder de filters, niet als melding over de knoppen heen */
+.albums-new-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+}
+
+.albums-new-hint > i {
+    color: var(--accent-text);
+}
+
+.albums-new-hint-text {
+    flex: 1;
+}
+
+.albums-folder-btn span {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.albums-more-count {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 var(--space-xs);
+    justify-content: center;
+}
+
+.albums-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: 26px;
+}
+
+.albums-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+}
+
+.albums-chips:empty {
+    display: none;
+}
+
+.albums-chip-text {
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.albums-clear {
+    font-size: var(--fs-xs);
+}
+
+.albums-count {
+    order: -1;
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.albums-count-number {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+/* ---- Raster (gevirtualiseerd) ---- */
+
+.albums-scroll {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.albums-content {
+    position: relative;
+    width: 100%;
+    max-width: var(--page-max);
+    margin: 0 auto;
+    /* De hoogte zet library.js; onderaan vrij voor het takenpaneel */
+    box-sizing: content-box;
+    padding-bottom: max(var(--space-4xl), var(--job-dock-space, 0px));
+}
+
+.albums-state,
+.albums-loading {
+    max-width: var(--page-max);
+    margin: 0 auto;
+    padding: 0 var(--page-gutter);
+}
+
+.albums-state {
+    padding-top: var(--space-3xl);
+}
+
+.albums-state:empty {
+    display: none;
+}
+
+.albums-row {
+    position: absolute;
+    left: var(--page-gutter);
+    right: var(--page-gutter);
+    display: grid;
+}
+
+.albums-tile {
+    width: 100%;
+    height: 100%;
+}
+
+.albums-tile.is-placeholder {
+    cursor: default;
+}
+
+.albums-tile.is-placeholder:hover {
+    transform: none;
+    box-shadow: none;
+}
+
+.albums-tile-badge {
+    position: absolute;
+    top: var(--space-sm);
+    left: var(--space-sm);
+    z-index: 2;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    background: var(--media-scrim);
+    color: var(--on-media);
+    font-size: var(--fs-2xs);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+}
+
+.albums-tile-caption {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    opacity: 0;
+    transition: opacity var(--duration-base) var(--ease-out);
+}
+
+.albums-tile:hover .albums-tile-caption,
+.albums-tile:focus-visible .albums-tile-caption {
+    opacity: 1;
+}
+
+.albums-tile-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.albums-tile-date {
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-regular);
+    color: var(--on-media-muted);
+}
+
+/* ---- Op deze dag ---- */
+
+.albums-otd-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.albums-otd-scroll > * {
+    max-width: var(--page-max);
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: var(--page-gutter);
+    padding-right: var(--page-gutter);
+}
+
+.albums-otd-scroll > .page-header {
+    padding-top: var(--space-2xl);
+}
+
+.albums-otd-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.albums-otd-folders {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs);
+    margin-top: calc(-1 * var(--space-md));
+    margin-bottom: var(--space-lg);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.albums-otd-groups {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xl);
+    padding-bottom: max(var(--space-4xl), var(--job-dock-space, 0px));
+}
+
+.albums-otd-year-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+}
+
+.albums-otd-year-title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    margin: 0;
+    font-size: var(--fs-xl);
+    font-weight: var(--fw-semibold);
+    letter-spacing: var(--tracking-tight);
+    color: var(--text-primary);
+}
+
+.albums-otd-year-number {
+    font-size: var(--fs-md);
+    font-weight: var(--fw-medium);
+    color: var(--text-tertiary);
+}
+
+.albums-otd-year-meta {
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+}
+
+.albums-otd-year-head .btn {
+    margin-left: auto;
+    align-self: center;
+}
+
+.albums-otd-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--space-md);
+}
+
+.albums-otd-grid .albums-tile {
+    height: auto;
+    aspect-ratio: 1;
+}
+
+/* ---- Venster: een album bewaren of bewerken ---- */
+
+.album-dialog {
+    max-width: 520px;
+}
+
+.album-dialog > form {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.album-dialog-body {
+    gap: var(--space-sm);
+}
+
+.album-field-label {
+    margin-top: var(--space-sm);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    color: var(--text-secondary);
+}
+
+.album-field-label:first-child {
+    margin-top: 0;
+}
+
+.album-icons {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: var(--space-xs);
+}
+
+.album-icon-choice {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: var(--control-h);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+
+.album-icon-choice:hover {
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+}
+
+.album-icon-choice input {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.album-icon-choice:has(input:checked) {
+    border-color: var(--accent-border);
+    background: var(--accent-subtle);
+    color: var(--accent-text);
+}
+
+.album-icon-choice:has(input:focus-visible) {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.album-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.album-filters-none,
+.album-filters-sort {
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.album-note {
+    margin: var(--space-sm) 0 0;
+    font-size: var(--fs-xs);
+    line-height: var(--lh-snug);
+    color: var(--text-secondary);
+}
+
+.album-hidden-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+}
+
+.album-error {
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--danger-text);
+}
+
+.album-error:empty {
+    display: none;
+}
+
+.album-dialog-footer,
+.albums-folder-footer {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.albums-folder-sub {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+/* Home: 'Alles bekijken' naast het tandwiel van Foto op deze dag */
+.otd-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+@media (max-width: 900px) {
+    .albums-sidebar {
+        width: 200px;
+        padding-left: var(--space-sm);
+        padding-right: var(--space-sm);
     }
 }

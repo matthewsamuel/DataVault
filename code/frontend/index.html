@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=51">
+    <link rel="stylesheet" href="style.css?v=53">
 </head>
 
 <body>
@@ -48,6 +48,9 @@
                 </button>
                 <button class="nav-tab" data-view="timeline" onclick="switchMainView('timeline')" title="Tijdlijn (7)">
                     Tijdlijn
+                </button>
+                <button class="nav-tab" data-view="albums" onclick="switchMainView('albums')" title="Albums: filters, slimme albums en op deze dag (g a)">
+                    Albums
                 </button>
                 <button class="nav-tab" data-view="recovery" onclick="switchMainView('recovery')" title="Herstelcentrum: alles terugzetten wat de app verplaatste (8)">
                     Herstelcentrum
@@ -131,10 +134,16 @@
                                 <div class="dynamic-widget" id="widget-photo-otd">
                                     <div class="otd-header-flex">
                                         <h4><i class="fas fa-camera-retro" aria-hidden="true"></i> Foto op deze dag</h4>
-                                        <button type="button" class="otd-settings-icon" onclick="toggleOtdSettings(event)"
-                                            title="Kies de mappen" aria-label="Mappen voor 'foto op deze dag' kiezen">
-                                            <i class="fas fa-sliders" aria-hidden="true"></i>
-                                        </button>
+                                        <div class="otd-header-actions">
+                                            <button type="button" class="btn btn-ghost btn-sm otd-see-all" onclick="albumsOpenOnThisDay()"
+                                                title="Alle foto's en video's van deze dag, per jaar (Albums)">
+                                                Alles bekijken <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                                            </button>
+                                            <button type="button" class="otd-settings-icon" onclick="toggleOtdSettings(event)"
+                                                title="Kies de mappen" aria-label="Mappen voor 'foto op deze dag' kiezen">
+                                                <i class="fas fa-sliders" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
                                     </div>
                                     <div class="widget-content otd-widget-envelope">
                                         <div class="loading-spinner" id="photo-otd-loading"></div>
@@ -630,6 +639,117 @@
             </div>
         </div>
 
+        <!-- ALBUMS: de bibliotheek met filters, slimme albums en 'op deze dag' (library.js) -->
+        <div id="section-albums" class="section hidden">
+            <div class="albums-layout">
+                <nav class="albums-sidebar" aria-label="Albums">
+                    <div class="albums-side-group">
+                        <div class="overline albums-side-title">Bibliotheek</div>
+                        <div class="albums-side-list" id="albums-side-library"></div>
+                    </div>
+                    <div class="albums-side-group">
+                        <div class="albums-side-head">
+                            <span class="overline albums-side-title">Slimme albums</span>
+                            <button type="button" class="btn btn-ghost btn-icon btn-sm" onclick="albumsNew()"
+                                title="Nieuw slim album: kies filters en bewaar ze" aria-label="Nieuw slim album">
+                                <i class="fas fa-plus" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                        <div class="albums-side-list" id="albums-side-albums"></div>
+                    </div>
+                </nav>
+
+                <div class="albums-main">
+                    <!-- Bladeren: kop, filters en een gevirtualiseerd raster -->
+                    <div class="albums-pane" id="albums-browse">
+                        <div class="albums-top">
+                            <div class="page-header albums-header">
+                                <div>
+                                    <h1 class="page-title" id="albums-title" tabindex="-1"><i class="fas fa-photo-film" id="albums-title-icon" aria-hidden="true"></i> <span id="albums-title-text">Alles</span></h1>
+                                    <p class="page-subtitle" id="albums-subtitle"></p>
+                                </div>
+                                <div class="albums-header-actions" id="albums-header-actions"></div>
+                            </div>
+
+                            <div class="albums-filters" role="group" aria-label="Filters">
+                                <div class="albums-filter-row">
+                                    <div class="albums-kinds" id="albums-kinds" role="group" aria-label="Soort"></div>
+                                    <select class="select select-sm" id="albums-when" aria-label="Wanneer"></select>
+                                    <select class="select select-sm" id="albums-month" aria-label="Maand"></select>
+                                    <button type="button" class="pill albums-folder-btn" id="albums-folder-btn" aria-haspopup="dialog">
+                                        <i class="fas fa-folder" aria-hidden="true"></i> <span id="albums-folder-label">Hele archief</span>
+                                    </button>
+                                    <button type="button" class="pill" id="albums-more-btn" aria-expanded="false" aria-controls="albums-more">
+                                        <i class="fas fa-sliders" aria-hidden="true"></i> Meer filters
+                                        <span class="badge badge-accent albums-more-count" id="albums-more-count" hidden></span>
+                                    </button>
+                                    <span class="albums-filter-spacer"></span>
+                                    <span class="albums-sort">
+                                        <label class="albums-sort-label" for="albums-sort">Sorteren</label>
+                                        <select class="select select-sm" id="albums-sort"></select>
+                                    </span>
+                                </div>
+                                <!-- Van… tot…: op een eigen rij, zodat de rij erboven niet afbreekt -->
+                                <div class="albums-filter-row albums-range" id="albums-range" role="group" aria-label="Periode" hidden>
+                                    <label class="albums-range-label" for="albums-from">Van</label>
+                                    <input type="date" class="input input-sm" id="albums-from" aria-label="Van (datum)" aria-describedby="albums-range-error">
+                                    <label class="albums-range-label" for="albums-to">tot en met</label>
+                                    <input type="date" class="input input-sm" id="albums-to" aria-label="Tot en met (datum)" aria-describedby="albums-range-error">
+                                    <p class="albums-range-error" id="albums-range-error" role="alert" hidden></p>
+                                </div>
+                                <div class="albums-filter-row albums-more" id="albums-more" hidden>
+                                    <select class="select select-sm" id="albums-camera" aria-label="Camera"></select>
+                                    <select class="select select-sm" id="albums-ext" aria-label="Bestandstype"></select>
+                                    <select class="select select-sm" id="albums-has-gps" aria-label="Locatie"></select>
+                                    <select class="select select-sm" id="albums-rating" aria-label="Shows-score"></select>
+                                    <select class="select select-sm" id="albums-keurer" aria-label="Keurer"></select>
+                                    <select class="select select-sm" id="albums-orientation" aria-label="Oriëntatie"></select>
+                                    <select class="select select-sm" id="albums-capture-date" aria-label="Opnamedatum"></select>
+                                </div>
+                                <div class="albums-summary">
+                                    <div class="albums-chips" id="albums-chips" aria-label="Gekozen filters"></div>
+                                    <button type="button" class="link-button albums-clear" id="albums-clear" hidden>Alles wissen</button>
+                                    <span class="albums-count tabular" id="albums-count" aria-live="polite"></span>
+                                </div>
+                                <div class="albums-new-hint" id="albums-new-hint" role="status" hidden></div>
+                            </div>
+                        </div>
+
+                        <div class="albums-scroll" id="albums-scroll" aria-label="Bestanden (pijltjes om te kiezen, Enter om te openen)">
+                            <div class="albums-state" id="albums-state"></div>
+                            <div class="albums-loading" id="albums-loading" hidden></div>
+                            <div class="albums-content" id="albums-content"></div>
+                        </div>
+                    </div>
+
+                    <!-- Op deze dag: per jaar, van nieuw naar oud -->
+                    <div class="albums-pane" id="albums-otd" hidden>
+                        <div class="albums-otd-scroll">
+                            <div class="page-header albums-header">
+                                <div>
+                                    <h1 class="page-title" id="albums-otd-title" tabindex="-1"><i class="fas fa-calendar-day" aria-hidden="true"></i> <span id="albums-otd-title-text">Op deze dag</span></h1>
+                                    <p class="page-subtitle" id="albums-otd-subtitle"></p>
+                                </div>
+                                <div class="albums-otd-nav" role="group" aria-label="Dag kiezen">
+                                    <button type="button" class="btn btn-secondary btn-icon" onclick="albumsOtdShift(-1)" aria-label="Vorige dag" title="Vorige dag">
+                                        <i class="fas fa-chevron-left" aria-hidden="true"></i>
+                                    </button>
+                                    <select class="select" id="albums-otd-day" aria-label="Dag"></select>
+                                    <select class="select" id="albums-otd-month" aria-label="Maand"></select>
+                                    <button type="button" class="btn btn-secondary btn-icon" onclick="albumsOtdShift(1)" aria-label="Volgende dag" title="Volgende dag">
+                                        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-secondary" id="albums-otd-today" onclick="albumsOtdToday()">Vandaag</button>
+                                </div>
+                            </div>
+                            <p class="albums-otd-folders" id="albums-otd-folders" hidden></p>
+                            <div class="albums-otd-groups" id="albums-otd-groups" aria-label="Foto's per jaar (pijltjes om te kiezen, Enter om te openen)"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- HERSTELCENTRUM: alles wat de app verplaatste, met terugzetten per actie (recovery.js) -->
         <div id="section-recovery" class="section hidden">
             <div class="recovery-page">
@@ -1073,6 +1193,59 @@
         </div>
     </div>
 
+    <!-- Albums: een slim album bewaren of bewerken (library.js) -->
+    <div class="modal" id="modal-album">
+        <div class="modal-container album-dialog">
+            <form onsubmit="albumsSaveDialog(event)">
+                <div class="modal-header">
+                    <h2 class="modal-title"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> <span id="album-dialog-title">Bewaar als slim album</span></h2>
+                    <button type="button" class="modal-close" onclick="albumsCloseDialog()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+                </div>
+                <div class="modal-body modal-body-list album-dialog-body">
+                    <label class="album-field-label" for="album-name">Naam</label>
+                    <input type="text" class="input" id="album-name" maxlength="80" autocomplete="off" required data-autofocus>
+                    <div class="album-field-label" id="album-icons-label">Icoon</div>
+                    <div class="album-icons" id="album-icons" role="radiogroup" aria-labelledby="album-icons-label"></div>
+                    <div class="album-field-label">Wat erin komt</div>
+                    <div class="album-filters" id="album-filters"></div>
+                    <p class="album-note">Een slim album is een bewaarde zoekopdracht: het blijft vanzelf bij en verplaatst of kopieert nooit een bestand.</p>
+                    <label class="album-hidden-row" id="album-hidden-row">
+                        <span class="switch"><input type="checkbox" id="album-hidden"><span class="slider"></span></span>
+                        <span>Verbergen in de lijst</span>
+                    </label>
+                    <p class="album-error" id="album-error" role="alert"></p>
+                </div>
+                <div class="modal-footer album-dialog-footer">
+                    <button type="button" class="btn btn-danger" id="album-delete" onclick="albumsDeleteFromDialog()">
+                        <i class="fas fa-trash-can" aria-hidden="true"></i> <span id="album-delete-label">Verwijderen</span>
+                    </button>
+                    <span class="albums-filter-spacer"></span>
+                    <button type="button" class="btn btn-secondary" onclick="albumsCloseDialog()">Annuleren</button>
+                    <button type="submit" class="btn btn-primary" id="album-save">Album bewaren</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Albums: een map kiezen voor het filter -->
+    <div class="modal" id="modal-albums-folder">
+        <div class="modal-container folder-selector-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Alleen uit deze map</h2>
+                <button class="modal-close" onclick="albumsCloseFolderPicker()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body folder-selector-body">
+                <div class="folder-tree-container" id="albums-folder-tree"></div>
+            </div>
+            <div class="modal-footer albums-folder-footer">
+                <label class="albums-folder-sub"><input type="checkbox" class="checkbox" id="albums-folder-sub" checked> Met submappen</label>
+                <span class="albums-filter-spacer"></span>
+                <button class="btn btn-secondary" onclick="albumsWholeArchive()">Hele archief</button>
+                <button class="btn btn-primary" id="btn-albums-folder-confirm" onclick="albumsConfirmFolder()" disabled>Kies deze map</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Timeline Folder Picker Modal -->
     <div class="modal" id="modal-timeline-folders">
         <div class="modal-container folder-selector-container">
@@ -1140,8 +1313,8 @@
     <script src="dom.js?v=1"></script>
     <script src="ui.js?v=2"></script>
     <script src="folder-tree.js?v=7"></script>
-    <script src="app.js?v=60"></script>
-    <script src="jobs.js?v=9"></script>
+    <script src="app.js?v=62"></script>
+    <script src="jobs.js?v=10"></script>
     <script src="duplicates.js?v=24"></script>
     <script src="keurer.js?v=21"></script>
     <script src="timeline.js?v=12"></script>
@@ -1149,7 +1322,8 @@
     <script src="resizable-sidebar.js?v=1"></script>
     <script src="recovery.js?v=5"></script>
     <script src="settings.js?v=4"></script>
-    <script src="shortcuts.js?v=5"></script>
+    <script src="shortcuts.js?v=6"></script>
+    <script src="library.js?v=2"></script>
 </body>
 
 </html>
