@@ -1346,23 +1346,8 @@ async function fetchHomeWidgets() {
                 </div>
             `;
 
-            // Probeer albumcover op te halen via iTunes Search API (gratis, geen credentials nodig)
-            const query = encodeURIComponent(`${t.track} ${t.artist}`);
-            fetch(`https://itunes.apple.com/search?term=${query}&media=music&limit=1`)
-                .then(r => r.json())
-                .then(itunesData => {
-                    const result = itunesData.results && itunesData.results[0];
-                    if (result && result.artworkUrl100) {
-                        const artUrl = result.artworkUrl100.replace('100x100', '300x300');
-                        const img = document.createElement('img');
-                        img.src = artUrl;
-                        img.className = 'otd-photo';
-                        img.alt = t.track;
-                        const placeholder = content.querySelector('.otd-spotify-placeholder');
-                        if (placeholder) placeholder.replaceWith(img);
-                    }
-                })
-                .catch(() => { }); // blijf placeholder tonen bij fout
+            // Geen albumcover van buitenaf (zoals vroeger via iTunes): dat zou luistergeschiedenis
+            // naar een externe dienst sturen. Het lokale Spotify-icoon blijft staan.
         } else {
             content.innerHTML = '<div class="storage-text">No tracks played on this day.</div>';
         }

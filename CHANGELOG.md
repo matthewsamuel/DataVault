@@ -104,6 +104,17 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   antwoordt), stopt met controleren zodra hij terug is en toont na 30 seconden een melding
   met een knop om het scherm te sluiten, in plaats van eindeloos te blijven wachten.
 
+### Offline en privacy
+- De app werkt nu volledig zonder internet. De iconen (Font Awesome 6.4.0) en het lettertype
+  (JetBrains Mono) staan lokaal in `code/frontend/vendor/`, met hun licenties. Voorheen kwamen
+  ze van een CDN en Google Fonts, en zonder internet waren alle knoppen met alleen een icoon
+  leeg (Keurer, slideshow, chat versturen, sluiten-kruisjes).
+- "Spotify On This Day" op de homepage stuurt niet langer bij elk bezoek een nummer en artiest
+  uit je luistergeschiedenis naar Apple (iTunes) om een albumhoes op te halen. Je ziet nu het
+  lokale Spotify-icoon.
+- Een test bewaakt dat de frontend geen externe adressen meer gebruikt. Alleen een link die je
+  zelf aanklikt (een nummer opzoeken op Spotify) opent een site buiten de app.
+
 ### Foto Keurer
 - Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het
   bestand naartoe ging (prullenmand of doelmap). Undo stuurt alleen nog het nummer van de

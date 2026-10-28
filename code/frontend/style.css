@@ -1,7 +1,7 @@
 /* DataVault Dashboard - Hacker Style Design System */
 
-/* ==================== IMPORT FONTS ==================== */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap');
+/* ==================== FONTS ==================== */
+/* JetBrains Mono wordt lokaal geladen via vendor/jetbrains-mono/jetbrains-mono.css (index.html) */
 
 /* ==================== CSS VARIABLES - HACKER THEME ==================== */
 
