@@ -90,6 +90,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   de foto erachter (naar de prullenmand, terugdraaien, verplaatsen); dat kan niet meer. De Keurer
   reageert op pijltjes en spatie alleen als de focus op de Keurer zelf staat (of nergens, of op het
   tabblad).
+- In een venster om een map te kiezen doet Enter op **Annuleren** of **×** wat die knop zegt: het
+  venster sluit en er wordt niets verplaatst. Alleen Enter in de mappenlijst of het zoekveld kiest de
+  gemarkeerde map.
 - Elk venster houdt de focus binnen zich (Tab gaat rond), **Esc** sluit alleen het bovenste venster,
   en daarna staat de focus weer waar hij was: op de foto in het raster of in het chatvak. Na het
   sluiten van een foto die vanuit de chat geopend werd, kun je dus meteen verder typen.

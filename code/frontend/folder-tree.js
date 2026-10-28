@@ -353,6 +353,13 @@ function initFolderTreeKeyNav(config) {
         const container = getContainer();
         if (!container || container.offsetParent === null) return;
 
+        // Enter op een knop of veld in het venster (Annuleren, ×, zoekveld) is voor die knop:
+        // niet de gemarkeerde map bevestigen. Anders verplaatst 'Annuleren' het bestand.
+        if (e.key === 'Enter' && e.target instanceof Element) {
+            const control = e.target.closest('button, a[href], input, select, textarea, summary, [role="button"]');
+            if (control && !control.matches(itemSelector)) return;
+        }
+
         const items = getVisibleItems();
         if (items.length === 0 && e.key !== 'Escape') return;
 

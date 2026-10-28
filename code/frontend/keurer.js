@@ -1028,8 +1028,14 @@ document.addEventListener('keydown', function (e) {
 
     const moveModalActive = document.getElementById('modal-keurer-move').classList.contains('active');
 
-    // Enter in move-modal: bevestig verplaatsen (ook vanuit het zoekveld van het venster)
+    // Enter in move-modal: bevestig verplaatsen, maar alleen vanuit het zoekveld, de mappenboom
+    // of het venster zelf. Enter op een knop (Annuleren, ×) doet wat die knop doet.
     if (e.key === 'Enter' && moveModalActive) {
+        const modal = document.getElementById('modal-keurer-move');
+        const t = e.target instanceof Element ? e.target : null;
+        const fromTree = t && (t === modal || t.id === 'keurer-move-search'
+            || t.closest('#keurer-move-folder-tree'));
+        if (!fromTree) return;
         e.preventDefault();
         if (keurerMoveSelectedFolder) keurerConfirmMove();
         return;
