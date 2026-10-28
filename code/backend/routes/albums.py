@@ -21,7 +21,7 @@ import time
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Request
 
 from backend import library_filters, media_index, smart_albums
 from backend.config import Config
@@ -271,13 +271,16 @@ def restore_defaults() -> Dict[str, Any]:
     return {"added": added, **list_albums()}
 
 
+ALBUM_ID = Path(..., ge=0, le=MAX_INT)
+
+
 @router.get("/albums/{album_id}")
-def get_album(album_id: int) -> Dict[str, Any]:
+def get_album(album_id: int = ALBUM_ID) -> Dict[str, Any]:
     return _with_count(_album_or_404(album_id))
 
 
 @router.patch("/albums/{album_id}")
-def update_album(album_id: int, data: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+def update_album(album_id: int = ALBUM_ID, data: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     try:
         return _with_count(smart_albums.update_album(db, config, album_id, data))
     except smart_albums.AlbumError as e:
@@ -285,7 +288,7 @@ def update_album(album_id: int, data: Dict[str, Any] = Body(...)) -> Dict[str, A
 
 
 @router.delete("/albums/{album_id}")
-def delete_album(album_id: int) -> Dict[str, Any]:
+def delete_album(album_id: int = ALBUM_ID) -> Dict[str, Any]:
     try:
         return {"deleted": smart_albums.delete_album(db, album_id)}
     except smart_albums.AlbumError as e:

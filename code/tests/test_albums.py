@@ -532,3 +532,12 @@ def test_deep_pages_keep_the_order_of_one_full_sort(tmp_path):
     n, version = media_index.selection_info(db, {"kind": "photo"})
     assert n == 300 and version == media_index.selection_version(db, {"kind": "photo"})
     db.close_all()
+
+
+def test_a_huge_album_id_is_refused_not_a_server_error(indexed):
+    for method in ("get", "patch", "delete"):
+        kwargs = {"json": {"name": "x"}} if method == "patch" else {}
+        for album_id in ("99999999999999999999999", "-1"):
+            r = getattr(indexed, method)(f"/api/library/albums/{album_id}", **kwargs)
+            assert r.status_code == 422, (method, album_id, r.text)
+    assert indexed.get(f"/api/library/albums/{2 ** 62}").status_code == 404
