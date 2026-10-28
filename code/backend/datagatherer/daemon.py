@@ -61,7 +61,7 @@ def in_watch_folder(config, path: Path) -> bool:
 
 
 class _Seen:
-    """What the watcher saw last time per file: (size, mtime_ns) and what detect() said."""
+    """What the watcher saw last time per file: (size, mtime_ns), and per connector what its detect() said."""
 
     def __init__(self):
         self.sizes: Dict[str, tuple] = {}
@@ -110,11 +110,13 @@ def candidates(config, db, connector, now: Optional[float] = None) -> List[Dict[
             if st.st_size == 0:
                 continue
             key = (entry.path, st.st_size, st.st_mtime_ns)
+            # What detect() said is per connector: a Spotify zip is no Takeout, and the other way round
+            kind_key = (connector.id, *key)
             with _seen_lock:
                 previous = _seen.sizes.get(entry.path)
                 _seen.sizes[entry.path] = key[1:]
-                cached = key in _seen.kinds
-                kind = _seen.kinds.get(key)
+                cached = kind_key in _seen.kinds
+                kind = _seen.kinds.get(kind_key)
             stable = previous == key[1:] or now - st.st_mtime >= STABLE_AGE
             if not stable:
                 continue   # still being written: look again next time
@@ -122,7 +124,7 @@ def candidates(config, db, connector, now: Optional[float] = None) -> List[Dict[
                 path = Path(entry.path)
                 kind = connector.detect(path, raw_store.read_zip_names(path))
                 with _seen_lock:
-                    _seen.kinds[key] = kind
+                    _seen.kinds[kind_key] = kind
             if kind is None:
                 continue
             already = _already(db, entry.path, st.st_size)

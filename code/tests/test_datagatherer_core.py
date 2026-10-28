@@ -384,6 +384,34 @@ def test_the_watcher_skips_unfinished_downloads_and_waits_for_a_stable_size(app,
     assert partial.is_file()
 
 
+@pytest.mark.parametrize("first", ["google_takeout", "spotify"])
+def test_each_source_recognises_its_own_export_whoever_looks_first(app, client, config, downloads, first):
+    """UX-1: what one connector's detect() said is never reused for another connector."""
+    import zipfile
+    db = app.state.db
+    spotify_zip = _zip(downloads.parent)
+    takeout = downloads / "takeout-20261028T120000Z-001.zip"
+    with zipfile.ZipFile(takeout, "w") as zf:
+        zf.writestr("Takeout/Mijn activiteit/Zoeken/MijnActiviteit.json", "[]")
+    old = time.time() - 3600
+    for path in (spotify_zip, takeout):
+        os.utime(path, (old, old))
+    order = [first] + [s for s in ("google_takeout", "spotify") if s != first]
+    found = {s: [c["name"] for c in daemon.candidates(config, db, registry.get(s))] for s in order}
+    assert found == {"spotify": [spotify_zip.name], "google_takeout": [takeout.name]}
+    # The watcher with both exports requested starts each file for its own source only
+    state.open_request(db, "spotify", "extended", None)
+    state.open_request(db, "google_takeout", "takeout", None)
+    daemon.forget_seen()
+    started = daemon.Daemon(config, db, lambda: app.state.jobs).tick()["watch"]
+    assert sorted(started) == sorted([str(spotify_zip), str(takeout)])
+    watch = [j for j in app.state.jobs.list(20) if j["type"] == "datagatherer.watch"]
+    assert sorted((j["params"]["source"], Path(j["params"]["path"]).name) for j in watch) == [
+        ("google_takeout", takeout.name), ("spotify", spotify_zip.name)]
+    for job in watch:
+        assert app.state.jobs.wait(job["id"], timeout=20)["status"] == "done"
+
+
 def test_the_real_downloads_folder_is_never_watched_in_test_mode(config, tmp_path, monkeypatch):
     config.GATHER_WATCH_FOLDERS = None
     assert daemon.watch_folders(config) == []
