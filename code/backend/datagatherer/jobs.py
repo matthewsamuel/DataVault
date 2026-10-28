@@ -34,6 +34,7 @@ WATCH_TYPE = "datagatherer.watch"
 
 class GatherFailed(Exception):
     """A sync or import the user can act on; the message is Dutch and goes to the job dock."""
+    quiet = True    # no stack trace in the server log (backend/jobs.py)
 
 
 def sync_type_name(source_id: str) -> str:

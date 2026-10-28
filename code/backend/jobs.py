@@ -658,8 +658,11 @@ class JobManager:
                             continue  # again from the checkpoint
                         self._finish_stopped(live)
                         return
-                    import traceback
-                    traceback.print_exc()
+                    # An expected failure the user can act on (quiet = True, e.g. 'connect again')
+                    # needs no stack trace in the server log; its message goes to the dock
+                    if not getattr(e, "quiet", False):
+                        import traceback
+                        traceback.print_exc()
                     detail = getattr(e, "detail", None) or str(e) or type(e).__name__
                     self._update(live, persist=True, status=FAILED, error=detail,
                                  finished_at=time.time(), message="Mislukt")

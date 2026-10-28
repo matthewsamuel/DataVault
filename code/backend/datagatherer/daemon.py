@@ -5,7 +5,7 @@ One small thread (started in main._lifespan, like the media index's AutoIndexer;
 DATAVAULT_GATHER_DAEMON=0) that wakes every INTERVAL seconds and:
 
 1. Downloads watcher, ONLY while an export request is open (dg_requests): lists the watch
-   folders (config 'datagatherer_watch_folders', default ~/Downloads; never recursive),
+   folders (~/Downloads plus config 'datagatherer_watch_folders'; never recursive),
    skips what is still downloading (.crdownload, .download, .part, a file whose size or
    mtime changed since the last look), recognises an export by its CONTENT (the
    connector's detect(): the members of a zip, the start of a JSON file) and starts a
@@ -40,10 +40,11 @@ def _testing() -> bool:
 
 
 def watch_folders(config) -> List[Path]:
-    """The folders the watcher looks in (only those that exist)."""
-    folders = config.GATHER_WATCH_FOLDERS
-    if folders is None:
-        folders = [] if _testing() else [Path.home() / "Downloads"]
+    """
+    The folders the watcher looks in (only those that exist): ~/Downloads plus the extra
+    folders of config 'datagatherer_watch_folders' (for example a synced cloud folder).
+    """
+    folders = ([] if _testing() else [Path.home() / "Downloads"]) + list(config.GATHER_WATCH_FOLDERS or [])
     if _testing():
         temp = Path(tempfile.gettempdir()).resolve()
         folders = [f for f in folders if Path(f).resolve().is_relative_to(temp)]

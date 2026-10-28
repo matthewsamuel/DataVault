@@ -194,7 +194,7 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   overschreven, sha256 tegen dubbels); bestaande exportmappen worden ter plekke geregistreerd. De
   Downloads-watcher kijkt alleen zolang een export aangevraagd is.
 - Optionele configuratie in `config.json`: `"data_owner": "Matthew"` (de map onder `data/`, standaard
-  de eerste) en `"datagatherer_watch_folders": ["/Users/…/Downloads"]` (standaard `~/Downloads`).
+  de eerste) en `"datagatherer_watch_folders": ["/Users/…/Dropbox/Exports"]` (extra mappen naast `~/Downloads`).
 - Migraties 60 (DataGatherer) en 61 (samengevoegde Spotify-plays). Het Spotify-scherm leest
   `spotify_plays_merged` zodra er iets is ingelezen, anders de exportbestanden zoals vroeger.
 - Tests: `DATAVAULT_GATHER_DAEMON=0` (de tests tikken de watcher zelf), een sleutelhanger in het

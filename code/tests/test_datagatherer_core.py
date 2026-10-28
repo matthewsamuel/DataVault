@@ -315,11 +315,18 @@ def test_the_watcher_skips_unfinished_downloads_and_waits_for_a_stable_size(app,
     assert partial.is_file()
 
 
-def test_the_real_downloads_folder_is_never_watched_in_test_mode(config):
+def test_the_real_downloads_folder_is_never_watched_in_test_mode(config, tmp_path, monkeypatch):
     config.GATHER_WATCH_FOLDERS = None
     assert daemon.watch_folders(config) == []
     config.GATHER_WATCH_FOLDERS = [Path.home() / "Downloads"]
     assert daemon.watch_folders(config) == []
+    # Outside test mode: ~/Downloads (a fake home here) plus the configured extra folders
+    monkeypatch.setenv("DATAVAULT_TESTING", "0")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    (tmp_path / "Downloads").mkdir()
+    (tmp_path / "Dropbox").mkdir()
+    config.GATHER_WATCH_FOLDERS = [tmp_path / "Dropbox", tmp_path / "bestaat-niet"]
+    assert daemon.watch_folders(config) == [tmp_path / "Downloads", tmp_path / "Dropbox"]
 
 
 def test_only_a_reported_candidate_can_be_imported(client, downloads):
@@ -385,6 +392,23 @@ def test_launchd_never_touches_the_real_launch_agents_in_test_mode(monkeypatch):
     launchd.set_runner(None)
     with pytest.raises(launchd.LaunchdError):
         launchd._launchctl(["list"])
+
+
+def test_the_launchd_command_syncs_only_scheduled_sources(app, client, config_file):
+    """What the agent runs (cli.py): a scheduled sync without the server, through the same guard."""
+    from backend.datagatherer import cli
+    from fake_services import FakeLastFm
+    fake = FakeLastFm([(1_700_000_000 + i * 300, "Band", f"Nummer {i}") for i in range(3)])
+    net.set_transport_factory(lambda: httpx.MockTransport(fake.handler))
+    keychain.set("lastfm", "api_key", "k")
+    client.put("/api/datagatherer/sources/lastfm/settings", json={"settings": {"username": "iemand"}})
+    assert cli.main(["sync", "--config", str(config_file)]) == 0
+    assert fake.requests == []                                    # schedule off: nothing
+    client.put("/api/datagatherer/sources/lastfm/settings", json={"schedule_enabled": True})
+    assert cli.main(["sync", "--config", str(config_file)]) == 0
+    assert len(fake.requests) == 1
+    log = client.get("/api/datagatherer/network-log?source=lastfm").json()["entries"]
+    assert [e["trigger"] for e in log] == ["schedule"]
 
 
 # ---------- migrations 60 and 61 ----------
