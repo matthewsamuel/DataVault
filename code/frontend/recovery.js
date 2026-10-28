@@ -194,6 +194,10 @@ async function recoveryUndo(entry, button) {
     const question = `${what} terugzetten naar de oorspronkelijke plek?\n\n`
         + (entry.note || 'Er wordt nooit iets overschreven.');
     if (!confirm(question)) return;
+    // De lijst wordt zo opnieuw opgebouwd; onthoud waar de focus stond om hem terug te zetten
+    const list = document.getElementById('recovery-list');
+    const hadFocus = list.contains(document.activeElement);
+    const index = recoveryState.entries.findIndex(e => e.key === entry.key);
     button.disabled = true;
     button.textContent = 'Bezig…';
     try {
@@ -211,8 +215,24 @@ async function recoveryUndo(entry, button) {
     } catch (err) {
         toastFetchError('Terugzetten mislukt', err);
     } finally {
-        recoveryLoad();
+        await recoveryLoad();
+        const active = document.activeElement;
+        if (hadFocus || !active || active === document.body) recoveryRefocus(entry.key, index);
     }
+}
+
+// Na terugzetten de focus niet laten wegvallen (naar het begin van de pagina): dezelfde actie
+// als die nog iets terug kan zetten, anders de volgende (of vorige), anders de paginatitel
+function recoveryRefocus(key, index) {
+    const cards = [...document.querySelectorAll('#recovery-list .recovery-entry')];
+    const at = Math.max(0, index);
+    const order = [cards.find(c => c.dataset.key === key), ...cards.slice(at), ...cards.slice(0, at).reverse()];
+    for (const card of order) {
+        const button = card && card.querySelector('.recovery-undo');
+        if (button && !button.disabled) { button.focus(); return; }
+    }
+    const title = document.getElementById('recovery-title');
+    if (title) title.focus();
 }
 
 // Andere schermen die dezelfde bestanden tonen, bijwerken

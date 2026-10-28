@@ -94,6 +94,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - In een venster om een map te kiezen doet Enter op **Annuleren** of **×** wat die knop zegt: het
   venster sluit en er wordt niets verplaatst. Alleen Enter in de mappenlijst of het zoekveld kiest de
   gemarkeerde map.
+- Na **Terugzetten** in het Herstelcentrum blijft de focus in de lijst (op dezelfde of de volgende
+  actie) in plaats van naar het begin van de pagina te springen.
 - Elk venster houdt de focus binnen zich (Tab gaat rond), **Esc** sluit alleen het bovenste venster,
   en daarna staat de focus weer waar hij was: op de foto in het raster of in het chatvak. Na het
   sluiten van een foto die vanuit de chat geopend werd, kun je dus meteen verder typen.
