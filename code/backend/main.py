@@ -25,10 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend import errors, file_ops, restart, security, thumbnail
+from backend import errors, file_ops, media_index, restart, security, thumbnail
 from backend.jobs import JobManager
 from backend.job_types import build_job_types
-from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs
+from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library
 
 
 def _say(message: str) -> None:
@@ -41,7 +41,13 @@ def _say(message: str) -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    # Automatic index passes (on start, when the vault returns) only while the server runs
+    auto_index = getattr(app.state, "auto_index", None)
+    if auto_index is not None:
+        auto_index.start()
     yield
+    if auto_index is not None:
+        await run_in_threadpool(auto_index.stop)
     # Stop background jobs at their next check (they stay resumable as 'interrupted'),
     # then close the database connections
     job_manager = getattr(app.state, "jobs", None)
@@ -86,15 +92,16 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     config = None
     app.state.jobs = None
     app.state.db = None
+    app.state.auto_index = None
     try:
         # Load configuration
         config = Config(config_path)
 
         # No file move may ever take something out of (or into) the app's own cache/database
         file_ops.protect_paths([config.CACHE_FOLDER, config.DB_PATH])
-        # A moved file keeps its cached thumbnail (renamed to the new path's key)
-        thumbs = config.THUMB_CACHE_PATH
-        file_ops.on_moved(lambda src, dst: thumbnail.carry_over(src, dst, thumbs))
+        # A moved file keeps its cached thumbnail (renamed to the new path's key), and its
+        # index row, rating and Keurer decisions follow it (see media_index.record_move)
+        file_ops.on_moved(_after_move(config, lambda: app.state.db))
 
         # Validate paths (but don't fail if T7 not mounted)
         path_status = config.validate_paths()
@@ -124,6 +131,14 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         app.state.jobs = job_manager
         jobs.init_router(job_manager)
 
+        # The media index is brought up to date on start, when the vault returns and when
+        # the timeline finds it behind the disk (DATAVAULT_AUTO_INDEX=0 turns this off: tests)
+        if os.environ.get("DATAVAULT_AUTO_INDEX", "1") != "0":
+            app.state.auto_index = media_index.AutoIndexer(job_manager)
+            media_index.set_updater(app.state.auto_index.request)
+        else:
+            media_index.set_updater(None)
+
         # Initialize routes with config and database: always, also without the vault
         folders.init_router(config)
         media.init_router(config, db)
@@ -134,6 +149,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         chat.init_router(config, db)
         keurer.init_router(config, db)
         timeline.init_router(config, db)
+        library.init_router(config, db, job_manager)
 
         _say("DataVault Dashboard initialized successfully")
 
@@ -160,6 +176,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(stats.router, prefix="/api/stats", tags=["stats"], dependencies=vault)
     app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"], dependencies=vault)
     app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"], dependencies=vault)
+    app.include_router(library.router, prefix="/api/library", tags=["library"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 
@@ -185,6 +202,20 @@ def _vault_preparer(config):
         config._make_dir(config.THUMB_CACHE_PATH)
         config.ensure_duplicates_folder()
     return prepare
+
+
+def _after_move(config, get_db):
+    """What follows a file the app moved: its thumbnail, then its index row, rating and Keurer decisions."""
+    def after(src, dst):
+        try:
+            thumbnail.carry_over(src, dst, config.THUMB_CACHE_PATH)
+        except Exception:
+            pass
+        try:
+            media_index.record_move(get_db(), config, src, dst)
+        except Exception as e:
+            _say(f"Index not updated after a move ({e}); the next pass picks it up")
+    return after
 
 
 def _recover_jobs(job_manager) -> None:

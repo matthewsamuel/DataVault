@@ -6,9 +6,11 @@ dup_scan    duplicate scan of one folder (scanner.find_duplicates_in_folder); th
 hashing     fill the hash cache for a folder, so a later duplicate scan only reads
             what changed
 thumbnails  make the missing thumbnails of a folder (or the whole vault) ahead of time
+index       bring the media index (backend/media_index.py) up to date with the disk
 
 None of them moves or changes an archive file: they read the archive and write the
-app's own cache (hashes in the database, thumbnails in the thumbnail folder). Resume
+app's own cache (hashes and the media index in the database, thumbnails in the
+thumbnail folder). Resume
 continues from what is already cached: hashes whose file is unchanged and valid
 thumbnails are skipped, and the checkpoint says how far the last run got.
 """
@@ -366,9 +368,48 @@ def thumbnails_type(config: Config) -> JobType:
                    results_to_keep=3, describe=_describe(config))
 
 
+# ---------- index ----------
+
+def index_type(config: Config, db) -> JobType:
+    """
+    One pass of the media index over the whole vault (media_index.run_pass).
+    params: full (list every folder and compare every file, the 'Bibliotheek bijwerken'
+    button) and auto (queued by the app itself: on start, when the vault returns).
+    Resume needs no checkpoint of its own: a folder's row is written after its files,
+    so what a stopped pass wrote is unchanged and skipped next time.
+    """
+    from backend import media_index
+
+    def prepare(params: Dict[str, Any]) -> Dict[str, Any]:
+        for key in ("full", "auto"):
+            if not isinstance(params.get(key, False), bool):
+                raise HTTPException(status_code=400, detail=f"{key} moet true of false zijn")
+        return {"full": params.get("full", False), "auto": params.get("auto", False)}
+
+    def run(ctx: JobContext) -> Dict[str, Any]:
+        if not config.VAULT_ROOT.is_dir():
+            raise VaultUnavailable()
+        errors, read_errors = _JobErrors(config), _JobErrors(config)
+
+        def vault_check() -> None:
+            if errors.vault_lost or read_errors.vault_lost or not config.VAULT_ROOT.is_dir():
+                raise VaultUnavailable()
+
+        result = media_index.run_pass(ctx, config, db, ctx.params.get("full", False),
+                                      errors, read_errors, vault_check)
+        ctx.progress(result["folders"], result["folders"], media_index.pass_message(result))
+        return result
+
+    return JobType(media_index.INDEX_JOB, "Bibliotheek bijwerken", prepare, run,
+                   summarize=lambda r: {k: r.get(k) for k in ("full", "files", "new", "changed", "moved",
+                                                               "removed", "errors", "complete", "seconds")},
+                   results_to_keep=3, jobs_to_keep=5, describe=lambda params: "hele archief")
+
+
 def build_job_types(config: Config, db, on_dup_scan_done=None) -> List[JobType]:
     return [
         dup_scan_type(config, db, on_dup_scan_done),
         hashing_type(config, db),
         thumbnails_type(config),
+        index_type(config, db),
     ]

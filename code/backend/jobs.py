@@ -136,6 +136,7 @@ class JobType:
     on_done: Optional[Callable[[Dict[str, Any]], None]] = None
     results_to_keep: int = 5                                 # stored results of this type
     describe: Optional[Callable[[Dict[str, Any]], str]] = None   # what it works on, for the dock
+    jobs_to_keep: Optional[int] = None                       # finished jobs of this type kept (None: no own limit)
 
 
 class _Live:
@@ -313,6 +314,14 @@ class JobManager:
                     "ORDER BY id DESC LIMIT -1 OFFSET ?",
                     (*FINISHED, JOBS_TO_KEEP),
                 )]
+                own_limit = self.types[job_type].jobs_to_keep if job_type in self.types else None
+                if own_limit is not None:
+                    # A type that runs often (the automatic index pass) never pushes other jobs out
+                    old += [r[0] for r in conn.execute(
+                        f"SELECT id FROM jobs WHERE type = ? AND status IN ({','.join('?' * len(FINISHED))}) "
+                        "ORDER BY id DESC LIMIT -1 OFFSET ?",
+                        (job_type, *FINISHED, own_limit),
+                    )]
                 conn.executemany("DELETE FROM job_results WHERE job_id = ?", [(i,) for i in old])
                 conn.executemany("DELETE FROM jobs WHERE id = ?", [(i,) for i in old])
         except sqlite3.Error:

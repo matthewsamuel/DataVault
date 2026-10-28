@@ -1,0 +1,918 @@
+"""
+DataVault Dashboard - The media index
+
+One row per photo, video and audio file in the vault (table media, migration 11)
+with what the app filters, sorts and groups on: capture date, size, dimensions,
+orientation, camera, lens, GPS position, duration (backend/media_meta.py). Features
+query it (query(), count(), date_histogram()) instead of walking the disk.
+
+Keeping it up to date (the 'index' job, job_types.index_type -> run_pass):
+- The walk uses the one exclusion rule of backend/paths.py and is deterministic
+  (sorted, depth first). media_folders keeps every folder's mtime at its last
+  listing. A folder whose mtime is unchanged has the same entries, so an
+  incremental pass only stats it and takes its subfolders from the table: an
+  unchanged vault costs one stat per folder. A changed folder is listed and only
+  files whose size or mtime_ns changed (or are new) are read again.
+  A full pass (full=True, the 'Bibliotheek bijwerken' button) lists every folder
+  and compares every file, which also catches a file edited in place.
+- Work is written in bounded batches (executemany). A folder's row is written only
+  after all of its files, so a cancelled, paused or interrupted pass resumes by
+  itself: what was written is unchanged and skipped next time.
+- A file that is gone from its folder is marked missing (hidden from every query),
+  never deleted at once. At the end of a pass, once every folder had its turn, a
+  missing file whose (inode, size, birthtime), or (size, content hash), matches a
+  file that appeared since is a move made outside the app (Finder): the row keeps
+  its id and its ratings and Keurer 'keep' follow it. Only then are the rows still
+  missing removed (never below a folder that could not be read in this pass).
+- Moves made by the app (every move_no_overwrite) update the row, the rating and
+  the Keurer decisions at once: record_move(), registered in main.create_app.
+
+Freshness: usable() is true once a pass has finished. fresh_for(roots) checks
+the folders of a selection against their stored mtimes (one stat per folder), so
+the timeline only uses the index when it matches the disk, and falls back to its
+own walk (and asks for an update) when it does not.
+
+Never moves, changes or deletes an archive file: it reads the archive and writes
+the app's own database.
+"""
+import os
+import threading
+import time
+from collections import defaultdict
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+from backend import media_meta
+from backend.config import media_type
+from backend.paths import ArchiveFilter, excluded_folders, scan_dir
+
+INDEX_JOB = "index"
+STATE_KEY = "media_index"     # app_settings: {last_pass_at, last_complete_at, last_full_at, ...}
+BATCH_FILES = 400             # files read and written per transaction
+READ_WORKERS = 4              # file reads in parallel (I/O bound)
+FLUSH_SECONDS = 2.0           # pending work is written at least this often
+PROGRESS_SECONDS = 0.5
+MOVE_HASH_LIMIT = 500         # files hashed per pass to recognise moves by content
+FAILED_FOLDERS_KEPT = 200
+
+# Every column of a media row that comes from the file (media_meta.read_metadata)
+META_COLUMNS = ("kind", "ext", "size", "mtime_ns", "inode", "birthtime", "taken", "taken_source",
+                "width", "height", "orientation", "camera_make", "camera_model", "lens",
+                "lat", "lon", "altitude", "duration", "meta_status")
+ROW_COLUMNS = ("id", "path", "folder", "name") + META_COLUMNS + ("added_at", "indexed_at", "seen_at")
+
+# Bumped on every write, so a client paging through a result can tell it changed
+_generation = 0
+_generation_lock = threading.Lock()
+
+
+def _bump() -> None:
+    global _generation
+    with _generation_lock:
+        _generation += 1
+
+
+def generation() -> int:
+    return _generation
+
+
+# ---------- state ----------
+
+def state(db) -> Dict[str, Any]:
+    try:
+        value = db.get_setting(STATE_KEY, {})
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def usable(db) -> bool:
+    """True once a pass has finished: the index then holds the whole vault (as of that pass)."""
+    return bool(state(db).get("last_pass_at"))
+
+
+def _prefix_range(folder: str) -> Tuple[str, str]:
+    """[low, high) of every path strictly below folder ('0' is the character after '/')."""
+    prefix = folder.rstrip("/") + "/"
+    return prefix, prefix[:-1] + "0"
+
+
+def fresh_for(db, roots: Sequence[Path]) -> bool:
+    """
+    True when the index may answer for these folders: a pass has finished, every
+    folder below them still has the mtime it was listed with, and none of them
+    failed to list in the last pass. Costs one stat per folder.
+    """
+    info = state(db)
+    if not info.get("last_pass_at"):
+        return False
+    failed = info.get("failed_folders") or []
+    try:
+        with db._connect() as conn:
+            for root in roots:
+                root = str(root)
+                low, high = _prefix_range(root)
+                if any(f == root or low <= f < high or root.startswith(f.rstrip("/") + "/") for f in failed):
+                    return False
+                rows = conn.execute(
+                    "SELECT path, mtime_ns FROM media_folders WHERE path = ? OR (path >= ? AND path < ?)",
+                    (root, low, high)).fetchall()
+                if not any(path == root for path, _ in rows):
+                    return False
+                for path, mtime_ns in rows:
+                    if os.stat(path).st_mtime_ns != mtime_ns:
+                        return False
+    except Exception:
+        return False
+    return True
+
+
+# Set by main.create_app: ask for an incremental pass (the index is behind the disk)
+_updater: Optional[Callable[[], None]] = None
+
+
+def set_updater(fn: Optional[Callable[[], None]]) -> None:
+    global _updater
+    _updater = fn
+
+
+def request_update() -> None:
+    if _updater is not None:
+        try:
+            _updater()
+        except Exception:
+            pass
+
+
+# ---------- which files belong in the index ----------
+
+def indexable(path: Path, config) -> bool:
+    """A photo, video or audio file inside the vault that a walk would list (see paths.ArchiveFilter)."""
+    from backend.file_ops import is_inside
+    path = Path(path)
+    try:
+        rel = path.relative_to(config.VAULT_ROOT)
+    except ValueError:
+        return False
+    if not rel.parts or any(part.startswith(".") for part in rel.parts):
+        return False
+    if media_type(path) == "other":
+        return False
+    return not any(is_inside(path, folder) for folder in excluded_folders(config))
+
+
+def _row_values(path: str, meta: Dict[str, Any], now: float) -> Tuple:
+    folder, name = os.path.split(path)
+    return (path, folder, name, *[meta[c] for c in META_COLUMNS], now, now, now)
+
+
+_UPSERT = f"""
+    INSERT INTO media (path, folder, name, {', '.join(META_COLUMNS)}, added_at, indexed_at, seen_at, missing)
+    VALUES ({', '.join('?' * (3 + len(META_COLUMNS) + 3))}, 0)
+    ON CONFLICT(path) DO UPDATE SET
+        {', '.join(f'{c} = excluded.{c}' for c in ('folder', 'name') + META_COLUMNS)},
+        indexed_at = excluded.indexed_at, seen_at = excluded.seen_at, missing = 0
+"""
+
+
+def _fallback_meta(path: str, st: os.stat_result, status: str) -> Dict[str, Any]:
+    """A row with only what stat knows (a file whose own metadata could not be read)."""
+    from backend import media_dates
+    birthtime = getattr(st, "st_birthtime", None)
+    taken, source = media_dates.file_date(st)
+    meta = {c: None for c in META_COLUMNS}
+    meta.update(kind=media_type(Path(path)), ext=os.path.splitext(path)[1].lower(), size=st.st_size,
+                mtime_ns=st.st_mtime_ns, inode=st.st_ino,
+                birthtime=birthtime if birthtime and birthtime > 0 else None,
+                taken=taken, taken_source=source, meta_status=status)
+    return meta
+
+
+def read_file(path: str, st: os.stat_result) -> Optional[Dict[str, Any]]:
+    """
+    The metadata of one file for its row; None when the file is gone (it moved or was
+    removed after the listing). A read error gives a row with the file's own dates and
+    meta_status 'error', read again on the next pass. Raises OSError only when the
+    error may be the vault going away (the caller checks).
+    """
+    try:
+        return media_meta.read_metadata(Path(path), st)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        if e.errno is None:
+            return _fallback_meta(path, st, media_meta.META_NONE)
+        raise
+    except Exception:
+        # A file the parsers do not understand: never let one file stop the pass
+        return _fallback_meta(path, st, media_meta.META_NONE)
+
+
+# ---------- the pass ----------
+
+class _Pass:
+    def __init__(self, ctx, config, db, full: bool, errors, read_errors, vault_unavailable):
+        self.ctx = ctx
+        self.config = config
+        self.db = db
+        self.full = full
+        self.errors = errors                # folders and entries that could not be listed
+        self.read_errors = read_errors      # files whose metadata could not be read
+        self.vault_unavailable = vault_unavailable
+        self.filter = ArchiveFilter(config)
+        self.root = str(config.VAULT_ROOT)
+        self.now = time.time()
+        self.counts = defaultdict(int)
+        self.failed: List[str] = []
+        self.pending_reads: List[Tuple[str, os.stat_result]] = []
+        self.pending_folders: List[Tuple[str, Optional[str], int]] = []
+        self.pending_missing: List[str] = []
+        self.pending_present: List[str] = []    # rows that were missing and are back
+        self.pending_seen: List[str] = []       # listed folders: their present rows are seen now
+        self.last_flush = time.monotonic()
+        self.last_progress = 0.0
+
+    # -- database --
+
+    def _load(self):
+        with self.db._connect() as conn:
+            self.known = {path: (mtime_ns, parent, last_scanned) for path, parent, mtime_ns, last_scanned
+                          in conn.execute("SELECT path, parent, mtime_ns, last_scanned FROM media_folders")}
+            self.retry = {row[0] for row in conn.execute(
+                "SELECT DISTINCT folder FROM media WHERE meta_status = 'error' AND missing = 0")}
+        self.children: Dict[str, List[str]] = defaultdict(list)
+        for path, (_, parent, _) in self.known.items():
+            if parent is not None:
+                self.children[parent].append(path)
+
+    def _folder_rows(self, folder: str) -> Dict[str, Tuple[int, int, Optional[str], int]]:
+        with self.db._connect() as conn:
+            return {row[0]: row[1:] for row in conn.execute(
+                "SELECT path, size, mtime_ns, meta_status, missing FROM media WHERE folder = ?", (folder,))}
+
+    # -- walking --
+
+    def walk(self) -> None:
+        self._load()
+        full_started = self.ctx.checkpoint.get("full_started") if self.full else None
+        if self.full and full_started is None:
+            full_started = self.now
+            self.ctx.save_checkpoint({**self.ctx.checkpoint, "full_started": full_started})
+        self.full_started = full_started
+        self.visited = set()
+        stack = [self.root]
+        while stack:
+            self.ctx.check()
+            folder = stack.pop()
+            self.visited.add(folder)
+            subdirs = self._visit(folder)
+            if subdirs is not None:
+                stack.extend(sorted(subdirs, reverse=True))
+            self._progress()
+            if len(self.pending_reads) >= BATCH_FILES or (
+                    (self.pending_reads or self.pending_folders)
+                    and time.monotonic() - self.last_flush >= FLUSH_SECONDS):
+                self.flush()
+        self.flush()
+
+    def _visit(self, folder: str) -> Optional[List[str]]:
+        try:
+            st = os.stat(folder)
+        except OSError as e:
+            self.errors(folder, e)
+            self.failed.append(folder)
+            self.vault_unavailable()
+            return None
+        known = self.known.get(folder)
+        unchanged = known is not None and known[0] == st.st_mtime_ns and folder not in self.retry
+        if unchanged and self.full:
+            # A full pass lists every folder once; a resumed one skips what it already listed
+            unchanged = known[2] >= self.full_started
+        if unchanged:
+            self.counts["folders_unchanged"] += 1
+            return self.children.get(folder, [])
+        try:
+            entries = scan_dir(Path(folder), self.filter)
+        except OSError as e:
+            self.errors(folder, e)
+            self.failed.append(folder)
+            self.vault_unavailable()
+            return None
+        self.counts["folders_listed"] += 1
+        subdirs: List[str] = []
+        files: Dict[str, os.stat_result] = {}
+        unreadable = set()
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    subdirs.append(entry.path)
+                elif entry.is_file(follow_symlinks=False) and media_type(Path(entry.name)) != "other":
+                    files[entry.path] = entry.stat(follow_symlinks=False)
+            except OSError as e:
+                self.errors(entry.path, e)
+                unreadable.add(entry.path)
+        rows = self._folder_rows(folder)
+        for path, fst in sorted(files.items()):
+            row = rows.get(path)
+            if row is None:
+                self.pending_reads.append((path, fst))
+                self.counts["new"] += 1
+            elif row[0] != fst.st_size or row[1] != fst.st_mtime_ns or row[2] == media_meta.META_ERROR:
+                self.pending_reads.append((path, fst))
+                self.counts["changed"] += 1
+            elif row[3]:
+                self.pending_present.append(path)
+        for path, row in rows.items():
+            if path not in files and path not in unreadable and not row[3]:
+                self.pending_missing.append(path)
+        self.pending_seen.append(folder)
+        if not unreadable:
+            # A folder with an entry it could not read is listed again next time
+            parent = None if folder == self.root else os.path.dirname(folder)
+            self.pending_folders.append((folder, parent, st.st_mtime_ns))
+        else:
+            self.failed.append(folder)
+        # Subfolders that are no longer there (removed, renamed, now hidden) are found
+        # after the walk: known folders that were never visited
+        return subdirs
+
+    def _progress(self, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - self.last_progress < PROGRESS_SECONDS:
+            return
+        self.last_progress = now
+        visited = len(self.visited)
+        total = max(len(self.known), visited) if self.known else None
+        self.ctx.progress(visited, total,
+                          f"Mappen nalopen... {visited:,} · {self.counts['read']:,} bestand(en) gelezen"
+                          .replace(",", "."))
+
+    # -- writing --
+
+    def _read_all(self, items: List[Tuple[str, os.stat_result]]) -> List[Tuple]:
+        from backend.jobs import bounded_map
+        values = []
+        stop = lambda: self.ctx.stopping  # noqa: E731
+        outcomes = bounded_map(lambda item: read_file(*item), items, workers=READ_WORKERS, stop=stop)
+        for (path, st), meta, error in outcomes:
+            if error is not None:
+                self.read_errors(path, error)
+                self.vault_unavailable()
+                meta = _fallback_meta(path, st, media_meta.META_ERROR)
+            if meta is None:
+                continue  # gone since the listing: its folder changed, the next pass sees it
+            values.append(_row_values(path, meta, time.time()))
+        self.ctx.check()
+        return values
+
+    def flush(self) -> None:
+        reads, self.pending_reads = self.pending_reads, []
+        for i in range(0, len(reads), BATCH_FILES):
+            chunk = reads[i:i + BATCH_FILES]
+            values = self._read_all(chunk)
+            self.vault_unavailable()
+            with self.db._connect() as conn:
+                conn.executemany(_UPSERT, values)
+            self.counts["read"] += len(values)
+            self._progress()
+        now = time.time()
+        with self.db._connect() as conn:
+            conn.executemany("UPDATE media SET missing = 1 WHERE path = ?", [(p,) for p in self.pending_missing])
+            conn.executemany("UPDATE media SET missing = 0, seen_at = ? WHERE path = ?",
+                             [(now, p) for p in self.pending_present])
+            conn.executemany("UPDATE media SET seen_at = ? WHERE folder = ? AND missing = 0",
+                             [(now, f) for f in self.pending_seen])
+            conn.executemany(
+                "INSERT INTO media_folders (path, parent, mtime_ns, last_scanned) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(path) DO UPDATE SET parent = excluded.parent, mtime_ns = excluded.mtime_ns, "
+                "last_scanned = excluded.last_scanned",
+                [(path, parent, mtime_ns, now) for path, parent, mtime_ns in self.pending_folders])
+        self.counts["missing"] += len(self.pending_missing)
+        if self.pending_missing or self.pending_folders or reads:
+            _bump()
+        self.pending_missing, self.pending_present, self.pending_seen, self.pending_folders = [], [], [], []
+        self.last_flush = time.monotonic()
+
+    # -- the end of a pass --
+
+    def _under_failed(self, path: str) -> bool:
+        return any(path == f or path.startswith(f.rstrip("/") + "/") for f in self.failed)
+
+    def finish(self) -> None:
+        """Folders that are gone, then moves made outside the app, then remove what stays missing."""
+        gone = [path for path in self.known
+                if path not in self.visited and not self._under_failed(path)]
+        if gone:
+            with self.db._connect() as conn:
+                conn.executemany("UPDATE media SET missing = 1 WHERE folder = ? AND missing = 0",
+                                 [(p,) for p in gone])
+                conn.executemany("DELETE FROM media_folders WHERE path = ?", [(p,) for p in gone])
+            self.counts["folders_gone"] = len(gone)
+            _bump()
+        self.ctx.check()
+        self.vault_unavailable()
+        self.counts["moved"] = match_moves(self.db, self.ctx)
+        self.vault_unavailable()
+        self.counts["removed"] = purge_missing(self.db, self._under_failed)
+
+
+def run_pass(ctx, config, db, full: bool, errors, read_errors, vault_unavailable) -> Dict[str, Any]:
+    """
+    One index pass over the whole vault (see the top of this module). errors and
+    read_errors are error logs (job_types._JobErrors); vault_unavailable() raises
+    jobs.VaultUnavailable when the vault went away.
+    """
+    started = time.monotonic()
+    run = _Pass(ctx, config, db, full, errors, read_errors, vault_unavailable)
+    ctx.progress(0, None, "Mappen nalopen...")
+    run.walk()
+    run.finish()
+    complete = errors.count == 0
+    now = time.time()
+    with db._connect() as conn:
+        files, missing = conn.execute(
+            "SELECT COUNT(*) - COALESCE(SUM(missing), 0), COALESCE(SUM(missing), 0) FROM media").fetchone()
+        folders = conn.execute("SELECT COUNT(*) FROM media_folders").fetchone()[0]
+    info = {**state(db), "last_pass_at": now, "files": files, "folders": folders,
+            "failed_folders": sorted(set(run.failed))[:FAILED_FOLDERS_KEPT],
+            "last_seconds": round(time.monotonic() - started, 3)}
+    if complete:
+        info["last_complete_at"] = now
+    if full:
+        info["last_full_at"] = now
+    db.set_setting(STATE_KEY, info)
+    _bump()
+    counts = run.counts
+    return {
+        "full": full,
+        "files": files,
+        "folders": folders,
+        "folders_listed": counts["folders_listed"],
+        "folders_unchanged": counts["folders_unchanged"],
+        "new": counts["new"],
+        "changed": counts["changed"],
+        "read": counts["read"],
+        "moved": counts["moved"],
+        "removed": counts["removed"],
+        "still_missing": missing,
+        "errors": errors.count,
+        "error_samples": errors.samples,
+        "read_errors": read_errors.count,
+        "read_error_samples": read_errors.samples,
+        "complete": complete,
+        "seconds": info["last_seconds"],
+    }
+
+
+def pass_message(result: Dict[str, Any]) -> str:
+    def n(value: int) -> str:
+        return f"{value:,}".replace(",", ".")
+    parts = [f"Klaar: {n(result['files'])} bestanden"]
+    changes = []
+    if result["new"]:
+        changes.append(f"{n(result['new'])} nieuw")
+    if result["changed"]:
+        changes.append(f"{n(result['changed'])} gewijzigd")
+    if result["moved"]:
+        changes.append(f"{n(result['moved'])} verplaatst")
+    if result["removed"]:
+        changes.append(f"{n(result['removed'])} weg")
+    parts.append(", ".join(changes) if changes else "niets veranderd")
+    if result["errors"]:
+        parts.append(f"{n(result['errors'])} map(pen) of bestand(en) niet leesbaar")
+    if result["read_errors"]:
+        parts.append(f"{n(result['read_errors'])} bestand(en) niet te lezen (volgende keer opnieuw)")
+    return "; ".join(parts)
+
+
+# ---------- moves ----------
+
+def _carry_user_data(conn, src: str, dst: str, carry_keep: bool = True, keurer_dest: bool = False) -> None:
+    """
+    What the user gave a file follows it to its new path: its Shows rating, and (with
+    carry_keep: only into the library, never into TRASH or RAW_DUPLICATES, where a Keurer
+    'delete' replaces it) a Keurer 'keep', now for the folder it is in. With keurer_dest,
+    a Keurer delete/move record that points at src points at dst instead, so its undo
+    still finds the file.
+    """
+    if conn.execute("SELECT 1 FROM file_ratings WHERE path = ?", (src,)).fetchone():
+        # dst is a free name (moves never overwrite): a rating there belonged to a file that is gone
+        conn.execute("DELETE FROM file_ratings WHERE path = ?", (dst,))
+        conn.execute("UPDATE file_ratings SET path = ? WHERE path = ?", (dst, src))
+    folder = os.path.dirname(dst)
+    if carry_keep and not conn.execute("SELECT 1 FROM keurer_decisions WHERE path = ? AND folder = ? AND decision = 'keep'",
+                        (dst, folder)).fetchone():
+        conn.execute("UPDATE keurer_decisions SET path = ?, folder = ? WHERE id = ("
+                     "SELECT id FROM keurer_decisions WHERE path = ? AND decision = 'keep' "
+                     "ORDER BY id DESC LIMIT 1)", (dst, folder, src))
+    if keurer_dest:
+        conn.execute("UPDATE keurer_decisions SET dest_path = ? WHERE dest_path = ? AND decision != 'keep'",
+                     (dst, src))
+
+
+def record_move(db, config, src, dst) -> None:
+    """
+    The app moved src to dst (file_ops.on_moved): the index row, the rating and the
+    Keurer decisions follow at once. Into TRASH or RAW_DUPLICATES the row stays (with
+    its id) but is hidden as missing, so an undo brings it back as it was; the next
+    pass removes it if it stays there. Best effort: the next pass recognises the move
+    by inode anyway.
+    """
+    src, dst = str(src), str(dst)
+    if db is None or not getattr(db, "ready", True):
+        return
+    with db._connect() as conn:
+        row = conn.execute("SELECT id FROM media WHERE path = ?", (src,)).fetchone()
+    shown = indexable(Path(dst), config)
+    meta = None
+    if shown and row is None:
+        try:
+            meta = read_file(dst, os.lstat(dst))
+        except OSError:
+            meta = None
+    now = time.time()
+    folder, name = os.path.split(dst)
+    with db._connect() as conn:
+        _carry_user_data(conn, src, dst, carry_keep=shown, keurer_dest=True)
+        conn.execute("DELETE FROM media WHERE path = ?", (dst,))
+        if row is not None:
+            conn.execute("UPDATE media SET path = ?, folder = ?, name = ?, missing = ?, seen_at = ? WHERE id = ?",
+                         (dst, folder, name, 0 if shown else 1, now, row[0]))
+        elif meta is not None:
+            conn.execute(_UPSERT, _row_values(dst, meta, now))
+    _bump()
+
+
+def match_moves(db, ctx=None) -> int:
+    """
+    Missing rows that are the same file as a row that appeared since (a move outside
+    the app): same inode, size and birthtime; or, when the old path had a cached
+    content hash, same size and content. The old row takes the new path (keeping its
+    id), the new row goes, and the rating and Keurer 'keep' follow. Returns the count.
+    """
+    with db._connect() as conn:
+        missing = conn.execute(
+            "SELECT id, path, inode, size, birthtime, seen_at, mtime_ns FROM media WHERE missing = 1").fetchall()
+        if not missing:
+            return 0
+        since = min(row[5] for row in missing)
+        candidates = conn.execute(
+            "SELECT id, path, inode, size, birthtime, added_at FROM media "
+            "WHERE missing = 0 AND added_at >= ?", (since,)).fetchall()
+    if not candidates:
+        return 0
+    by_identity: Dict[Tuple, List[Tuple]] = defaultdict(list)
+    by_size: Dict[int, List[Tuple]] = defaultdict(list)
+    for cand in candidates:
+        by_identity[(cand[2], cand[3], cand[4])].append(cand)
+        by_size[cand[3]].append(cand)
+    claimed = set()
+    pairs: List[Tuple[Tuple, Tuple]] = []
+    unmatched = []
+    for old in missing:
+        found = [c for c in by_identity.get((old[2], old[3], old[4]), ())
+                 if c[0] not in claimed and c[5] >= old[5]]
+        if old[2] is not None and len(found) == 1:
+            claimed.add(found[0][0])
+            pairs.append((old, found[0]))
+        else:
+            unmatched.append(old)
+    if unmatched:
+        pairs.extend(_match_by_content(db, unmatched, by_size, claimed, ctx))
+    for old, new in pairs:
+        _apply_move(db, old, new)
+    if pairs:
+        _bump()
+    return len(pairs)
+
+
+def _match_by_content(db, unmatched, by_size, claimed, ctx) -> List[Tuple[Tuple, Tuple]]:
+    from backend.scanner import HASH_ALGO, hash_file_xxh3
+    pairs = []
+    hashed: Dict[str, Optional[str]] = {}
+    budget = MOVE_HASH_LIMIT
+    for old in unmatched:
+        options = [c for c in by_size.get(old[3], ()) if c[0] not in claimed and c[5] >= old[5]]
+        if not options:
+            continue
+        with db._connect() as conn:
+            row = conn.execute(
+                "SELECT hash FROM file_hashes WHERE path = ? AND algo = ? AND size = ? AND ino IS ? "
+                "AND mtime_ns = ?", (old[1], HASH_ALGO, old[3], old[2], old[6])).fetchone()
+        if row is None:
+            continue  # the old content is not known: no guessing
+        matches = []
+        for cand in options:
+            if cand[1] not in hashed:
+                if budget <= 0:
+                    break
+                budget -= 1
+                if ctx is not None:
+                    ctx.check()
+                try:
+                    hashed[cand[1]] = hash_file_xxh3(Path(cand[1]))
+                except OSError:
+                    hashed[cand[1]] = None
+            if hashed[cand[1]] == row[0]:
+                matches.append(cand)
+        if len(matches) == 1:
+            claimed.add(matches[0][0])
+            pairs.append((old, matches[0]))
+    return pairs
+
+
+def _apply_move(db, old: Tuple, new: Tuple) -> None:
+    columns = ("path", "folder", "name") + META_COLUMNS + ("indexed_at", "seen_at")
+    with db._connect() as conn:
+        values = conn.execute(f"SELECT {', '.join(columns)} FROM media WHERE id = ?", (new[0],)).fetchone()
+        if values is None:
+            return
+        _carry_user_data(conn, old[1], new[1])
+        conn.execute("DELETE FROM media WHERE id = ?", (new[0],))
+        conn.execute(f"UPDATE media SET {', '.join(f'{c} = ?' for c in columns)}, missing = 0 WHERE id = ?",
+                     (*values, old[0]))
+
+
+def purge_missing(db, keep: Callable[[str], bool] = lambda path: False) -> int:
+    """Remove the rows still marked missing, except those keep(path) protects."""
+    with db._connect() as conn:
+        rows = conn.execute("SELECT id, path FROM media WHERE missing = 1").fetchall()
+        gone = [(row[0],) for row in rows if not keep(row[1])]
+        # (Later steps that keep their own per-media tables clean them here, by id)
+        conn.executemany("DELETE FROM media WHERE id = ?", gone)
+    if gone:
+        _bump()
+    return len(gone)
+
+
+# ---------- queries ----------
+
+ORIENTATIONS = ("landscape", "portrait", "square")
+SORTS = {
+    "taken": "m.taken ASC, m.path ASC",
+    "-taken": "m.taken DESC, m.path DESC",
+    "name": "m.name ASC, m.path ASC",
+    "-name": "m.name DESC, m.path DESC",
+    "size": "m.size ASC, m.path ASC",
+    "-size": "m.size DESC, m.path ASC",
+    "added": "m.added_at ASC, m.id ASC",
+    "-added": "m.added_at DESC, m.id DESC",
+    "path": "m.path ASC",
+    "random": "random()",
+}
+MAX_LIMIT = 10000
+
+
+def _as_list(value) -> List:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
+    """
+    SQL for the filters (all optional, combined with AND):
+      kind          'photo' | 'video' | 'audio', or a list of them
+      ext           '.jpg' or a list (lower case, with the dot)
+      date_from     taken >= this epoch;  date_to: taken < this epoch
+      folder        an absolute folder: files in it and below (recursive=False: only in it)
+      folders       a list of such folders (any of them)
+      camera        'Canon EOS 80D' (make + model) or just the model, case-insensitive
+      camera_make, camera_model   exact, case-insensitive
+      has_gps       True: only with a position; False: only without
+      bbox          (south, west, north, east) in degrees
+      min_rating    Shows rating at least this (files never voted on are left out)
+      orientation   'landscape' | 'portrait' | 'square' (as shown, after rotation)
+      month_day     (month, day): taken on that day of any year (local time)
+      exclude_year  leave out this (local) year
+    Hidden (missing) rows are never returned.
+    """
+    filters = filters or {}
+    clauses = ["m.missing = 0"]
+    args: List[Any] = []
+
+    def any_of(column: str, values: List[Any]) -> None:
+        clauses.append(f"{column} IN ({', '.join('?' * len(values))})")
+        args.extend(values)
+
+    kinds = _as_list(filters.get("kind"))
+    if kinds:
+        any_of("m.kind", kinds)
+    exts = [str(e).lower() if str(e).startswith(".") else "." + str(e).lower() for e in _as_list(filters.get("ext"))]
+    if exts:
+        any_of("m.ext", exts)
+    if filters.get("date_from") is not None:
+        clauses.append("m.taken >= ?")
+        args.append(float(filters["date_from"]))
+    if filters.get("date_to") is not None:
+        clauses.append("m.taken < ?")
+        args.append(float(filters["date_to"]))
+    folders = [str(f) for f in _as_list(filters.get("folders"))]
+    if filters.get("folder") is not None:
+        folders.append(str(filters["folder"]))
+    if folders:
+        parts = []
+        for folder in folders:
+            folder = folder.rstrip("/") or "/"
+            if filters.get("recursive", True):
+                low, high = _prefix_range(folder)
+                parts.append("(m.path >= ? AND m.path < ?)")
+                args.extend([low, high])
+            else:
+                parts.append("m.folder = ?")
+                args.append(folder)
+        clauses.append("(" + " OR ".join(parts) + ")")
+    if filters.get("camera"):
+        clauses.append("(m.camera_model = ? COLLATE NOCASE OR "
+                       "(COALESCE(m.camera_make, '') || ' ' || COALESCE(m.camera_model, '')) = ? COLLATE NOCASE)")
+        args.extend([filters["camera"], filters["camera"]])
+    for key in ("camera_make", "camera_model"):
+        if filters.get(key):
+            clauses.append(f"m.{key} = ? COLLATE NOCASE")
+            args.append(filters[key])
+    if filters.get("has_gps") is True:
+        clauses.append("m.lat IS NOT NULL")
+    elif filters.get("has_gps") is False:
+        clauses.append("m.lat IS NULL")
+    if filters.get("bbox") is not None:
+        south, west, north, east = (float(v) for v in filters["bbox"])
+        clauses.append("m.lat BETWEEN ? AND ?")
+        args.extend([south, north])
+        if west <= east:
+            clauses.append("m.lon BETWEEN ? AND ?")
+            args.extend([west, east])
+        else:  # across the date line
+            clauses.append("(m.lon >= ? OR m.lon <= ?)")
+            args.extend([west, east])
+    if filters.get("min_rating") is not None:
+        clauses.append("EXISTS (SELECT 1 FROM file_ratings r WHERE r.path = m.path AND r.rating >= ?)")
+        args.append(int(filters["min_rating"]))
+    orientation = filters.get("orientation")
+    if orientation:
+        if orientation not in ORIENTATIONS:
+            raise ValueError(f"orientation must be one of {', '.join(ORIENTATIONS)}")
+        op = {"landscape": ">", "portrait": "<", "square": "="}[orientation]
+        clauses.append(f"m.width IS NOT NULL AND m.height IS NOT NULL AND m.width {op} m.height")
+    if filters.get("month_day") is not None:
+        month, day = filters["month_day"]
+        clauses.append("strftime('%m-%d', m.taken, 'unixepoch', 'localtime') = ?")
+        args.append(f"{int(month):02d}-{int(day):02d}")
+    if filters.get("exclude_year") is not None:
+        clauses.append("strftime('%Y', m.taken, 'unixepoch', 'localtime') != ?")
+        args.append(f"{int(filters['exclude_year']):04d}")
+    return " AND ".join(clauses), args
+
+
+def _item(row) -> Dict[str, Any]:
+    item = dict(zip(ROW_COLUMNS + ("rating", "votes"), row))
+    if item["rating"] is None:
+        del item["rating"], item["votes"]
+    return item
+
+
+def query(db, filters: Optional[Dict[str, Any]] = None, sort: str = "taken",
+          offset: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
+    """
+    The media rows matching filters (see _where), sorted (SORTS), one page of them.
+    Each row is a dict of ROW_COLUMNS, plus rating and votes when the file was voted on.
+    """
+    if sort not in SORTS:
+        raise ValueError(f"sort must be one of {', '.join(SORTS)}")
+    where, args = _where(filters)
+    limit = max(0, min(int(limit), MAX_LIMIT))
+    offset = max(0, int(offset))
+    columns = ", ".join(f"m.{c}" for c in ROW_COLUMNS)
+    with db._connect() as conn:
+        rows = conn.execute(
+            f"SELECT {columns}, r.rating, r.votes FROM media m LEFT JOIN file_ratings r ON r.path = m.path "
+            f"WHERE {where} ORDER BY {SORTS[sort]} LIMIT ? OFFSET ?", (*args, limit, offset)).fetchall()
+    return [_item(row) for row in rows]
+
+
+def count(db, filters: Optional[Dict[str, Any]] = None) -> int:
+    where, args = _where(filters)
+    with db._connect() as conn:
+        return conn.execute(f"SELECT COUNT(*) FROM media m WHERE {where}", args).fetchone()[0]
+
+
+def date_histogram(db, filters: Optional[Dict[str, Any]] = None) -> List[Tuple[int, int, int]]:
+    """[(year, month, count)] of the matching rows by local capture date, oldest first."""
+    where, args = _where(filters)
+    with db._connect() as conn:
+        rows = conn.execute(
+            "SELECT CAST(strftime('%Y', m.taken, 'unixepoch', 'localtime') AS INTEGER) AS y, "
+            "CAST(strftime('%m', m.taken, 'unixepoch', 'localtime') AS INTEGER) AS mo, COUNT(*) "
+            f"FROM media m WHERE {where} AND m.taken IS NOT NULL GROUP BY y, mo ORDER BY y, mo", args).fetchall()
+    return [tuple(row) for row in rows]
+
+
+def timeline_page(db, roots: Sequence[Path], offset: int, limit: Optional[int]) -> List[Tuple]:
+    """(taken, path, size, kind, taken_source) of the photos and videos below roots, by date."""
+    where, args = _where({"kind": ["photo", "video"], "folders": [str(r) for r in roots]})
+    sql = (f"SELECT m.taken, m.path, m.size, m.kind, m.taken_source FROM media m WHERE {where} "
+           "ORDER BY m.taken ASC, m.path ASC")
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        args = [*args, int(limit), int(offset)]
+    elif offset:
+        sql += " LIMIT -1 OFFSET ?"
+        args = [*args, int(offset)]
+    with db._connect() as conn:
+        return conn.execute(sql, args).fetchall()
+
+
+def random_rows(db, filters: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
+    return query(db, filters, sort="random", limit=limit)
+
+
+def stats(db) -> Dict[str, Any]:
+    """Counts for the library status: files per kind, hidden rows, folders."""
+    with db._connect() as conn:
+        kinds = dict(conn.execute("SELECT kind, COUNT(*) FROM media WHERE missing = 0 GROUP BY kind").fetchall())
+        missing = conn.execute("SELECT COUNT(*) FROM media WHERE missing = 1").fetchone()[0]
+        folders = conn.execute("SELECT COUNT(*) FROM media_folders").fetchone()[0]
+    return {"files": sum(kinds.values()), "photos": kinds.get("photo", 0), "videos": kinds.get("video", 0),
+            "audio": kinds.get("audio", 0), "missing": missing, "folders": folders}
+
+
+# ---------- automatic passes ----------
+
+AUTO_POLL_SECONDS = 5.0        # how often the vault is checked (start, unplug, return)
+AUTO_INTERVAL_SECONDS = 1800.0  # an incremental pass at least this often while the app runs
+
+
+class AutoIndexer:
+    """
+    Queues an incremental pass (params {'auto': True}) when the app starts with the
+    vault there, when the vault comes back after it was gone, every
+    AUTO_INTERVAL_SECONDS, and when request() is called (the timeline found the index
+    behind the disk). Never two at once: a running pass of any kind is left alone.
+    """
+
+    def __init__(self, manager, poll: float = AUTO_POLL_SECONDS, interval: float = AUTO_INTERVAL_SECONDS):
+        self.manager = manager
+        self.poll = poll
+        self.interval = interval
+        self._stop = threading.Event()
+        self._wake = threading.Event()
+        self._requested = False
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._loop, name="media-index-auto", daemon=True)
+            self._thread.start()
+
+    def stop(self, wait: float = 2.0) -> None:
+        self._stop.set()
+        self._wake.set()
+        if self._thread is not None:
+            self._thread.join(wait)
+
+    def request(self) -> None:
+        self._requested = True
+        self._wake.set()
+
+    def _loop(self) -> None:
+        was_available = False
+        last_start = None
+        try:
+            while not self._stop.is_set():
+                available = self.manager.vault_available()
+                due = available and (not was_available or self._requested or last_start is None
+                                     or time.monotonic() - last_start >= self.interval)
+                if due:
+                    self._requested = False
+                    if self.start_pass():
+                        last_start = time.monotonic()
+                    elif last_start is None:
+                        last_start = time.monotonic()
+                was_available = available
+                self._wake.wait(self.poll)
+                self._wake.clear()
+        finally:
+            try:
+                self.manager.db.release_thread()
+            except Exception:
+                pass
+
+    def start_pass(self) -> bool:
+        """Queue an automatic pass unless one (of any kind) is active. True when one was queued."""
+        from backend.jobs import ACTIVE, INTERRUPTED, JobError
+        try:
+            jobs = self.manager.list(limit=100, job_type=INDEX_JOB)
+            if any(job["status"] in ACTIVE for job in jobs):
+                return False
+            self.manager.start(INDEX_JOB, {"auto": True}, exclusive=True)
+            # An automatic pass that a restart interrupted is superseded by this one
+            for job in jobs:
+                if job["status"] == INTERRUPTED and (job.get("params") or {}).get("auto"):
+                    try:
+                        self.manager.cancel(job["id"])
+                    except JobError:
+                        pass
+            return True
+        except Exception:
+            return False
