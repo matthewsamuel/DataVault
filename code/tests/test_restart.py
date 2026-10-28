@@ -166,3 +166,82 @@ def test_restart_end_to_end(config_file, tmp_path):
             except ProcessLookupError:
                 pass
         log.close()
+
+
+def _stop(pid):
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+
+
+def test_restart_survives_a_closed_terminal(config_file, tmp_path):
+    """
+    R-2.1b-1: started from a Terminal (stdout/stderr on a tty), restarted, then the
+    Terminal window is closed (tty revoked). A second restart must still bring the
+    server back: the restarted server writes to the log file, never to the old tty.
+    """
+    import pty
+    import select
+    import threading
+
+    port = _free_port()
+    log_file = tmp_path / "logs" / "server.log"
+    env = dict(os.environ, DATAVAULT_TESTING="1", DATAVAULT_CONFIG=str(config_file),
+               DATAVAULT_LOG_FILE=str(log_file))
+    master, slave = pty.openpty()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "--factory", "backend.main:create_app",
+         "--host", "127.0.0.1", "--port", str(port)],
+        cwd=str(CODE_DIR), env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True,
+    )
+    os.close(slave)
+    terminal = bytearray()
+    closed = threading.Event()
+
+    def drain():  # the Terminal window: shows whatever the server prints
+        while not closed.is_set():
+            if select.select([master], [], [], 0.1)[0]:
+                try:
+                    terminal.extend(os.read(master, 65536))
+                except OSError:
+                    return
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+
+    base = f"http://127.0.0.1:{port}"
+    pids = {proc.pid}
+
+    def restart_once():
+        before = _wait_health(base)
+        token = httpx.get(f"{base}/api/session").json()["token"]
+        assert httpx.post(f"{base}/api/restart", headers={"X-DataVault-Token": token}).status_code == 200
+        after = _wait_health(base, timeout=30, not_instance=before["instance"])
+        pids.add(after["pid"])
+        return after
+
+    try:
+        restart_once()
+        assert proc.wait(timeout=15) in (0, -signal.SIGTERM)
+        closed.set()
+        reader.join()
+        os.close(master)  # the Terminal window is closed: its tty is revoked
+        time.sleep(0.3)
+        assert httpx.get(f"{base}/api/folders").status_code == 200
+
+        third = restart_once()
+        assert httpx.get(f"{base}/api/folders").status_code == 200
+        assert third["pid"] not in (proc.pid,)
+        assert b"uitvoer staat voortaan in" in terminal
+        assert log_file.read_text().count("Application startup complete") >= 2
+    finally:
+        closed.set()
+        for pid in pids - {proc.pid}:
+            _stop(pid)
+        if proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=10)
+        try:
+            os.close(master)
+        except OSError:
+            pass

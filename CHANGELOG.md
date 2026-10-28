@@ -80,6 +80,12 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   eigen server: voorheen werd alles op poort 8000 hard afgesloten (ook andere programma's) en
   altijd op poort 8000 opnieuw gestart. Nu wacht een hulpproces tot de server gestopt is en
   start hem met precies dezelfde instellingen opnieuw.
+- Herstarten werkt nu ook nadat je het Terminal-venster van `start.sh` hebt gesloten. Voorheen
+  bleef de herstarte server aan dat venster hangen: was het eenmaal dicht, dan kwam de server
+  bij de volgende herstart niet meer terug ("Server reageert niet"). De uitvoer van een
+  herstarte server staat nu in `~/Library/Logs/DataVault/server.log` (te openen met de app
+  Console); in Terminal verschijnt een melding waar je die vindt. Met de DataVault-app blijft de
+  uitvoer gewoon in `/tmp/datavault_server.log`.
 - Twee herstartverzoeken tegelijk (bijv. vanuit twee tabbladen) starten nog maar één nieuwe
   server. Voorheen startten er twee, die allebei tegelijk de database klaarzetten voordat één
   van beide afhaakte. Het tweede tabblad wacht nu gewoon mee op de herstarte server.

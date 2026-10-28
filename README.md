@@ -427,7 +427,13 @@ AppleDouble files and symlinks.
 
 **Restart** (`backend/restart.py`): `POST /api/restart` restarts only the process that received
 it. A helper in its own session waits for this PID to exit, then execs the same interpreter with
-the same arguments, working directory and environment. Nothing is killed by port.
+the same arguments, working directory and environment. Nothing is killed by port. A second
+restart request while one is pending gets 409 (`Herstart is al bezig`), so only one new server
+ever starts. The restarted server outlives the Terminal window that started it, so it never
+writes to that Terminal: output that went to a regular file (the DataVault app's
+`/tmp/datavault_server.log`) stays there, anything else (a tty, a pipe) goes to
+`~/Library/Logs/DataVault/server.log` (override with `DATAVAULT_LOG_FILE`; above 10 MB the old
+log moves to `server.log.1`).
 
 ## 📊 Database Design
 

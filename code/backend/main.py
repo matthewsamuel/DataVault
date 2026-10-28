@@ -24,6 +24,14 @@ from backend import file_ops, restart, security
 from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline
 
 
+def _say(message: str) -> None:
+    """A startup message; a closed terminal (revoked tty) must never stop the server from starting."""
+    try:
+        print(message, flush=True)
+    except OSError:
+        pass
+
+
 def create_app(config_path: Optional[str] = None) -> FastAPI:
     """
     Build the application. Config comes from config_path, $DATAVAULT_CONFIG
@@ -62,10 +70,10 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         path_status = config.validate_paths()
 
         if not path_status["vault_root"]:
-            print("WARNING: Vault root not found. Is T7 mounted?")
-            print(f"Expected path: {config.VAULT_ROOT}")
+            _say("WARNING: Vault root not found. Is T7 mounted?")
+            _say(f"Expected path: {config.VAULT_ROOT}")
         else:
-            print(f"Vault root found: {config.VAULT_ROOT}")
+            _say(f"Vault root found: {config.VAULT_ROOT}")
 
             # Ensure cache directories exist
             config.ensure_cache_dirs()
@@ -73,7 +81,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
 
         # Initialize database
         db = Database(config.DB_PATH)
-        print(f"Database initialized: {config.DB_PATH}")
+        _say(f"Database initialized: {config.DB_PATH}")
 
         # Initialize routes with config and database
         folders.init_router(config)
@@ -86,15 +94,15 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         keurer.init_router(config, db)
         timeline.init_router(config)
 
-        print("DataVault Dashboard initialized successfully")
+        _say("DataVault Dashboard initialized successfully")
 
     except RuntimeError:
         # Safety guards (e.g. test mode pointing at a real vault) must stop startup
         raise
     except Exception as e:
-        print(f"ERROR during initialization: {e}")
+        _say(f"ERROR during initialization: {e}")
         import traceback
-        traceback.print_exc()
+        _say(traceback.format_exc())
 
     app.state.config = config
 

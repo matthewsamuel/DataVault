@@ -6,6 +6,12 @@ else on the machine, and no fixed port): a small helper process waits until
 this PID has exited, then starts the server again with the same interpreter,
 arguments, working directory and environment. This process then shuts down
 the normal way (SIGTERM, so uvicorn finishes open requests first).
+
+The restarted server runs in its own session, so it outlives the Terminal
+window that started it. Its output therefore never goes to that Terminal: once
+the window closes the tty is revoked and every print would fail (the server
+could not even start a second time). Output that went to a regular file (the
+DataVault app's log) stays there; anything else goes to LOG_FILE.
 """
 import json
 import os
@@ -13,6 +19,7 @@ import signal
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from typing import List, Optional
 
 # How long the helper waits for the old process before giving up (it never kills anything)
@@ -22,11 +29,43 @@ EXIT_DELAY = 0.5
 # A second SIGTERM makes uvicorn stop without waiting for long-running streams (chat)
 FORCE_EXIT_DELAY = 10
 
+# Where a restarted server writes its output when it cannot keep the old one (a Terminal)
+LOG_FILE = Path(os.environ.get("DATAVAULT_LOG_FILE") or Path.home() / "Library/Logs/DataVault/server.log")
+# Above this size the log is moved to server.log.1 (one older generation is kept)
+LOG_MAX_BYTES = 10 * 1024 * 1024
+
 # Runs in the helper process: wait for the old PID to exit, then become the new server.
 # A zombie (exited, not yet reaped by its parent) counts as exited.
 HELPER_SCRIPT = r"""
-import json, os, subprocess, sys, time
+import json, os, stat, subprocess, sys, time
 pid, argv, cwd, wait = int(sys.argv[1]), json.loads(sys.argv[2]), sys.argv[3], float(sys.argv[4])
+log_file, log_max = sys.argv[5], int(sys.argv[6])
+
+def say(msg):
+    try:
+        os.write(2, msg.encode())
+    except OSError:
+        pass  # no (more) terminal: nothing to tell
+
+def keeps_output(fd):
+    # A regular file (a log) or /dev/null stays usable for good; a tty, pipe or socket may not
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        return False
+    return stat.S_ISREG(st.st_mode) or (stat.S_ISCHR(st.st_mode) and not os.isatty(fd))
+
+def open_log():
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        try:
+            if os.lstat(log_file).st_size > log_max:
+                os.rename(log_file, log_file + ".1")  # the app's own log, never an archive file
+        except FileNotFoundError:
+            pass
+        return os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o644)
+    except OSError:
+        return os.open(os.devnull, os.O_WRONLY)
 
 def running():
     try:
@@ -41,9 +80,16 @@ def running():
 deadline = time.monotonic() + wait
 while running():
     if time.monotonic() > deadline:
-        sys.stderr.write(f"DataVault: proces {pid} stopte niet; er wordt geen tweede server gestart\n")
+        say(f"DataVault: proces {pid} stopte niet; er wordt geen tweede server gestart\n")
         sys.exit(1)
     time.sleep(0.1)
+if not (keeps_output(1) and keeps_output(2)):
+    say(f"DataVault: server herstart; de uitvoer staat voortaan in {log_file}\n")
+    log_fd = open_log()
+    for fd in (1, 2):
+        if not keeps_output(fd):
+            os.dup2(log_fd, fd)
+    os.close(log_fd)
 os.chdir(cwd)
 os.execv(argv[0], argv)
 """
@@ -75,9 +121,13 @@ def relaunch_command() -> List[str]:
 
 
 def _spawn_helper(pid: int, argv: List[str], cwd: str) -> subprocess.Popen:
-    """Start the waiting helper in its own session; it inherits stdout/stderr and the environment."""
+    """
+    Start the waiting helper in its own session. It inherits stdout/stderr and the
+    environment, and moves output that is not a regular file to LOG_FILE (see above).
+    """
     return subprocess.Popen(
-        [sys.executable, "-c", HELPER_SCRIPT, str(pid), json.dumps(argv), cwd, str(WAIT_SECONDS)],
+        [sys.executable, "-c", HELPER_SCRIPT, str(pid), json.dumps(argv), cwd, str(WAIT_SECONDS),
+         str(LOG_FILE), str(LOG_MAX_BYTES)],
         start_new_session=True,
         stdin=subprocess.DEVNULL,
         env=os.environ.copy(),
