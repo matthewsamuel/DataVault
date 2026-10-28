@@ -701,7 +701,7 @@
                                     <select class="select select-sm" id="albums-camera" aria-label="Camera"></select>
                                     <select class="select select-sm" id="albums-ext" aria-label="Bestandstype"></select>
                                     <select class="select select-sm" id="albums-has-gps" aria-label="Locatie"></select>
-                                    <select class="select select-sm" id="albums-rating" aria-label="Shows-waardering"></select>
+                                    <select class="select select-sm" id="albums-rating" aria-label="Shows-score"></select>
                                     <select class="select select-sm" id="albums-keurer" aria-label="Keurer"></select>
                                     <select class="select select-sm" id="albums-orientation" aria-label="Oriëntatie"></select>
                                     <select class="select select-sm" id="albums-capture-date" aria-label="Opnamedatum"></select>
@@ -711,6 +711,7 @@
                                     <button type="button" class="link-button albums-clear" id="albums-clear" hidden>Alles wissen</button>
                                     <span class="albums-count tabular" id="albums-count" aria-live="polite"></span>
                                 </div>
+                                <div class="albums-new-hint" id="albums-new-hint" role="status" hidden></div>
                             </div>
                         </div>
 
@@ -726,7 +727,7 @@
                         <div class="albums-otd-scroll">
                             <div class="page-header albums-header">
                                 <div>
-                                    <h1 class="page-title" tabindex="-1"><i class="fas fa-calendar-day" aria-hidden="true"></i> <span id="albums-otd-title-text">Op deze dag</span></h1>
+                                    <h1 class="page-title" id="albums-otd-title" tabindex="-1"><i class="fas fa-calendar-day" aria-hidden="true"></i> <span id="albums-otd-title-text">Op deze dag</span></h1>
                                     <p class="page-subtitle" id="albums-otd-subtitle"></p>
                                 </div>
                                 <div class="albums-otd-nav" role="group" aria-label="Dag kiezen">

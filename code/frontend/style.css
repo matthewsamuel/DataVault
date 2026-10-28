@@ -9108,13 +9108,20 @@ button.otd-settings-icon:hover {
 }
 
 .albums-header {
+    flex-wrap: wrap;
     margin-bottom: var(--space-lg);
+}
+
+/* De titel krijgt minstens 320 px; passen de knoppen er dan niet naast, dan gaan ze samen
+   (als één rij) onder de titel, in plaats van één knop alleen op een tweede regel */
+.albums-header > div:first-child {
+    flex: 1 1 320px;
+    min-width: 0;
 }
 
 .albums-header-actions {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
+    flex-wrap: nowrap;
     gap: var(--space-sm);
 }
 

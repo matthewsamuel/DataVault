@@ -35,9 +35,15 @@
         'oktober', 'november', 'december'];
     const MONTHS_SHORT = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
     const PERIODS = { this_year: 'Dit jaar', last_year: 'Vorig jaar', this_month: 'Deze maand', last_30_days: 'Laatste 30 dagen' };
-    // Shows-waardering: elke stem omhoog is +50 vanaf 1000 (shows.py)
-    const RATINGS = [['100', 'Elke beoordeelde'], ['1050', '1 ster of meer'], ['1150', '2 sterren of meer'],
-        ['1300', '3 sterren of meer']];
+    // De Shows-score: elk hartje ('Mooi') is +50 vanaf 1000, elk duimpje omlaag -50 (shows.py).
+    // Dezelfde woorden als in Shows en de viewer ('Score 1150'); [waarde, keuze, label]
+    const RATINGS = [
+        ['100', 'Beoordeeld in Shows', 'Beoordeeld in Shows'],
+        ['1050', 'Vaker mooi dan niet (score 1050+)', 'Vaker mooi dan niet'],
+        ['1150', 'Netto 3× mooi (score 1150+)', 'Netto 3× mooi'],
+        ['1300', 'Netto 6× mooi (score 1300+)', 'Netto 6× mooi'],
+    ];
+    const CAMERA_CONTAINS = '__contains';    // de keuze 'Bevat …' in de cameralijst (geen echte camera)
     const SELECTS = {
         has_gps: [['true', 'Met locatie'], ['false', 'Zonder locatie']],
         keurer: [['keep', 'Gehouden in de Keurer'], ['undecided', 'Nog niet gekeurd']],
@@ -248,6 +254,7 @@
         const otd = state.mode === 'otd';
         $('albums-browse').hidden = otd;
         $('albums-otd').hidden = !otd;
+        if (otd) state.newHint = false;
         renderSidebar();
         if (otd) loadOnThisDay();
         else {
@@ -284,6 +291,7 @@
     window.albumsShow = function (albumId, spec, sort) {
         state.mode = 'browse';
         state.customRange = false;
+        state.newHint = false;
         state.albumId = albumId ?? null;
         const album = currentAlbum();
         state.spec = spec ? { ...spec } : album ? JSON.parse(JSON.stringify(album.filters || {})) : {};
@@ -296,15 +304,33 @@
         }
     };
 
-    // Nieuw slim album: vanaf alles, met de filters in beeld; Bewaar als album maakt het
+    // Nieuw slim album: vanaf alles, met een uitleg onder de filters (geen melding over de knoppen
+    // heen); Bewaar als album maakt het. Staan er al filters (en geen album), dan blijven die staan.
     window.albumsNew = function () {
-        albumsShow(null, {}, DEFAULT_SORT);
-        showToast('Nieuw slim album', 'Kies hierboven de filters en klik dan op Bewaar als album.', 'info');
+        const keep = state.mode === 'browse' && state.albumId === null;
+        if (!keep) albumsShow(null, {}, DEFAULT_SORT);
+        state.newHint = true;
+        renderNewHint();
         setTimeout(() => {
             const first = document.querySelector('#albums-kinds .pill');
             if (first) first.focus();
-        }, 100);
+        }, keep ? 0 : 100);
     };
+
+    function renderNewHint() {
+        const hint = $('albums-new-hint');
+        if (!hint) return;
+        const show = !!state.newHint && state.mode === 'browse' && state.albumId === null;
+        hint.hidden = !show;
+        if (!show) return;
+        hint.replaceChildren(
+            createEl('i', { class: 'fas fa-wand-magic-sparkles', 'aria-hidden': 'true' }),
+            createEl('span', { class: 'albums-new-hint-text', text: 'Nieuw slim album: kies hierboven de filters en klik dan rechtsboven op Bewaar als album.' }),
+            createEl('button', {
+                type: 'button', class: 'btn btn-ghost btn-icon btn-sm', 'aria-label': 'Uitleg sluiten', title: 'Sluiten',
+                onClick: () => { state.newHint = false; renderNewHint(); $('albums-title').focus(); },
+            }, createEl('i', { class: 'fas fa-xmark', 'aria-hidden': 'true' })));
+    }
 
     // ── Zijbalk ──────────────────────────────────────────
 
@@ -340,10 +366,23 @@
             createEl('span', { class: 'albums-side-count tabular', text: countText(count) }));
     }
 
+    // De zijbalk wordt opnieuw getekend: wie er met het toetsenbord was, blijft op het gekozen item
     function renderSidebar() {
         const library = $('albums-side-library');
         const list = $('albums-side-albums');
         if (!library || !list) return;
+        const active = document.activeElement;
+        const hadFocus = !!active && !!active.closest && !!active.closest('.albums-sidebar');
+        const focusLink = hadFocus && active.classList.contains('albums-side-link') ? active.dataset.link : null;
+        drawSidebar(library, list);
+        if (!hadFocus || document.activeElement.closest('.albums-sidebar')) return;
+        const target = (focusLink && document.querySelector(`.albums-sidebar [data-link="${focusLink}"]`))
+            || document.querySelector('.albums-sidebar .albums-side-item.active')
+            || document.querySelector('.albums-sidebar .albums-side-item');
+        if (target) target.focus();
+    }
+
+    function drawSidebar(library, list) {
         const browsing = state.mode === 'browse';
         library.replaceChildren(
             sideItem({
@@ -378,6 +417,7 @@
         if (hiddenCount) {
             extra.push(createEl('button', {
                 type: 'button', class: 'link-button albums-side-link', 'aria-expanded': String(state.showHidden),
+                dataset: { link: 'hidden' },
                 text: state.showHidden ? 'Verborgen albums niet tonen' : `Verborgen albums tonen (${hiddenCount})`,
                 onClick: () => { state.showHidden = !state.showHidden; renderSidebar(); },
             }));
@@ -386,6 +426,7 @@
         if (builtins.size < 6) {
             extra.push(createEl('button', {
                 type: 'button', class: 'link-button albums-side-link', text: 'Standaardalbums terugzetten',
+                dataset: { link: 'defaults' },
                 onClick: restoreDefaults,
             }));
         }
@@ -417,26 +458,34 @@
             ? (changed ? 'Aangepast: bewaar de nieuwe filters of zet ze terug.'
                 : 'Slim album: altijd actueel, de bestanden blijven waar ze staan.')
             : 'Alles in je archief. Kies filters en bewaar ze als slim album.';
+        // Hoogstens drie knoppen. Een aangepast album: terugzetten, bewaren, of als nieuw album
+        // bewaren (naam en icoon wijzigen kan daarna weer met Album bewerken)
         const actions = $('albums-header-actions');
+        const focused = document.activeElement && actions.contains(document.activeElement) ? document.activeElement.id : null;
         const buttons = [];
         if (album && changed) {
-            buttons.push(createEl('button', { type: 'button', class: 'btn btn-ghost', onClick: () => albumsShow(album.id) },
+            buttons.push(createEl('button', { type: 'button', class: 'btn btn-ghost', id: 'albums-revert', onClick: () => { albumsShow(album.id); $('albums-title').focus(); } },
                 createEl('i', { class: 'fas fa-rotate-left', 'aria-hidden': 'true' }), 'Terugzetten'));
+            buttons.push(createEl('button', {
+                type: 'button', class: 'btn btn-secondary', id: 'albums-save-new', title: 'Deze filters als een nieuw album bewaren',
+                onClick: () => openAlbumDialog(null),
+            }, createEl('i', { class: 'fas fa-plus', 'aria-hidden': 'true' }), 'Als nieuw album'));
             buttons.push(createEl('button', { type: 'button', class: 'btn btn-primary', id: 'albums-save-changes', onClick: saveAlbumChanges },
                 createEl('i', { class: 'fas fa-check', 'aria-hidden': 'true' }), 'Wijzigingen bewaren'));
-        }
-        if (album) {
+        } else if (album) {
             buttons.push(createEl('button', { type: 'button', class: 'btn btn-secondary', id: 'albums-edit', onClick: () => openAlbumDialog(album) },
                 createEl('i', { class: 'fas fa-pen', 'aria-hidden': 'true' }), 'Album bewerken'));
-        }
-        if (!album || changed) {
+        } else {
             const any = Object.keys(state.spec).length > 0;
             buttons.push(createEl('button', {
-                type: 'button', class: `btn ${any && !album ? 'btn-primary' : 'btn-secondary'}`, id: 'albums-save-new',
+                type: 'button', class: `btn ${any ? 'btn-primary' : 'btn-secondary'}`, id: 'albums-save-new',
                 onClick: () => openAlbumDialog(null),
             }, createEl('i', { class: 'fas fa-plus', 'aria-hidden': 'true' }), 'Bewaar als album'));
         }
         actions.replaceChildren(...buttons);
+        renderNewHint();
+        // Weg was de knop met de focus (bijv. na Wijzigingen bewaren): dan de titel, niet de pagina
+        if (focused) ($(focused) || $('albums-title')).focus();
     }
 
     // ── Filterbalk ───────────────────────────────────────
@@ -477,6 +526,7 @@
             state.spec = {};
             state.customRange = false;
             changed();
+            $('albums-title').focus();
         });
         $('albums-loading').replaceChildren(skeletonCards(12, 'albums-skeleton'));
         registerOverlayCloser('modal-album', albumsCloseDialog);
@@ -502,6 +552,7 @@
     }
 
     function setCamera(value) {
+        if (value === CAMERA_CONTAINS) return;     // dat is het filter dat er al staat
         const spec = { ...state.spec };
         delete spec.camera;
         delete spec.camera_contains;
@@ -597,9 +648,9 @@
         const camera = $('albums-camera');
         const camOptions = cameras.map(c => option(c.value, `${c.label} (${formatNumberNl(c.count)})`));
         if (spec.camera && !cameras.some(c => c.value === spec.camera)) camOptions.unshift(option(spec.camera, spec.camera));
-        if (spec.camera_contains) camOptions.unshift(option('', `Bevat '${spec.camera_contains}'`));
+        if (spec.camera_contains) camOptions.unshift(option(CAMERA_CONTAINS, `Bevat '${spec.camera_contains}'`));
         camera.replaceChildren(option('', 'Camera'), ...camOptions);
-        camera.value = spec.camera || '';
+        camera.value = spec.camera || (spec.camera_contains ? CAMERA_CONTAINS : '');
         const exts = (state.facets && state.facets.exts) || [];
         const ext = $('albums-ext');
         const extOptions = exts.map(x => option(x.ext, `${x.ext} (${formatNumberNl(x.count)})`));
@@ -607,9 +658,9 @@
         ext.replaceChildren(option('', 'Bestandstype'), ...extOptions);
         ext.value = spec.ext && spec.ext.length === 1 ? spec.ext[0] : '';
         const rating = $('albums-rating');
-        rating.replaceChildren(option('', 'Waardering'), ...RATINGS.map(([v, l]) => option(v, l)));
+        rating.replaceChildren(option('', 'Shows-score'), ...RATINGS.map(([v, l]) => option(v, l)));
         if (spec.min_rating && !RATINGS.some(([v]) => Number(v) === spec.min_rating)) {
-            rating.appendChild(option(String(spec.min_rating), `Minstens ${spec.min_rating}`));
+            rating.appendChild(option(String(spec.min_rating), `Score ${spec.min_rating} of hoger`));
         }
         rating.value = spec.min_rating ? String(spec.min_rating) : '';
         Object.keys(SELECTS).forEach(key => {
@@ -645,7 +696,7 @@
         if (spec.camera) out.push(['camera', spec.camera]);
         if (spec.camera_contains) out.push(['camera_contains', `Camera met '${spec.camera_contains}'`]);
         if (spec.ext) out.push(['ext', spec.ext.join(', ')]);
-        if (spec.min_rating) out.push(['min_rating', (RATINGS.find(([v]) => Number(v) === spec.min_rating) || [0, `Waardering ${spec.min_rating}+`])[1]]);
+        if (spec.min_rating) out.push(['min_rating', (RATINGS.find(([v]) => Number(v) === spec.min_rating) || [0, 0, `Score ${spec.min_rating}+`])[2]]);
         Object.keys(SELECTS).forEach(key => {
             if (spec[key] === undefined) return;
             const found = SELECTS[key].find(([v]) => v === String(spec[key]));
@@ -657,7 +708,7 @@
     function renderChips() {
         const chips = $('albums-chips');
         const labels = chipLabels(state.spec);
-        chips.replaceChildren(...labels.map(([key, label]) => createEl('span', { class: 'chip albums-chip' },
+        chips.replaceChildren(...labels.map(([key, label], at) => createEl('span', { class: 'chip albums-chip' },
             createEl('span', { class: 'albums-chip-text', text: label }),
             createEl('button', {
                 type: 'button', class: 'chip-remove', 'aria-label': `Filter ${label} weghalen`, title: 'Weghalen',
@@ -892,18 +943,20 @@
             }));
         } else if (currentAlbum() && !albumChanged()) {
             const album = currentAlbum();
-            const rated = state.spec.min_rating !== undefined;
+            // Het hartjes-advies alleen als de score het enige is dat het album smaller maakt
+            const onlyRating = state.spec.min_rating !== undefined && narrowingKeys(state.spec).length === 1;
             box.replaceChildren(emptyState({
                 icon: album.icon || 'fa-images', title: 'Dit album is nog leeg',
-                text: rated ? 'Geef in een Shows-diavoorstelling een hartje aan je mooiste foto\'s: wat hoog scoort, komt hier vanzelf bij.'
-                    : 'Nog niets in het archief past bij dit album. Het vult zich vanzelf zodra dat wel zo is.',
-                action: rated ? { label: 'Naar Shows', onClick: () => switchMainView('shows') } : null,
+                text: onlyRating ? 'Geef in een Shows-diavoorstelling een hartje aan je mooiste foto\'s: wat hoog scoort, komt hier vanzelf bij.'
+                    : `Nog geen ${kindWords(state.spec)} in het archief passen bij dit album. Het vult zich vanzelf zodra dat wel zo is.`,
+                action: onlyRating ? { label: 'Naar Shows', onClick: () => switchMainView('shows') }
+                    : { label: 'Album bewerken', onClick: () => openAlbumDialog(album) },
             }));
         } else if (Object.keys(state.spec).length) {
             box.replaceChildren(emptyState({
                 icon: 'fa-filter-circle-xmark', title: 'Niets gevonden',
-                text: 'Geen foto\'s of video\'s die bij al deze filters passen.',
-                action: { label: 'Filters wissen', onClick: () => { state.spec = {}; changed(); } },
+                text: `Geen ${kindWords(state.spec)} die bij al deze filters passen.`,
+                action: { label: 'Filters wissen', onClick: () => { state.spec = {}; state.customRange = false; changed(); $('albums-title').focus(); } },
             }));
         } else {
             box.replaceChildren(emptyState({
@@ -1195,6 +1248,7 @@
         save.disabled = true;
         save.classList.add('is-loading');
         try {
+            const before = dialogAlbum;
             const album = await fetchJSON(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             albumsCloseDialog();
             await loadAlbums();
@@ -1202,11 +1256,18 @@
                 showToast('Album bewaard', `'${album.name}' staat bij je slimme albums en blijft vanzelf bij.`, 'success');
                 albumsShow(album.id);
             } else {
-                if (album.hidden) state.showHidden = true;
                 renderSidebar();
                 renderHeader();
                 writeHash();
+                if (album.hidden && !before.hidden && !state.showHidden) {
+                    // Verborgen: weg uit de lijst (het album zelf blijft open), met de weg terug
+                    showToast('Album verborgen', `'${album.name}' staat niet meer in de lijst. Je vindt het onder 'Verborgen albums tonen'.`, 'success', {
+                        label: 'Ongedaan maken',
+                        onClick: () => unhideAlbum(album),
+                    });
+                }
             }
+            $('albums-title').focus();
         } catch (e) {
             $('album-error').textContent = (e && e.message) || 'Bewaren mislukt';
         } finally {
@@ -1214,6 +1275,18 @@
             save.classList.remove('is-loading');
         }
     };
+
+    async function unhideAlbum(album) {
+        try {
+            await fetchJSON(`${API_BASE}/api/library/albums/${album.id}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden: false }),
+            });
+            await loadAlbums();
+            showToast('Album weer zichtbaar', `'${album.name}' staat weer in de lijst.`, 'success');
+        } catch (e) {
+            toastFetchError('Terugzetten mislukt', e);
+        }
+    }
 
     window.albumsDeleteFromDialog = async function () {
         const button = $('album-delete');
@@ -1231,6 +1304,7 @@
             showToast('Album verwijderd', `'${album.name}' is weg. Je foto's en video's blijven waar ze staan.`, 'success');
             await loadAlbums();
             albumsShow(null, {}, DEFAULT_SORT);
+            $('albums-title').focus();
         } catch (e) {
             $('album-error').textContent = (e && e.message) || 'Verwijderen mislukt';
         }
@@ -1278,6 +1352,8 @@
         state.otdDay = now.getDate();
         writeHash();
         loadOnThisDay();
+        // De knop schakelt zichzelf uit: de focus naar de titel, niet naar de pagina
+        $('albums-otd-title').focus();
     };
 
     function renderOtdControls() {
