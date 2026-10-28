@@ -17,7 +17,8 @@ Een lokale media viewer en RAW duplicaten opruimtool voor macOS. Draait op exter
     │   ├── scanner.py     # Bestanden scannen & hashen
     │   ├── thumbnail.py   # Thumbnails genereren
     │   ├── jobs.py        # Achtergrondtaken (voortgang, pauzeren, hervatten)
-    │   ├── job_types.py   # Duplicatenscan, indexeren, miniaturen
+    │   ├── job_types.py   # Duplicatenscan, indexeren, miniaturen, foto's vergelijken
+    │   ├── near_dups.py   # Bijna-duplicaten en bursts (Beste uit reeks)
     │   └── routes/        # API endpoints
     ├── frontend/          # HTML/CSS/JS interface
     ├── venv/              # Python virtual environment
@@ -96,6 +97,41 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Per groep kies je welke kopie blijft (regel of zelf aanklikken)
 - Duplicaten verplaatsen naar RAW_DUPLICATES (structuur behouden), nooit wissen
 - Elke opruimactie is in één keer terug te zetten (Herstellen, of in het Herstelcentrum)
+
+### Beste uit reeks (bijna-duplicaten en bursts)
+- Tweede tabblad op **Duplicaten**: foto's die op elkaar *lijken* (verkleinde of opnieuw opgeslagen
+  kopieën, bewerkingen, bursts), niet byte voor byte gelijk. `backend/near_dups.py`, routes in
+  `backend/routes/series.py`, scherm in `frontend/series.js`; migraties 30 en 31.
+- **Vergelijken** is een achtergrondtaak (`phash`, na een snelle ronde van de bibliotheek). Per foto
+  (alleen foto's; video's en RAW-bestanden die Pillow niet kan openen worden overgeslagen) een klein
+  gedecodeerde versie (JPEG in draft-modus, HEIC via pillow_heif, rechtop volgens EXIF): dHash en
+  pHash (64 bits), de gemiddelde kleur van de vier kwarten, contrast, scherpte (variantie van de
+  Laplaciaan), en afgekapte schaduwen en hoge lichten. Alleen nieuwe of veranderde foto's worden
+  gelezen; pauzeren, hervatten en annuleren verliezen hooguit één stapel van 200.
+- Paren: multi-index hashing (4 delen van 16 bits, nooit alle paren); foto's die precies hetzelfde
+  ogen vormen één groep. Bursts: dezelfde camera, EXIF-tijden hooguit 3 s na elkaar, dezelfde map.
+- Strengheid (pHash / dHash / kleur): **Streng** 4/6/10, **Normaal** 8/10/16 (standaard), **Ruim**
+  11/14/24; bursts 14/16/16, 20/22/22 en 26/28/30. Is één van de twee foto's bijna vlak (contrast
+  < 10), dan mag de kleur hooguit 6 verschillen. Afgestemd op het testarchief (de verkleinde
+  `strand klein.jpg` hoort bij het origineel, de effen testfoto's in andere kleuren niet) en op 132
+  echte foto's met gemaakte varianten.
+- Exacte kopieën blijven het werk van het eerste tabblad: hier tellen ze als één foto, met
+  "+n exacte kopieën" erbij (ze gaan mee als die foto weggaat, alleen als ze dan nog byte voor byte
+  gelijk zijn). Een groep van meer dan 48 foto's komt in delen, op tijdsvolgorde.
+- Score (0-100, binnen de reeks, deterministisch): scherpte 40, resolutie 25, belichting 15, jouw
+  keuze 20 (Keurer "houden" 12, Shows-waardering tot 8); gelijke stand: grootste bestand, dan pad.
+- Bevestigen verplaatst de rest met `move_no_overwrite` naar
+  `RAW_DUPLICATES/near-duplicates/<pad onder RAW>`, als één actie per reeks in het Herstelcentrum
+  (`recovery.ActionRecorder`, soort `near_dup`). De server controleert vooraf dat de foto's één
+  reeks zijn, dat een foto die blijft er nog onveranderd staat, en per foto dat het nog het
+  vergeleken bestand is. **Alles behouden** onthoudt de reeks (tot hij verandert); **Overslaan**
+  geldt voor deze sessie.
+- API: `GET /api/series/status`, `GET /api/series?strictness=&sort=size|recent&offset=&limit=`,
+  `POST /api/series/keep {members, keep}`, `POST /api/series/keep-all {members}`,
+  `POST /api/series/reviews/reset`.
+- Snelheid (M3 Pro, 4 threads): 12 MP JPEG ~130 foto's/s; HEIC wordt volledig gedecodeerd (36 MP:
+  ~0,7 s per foto per thread, ~5 per seconde met 4 threads). Paren en bursts voor 100.000 foto's:
+  ~5 s, alleen als er iets nieuw of veranderd is; een pagina reeksen daarna in enkele ms.
 
 ### Bibliotheek (media-index)
 - De app houdt een index bij van elke foto, video en audiobestand in het archief (datum, afmetingen,
@@ -183,7 +219,7 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   uitvoer, of zet `DATAVAULT_SMOKE_SHOTS`).
 
 ### Achtergrondtaken
-- Duplicaten zoeken, vooraf indexeren, miniaturen maken en de bibliotheek bijwerken lopen als taak op de achtergrond
+- Duplicaten zoeken, vooraf indexeren, miniaturen maken, de bibliotheek bijwerken en foto's vergelijken (Beste uit reeks) lopen als taak op de achtergrond
 - Het takenpaneel rechtsonder toont voortgang en resterende tijd, met Pauzeren, Hervatten en Annuleren
 - Blijft bewaard na herladen of herstarten ("onderbroken", hervatbaar); bij een losgekoppelde schijf wacht een taak tot de schijf terug is
 
