@@ -5,8 +5,9 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 import os
 import subprocess
+import unicodedata
 
-from backend.config import Config
+from backend.config import Config, is_photo
 from backend.paths import ArchiveFilter, resolve_in_vault, scan_dir, vault_folder_or_none, walk_archive
 from backend.routes.spotify import parse_spotify_data
 
@@ -293,28 +294,32 @@ def get_photos_by_date(date: str) -> Dict[str, Any]:
 
 @router.get("/search-photos")
 def search_photos(query: str, limit: int = 5) -> Dict[str, Any]:
-    """Zoek foto's op bestandsnaam die de query bevat (case-insensitive)."""
-    if not config or not query.strip():
+    """
+    Zoek foto's op bestandsnaam die de query bevat. Hoofdletters en de Unicode-vorm tellen
+    niet mee (GAP-2): een naam die Finder als 'e' + accentteken (NFD) opsloeg, wordt ook
+    gevonden met een 'é' van het toetsenbord (NFC).
+    """
+    wanted = _search_key(query)
+    if not wanted:
         return {"photos": []}
-
-    query_lower = query.lower()
+    limit = max(1, min(limit, 50))
     results = []
 
-    IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.gif', '.bmp', '.webp',
-                        '.tiff', '.tif', '.raw', '.cr2', '.nef', '.arw', '.dng', '.raf'}
-
-    try:
-        for root, dirs, files in walk_archive(config.VAULT_ROOT, config):
-            for filename in files:
-                ext = Path(filename).suffix.lower()
-                if ext in IMAGE_EXTENSIONS and query_lower in filename.lower():
-                    results.append({
-                        "path": str(Path(root) / filename),
-                        "name": filename
-                    })
-                    if len(results) >= limit:
-                        return {"photos": results}
-    except Exception:
-        pass
+    for root, dirs, files in walk_archive(config.VAULT_ROOT, config):
+        dirs.sort()
+        for filename in sorted(files):
+            if is_photo(Path(filename)) and wanted in _search_key(filename):
+                results.append({
+                    "path": str(Path(root) / filename),
+                    "name": filename,
+                    "type": "photo",
+                })
+                if len(results) >= limit:
+                    return {"photos": results}
 
     return {"photos": results}
+
+
+def _search_key(text: str) -> str:
+    """Text for a name search: NFC and casefold, so 'É', 'é' and 'e'+accent all match."""
+    return unicodedata.normalize("NFC", text or "").casefold().strip()

@@ -151,11 +151,48 @@ class Config:
             print(f"Warning: Could not create duplicates folder: {e}")
             return False
 
-# Supported media extensions
-PHOTO_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.heic', '.tiff', '.webp', '.gif', '.bmp', '.raw', '.cr2', '.nef', '.arw', '.dng'}
+# Supported media extensions: the ONE list every part of the app uses (viewer, timeline,
+# Keurer, Shows, on this day, search, duplicate scan, thumbnails). Add a format here only.
+RAW_PHOTO_EXTENSIONS = {'.raw', '.cr2', '.cr3', '.nef', '.arw', '.dng', '.raf', '.orf', '.rw2'}
+PHOTO_EXTENSIONS = {
+    '.jpg', '.jpeg', '.png', '.heic', '.heif', '.hif', '.tif', '.tiff', '.webp', '.gif', '.bmp',
+} | RAW_PHOTO_EXTENSIONS
 VIDEO_EXTENSIONS = {'.mp4', '.mov', '.m4v', '.avi', '.mkv', '.wmv', '.flv', '.webm', '.3gp', '.mpg', '.mpeg', '.mts', '.m2ts'}
 AUDIO_EXTENSIONS = {'.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.wma'}
 MEDIA_EXTENSIONS = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
+
+# Content types Python's mimetypes does not know (it would fall back to text/plain).
+# A browser cannot show RAW photos itself; the viewer then shows the thumbnail.
+MEDIA_CONTENT_TYPES = {
+    '.heic': 'image/heic', '.heif': 'image/heif', '.hif': 'image/heif',
+    '.raw': 'image/x-raw', '.cr2': 'image/x-canon-cr2', '.cr3': 'image/x-canon-cr3',
+    '.nef': 'image/x-nikon-nef', '.arw': 'image/x-sony-arw', '.dng': 'image/x-adobe-dng',
+    '.raf': 'image/x-fuji-raf', '.orf': 'image/x-olympus-orf', '.rw2': 'image/x-panasonic-rw2',
+    '.mts': 'video/mp2t', '.m2ts': 'video/mp2t', '.mkv': 'video/x-matroska',
+    '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.wma': 'audio/x-ms-wma',
+}
+
+
+def media_type(path: Path) -> str:
+    """'photo', 'video', 'audio' or 'other' (a document, archive, ...: never shown as a photo)."""
+    ext = path.suffix.lower()
+    if ext in PHOTO_EXTENSIONS:
+        return 'photo'
+    if ext in VIDEO_EXTENSIONS:
+        return 'video'
+    if ext in AUDIO_EXTENSIONS:
+        return 'audio'
+    return 'other'
+
+
+def content_type(path: Path) -> str:
+    """The Content-Type to serve a vault file with; unknown files are a download, never text/plain."""
+    import mimetypes
+    ext = path.suffix.lower()
+    if ext in MEDIA_CONTENT_TYPES:
+        return MEDIA_CONTENT_TYPES[ext]
+    guessed, _ = mimetypes.guess_type(path.name)
+    return guessed or 'application/octet-stream'
 
 # Thumbnail settings
 THUMB_SIZE = (300, 300)

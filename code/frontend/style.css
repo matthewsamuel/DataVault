@@ -821,6 +821,55 @@ body::before {
     align-items: center;
 }
 
+/* Bestanden die geen foto, video of audio zijn: een icoon, nooit een miniatuur */
+.other-card-icon {
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 42px;
+    color: var(--text-tertiary);
+    background-color: var(--bg-tertiary);
+}
+
+.media-grid.grid-view .other-card .media-card-name {
+    display: block;
+    padding: 6px 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.media-grid.list-view .other-card-icon {
+    width: 80px;
+    height: 60px;
+    flex-shrink: 0;
+    font-size: 22px;
+}
+
+.modal-no-preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 48px 24px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.modal-no-preview i {
+    font-size: 56px;
+    color: var(--text-tertiary);
+}
+
+.modal-no-preview-name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    word-break: break-all;
+}
+
 /* Keep grid view as default */
 .media-grid.grid-view {
     display: grid;

@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
 from typing import Dict, Any
 
-from backend.config import Config, is_video
+from backend.config import Config, content_type, is_video
 from backend.paths import resolve_in_vault, ArchiveFilter
 from backend.file_ops import (
     move_no_overwrite, same_folder, ARCHIVE_LOCK,
@@ -64,8 +64,9 @@ def get_file_endpoint(path: str = Query(...)):
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     
-    # Return file with appropriate content type so browsers can stream it natively
-    return FileResponse(path=str(file_path))
+    # The real content type, so browsers can stream it natively; a RAW photo or an
+    # unknown file is never served as text/plain (see config.content_type)
+    return FileResponse(path=str(file_path), media_type=content_type(file_path))
 
 @router.get("/api/thumb")
 def get_thumbnail_endpoint(path: str = Query(...)):

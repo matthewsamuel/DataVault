@@ -50,24 +50,9 @@ def get_folders(root_path: Path, archive_filter: ArchiveFilter) -> List[Dict[str
 
 
 def get_file_type(file_path: Path) -> str:
-    """
-    Determine if file is photo, video, or audio based on extension.
-    
-    Args:
-        file_path: Path to file
-    
-    Returns:
-        'photo', 'video', or 'audio'
-    """
-    ext = file_path.suffix.lower()
-    from backend.config import VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
-    
-    if ext in VIDEO_EXTENSIONS:
-        return 'video'
-    elif ext in AUDIO_EXTENSIONS:
-        return 'audio'
-    else:
-        return 'photo'
+    """'photo', 'video', 'audio' or 'other', from the extension (see config.media_type)."""
+    from backend.config import media_type
+    return media_type(file_path)
 
 
 def list_media_files(folder_path: Path, archive_filter: ArchiveFilter) -> List[Dict[str, Any]]:

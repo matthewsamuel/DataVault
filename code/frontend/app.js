@@ -624,7 +624,13 @@ function createMediaCard(file) {
     // Thumbnail URL logic
     let thumbUrl = `${API_BASE}/api/thumb?path=${encodeURIComponent(file.path)}`;
 
-    if (file.type === 'audio') {
+    if (file.type === 'other') {
+        // Geen foto, video of audio (pdf, zip, ...): een bestandsicoon, nooit een miniatuur
+        card.classList.add('other-card');
+        card.appendChild(createEl('div', { class: 'other-card-icon' }, createEl('i', { class: 'fas fa-file' })));
+        card.appendChild(createEl('div', { class: 'media-card-name', text: file.name }));
+        return card;
+    } else if (file.type === 'audio') {
         // Deterministic hash based on filename for consistent variations (1-10)
         let hash = 0;
         for (let i = 0; i < file.name.length; i++) {
@@ -695,15 +701,19 @@ function formatBytes(bytes) {
 
 // ==================== SEARCH/FILTER ====================
 
+// Zoektekst zonder verschil in hoofdletters of Unicode-vorm: een naam die Finder als
+// 'e' + accentteken opsloeg, wordt ook gevonden met een 'é' van het toetsenbord
+function searchKey(text) {
+    return String(text || '').normalize('NFC').toLowerCase().trim();
+}
+
 function handleGlobalSearch(query) {
-    query = query.toLowerCase().trim();
+    query = searchKey(query);
 
     if (!query) {
         filteredMedia = [...currentMedia];
     } else {
-        filteredMedia = currentMedia.filter(file =>
-            file.name.toLowerCase().includes(query)
-        );
+        filteredMedia = currentMedia.filter(file => searchKey(file.name).includes(query));
     }
 
     applySortAndRender();
@@ -811,11 +821,25 @@ function renderViewerFile() {
     } else if (file.type === 'audio') {
         renderAudioPlayer(file, modalBody); // voegt de speler zelf toe
         modalControls.style.display = 'none';
+    } else if (file.type === 'other') {
+        // Geen voorbeeld: de browser zou het hele bestand (soms GB's) in een <img> laden
+        media = createEl('div', { class: 'modal-no-preview' },
+            createEl('i', { class: 'fas fa-file' }),
+            createEl('div', { text: 'Geen voorbeeld voor dit bestandstype' }),
+            createEl('div', { class: 'modal-no-preview-name', text: file.name }));
+        modalControls.style.display = 'none';
     } else {
         media = createEl('img', { id: 'modal-image', src: vaultFileUrl('file', file.path), alt: file.name });
         media.style.cursor = 'default';
         media.style.userSelect = 'none';
         media.addEventListener('mousedown', startPan);
+        // Een formaat dat de browser niet zelf kan tonen (RAW, HEIC buiten Safari): de miniatuur
+        media.addEventListener('error', () => {
+            if (media.dataset.fallback) return;
+            media.dataset.fallback = '1';
+            media.title = 'Voorbeeld: dit formaat kan de browser niet zelf tonen';
+            media.src = vaultFileUrl('thumb', file.path);
+        });
         modalControls.style.display = 'flex';
     }
     if (media) modalBody.insertBefore(media, modalBody.firstChild);

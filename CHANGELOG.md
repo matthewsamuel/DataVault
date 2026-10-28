@@ -467,3 +467,17 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Nieuw: `code/tests/ui/smoke_webkit.py`, een browsertest die in WebKit (Safari) door alle
   tabbladen klikt en faalt bij elke JavaScript-fout (zie `code/README.md`), en een test die
   controleert dat elke knop een bestaande functie aanroept en elke CSS-kleur bestaat.
+
+### Bestandstypen
+- Eén gedeelde lijst met bestandstypen voor de hele app. Daardoor worden `.tif`, `.heif`/`.hif`
+  en de RAW-formaten `.cr3` (Canon), `.raf` (Fuji), `.orf` (Olympus) en `.rw2` (Panasonic) nu
+  overal herkend: in de tijdlijn, de Keurer, Shows, "op deze dag", zoeken en de duplicaatscan.
+  Voorheen toonde de viewer ze wel, maar sloegen de andere onderdelen ze stil over.
+- Documenten en andere bestanden (pdf, txt, zip, ...) worden niet meer als "foto" getoond. Ze
+  krijgen een bestandsicoon, en de viewer meldt "Geen voorbeeld voor dit bestandstype" in plaats
+  van het hele bestand als kapot plaatje te laden.
+- RAW-foto's en onbekende bestanden worden met het juiste bestandstype verstuurd (niet meer als
+  tekst). Kan de browser een formaat niet zelf tonen (RAW, of HEIC buiten Safari), dan toont de
+  viewer de miniatuur.
+- Zoeken op bestandsnaam (zoekbalk en chat) vindt nu ook namen met accenten die Finder in een
+  andere Unicode-vorm opsloeg, bijvoorbeeld "Café" of "Zürich".
