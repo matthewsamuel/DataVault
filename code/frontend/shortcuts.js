@@ -160,6 +160,10 @@ document.addEventListener('keydown', (e) => {
     if (isTypingTarget(e.target)) return;
 
     if (e.key === '?') {
+        // Niet boven de viewer, een dialoog of de slideshow: hun toetsen zouden eronder doorwerken
+        const help = document.getElementById('shortcut-help');
+        const helpOpen = !!help && help.classList.contains('active');
+        if (anyOverlayOpen() && !helpOpen) return;
         e.preventDefault();
         toggleShortcutHelp();
         return;

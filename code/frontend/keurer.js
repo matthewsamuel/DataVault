@@ -1003,6 +1003,8 @@ function keurerSetupDrag(card) {
 document.addEventListener('keydown', function (e) {
     const section = document.getElementById('section-keurer');
     if (!section || !section.classList.contains('active')) return;
+    // Het sneltoetsenoverzicht (?) ligt erboven: geen beslissing achter het venster
+    if (document.querySelector('.dv-overlay.active')) return;
 
     const moveModalActive = document.getElementById('modal-keurer-move').classList.contains('active');
 
