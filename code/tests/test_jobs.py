@@ -625,3 +625,111 @@ def test_a_job_whose_result_was_pruned_says_so(client, vault, monkeypatch):
     assert client.get(f"/api/jobs/{ids[2]}/result").status_code == 200
     running = _start(client, "hashing", folder=str(folder))
     assert running["has_result"] is False
+
+
+# ==================== THUMBNAILS: RENAMED VAULT, UNDECODABLE FILES ====================
+
+class ThumbGate:
+    """Holds a photo render after decoding, just before its thumbnail is written."""
+
+    def __init__(self, monkeypatch, at):
+        from PIL import ImageOps
+        self.calls = 0
+        self.lock = threading.Lock()
+        self.reached = threading.Event()
+        self.open = threading.Event()
+        real = ImageOps.exif_transpose
+
+        def gated(img, *args, **kwargs):
+            with self.lock:
+                self.calls += 1
+                hold = self.calls >= at
+            if hold:
+                self.reached.set()
+                self.open.wait(20)
+            return real(img, *args, **kwargs)
+
+        monkeypatch.setattr(ImageOps, "exif_transpose", gated)
+
+
+def test_a_thumbnail_write_never_recreates_a_renamed_vault(config):
+    """R23-1: only the thumbnail folder itself may be made, never the folders above it."""
+    from backend import thumbnail
+    config.ensure_cache_dirs()
+    root = config.VAULT_ROOT
+    out = config.THUMB_CACHE_PATH / "abc.jpg"
+    away = root.with_name("vault_weg")
+    os.rename(root, away)
+    try:
+        with pytest.raises(FileNotFoundError):
+            with thumbnail._atomic_output(out) as tmp:
+                tmp.write_bytes(b"x")
+        assert thumbnail.create_placeholder_thumbnail(out) is False
+        assert config.ensure_cache_dirs() is False
+        assert not root.exists()
+    finally:
+        os.rename(away, root)
+    # With the vault there, a missing thumbnail folder is made again
+    for p in config.THUMB_CACHE_PATH.iterdir():
+        p.unlink()
+    config.THUMB_CACHE_PATH.rmdir()
+    assert thumbnail.create_placeholder_thumbnail(out) is True and out.is_file()
+
+
+def test_thumbnail_job_with_the_cache_inside_a_renamed_vault_waits_and_never_recreates_it(
+        tmp_path, vault, monkeypatch):
+    """R23-1: renders in flight when the vault is renamed must not build an empty vault at the old path."""
+    from fastapi.testclient import TestClient
+    from backend import thumbnail
+    from backend.main import create_app
+    from fixtures.vault_builder import write_config
+    photos = _photos(vault / "Los", 24)
+    gate = ThumbGate(monkeypatch, at=6)
+    app = create_app(str(write_config(vault, tmp_path / "binnen.json")))
+    with TestClient(app) as c:
+        c.headers["X-DataVault-Token"] = c.get("/api/session").json()["token"]
+        app.state.jobs.vault_poll_interval = 0.05
+        config = app.state.config
+        job = _start(c, "thumbnails", folder=str(vault / "Los"))
+        assert gate.reached.wait(20)
+        root = config.VAULT_ROOT
+        away = root.with_name("vault_weg")
+        os.rename(root, away)
+        try:
+            gate.open.set()
+            job = _wait(c, job["id"], until=("waiting_for_vault", "done", "failed"))
+            assert job["status"] == "waiting_for_vault", job
+            time.sleep(0.3)
+            assert not root.exists(), sorted(str(p) for p in root.rglob("*"))
+        finally:
+            if not root.exists():
+                os.rename(away, root)
+        job = _wait(c, job["id"])
+        assert job["status"] == "done", job
+        assert job["summary"]["made"] == 24 and job["summary"]["complete"] is True, job
+        assert job["message"] == "Klaar: 24 nieuw, 0 waren er al"
+        assert all(thumbnail.get_thumbnail_cache_path(p, config.THUMB_CACHE_PATH).exists() for p in photos)
+
+
+def test_thumbnails_made_twice_after_a_pause_are_counted_once(client, vault, config, monkeypatch):
+    """R23-1: 'nieuw' never adds up to more than the number of files."""
+    from backend import thumbnail
+    photos = _photos(vault / "Twee", 12)
+    gate = ThumbGate(monkeypatch, at=4)
+    job = _start(client, "thumbnails", folder=str(vault / "Twee"))
+    assert gate.reached.wait(20)
+    client.post(f"/api/jobs/{job['id']}/pause")
+    gate.open.set()
+    job = _wait(client, job["id"])
+    assert job["status"] == "paused"
+    made = [p for p in photos if thumbnail.get_thumbnail_cache_path(p, config.THUMB_CACHE_PATH).exists()]
+    assert made
+    for p in made:  # lost in between (e.g. written somewhere they do not count)
+        thumbnail.get_thumbnail_cache_path(p, config.THUMB_CACHE_PATH).unlink()
+    client.post(f"/api/jobs/{job['id']}/resume")
+    job = _wait(client, job["id"])
+    assert job["status"] == "done" and job["summary"]["made"] == 12, job
+    result = client.get(f"/api/jobs/{job['id']}/result").json()["result"]
+    assert result["made"] + result["cached"] == 12
+    assert job["message"] == "Klaar: 12 nieuw, 0 waren er al"
+

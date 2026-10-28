@@ -321,14 +321,19 @@ def thumbnails_type(config: Config) -> JobType:
                 if now - last >= scanner.PROGRESS_SECONDS or processed == total:
                     last = now
                     ctx.progress(processed, total,
-                                 f"Miniaturen... {processed}/{total} ({before + counts['made']} nieuw)")
+                                 f"Miniaturen... {processed}/{total} "
+                                 f"({min(before, counts['cached']) + counts['made']} nieuw)")
             ctx.check()
             _vault_check(config, folder, errors)
         except BaseException:
             ctx.save_checkpoint({**ctx.checkpoint, "made_before": before + counts["made"]})
             raise
-        made = before + counts["made"]
-        cached = max(0, counts["cached"] - before)
+        # What earlier runs made, this run finds 'already there'; only as many of
+        # those as are really there count (one that went missing was made again and
+        # is in counts["made"]), so 'nieuw' never adds up to more than the files
+        earlier = min(before, counts["cached"])
+        made = earlier + counts["made"]
+        cached = counts["cached"] - earlier
         ctx.save_checkpoint({"files": total, "made": made, "cached": cached})
         ctx.progress(message=f"Klaar: {made} nieuw, {cached} waren er al"
                              + (f", {counts['no_ffmpeg']} video('s) zonder miniatuur (ffmpeg ontbreekt)"

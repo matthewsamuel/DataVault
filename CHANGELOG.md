@@ -368,6 +368,12 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Na pauzeren, onderbreken of wachten op de schijf telt de eindmelding van Miniaturen maken en
   Vooraf indexeren ook mee wat eerdere rondes van dezelfde taak al gedaan hadden (voorheen
   stond er bijvoorbeeld "0 nieuw, 3000 waren er al").
+- Miniaturen maken: werd de archiefmap hernoemd terwijl de taak liep, dan maakten de
+  miniaturen die net klaar waren een lege kopie van het archief aan op de oude plek (met
+  alleen een cache-map erin). De app zag die lege map dan als "het archief", de taak bleef
+  wachten, en de map terug hernoemen lukte niet meer. Nu maakt de app nooit meer de mappen
+  boven de miniaturenmap aan: de taak wacht netjes tot het archief terug is en gaat dan
+  verder. Ook telt de eindmelding nooit meer "nieuw" dan er bestanden zijn.
 - Takenpaneel: een taak die je hervatte op het moment dat hij net gepauzeerd werd, liep soms
   verder zonder dat de app hem nog volgde (niet meer te annuleren, en een tweede taak van
   dezelfde soort kon tegelijk starten). Annuleren in datzelfde moment liet de taak op

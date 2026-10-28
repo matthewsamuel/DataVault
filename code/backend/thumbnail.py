@@ -40,8 +40,13 @@ def _atomic_output(output_path: Path) -> Iterator[Path]:
     into place only when complete. A request and the thumbnail job that make the same
     thumbnail at once, or a server stopped halfway, never leave a half-written JPEG.
     Only ever touches the app's own thumbnail cache.
+
+    Only the thumbnail folder itself is made when it is missing, never the folders
+    above it (R23-1): with the cache inside the vault, a render that finishes after
+    the vault was renamed or unplugged must fail here (FileNotFoundError, which a
+    job reads as 'vault gone') instead of building an empty vault at the old path.
     """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(exist_ok=True)
     tmp = output_path.with_name(f".{output_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.jpg")
     try:
         yield tmp

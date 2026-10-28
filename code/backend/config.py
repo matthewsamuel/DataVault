@@ -115,11 +115,28 @@ class Config:
         }
         return results
     
+    def _make_dir(self, path: Path) -> None:
+        """
+        mkdir that never makes the vault root itself: below VAULT_ROOT each folder is
+        made one at a time, so with the vault renamed or unplugged this fails
+        (FileNotFoundError) instead of creating an empty vault at the old path.
+        A folder outside the vault (a separate cache folder) is made as before.
+        """
+        try:
+            rel = path.relative_to(self.VAULT_ROOT)
+        except ValueError:
+            path.mkdir(parents=True, exist_ok=True)
+            return
+        current = self.VAULT_ROOT
+        for part in rel.parts:
+            current = current / part
+            current.mkdir(exist_ok=True)
+
     def ensure_cache_dirs(self):
         """Create cache directories if they don't exist"""
         try:
-            self.CACHE_FOLDER.mkdir(parents=True, exist_ok=True)
-            self.THUMB_CACHE_PATH.mkdir(parents=True, exist_ok=True)
+            self._make_dir(self.CACHE_FOLDER)
+            self._make_dir(self.THUMB_CACHE_PATH)
             return True
         except Exception as e:
             print(f"Warning: Could not create cache directories: {e}")
@@ -128,7 +145,7 @@ class Config:
     def ensure_duplicates_folder(self):
         """Create duplicates folder if it doesn't exist"""
         try:
-            self.DUPLICATES_FOLDER.mkdir(parents=True, exist_ok=True)
+            self._make_dir(self.DUPLICATES_FOLDER)
             return True
         except Exception as e:
             print(f"Warning: Could not create duplicates folder: {e}")
