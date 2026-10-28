@@ -110,117 +110,115 @@
                 <!-- HOME SECTION -->
                 <div id="section-home" class="section hidden">
                     <div class="home-container">
-                        <div class="home-header">
-                            <h1 class="home-title">DataVault</h1>
-                            <p class="home-subtitle">Je digitale archief, volledig lokaal</p>
-                        </div>
+                        <div class="home-inner">
+                            <header class="home-hero">
+                                <p class="home-date" id="home-date"></p>
+                                <h1 class="home-title" id="home-greeting">Welkom</h1>
+                                <p class="home-subtitle">Je digitale archief, volledig lokaal op deze Mac.</p>
+                            </header>
 
-                        <div class="home-stats-grid">
-                            <div class="stat-card">
-                                <i class="fas fa-hdd" style="color: var(--accent);"></i>
-                                <h3>DataVault-opslag</h3>
-                                <p>Actief en offline bereikbaar</p>
-                            </div>
-                            <div class="stat-card">
-                                <i class="fas fa-music" style="color: #1DB954;"></i>
-                                <h3>Luister-DNA</h3>
-                                <p>Uit je Spotify-export</p>
-                            </div>
-                            <div class="stat-card">
-                                <i class="fas fa-shield-alt" style="color: #e74c3c;"></i>
-                                <h3>Privacy eerst</h3>
-                                <p>100% lokaal AI-model</p>
-                            </div>
-                        </div>
-
-                        <!-- Chat Widget -->
-                        <div class="chat-widget">
-                            <div class="chat-header">
-                                <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
-                                <div class="chat-title">
-                                    <h3>Pasha (DataVault AI)</h3>
-                                    <div class="chat-status-row">
-                                        <span class="chat-status" data-chat-status data-state="pending">Verbinden…</span>
-                                        <select class="chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
+                            <!-- Op deze dag: foto's en muziek van deze datum in eerdere jaren -->
+                            <section class="home-dynamic-widgets" aria-label="Op deze dag">
+                                <div class="dynamic-widget" id="widget-photo-otd">
+                                    <div class="otd-header-flex">
+                                        <h4><i class="fas fa-camera-retro" aria-hidden="true"></i> Foto op deze dag</h4>
+                                        <button type="button" class="otd-settings-icon" onclick="toggleOtdSettings(event)"
+                                            title="Kies de mappen" aria-label="Mappen voor 'foto op deze dag' kiezen">
+                                            <i class="fas fa-sliders" aria-hidden="true"></i>
+                                        </button>
                                     </div>
-                                </div>
-                                <button class="chat-fullscreen-toggle" onclick="openChatFullscreen()" title="Volledig scherm"
-                                    aria-label="Chat op volledig scherm">
-                                    <i class="fas fa-expand" aria-hidden="true"></i>
-                                </button>
-                            </div>
-                            <!-- Eén berichtenlijst: bij volledig scherm verhuist #chat-messages naar
-                                 #chat-fullscreen-slot en bij sluiten terug (app.js) -->
-                            <div class="chat-messages-slot" id="chat-home-slot">
-                                <div class="chat-messages" id="chat-messages">
-                                    <div class="chat-message ai-message">
-                                        <div class="message-bubble">
-                                            Woof! Ik ben Pasha, jouw DataVault-assistent. Je kunt me vragen stellen over je bestanden of Spotify-gegevens!
+                                    <div class="widget-content otd-widget-envelope">
+                                        <div class="loading-spinner" id="photo-otd-loading"></div>
+                                        <div id="photo-otd-content" class="otd-large-container" style="display: none;">
+                                            <!-- Will be populated by JS -->
+                                        </div>
+                                        <div id="otd-settings-panel" class="otd-settings-panel" style="display: none;">
+                                            <h5>Mappen</h5>
+                                            <div id="otd-settings-list" class="otd-settings-list"></div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="chat-input-container">
-                                <input type="text" id="chat-input" class="chat-input" placeholder="Typ een bericht…"
-                                    aria-label="Bericht aan Pasha" onkeypress="handleChatKeyPress(event)">
-                                <button class="chat-send-btn" onclick="sendChatMessage()" title="Versturen" aria-label="Versturen">
-                                    <i class="fas fa-paper-plane" aria-hidden="true"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
 
-                    <!-- Dynamic Home Widgets -->
-                    <div class="home-dynamic-widgets">
-                        <div class="dynamic-widget" id="widget-storage" style="cursor: pointer;" role="button" tabindex="0"
-                            aria-label="Opslag per map bekijken" onclick="openStorageModal()"
-                            onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openStorageModal(); }">
-                            <h4><i class="fas fa-server" aria-hidden="true"></i> Opslag</h4>
-                            <div class="widget-content">
-                                <div class="storage-loading"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
-                                <div class="storage-stats" style="display: none;">
-                                    <div class="storage-bar-container">
-                                        <div class="storage-bar" id="storage-bar-fill"></div>
-                                    </div>
-                                    <div class="storage-text">
-                                        <span id="storage-used-text">0 GB</span> van <span id="storage-total-text">0
-                                            GB</span> gebruikt (<span id="storage-free-text">0 GB</span> vrij)
+                                <div class="dynamic-widget" id="widget-spotify-otd">
+                                    <h4><i class="fab fa-spotify" aria-hidden="true"></i> Spotify op deze dag</h4>
+                                    <div class="widget-content">
+                                        <div class="loading-spinner" id="spotify-otd-loading"></div>
+                                        <div id="spotify-otd-content" style="display: none;">
+                                            <!-- Will be populated by JS -->
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
+                            </section>
 
-                        <div class="dynamic-widget" id="widget-photo-otd">
-                            <div class="otd-header-flex">
-                                <h4><i class="fas fa-camera-retro" aria-hidden="true"></i> Foto op deze dag</h4>
-                                <button type="button" class="otd-settings-icon" onclick="toggleOtdSettings(event)"
-                                    title="Kies de mappen" aria-label="Mappen voor 'foto op deze dag' kiezen">
-                                    <i class="fas fa-cog" aria-hidden="true"></i>
-                                </button>
-                            </div>
-                            <div class="widget-content otd-widget-envelope">
-                                <div class="loading-spinner" id="photo-otd-loading"></div>
-                                <div id="photo-otd-content" class="otd-large-container" style="display: none;">
-                                    <!-- Will be populated by JS -->
+                            <!-- Cijfers uit de bibliotheek (media-index) en de schijf -->
+                            <section class="home-stats-grid" aria-label="Je archief in cijfers">
+                                <div class="stat-tile">
+                                    <div class="stat-tile-label"><i class="fas fa-image" aria-hidden="true"></i> Foto's</div>
+                                    <div class="stat-tile-value is-empty" id="home-stat-photos">–</div>
+                                    <div class="stat-tile-meta" id="home-stat-folders">Bibliotheek wordt geladen</div>
                                 </div>
-                                <div id="otd-settings-panel" class="otd-settings-panel" style="display: none;">
-                                    <h5>Mappen</h5>
-                                    <div id="otd-settings-list" class="otd-settings-list"></div>
+                                <div class="stat-tile">
+                                    <div class="stat-tile-label"><i class="fas fa-film" aria-hidden="true"></i> Video's</div>
+                                    <div class="stat-tile-value is-empty" id="home-stat-videos">–</div>
+                                    <div class="stat-tile-meta">In de bibliotheek</div>
                                 </div>
-                            </div>
-                        </div>
+                                <div class="stat-tile">
+                                    <div class="stat-tile-label"><i class="fas fa-music" aria-hidden="true"></i> Audio</div>
+                                    <div class="stat-tile-value is-empty" id="home-stat-audio">–</div>
+                                    <div class="stat-tile-meta">In de bibliotheek</div>
+                                </div>
+                                <div class="stat-tile" id="widget-storage" role="button" tabindex="0"
+                                    aria-label="Opslag per map bekijken" onclick="openStorageModal()"
+                                    onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openStorageModal(); }">
+                                    <div class="stat-tile-label"><i class="fas fa-hard-drive" aria-hidden="true"></i> Opslag</div>
+                                    <div class="storage-loading"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
+                                    <div class="storage-stats" style="display: none;">
+                                        <div class="stat-tile-value" id="storage-used-text">0 GB</div>
+                                        <div class="storage-bar-container">
+                                            <div class="storage-bar" id="storage-bar-fill"></div>
+                                        </div>
+                                        <div class="storage-text">van <span id="storage-total-text">0 GB</span> · <span id="storage-free-text">0 GB</span> vrij</div>
+                                    </div>
+                                </div>
+                            </section>
 
-                        <div class="dynamic-widget" id="widget-spotify-otd">
-                            <h4><i class="fab fa-spotify" style="color: #1DB954;" aria-hidden="true"></i> Spotify op deze dag</h4>
-                            <div class="widget-content">
-                                <div class="loading-spinner" id="spotify-otd-loading"></div>
-                                <div id="spotify-otd-content" style="display: none;">
-                                    <!-- Will be populated by JS -->
+                            <!-- Pasha, de assistent -->
+                            <section class="chat-widget" aria-label="Pasha, je assistent">
+                                <div class="chat-header">
+                                    <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
+                                    <div class="chat-title">
+                                        <h3>Pasha</h3>
+                                        <div class="chat-status-row">
+                                            <span class="chat-status" data-chat-status data-state="pending">Verbinden…</span>
+                                            <select class="select chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
+                                        </div>
+                                    </div>
+                                    <button class="chat-fullscreen-toggle" onclick="openChatFullscreen()" title="Volledig scherm"
+                                        aria-label="Chat op volledig scherm">
+                                        <i class="fas fa-expand" aria-hidden="true"></i>
+                                    </button>
                                 </div>
-                            </div>
+                                <!-- Eén berichtenlijst: bij volledig scherm verhuist #chat-messages naar
+                                     #chat-fullscreen-slot en bij sluiten terug (app.js) -->
+                                <div class="chat-messages-slot" id="chat-home-slot">
+                                    <div class="chat-messages" id="chat-messages">
+                                        <div class="chat-message ai-message">
+                                            <div class="message-bubble">
+                                                Woef! Ik ben Pasha, je DataVault-assistent. Vraag me iets over je bestanden of je Spotify-geschiedenis.
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="chat-input-container">
+                                    <input type="text" id="chat-input" class="chat-input" placeholder="Vraag Pasha iets…"
+                                        aria-label="Bericht aan Pasha" onkeypress="handleChatKeyPress(event)">
+                                    <button class="chat-send-btn" onclick="sendChatMessage()" title="Versturen" aria-label="Versturen">
+                                        <i class="fas fa-arrow-up" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                            </section>
                         </div>
                     </div>
-
                 </div>
 
         <div id="section-viewer" class="section hidden">

@@ -138,6 +138,7 @@ async function jobsLibraryRefresh() {
     } finally {
         jobDock.libraryLoading = false;
     }
+    if (typeof homeRenderLibraryStats === 'function') homeRenderLibraryStats(jobDock.library);
     renderJobDock();
 }
 

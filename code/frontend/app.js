@@ -1731,7 +1731,39 @@ function copyToClipboard(text) {
 }
 
 // ==================== HOME WIDGETS ====================
+
+// Begroeting en datum bovenaan Home
+function homeRenderGreeting() {
+    const now = new Date();
+    const hour = now.getHours();
+    const greeting = hour < 6 ? 'Goedenacht' : hour < 12 ? 'Goedemorgen' : hour < 18 ? 'Goedemiddag' : 'Goedenavond';
+    const title = document.getElementById('home-greeting');
+    const date = document.getElementById('home-date');
+    if (title) title.textContent = greeting;
+    if (date) date.textContent = now.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+// Cijfertegels op Home, uit de bibliotheekstatus die jobs.js ophaalt (null: niet bereikbaar)
+function homeRenderLibraryStats(lib) {
+    const ready = Boolean(lib && lib.ready);
+    const show = (id, value) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = ready ? Number(value || 0).toLocaleString('nl-NL') : '–';
+        el.classList.toggle('is-empty', !ready);
+    };
+    show('home-stat-photos', lib && lib.photos);
+    show('home-stat-videos', lib && lib.videos);
+    show('home-stat-audio', lib && lib.audio);
+    const folders = document.getElementById('home-stat-folders');
+    if (folders) {
+        folders.textContent = ready ? `In ${Number(lib.folders || 0).toLocaleString('nl-NL')} mappen`
+            : lib ? 'Bibliotheek wordt opgebouwd' : 'Bibliotheek niet bereikbaar';
+    }
+}
+
 async function fetchHomeWidgets() {
+    homeRenderGreeting();
     // 1. Storage
     try {
         const data = await fetchJSON(`${API_BASE}/api/stats/storage`);
@@ -1775,7 +1807,7 @@ async function fetchHomeWidgets() {
             // Geen albumcover van buitenaf (zoals vroeger via iTunes): dat zou luistergeschiedenis
             // naar een externe dienst sturen. Het lokale Spotify-icoon blijft staan.
         } else {
-            content.innerHTML = '<div class="storage-text">Op deze dag in eerdere jaren niets geluisterd.</div>';
+            content.innerHTML = '<div class="otd-empty">Op deze dag in eerdere jaren niets geluisterd.</div>';
         }
     } catch (e) {
         document.getElementById('spotify-otd-loading').textContent = `Laden mislukt: ${e.message}`;
@@ -1884,7 +1916,7 @@ async function loadPhotoOtdWidget() {
                 homeOtdCycle(!document.getElementById('section-home').classList.contains('hidden'));
             }
         } else {
-            content.innerHTML = '<div class="storage-text" style="display:flex;height:100%;align-items:center;justify-content:center;">Geen foto\'s van deze dag in eerdere jaren.</div>';
+            content.innerHTML = '<div class="otd-empty">Geen foto\'s van deze dag in eerdere jaren.</div>';
         }
     } catch (e) {
         document.getElementById('photo-otd-loading').textContent = `Laden mislukt: ${e.message}`;
@@ -1915,7 +1947,7 @@ function updateOtdSettingsList() {
     list.innerHTML = '';
 
     if (!folderTree || folderTree.length === 0) {
-        list.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;">Geen mappen gevonden</div>';
+        list.innerHTML = '<div class="otd-settings-empty">Geen mappen gevonden</div>';
         return;
     }
 
