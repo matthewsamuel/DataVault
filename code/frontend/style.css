@@ -4426,6 +4426,17 @@ input:checked+.slider:before {
     border-radius: 12px;
 }
 
+/* Een venster met een lijst of tekst (geen gecentreerde foto): van boven af, over de hele
+   breedte, en het hele stuk is te scrollen (gecentreerd viel de bovenkant buiten beeld) */
+.modal-body.modal-body-list {
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    padding: 24px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
 .storage-folder-list {
     list-style: none;
     padding: 0;

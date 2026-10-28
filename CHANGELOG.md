@@ -113,7 +113,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - De rest van de app is nu ook Nederlands (tabbladen, knoppen, vensters, maanden in de tijdlijn,
   Spotify-koppen). Knoppen met alleen een icoon hebben een uitleg bij de muis en voor schermlezers.
 - Het opslagoverzicht toont groottes als KB, MB of GB: een map van een paar MB staat er nu gewoon in
-  (was 0,00 GB of ontbrak), net als kleine bestanden bij de grootste bestanden.
+  (was 0,00 GB of ontbrak), net als kleine bestanden bij de grootste bestanden. Het venster "Opslag
+  per map" begint weer bovenaan (het totaal viel half buiten beeld) en gebruikt de hele breedte.
 
 ### Licht en donker thema
 - Elk scherm, venster en het takenpaneel zijn in beide thema's nagelopen. Alle tekst haalt nu het
