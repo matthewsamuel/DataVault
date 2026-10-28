@@ -870,8 +870,22 @@ function createFolderCard(folder) {
     name.className = 'folder-card-name';
     name.textContent = folder.name;
     card.appendChild(name);
+    card.appendChild(createListMeta(folder));
 
     return card;
+}
+
+// Soort, grootte en datum: alleen zichtbaar in de lijstweergave, als rustige kolommen
+const MEDIA_KIND_LABELS = { photo: 'Foto', video: 'Video', audio: 'Audio', folder: 'Map', other: 'Bestand' };
+
+function createListMeta(file) {
+    const date = file.modified
+        ? new Date(file.modified * 1000).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })
+        : '';
+    return createEl('div', { class: 'media-card-meta' },
+        createEl('span', { class: 'media-card-kind', text: MEDIA_KIND_LABELS[file.type] || 'Bestand' }),
+        createEl('span', { class: 'media-card-size', text: file.type === 'folder' ? '' : formatBytes(file.size || 0) }),
+        createEl('span', { class: 'media-card-date', text: date }));
 }
 
 function createMediaCard(file) {
@@ -894,6 +908,7 @@ function createMediaCard(file) {
         card.classList.add('other-card');
         card.appendChild(createEl('div', { class: 'other-card-icon' }, createEl('i', { class: 'fas fa-file' })));
         card.appendChild(createEl('div', { class: 'media-card-name', text: file.name }));
+        card.appendChild(createListMeta(file));
         return card;
     } else if (file.type === 'audio') {
         // Deterministic hash based on filename for consistent variations (1-10)
@@ -942,6 +957,7 @@ function createMediaCard(file) {
     nameSpan.className = 'media-card-name';
     nameSpan.textContent = file.name;
     card.appendChild(nameSpan);
+    card.appendChild(createListMeta(file));
 
     // Info icon (bottom-right corner, shown on hover/grid view)
     const infoIcon = document.createElement('div');

@@ -2638,11 +2638,17 @@ a.breadcrumb-item:hover {
 }
 
 /* ==================== BESTANDEN: LIJST ==================== */
+/* Rijen over de hele breedte met een haarlijn ertussen: miniatuur, naam, en dan rustige
+   kolommen voor soort, grootte en datum (alleen hier zichtbaar) */
+
+.media-card-meta {
+    display: none;
+}
 
 .media-grid.list-view {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 0;
 }
 
 .media-grid.list-view .media-card {
@@ -2650,10 +2656,12 @@ a.breadcrumb-item:hover {
     flex-direction: row;
     align-items: center;
     gap: var(--space-md);
+    width: 100%;
     max-width: 100%;
-    height: 56px;
-    padding: var(--space-xs);
-    border-radius: var(--radius-md);
+    height: 57px;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: 0;
+    border-bottom: 1px solid var(--border-hairline);
     background-color: transparent;
     aspect-ratio: auto;
 }
@@ -2662,6 +2670,42 @@ a.breadcrumb-item:hover {
     transform: none;
     box-shadow: none;
     background-color: var(--surface-hover);
+}
+
+.media-grid.list-view .media-card-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    flex: none;
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.media-grid.list-view .media-card-kind {
+    width: 64px;
+}
+
+.media-grid.list-view .media-card-size,
+.media-grid.list-view .media-card-date {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.media-grid.list-view .media-card-size {
+    width: 80px;
+}
+
+.media-grid.list-view .media-card-date {
+    width: 112px;
+    padding-right: var(--space-sm);
+}
+
+@media (max-width: 900px) {
+    .media-grid.list-view .media-card-kind {
+        display: none;
+    }
 }
 
 .media-grid.list-view .media-thumbnail,
@@ -2684,6 +2728,7 @@ a.breadcrumb-item:hover {
     flex-direction: row;
     justify-content: flex-start;
     border: none;
+    border-bottom: 1px solid var(--border-hairline);
     box-shadow: none;
 }
 
@@ -2694,9 +2739,15 @@ a.breadcrumb-item:hover {
 }
 
 .media-grid.list-view .folder-card-name {
+    flex: 1;
+    min-width: 0;
     text-align: left;
     display: block;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: var(--fs-sm);
+    color: var(--text-primary);
 }
 
 .media-grid.list-view .audio-card-name {
@@ -2716,12 +2767,9 @@ a.breadcrumb-item:hover {
     align-items: center;
 }
 
+/* In de lijst opent een klik op de rij al de viewer: geen apart i-knopje */
 .media-grid.list-view .media-info-icon {
-    position: static;
-    margin-left: auto;
-    margin-right: var(--space-sm);
-    background-color: var(--surface-raised);
-    color: var(--text-secondary);
+    display: none;
 }
 
 /* ==================== VIEWER (foto groot op een donkere achtergrond) ==================== */
