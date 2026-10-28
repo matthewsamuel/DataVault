@@ -999,13 +999,7 @@ function createMediaCard(file) {
         card.appendChild(createListMeta(file));
         return card;
     } else if (file.type === 'audio') {
-        // Deterministic hash based on filename for consistent variations (1-10)
-        let hash = 0;
-        for (let i = 0; i < file.name.length; i++) {
-            hash = file.name.charCodeAt(i) + ((hash << 5) - hash);
-        }
-        const variant = Math.abs(hash) % 15 + 1;
-        thumbUrl = `assets/audio_thumbs/audio_thumb_var${variant}.png`;
+        thumbUrl = audioThumbUrl(file.name);
     } else if (file.name.toLowerCase().endsWith('.avi')) {
         thumbUrl = 'assets/audio_thumbs/avi_thumb.png';
     }
@@ -1061,6 +1055,15 @@ function createMediaCard(file) {
     card.appendChild(infoIcon);
 
     return card;
+}
+
+// Een vaste hoes per audiobestand (een van 15 varianten, gekozen op de naam)
+function audioThumbUrl(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+        hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return `assets/audio_thumbs/audio_thumb_var${Math.abs(hash) % 15 + 1}.png`;
 }
 
 // Grootte leesbaar en met een Nederlandse komma: 812 B, 4,7 KB, 38 MB, 1,25 GB. Nooit "0,00 GB"
@@ -1156,6 +1159,8 @@ const viewer = {
     items: [],          // bestanden waar vorige/volgende doorheen bladert
     index: -1,          // het bestand dat nu te zien is
     onRemoved: null,    // (file) => void: de opener haalt een verplaatst bestand uit zijn lijst
+    more: null,         // async (richting -1|1) => [bestanden]: een lijst die per pagina laadt (Albums)
+    moreDone: {},       // richting -> true als er aan die kant niets meer komt
 };
 
 function viewerFile() {
@@ -1166,14 +1171,18 @@ function isViewerOpen() {
     return document.getElementById('modal-viewer').classList.contains('active');
 }
 
-// items: lijst bestandsobjecten van de server ({path, name, type, size, modified|timestamp, rating?})
-function openViewer(items, index, { onRemoved = null } = {}) {
+// items: lijst bestandsobjecten van de server ({path, name, type, size, modified|timestamp, rating?}).
+// more: voor een lijst die nog niet helemaal geladen is; aan het eind (of begin) haalt de viewer
+// daarmee de volgende (of vorige) bestanden op en bladert hij gewoon verder.
+function openViewer(items, index, { onRemoved = null, more = null } = {}) {
     const files = (items || []).filter(f => f && f.type !== 'folder');
     const start = files.indexOf(items[index]);
     if (start < 0) return;
     viewer.items = files;
     viewer.index = start;
     viewer.onRemoved = onRemoved;
+    viewer.more = more;
+    viewer.moreDone = {};
     renderViewerFile();
     const modal = document.getElementById('modal-viewer');
     modal.classList.add('active');
@@ -1238,7 +1247,9 @@ function renderViewerFile() {
     modalBody.classList.toggle('has-video', file.type === 'video');
     zones.forEach(zone => {
         const right = zone.classList.contains('right');
-        zone.hidden = right ? viewer.index >= viewer.items.length - 1 : viewer.index <= 0;
+        const step = right ? 1 : -1;
+        const edge = right ? viewer.index >= viewer.items.length - 1 : viewer.index <= 0;
+        zone.hidden = edge && !(viewer.more && !viewer.moreDone[step]);
     });
 
     let media;
@@ -1306,6 +1317,8 @@ function closeModal() {
     viewer.items = [];
     viewer.index = -1;
     viewer.onRemoved = null;
+    viewer.more = null;
+    viewer.moreDone = {};
 }
 
 async function openInFinder() {
@@ -1770,6 +1783,34 @@ function prevFile() {
     if (viewer.index > 0) {
         viewer.index--;
         renderViewerFile();
+    } else if (viewer.index >= 0) {
+        viewerLoadMore(1);
+    }
+}
+
+// Aan de rand van een lijst die per pagina laadt: de volgende (of vorige) pagina erbij en verder
+let viewerMoreBusy = false;
+async function viewerLoadMore(step) {
+    const more = viewer.more;
+    if (!more || viewer.moreDone[step] || viewerMoreBusy) return;
+    viewerMoreBusy = true;
+    try {
+        const files = ((await more(step)) || []).filter(f => f && f.type !== 'folder');
+        if (viewer.more !== more) return;      // de viewer is intussen dicht of opnieuw geopend
+        if (!files.length) {
+            viewer.moreDone[step] = true;
+        } else if (step > 0) {
+            viewer.items = viewer.items.concat(files);
+            viewer.index++;
+        } else {
+            viewer.items = files.concat(viewer.items);
+            viewer.index += files.length - 1;
+        }
+        renderViewerFile();
+    } catch (e) {
+        toastFetchError('Volgende bestanden laden mislukt', e);
+    } finally {
+        viewerMoreBusy = false;
     }
 }
 
@@ -1777,6 +1818,8 @@ function nextFile() {
     if (viewer.index >= 0 && viewer.index < viewer.items.length - 1) {
         viewer.index++;
         renderViewerFile();
+    } else if (viewer.index === 0) {
+        viewerLoadMore(-1);
     }
 }
 
