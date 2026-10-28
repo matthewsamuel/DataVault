@@ -55,6 +55,9 @@
     --space-2xl: 32px;
     --space-3xl: 48px;
     --space-4xl: 64px;
+    --thumb-min: 150px;          /* smallest result tile in the search window */
+    --thumb-min-sm: 112px;
+    --input-date-w: 150px;
     --page-gutter: 32px;
     --page-max: 1200px;
     --nav-h: 56px;
@@ -8932,7 +8935,7 @@ button.otd-settings-icon:hover {
 }
 
 .search-modes > button {
-    height: calc(var(--control-h) - 4px);
+    height: var(--control-h-sm);
     font-size: var(--fs-sm);
 }
 
@@ -8962,7 +8965,7 @@ button.otd-settings-icon:hover {
 }
 
 .search-date .input {
-    width: 150px;
+    width: var(--input-date-w);
 }
 
 .search-status {
@@ -8970,7 +8973,7 @@ button.otd-settings-icon:hover {
     align-items: center;
     flex-wrap: wrap;
     gap: var(--space-sm);
-    min-height: 32px;
+    min-height: var(--space-2xl);
     margin-top: var(--space-md);
     color: var(--text-secondary);
     font-size: var(--fs-sm);
@@ -8987,7 +8990,7 @@ button.otd-settings-icon:hover {
 
 .search-results {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(var(--thumb-min), 1fr));
     gap: var(--space-md);
     padding-top: var(--space-md);
 }
@@ -9013,16 +9016,18 @@ button.otd-settings-icon:hover {
 .search-result-badge {
     position: absolute;
     top: var(--space-sm);
-    right: var(--space-sm);
+    left: var(--space-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: var(--icon-xl);
+    height: var(--icon-xl);
     border-radius: var(--radius-full);
-    background: var(--media-control);
+    background: var(--media-scrim);
     color: var(--on-media);
     font-size: var(--icon-xs);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
     pointer-events: none;
 }
 
@@ -9060,8 +9065,8 @@ button.otd-settings-icon:hover {
 
 .search-similar-thumb {
     flex: none;
-    width: 64px;
-    height: 64px;
+    width: var(--space-4xl);
+    height: var(--space-4xl);
     cursor: default;
 }
 
@@ -9112,6 +9117,6 @@ button.otd-settings-icon:hover {
     }
 
     .search-results {
-        grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(var(--thumb-min-sm), 1fr));
     }
 }

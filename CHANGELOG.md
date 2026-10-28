@@ -250,6 +250,13 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   themamenu zie je ook na openen met de muis welke keuze de pijltjes gemarkeerd hebben.
 
 ### Slim zoeken: foto's vinden op wat erop staat
+- Verbeterd na de review: nieuwe foto's blijven niet meer onzichtbaar nadat verwijderde foto's zijn
+  opgeruimd, een onderwerp dat een groot deel van de map beslaat (bijvoorbeeld "hond") wordt gewoon
+  gevonden, onzin als zoekopdracht geeft "Niets gevonden", "Vergelijkbaar" verbergt gelijkende foto's niet
+  meer achter een bijna-kopie, de pagina's van de resultaten schuiven niet meer terwijl foto's nog
+  herkend worden, bestandsnamen met é of ü worden ook op hoofdletters gevonden en het zoekmodel wordt
+  bij het starten alvast geladen. Het venster geeft de focus netjes terug, 'Periode wissen' verschijnt
+  direct en een leeg resultaat heeft een knop om de filters te wissen.
 - Zoek in je foto's en video's op wat erop staat, gewoon in het Nederlands (of Engels): "hond op het
   strand", "verjaardagstaart", "zonsondergang boven zee", "sneeuw in de bergen". Typ in het zoekveld
   bovenaan en druk op Enter, of druk op **s**: het zoekvenster zoekt in de hele bibliotheek, met de

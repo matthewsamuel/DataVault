@@ -766,13 +766,16 @@ function renderMediaGrid(keepCount = false) {
         const searching = document.getElementById('global-search').value.trim();
         grid.replaceChildren(searching
             ? emptyState({
-                icon: 'fa-search', title: 'Niets gevonden', text: `Geen bestand in deze map heeft "${searching}" in de naam.`,
-                action: { label: 'Zoekopdracht wissen', onClick: () => {
-                    const input = document.getElementById('global-search');
-                    input.value = '';
-                    handleGlobalSearch('');
-                    input.focus();
-                } },
+                icon: 'fa-search', title: 'Niets gevonden',
+                text: `Geen bestand in deze map heeft "${searching}" in de naam. Slim zoeken kijkt in de hele bibliotheek, ook naar wat er op de foto staat.`,
+                action: typeof openSearch === 'function'
+                    ? { label: 'Zoek in de hele bibliotheek', primary: true, onClick: () => openSearch(searching) }
+                    : { label: 'Zoekopdracht wissen', onClick: () => {
+                        const input = document.getElementById('global-search');
+                        input.value = '';
+                        handleGlobalSearch('');
+                        input.focus();
+                    } },
             })
             : currentFolder
                 ? emptyState({ icon: 'fa-folder-open', title: 'Deze map is leeg', text: 'Er staan hier geen bestanden of submappen.' })
@@ -1116,6 +1119,7 @@ function globalSearchKeydown(event) {
     event.preventDefault();
     if (typeof openSearch === 'function') {
         openSearch(input.value);
+        if (currentMainView() === 'viewer') handleGlobalSearch('');    // de mapfilter blijft niet achter het venster hangen
         return;
     }
     switchMainView('viewer');

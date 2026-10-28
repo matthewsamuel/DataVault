@@ -531,6 +531,15 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(asked and "huggingface.co" in asked[0] and jobs_now == 0,
                    f"settings: install did not ask, or started anyway ({asked}, {jobs_now} jobs)")
 
+            # Closing the search window gives the focus back to the field that opened it
+            step("search: open and close with the keyboard", lambda: (
+                page.focus("#global-search"), page.keyboard.type("zzz"), page.keyboard.press("Enter"),
+                page.wait_for_selector("#search-overlay.active", timeout=5000), page.keyboard.press("Escape"),
+                page.wait_for_timeout(300)), 0.3)
+            expect(page.evaluate("document.activeElement.id") == "global-search",
+                   f"search: Escape left the focus on {page.evaluate('document.activeElement.id || document.activeElement.tagName')}")
+            page.evaluate("document.getElementById('global-search').value = ''; document.activeElement.blur()")
+
             # Slim zoeken with results (the model is not in the smoke vault: the answers are faked
             # with real files, so the results grid, paging hint and similar mode are drawn for real)
             files = page.evaluate("""fetch('/api/library/media?kind=photo&limit=1000').then(r => r.json())

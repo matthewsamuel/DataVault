@@ -88,7 +88,7 @@ function buildSearchOverlay() {
         createEl('span', { text: label }),
         createEl('input', {
             type: 'date', class: 'input input-sm', id, 'aria-label': `${label} (datum)`,
-            onChange: (e) => { searchState[key] = e.target.value; searchRun(); },
+            onChange: (e) => { searchState[key] = e.target.value; searchRenderFilters(); searchRun(); },
         }));
     const overlay = createEl('div', {
         id: 'search-overlay', class: 'dv-overlay search-overlay', role: 'dialog', 'aria-modal': 'true',
@@ -108,18 +108,12 @@ function buildSearchOverlay() {
             createEl('div', { class: 'search-similar', id: 'search-similar', hidden: true }),
             createEl('div', { class: 'search-filters', role: 'group', 'aria-label': 'Filters' },
                 createEl('div', { class: 'search-kinds' },
-                    kindPill('', 'Alles'), kindPill('photo', "Foto's"), kindPill('video', "Video's")),
+                    kindPill('', 'Alles'), kindPill('photo', 'Foto’s'), kindPill('video', 'Video’s')),
                 createEl('div', { class: 'search-dates' },
                     dateInput('search-date-from', 'Van', 'dateFrom'), dateInput('search-date-to', 'Tot en met', 'dateTo'),
                     createEl('button', {
                         type: 'button', class: 'link-button search-dates-clear', id: 'search-dates-clear', hidden: true,
-                        onClick: () => {
-                            searchState.dateFrom = searchState.dateTo = '';
-                            document.getElementById('search-date-from').value = '';
-                            document.getElementById('search-date-to').value = '';
-                            searchRenderFilters();
-                            searchRun();
-                        },
+                        onClick: () => { searchState.dateFrom = searchState.dateTo = ''; searchResetDates(); searchRenderFilters(); searchRun(); },
                     }, 'Periode wissen'))),
             createEl('div', { class: 'search-status', id: 'search-status', role: 'status', 'aria-live': 'polite' }),
             createEl('div', { class: 'search-scroll', id: 'search-scroll' },
@@ -139,6 +133,22 @@ function buildSearchOverlay() {
     return overlay;
 }
 
+function searchResetDates() {
+    document.getElementById('search-date-from').value = '';
+    document.getElementById('search-date-to').value = '';
+}
+
+// Waar de focus heen gaat als het venster sluit: het element dat het opende (niet het zoekveld
+// in het venster zelf, dat dan verborgen is)
+let searchOpener = null;
+
+function searchRememberOpener() {
+    const active = document.activeElement;
+    const overlay = document.getElementById('search-overlay');
+    if (searchIsOpen()) return;       // al open: de eerste opener blijft
+    searchOpener = active && active !== document.body && !(overlay && overlay.contains(active)) ? active : null;
+}
+
 function searchOverlay() {
     return document.getElementById('search-overlay') || buildSearchOverlay();
 }
@@ -150,6 +160,7 @@ function searchIsOpen() {
 
 // Openen met een tekst (uit het zoekveld bovenaan) of leeg (sneltoets s)
 function openSearch(query = '', { mode = null } = {}) {
+    searchRememberOpener();
     const overlay = searchOverlay();
     const input = overlay.querySelector('#search-input');
     searchState.similar = null;
@@ -167,6 +178,7 @@ function openSearch(query = '', { mode = null } = {}) {
 // 'Vergelijkbaar' in de viewer: foto's die op deze foto lijken
 function openSimilar(file) {
     if (!file || !file.path) return;
+    searchRememberOpener();
     if (typeof isViewerOpen === 'function' && isViewerOpen()) closeModal();
     const overlay = searchOverlay();
     searchState.similar = { path: file.path, name: file.name };
@@ -177,14 +189,22 @@ function openSimilar(file) {
     searchRenderFilters();
     searchFetchStatus().then(() => {
         searchRun();
-        const first = overlay.querySelector('#search-similar .link-button');
+        const first = overlay.querySelector('#search-similar .btn');
         if (first) first.focus();
     });
 }
 
 function closeSearch() {
     const overlay = document.getElementById('search-overlay');
+    const wasOpen = searchIsOpen();
     if (overlay) overlay.classList.remove('active');
+    if (wasOpen) {
+        // na het teruggeven van de focus door het overlay-systeem: naar de opener, of het zoekveld
+        const opener = searchOpener && searchOpener.isConnected && searchOpener.offsetParent !== null
+            ? searchOpener : document.getElementById('global-search');
+        searchOpener = null;
+        setTimeout(() => { if (!searchIsOpen() && opener) opener.focus(); }, 0);
+    }
     clearTimeout(searchState.timer);
     searchState.seq++;
 }
@@ -331,11 +351,23 @@ async function searchLoadMore() {
 }
 
 // Na de beste resultaten: de foto's die minder zeker passen, alleen op verzoek
-function searchShowWeak() {
+async function searchShowWeak() {
+    const first = searchState.items.length;
     searchState.includeWeak = true;
-    searchState.nextOffset = searchState.items.length;
+    searchState.nextOffset = first;
     searchOverlay().querySelector('#search-more').replaceChildren();
-    searchLoadMore();
+    await searchLoadMore();
+    // de knop is weg: de focus naar de eerste nieuwe foto
+    const card = searchOverlay().querySelector(`#search-results [data-index="${first}"]`);
+    if (card) card.focus();
+}
+
+function searchClearFilters() {
+    searchState.kind = '';
+    searchState.dateFrom = searchState.dateTo = '';
+    searchResetDates();
+    searchRenderFilters();
+    searchRun();
 }
 
 function searchShowState(node) {
@@ -420,29 +452,37 @@ function searchRenderResults(data, fresh) {
     if (fresh) results.replaceChildren(...cards); else results.append(...cards);
     const more = overlay.querySelector('#search-more');
     more.replaceChildren();
-    const count = searchState.mode === 'filename' ? data.total : data.total;
+    const count = data.total;
     if (fresh && !data.items.length) {
         const weak = searchState.mode !== 'filename' && data.ranked > 0;
+        const filtered = !!(searchState.kind || searchState.dateFrom || searchState.dateTo);
+        const noun = searchState.kind === 'video' ? 'video' : searchState.kind === 'photo' ? 'foto' : 'foto of video';
+        let action = null;
+        if (weak) action = { label: 'Toon wat er het meest op lijkt', onClick: searchShowWeak };
+        else if (filtered) action = { label: 'Filters wissen', onClick: searchClearFilters };
         more.append(emptyState({
             icon: 'fa-magnifying-glass', title: 'Niets gevonden',
-            text: weak ? 'Geen foto past echt goed. Probeer andere woorden, of bekijk wat er het meest op lijkt.'
+            text: weak ? `Geen ${noun} past echt goed. Probeer andere woorden, of bekijk wat er het meest op lijkt.`
                 : 'Probeer andere woorden of minder filters.',
-            action: weak ? { label: 'Toon wat er het meest op lijkt', onClick: searchShowWeak } : null,
+            action,
         }));
     } else if (searchState.nextOffset === null && searchState.mode !== 'filename' && !searchState.includeWeak
         && searchState.ranked > searchState.items.length) {
         more.append(createEl('button', { type: 'button', class: 'btn btn-secondary', id: 'search-show-weak', onClick: searchShowWeak },
-            createEl('i', { class: 'fas fa-angles-down', 'aria-hidden': 'true' }), " Meer foto's die minder goed passen"));
+            createEl('i', { class: 'fas fa-angles-down', 'aria-hidden': 'true' }), ' Meer foto’s die minder goed passen'));
     }
     const status = searchState.status || {};
     const parts = [];
-    if (searchState.mode === 'filename') {
+    const nothing = fresh && !data.items.length;
+    if (nothing) {
+        // geen telling boven een leeg scherm
+    } else if (searchState.mode === 'filename') {
         parts.push(`${formatNumberNl(count)} ${count === 1 ? 'bestand' : 'bestanden'}`);
     } else {
         parts.push(searchState.includeWeak ? `${formatNumberNl(searchState.items.length)} getoond`
             : `${formatNumberNl(count)} ${count === 1 ? 'goed resultaat' : 'goede resultaten'}`);
     }
-    if (typeof data.took_ms === 'number') {
+    if (!nothing && typeof data.took_ms === 'number') {
         parts.push(data.took_ms < 1000 ? `${formatNumberNl(Math.max(1, data.took_ms))} ms`
             : `${formatNumberNl(data.took_ms / 1000, 1)} s`);
     }
@@ -585,7 +625,7 @@ registerSettingsSection({
     icon: 'fa-wand-magic-sparkles',
     order: 70,
     description: 'Zoek foto’s op wat erop staat, zoals “hond op het strand”. Het zoekmodel draait op deze Mac: '
-        + 'je foto’s en zoekopdrachten gaan nergens heen. Het model wordt alleen gedownload als je hieronder op installeren klikt.',
+        + 'je foto’s en zoekopdrachten gaan nergens heen.',
     render(body) {
         const status = searchState.status;
         if (!searchSettingsAsked) {
@@ -602,6 +642,7 @@ registerSettingsSection({
         body.append(settingsRow('Model', `${model.label} · ${model.licence}`));
         if (!model.installed) {
             body.append(
+                settingsRow('Download', 'Het model wordt alleen gedownload als je hieronder op installeren klikt.'),
                 settingsRow('Grootte', `ongeveer ${formatBytes(model.size)} (eenmalig)`),
                 settingsRow('Bron', createEl('span', { class: 'settings-sources' },
                     ...model.sources.map(url => createEl('span', { class: 'path-label', text: url })))),
