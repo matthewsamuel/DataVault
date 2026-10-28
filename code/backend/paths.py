@@ -78,21 +78,19 @@ def _names_by_nfc(folder: str) -> Optional[dict]:
     return by_nfc
 
 
-def _on_disk_spelling(path: Path) -> Path:
+def _on_disk_spelling(base: str, names: Tuple[str, ...]) -> Path:
     """
-    The path with every name spelled as it is on disk, whatever Unicode form the
+    base / names with every name spelled as it is on disk, whatever Unicode form the
     request used (APFS finds a file under NFC and NFD alike, so an existence check
     alone would keep the request's spelling and stored keys would depend on the
     client). Names that do not exist (yet) get their NFC form. ASCII names have
     only one form and are taken as given, so ordinary paths cost no listing.
+    Only base and the folders below it are listed: callers pass a base inside
+    the vault (or the vault root's own parents, which come from the config).
     """
-    text = str(path)
-    if text.isascii():
-        return path
-    parts = Path(text).parts
-    current = parts[0]
+    current = base
     exists = True
-    for name in parts[1:]:
+    for name in names:
         if name.isascii() or name in (".", ".."):
             current = os.path.join(current, name)
             continue
@@ -108,10 +106,34 @@ def _on_disk_spelling(path: Path) -> Path:
     return Path(current)
 
 
+def _names_below(path: Path, root: Path) -> Optional[Tuple[str, ...]]:
+    """
+    The names of path below root, or None if path is not root or inside it. Purely
+    lexical (path must be resolved); names are compared in NFC, so the request may
+    spell the vault root itself in another Unicode form.
+    """
+    parts, root_parts = path.parts, root.parts
+    if len(parts) < len(root_parts):
+        return None
+    for part, root_part in zip(parts, root_parts):
+        if part != root_part and unicodedata.normalize("NFC", part) != unicodedata.normalize("NFC", root_part):
+            return None
+    return parts[len(root_parts):]
+
+
+def _resolve_entry(path: Path) -> Path:
+    """path with '..' and every symlink above its last name resolved (the last name is kept)."""
+    if path.name in ("", ".."):
+        return path.resolve()
+    return path.parent.resolve() / path.name
+
+
 def locate(user_path: Any, config, folder: bool = False) -> Optional[Path]:
     """
     The absolute path inside the vault that user_path names, or None when it is
     outside the vault (after resolving '..' and symlinks) or not a usable path.
+    Containment is checked before any name is re-spelled, so a path outside the
+    vault never causes a listing of a folder outside the vault.
     """
     if isinstance(user_path, Path):
         user_path = str(user_path)
@@ -120,19 +142,30 @@ def locate(user_path: Any, config, folder: bool = False) -> Optional[Path]:
     path = Path(user_path)
     if not path.is_absolute():
         path = config.VAULT_ROOT / path
-    path = _on_disk_spelling(path)
     try:
         root = config.VAULT_ROOT.resolve()
-        if path.name in ("", ".."):
-            entry = path.resolve()
-        else:
-            entry = path.parent.resolve() / path.name
+        disk_root = _on_disk_spelling(root.anchor, root.parts[1:])
+        entry = _resolve_entry(path)
+        names = _names_below(entry, root)
+        if names is None:
+            return None
+        spelled = _on_disk_spelling(str(disk_root), names)
+        if spelled != entry:
+            # Resolve once more in the on-disk spelling: on a filesystem that keeps Unicode
+            # forms apart, the request's form may not have found a folder (or a symlink in it)
+            entry = _resolve_entry(spelled)
+            names = _names_below(entry, root)
+            if names is None:
+                return None
+            entry = _on_disk_spelling(str(disk_root), names)
         target = entry.resolve()
         if target != entry:
-            target = _on_disk_spelling(target)  # a symlink's text may use another Unicode form
+            # A symlink: check where it points, in the on-disk spelling (its text may use another form)
+            names = _names_below(target, root)
+            if names is None:
+                return None
+            target = _on_disk_spelling(str(disk_root), names)
     except (OSError, RuntimeError, ValueError):
-        return None
-    if not entry.is_relative_to(root) or not target.is_relative_to(root):
         return None
     try:
         os.lstat(entry)

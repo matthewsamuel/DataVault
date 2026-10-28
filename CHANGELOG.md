@@ -55,6 +55,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   op de schijf staat, ook voor wat ze bewaart (Keurer-beslissingen, ratings, uitgeschakelde
   Shows-mappen). Zo hoort één map of foto nooit bij twee verschillende sleutels, afhankelijk
   van hoe de naam binnenkwam.
+  Die schrijfwijze wordt alleen binnen het archief opgezocht: een pad met accenten buiten het
+  archief wordt meteen geweigerd, zonder dat de app eerst mappen buiten het archief doorleest.
 - De eigen bestanden van de app (de database en de miniaturen-cache) worden niet meer als foto
   geserveerd en kunnen nergens meer gekozen worden.
 - Stemmen in Shows op een pad dat geen bestaand bestand is (een tikfout, een map of een

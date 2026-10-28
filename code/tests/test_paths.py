@@ -128,6 +128,40 @@ def test_existing_names_get_their_on_disk_spelling(config, vault):
     assert str(found) == str(on_disk / unicodedata.normalize("NFD", "strände.jpg"))
 
 
+def test_no_folder_outside_the_vault_is_ever_listed(config, vault, outside, tmp_path, monkeypatch):
+    """
+    R-2.1b-7: names are only re-spelled below the vault root. A request for a non-ASCII
+    path outside the vault (any website can make the browser send one) must not make
+    the server list folders outside the vault, only get the usual 403.
+    """
+    listed = []
+    real_listdir = os.listdir
+    monkeypatch.setattr(paths.os, "listdir", lambda folder: (listed.append(str(folder)), real_listdir(folder))[1])
+    paths._NAMES_CACHE.clear()
+    (outside / "Ärger").mkdir()
+    entry_link = tmp_path / "into_vault"
+    os.symlink(vault / "RAW", entry_link)  # outside the vault, but pointing into it
+    refused = [
+        "/usr/share/é/x.jpg",
+        str(outside / "Ärger" / "geheim é.txt"),
+        unicodedata.normalize("NFD", str(outside / "Ärger")),
+        f"{vault}/../{outside.name}/Ärger/é.jpg",
+        f"{vault}/RAW/2020/Café Ümlaut/../../../../{outside.name}/Ärger",
+        f"RAW/misc/link_to_outside/é/x.jpg",
+    ]
+    for bad in refused:
+        assert locate(bad, config) is None, bad
+        assert locate(bad, config, folder=True) is None, bad
+    # Paths that end up inside the vault are still re-spelled, below the root only
+    nfd = unicodedata.normalize("NFD", f"{entry_link}/2020/Café Ümlaut/koffie é à ü.jpg")
+    assert str(locate(nfd, config)) == str(vault / KOFFIE)
+    nfd = unicodedata.normalize("NFD", f"{vault}/RAW/2020/Café Ümlaut/../Café Ümlaut/koffie é à ü.jpg")
+    assert str(locate(nfd, config)) == str(vault / KOFFIE)
+    assert listed, "the inside paths should have needed a listing"
+    for folder in listed:
+        assert os.path.realpath(folder) == str(vault) or os.path.realpath(folder).startswith(f"{vault}/"), folder
+
+
 def test_stored_keys_do_not_depend_on_the_request_spelling(client, vault, config):
     """Keurer folders, Shows settings and ratings use the on-disk spelling for any input form."""
     on_disk = _nfd_folder(vault)
