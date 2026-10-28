@@ -160,8 +160,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         primary = "sync"
         hole_text = f"tussen {_date(hole[0])} en {_date(hole[1])}" if hole else ""
         if sync_failed:
-            step = (f"Bijwerken mislukte: {st['last_error'].rstrip('.')}. Probeer het opnieuw, of kijk bij Instellingen "
-                    "of alles klopt.")
+            # The reason itself is on the card (last_error), right under this sentence
+            step = "Bijwerken lukte de laatste keer niet. Probeer het opnieuw, of kijk bij Instellingen of alles klopt."
         elif hole and request:
             step = f"Je export is aangevraagd: die vult het gat {hole_text}. Bijwerken houdt je intussen bij."
         elif hole and connector.has("export_request"):
@@ -188,11 +188,15 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         step = f"Nog geen gegevens. Vraag een export aan: {name} maakt hem voor je klaar, DataVault leest hem in."
     elif api and sync_failed:
         primary = "connect"
-        step = f"Bijwerken mislukte: {st['last_error'].rstrip('.')}. Controleer de instellingen en verbind opnieuw."
+        step = "Bijwerken lukte de laatste keer niet. Controleer de instellingen en verbind opnieuw."
     elif api:
         primary = "connect"
-        step = (f"Verbind {name} om bij te blijven tot gisteren." if cov.records
-                else f"Verbind {name} om je gegevens op te halen.")
+        if hole:
+            step = (f"Er ontbreken gegevens tussen {_date(hole[0])} en {_date(hole[1])}: een nieuwe export vult dat aan. "
+                    f"Verbind {name} om daarna bij te blijven.")
+        else:
+            step = (f"Verbind {name} om bij te blijven tot gisteren." if cov.records
+                    else f"Verbind {name} om je gegevens op te halen.")
     elif connector.has("export_request"):
         primary = "request_export"
         last = _date(cov.last) or _date(max((r["received_at"] for r in raws), default=None))

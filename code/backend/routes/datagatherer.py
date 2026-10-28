@@ -83,7 +83,7 @@ def list_sources() -> Dict[str, Any]:
         "summary": {
             "total": len(items),
             "current": sum(i["status"] == "actueel" for i in items),
-            "behind": sum(i["status"] in ("achter", "fout", "opnieuw_verbinden") for i in items),
+            "behind": sum(i["status"] in ("achter", "gat", "fout", "opnieuw_verbinden") for i in items),
             "to_read": sum(i["status"] == "export_binnen" for i in items),
             "waiting": sum(i["status"] == "wacht_op_export" for i in items),
             "not_set": sum(i["status"] == "niet_ingesteld" for i in items),
