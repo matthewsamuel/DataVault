@@ -176,6 +176,7 @@ function recoveryRender() {
             icon: 'fa-clock-rotate-left',
             title: 'Nog niets om terug te zetten',
             text: 'Zodra de app iets verplaatst (Keurer, duplicaten opruimen, Verplaatsen in de viewer), staat het hier, met een knop om het terug te zetten.',
+            action: { label: 'Naar de Keurer', onClick: () => switchMainView('keurer') },
         }));
         return;
     }
