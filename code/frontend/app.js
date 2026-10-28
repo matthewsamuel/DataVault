@@ -758,7 +758,7 @@ function observeGridEnd(grid) {
 
 function createFolderCard(folder) {
     const card = document.createElement('div');
-    card.className = 'media-card folder-card';
+    card.className = 'media-card thumb-tile folder-card';
     card.onclick = () => selectFolder(folder.path);
     card.setAttribute('role', 'button');
     card.setAttribute('aria-label', `Map ${folder.name}`);
@@ -800,7 +800,7 @@ function createFolderCard(folder) {
 
 function createMediaCard(file) {
     const card = document.createElement('div');
-    card.className = 'media-card';
+    card.className = 'media-card thumb-tile';
     card.onclick = () => openMediaModal(file);
     card.setAttribute('role', 'button');
     card.setAttribute('aria-label', file.name);

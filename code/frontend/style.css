@@ -2434,51 +2434,10 @@ a.breadcrumb-item:hover {
     gap: var(--space-md);
 }
 
-/* Elke foto is een fototegel (zie .thumb-tile): afgerond, licht omhoog bij hover */
-.media-card {
-    position: relative;
-    overflow: hidden;
-    border-radius: var(--radius-thumb);
-    background-color: var(--thumb-bg);
-    cursor: pointer;
-    transition: transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out);
-}
-
-.media-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-}
-
-.media-card:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
-}
-
-.media-card.selected {
-    box-shadow: 0 0 0 3px var(--accent);
-}
-
+/* Elke tegel in het raster is een fototegel (.media-card.thumb-tile, zie .thumb-tile):
+   afgerond, licht omhoog bij hover, glans tijdens het laden, ring met vinkje bij selectie */
 .media-thumbnail {
-    width: 100%;
     aspect-ratio: 1 / 1;
-    object-fit: cover;
-    display: block;
-    transition: opacity var(--duration-slow) var(--ease-out), transform var(--duration-slow) var(--ease-out);
-}
-
-.media-card:hover .media-thumbnail {
-    transform: scale(1.02);
-}
-
-/* Zolang de miniatuur laadt: een rustige glans, daarna vervaagt de foto in */
-.media-thumbnail.loading {
-    opacity: 0;
-}
-
-.media-card:has(.media-thumbnail.loading) {
-    background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-highlight) 50%, var(--skeleton-base) 75%);
-    background-size: 200% 100%;
-    animation: skeleton-shimmer 1.4s ease-in-out infinite;
 }
 
 /* Mappen en andere bestanden tussen de foto's: een rustige kaart */
@@ -7535,45 +7494,15 @@ button.otd-settings-icon:hover {
     text-transform: uppercase;
 }
 
-/* ---- Fototegels (timeline.js: rijen van ROW_HEIGHT, tegels van ITEM_HEIGHT) ---- */
+/* ---- Fototegels: .tl-photo-card.thumb-tile, vierkant (timeline.js rekent de rijhoogte uit
+   de kolombreedte) ---- */
 
 .tl-photo-card {
-    position: relative;
-    height: 220px;
-    border-radius: var(--radius-thumb);
-    overflow: hidden;
-    background: var(--thumb-bg);
-    cursor: pointer;
-    transition: transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out);
+    height: 100%;
 }
 
 .tl-photo-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
     z-index: 2;
-}
-
-.tl-photo-card:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
-}
-
-.tl-photo-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    transition: opacity var(--duration-slow) var(--ease-out);
-}
-
-.tl-photo-img.loading {
-    opacity: 0;
-}
-
-.tl-photo-card:has(.tl-photo-img.loading) {
-    background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-highlight) 50%, var(--skeleton-base) 75%);
-    background-size: 200% 100%;
-    animation: skeleton-shimmer 1.4s ease-in-out infinite;
 }
 
 .tl-photo-date {

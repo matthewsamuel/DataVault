@@ -27,9 +27,11 @@
     let tlPendingYear = null;           // a year asked for before its photos were loaded
 
     // Virtualization
-    const ITEM_HEIGHT = 220;            // photo card height (px)
+    const ITEM_HEIGHT = 220;            // photo card height (px) until the first layout
     const COLS = 5;                     // cards per row
-    const ROW_HEIGHT = ITEM_HEIGHT + 12; // row height + gap
+    const GAP = 12;                     // between the cards, in a row and between rows
+    let tlTile = ITEM_HEIGHT;           // square tiles: as high as a column is wide
+    let tlRowHeight = ITEM_HEIGHT + GAP; // row height + gap
     const HEADER_HEIGHT = 48;           // date group header height
     const PRELOAD_ROWS = 4;            // extra rows to render above/below
 
@@ -75,7 +77,7 @@
                 return;
             }
             // Window resized while the tab was hidden: rebuild with the real width
-            if (tlFiles.length > 0 && getColumns() !== tlLayoutCols) recomputeLayout();
+            if (tlFiles.length > 0 && layoutStale()) recomputeLayout();
             // Just re-render in case of resize
             if (tlFiles.length > 0) {
                 tlRenderedRange = { start: -1, end: -1 };
@@ -496,9 +498,20 @@
     }
 
     // ── Layout Computation ────────────────────────────────
+    // Page margin left and right of the rows (--page-gutter, 20 px on narrow windows)
+    function gutter() {
+        const value = tlContentEl && parseFloat(getComputedStyle(tlContentEl).getPropertyValue('--page-gutter'));
+        return value > 0 ? value : 32;
+    }
+
+    // The content is at most --page-max wide (centred, like every page); the rows sit inside it
+    function rowWidth() {
+        return (tlContentEl || tlScrollContainer).clientWidth - 2 * gutter();
+    }
+
     function getColumns() {
         if (!tlScrollContainer) return COLS;
-        const w = tlScrollContainer.clientWidth - 64; // paginamarge (--page-gutter) links en rechts
+        const w = rowWidth();
         if (w < 500) return 2;
         if (w < 750) return 3;
         if (w < 1050) return 4;
@@ -506,9 +519,19 @@
         return 6;
     }
 
+    // Built for another width (columns or tile size)?
+    function layoutStale() {
+        const cols = getColumns();
+        return cols !== tlLayoutCols
+            || Math.max(80, Math.floor((rowWidth() - GAP * (cols - 1)) / cols)) !== tlTile;
+    }
+
     function recomputeLayout() {
         const cols = getColumns();
         tlLayoutCols = cols;
+        // Square tiles, the same shape as in Bestanden, at every window width
+        tlTile = Math.max(80, Math.floor((rowWidth() - GAP * (cols - 1)) / cols));
+        tlRowHeight = tlTile + GAP;
         tlLayoutRows = [];
         let top = 0;
 
@@ -540,18 +563,19 @@
                 tlLayoutRows.push({
                     type: 'row',
                     top: top,
-                    height: ROW_HEIGHT,
+                    height: tlRowHeight,
                     groupIdx: gi,
                     rowFiles: rowFiles
                 });
-                top += ROW_HEIGHT;
+                top += tlRowHeight;
             }
 
             // Group spacing
             top += 16;
         }
 
-        tlTotalHeight = top;
+        // Ruimte onderaan, zoals elke pagina (--space-4xl): het takenpaneel bedekt de laatste rij niet
+        tlTotalHeight = top + 64;
 
         if (tlContentEl) {
             tlContentEl.style.height = `${tlTotalHeight}px`;
@@ -568,7 +592,7 @@
 
         const scrollTop = tlScrollContainer.scrollTop;
         const viewHeight = tlScrollContainer.clientHeight;
-        const preloadPx = PRELOAD_ROWS * ROW_HEIGHT;
+        const preloadPx = PRELOAD_ROWS * tlRowHeight;
 
         const viewStart = scrollTop - preloadPx;
         const viewEnd = scrollTop + viewHeight + preloadPx;
@@ -650,12 +674,12 @@
             row.setAttribute('data-row-idx', rowIndex);
             row.style.position = 'absolute';
             row.style.top = `${layoutRow.top}px`;
-            row.style.left = '32px';
-            row.style.right = '32px';
-            row.style.height = `${ROW_HEIGHT}px`;
+            row.style.left = `${gutter()}px`;
+            row.style.right = `${gutter()}px`;
+            row.style.height = `${tlTile}px`;
             row.style.display = 'grid';
-            row.style.gridTemplateColumns = `repeat(${getColumns()}, 1fr)`;
-            row.style.gap = '12px';
+            row.style.gridTemplateColumns = `repeat(${tlLayoutCols}, 1fr)`;
+            row.style.gap = `${GAP}px`;
 
             layoutRow.rowFiles.forEach(fileIdx => {
                 const file = tlFiles[fileIdx];
@@ -669,7 +693,7 @@
 
     function createPhotoCard(file, index) {
         const card = document.createElement('div');
-        card.className = 'tl-photo-card';
+        card.className = 'tl-photo-card thumb-tile';
         card.setAttribute('data-index', index);
         card.setAttribute('role', 'button');
         card.tabIndex = index === tlFocusIndex ? 0 : -1;
@@ -815,7 +839,7 @@
         const ri = layoutRowOf(index);
         const row = tlLayoutRows[ri];
         const col = row ? index - row.rowFiles[0] : 0;
-        const rowsPerPage = Math.max(1, Math.floor(tlScrollContainer.clientHeight / ROW_HEIGHT) - 1);
+        const rowsPerPage = Math.max(1, Math.floor(tlScrollContainer.clientHeight / tlRowHeight) - 1);
         const inRow = (target) => {
             if (target < 0) return index;
             const r = tlLayoutRows[target];
