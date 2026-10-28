@@ -239,7 +239,7 @@ def _walk_answer(roots: List[Path]) -> Dict[str, Any]:
 @router.get("/scan")
 def timeline_scan(
     folders: List[str] = Query(..., description="Folder paths, one 'folders' parameter per folder"),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=2 ** 62),   # larger does not fit in an SQLite integer
     limit: Optional[int] = Query(None, ge=1, le=MAX_PAGE),
 ):
     """

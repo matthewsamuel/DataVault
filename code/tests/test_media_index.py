@@ -782,6 +782,28 @@ def test_library_media_route(client, config):
     assert client.get("/api/library/media", params={"kind": "doc"}).status_code == 400
 
 
+def test_out_of_range_dates_and_huge_numbers_are_refused_or_clamped(client, config):
+    _index(client)
+    huge = str(10 ** 20)
+    # The day after 9999-12-31 is no date: 400, never 500
+    assert client.get("/api/library/media", params={"date_to": "9999-12-31"}).status_code == 400
+    assert client.get("/api/stats/photos-by-date", params={"date": "9999-12-31"}).status_code == 400
+    # Year 1 is a timestamp on some platforms and not on others (time zone): never a 500
+    for name in ("date_from", "date_to"):
+        assert client.get("/api/library/media", params={name: "0001-01-01"}).status_code in (200, 400)
+    assert client.get("/api/stats/photos-by-date", params={"date": "0001-01-01"}).status_code in (200, 400)
+    for name, date in (("date_from", "9999-12-31"), ("date_to", "9999-12-30")):
+        assert client.get("/api/library/media", params={name: date}).status_code == 200
+    data = client.get("/api/library/media", params={"offset": huge}).json()
+    assert data["items"] == [] and data["offset"] == 2 ** 62
+    assert client.get("/api/library/media", params={"min_rating": huge}).json()["total"] == 0
+    assert client.get("/api/library/media", params={"min_rating": "-" + huge}).status_code == 200
+    r = client.get("/api/timeline/scan", params={"folders": str(config.VAULT_ROOT), "offset": huge})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_request"
+    page = client.get("/api/timeline/scan", params={"folders": str(config.VAULT_ROOT), "offset": 2 ** 62})
+    assert page.status_code == 200 and page.json()["rows"] == [] and page.json()["next_offset"] is None
+
+
 def test_an_automatic_pass_is_never_queued_twice_and_replaces_an_interrupted_one(client, config):
     from backend import media_index
     manager = _manager()

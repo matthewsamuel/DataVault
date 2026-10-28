@@ -341,10 +341,11 @@ def get_photos_by_date(date: str) -> Dict[str, Any]:
     """
     try:
         target = datetime.strptime(date, "%Y-%m-%d")
-    except ValueError:
+        start = target.timestamp()
+        end = (target + timedelta(days=1)).timestamp()
+    except (ValueError, OverflowError, OSError):
+        # Not a date, or one outside what a timestamp can hold (year 1, 9999-12-31)
         raise HTTPException(status_code=400, detail="Ongeldige datum, verwacht JJJJ-MM-DD")
-    start = target.timestamp()
-    end = (target + timedelta(days=1)).timestamp()
     roots = [config.VAULT_ROOT]
 
     found = _index_hits({"date_from": start, "date_to": end}, roots, BY_DATE_LIMIT, sort="taken")

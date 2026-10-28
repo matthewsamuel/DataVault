@@ -18,6 +18,9 @@ from backend.paths import resolve_in_vault
 
 router = APIRouter()
 
+# Larger offsets or ratings do not fit in an SQLite integer (and match nothing anyway)
+MAX_INT = 2 ** 62
+
 config: Config = None
 db = None
 manager = None
@@ -56,12 +59,17 @@ def library_status() -> Dict[str, Any]:
     }
 
 
-def _date(value: Optional[str], name: str) -> Optional[float]:
+def _date(value: Optional[str], name: str, next_day: bool = False) -> Optional[float]:
+    """The start of a day (YYYY-MM-DD), or of the day after it, as a timestamp."""
     if not value:
         return None
     try:
-        return datetime.strptime(value, "%Y-%m-%d").timestamp()
-    except ValueError:
+        day = datetime.strptime(value, "%Y-%m-%d")
+        if next_day:
+            day += timedelta(days=1)
+        return day.timestamp()
+    except (ValueError, OverflowError, OSError):
+        # Not a date, or one the platform cannot turn into a timestamp (year 1, 9999-12-31)
         raise HTTPException(status_code=400, detail=f"Ongeldige {name}, verwacht JJJJ-MM-DD")
 
 
@@ -95,11 +103,11 @@ def library_media(
         filters["kind"] = kind
     if ext:
         filters["ext"] = ext
-    start, end = _date(date_from, "begindatum"), _date(date_to, "einddatum")
+    start, end = _date(date_from, "begindatum"), _date(date_to, "einddatum", next_day=True)
     if start is not None:
         filters["date_from"] = start
     if end is not None:
-        filters["date_to"] = (datetime.fromtimestamp(end) + timedelta(days=1)).timestamp()
+        filters["date_to"] = end
     if folder:
         filters["folder"] = str(resolve_in_vault(folder, config, folder=True))
         filters["recursive"] = recursive
@@ -108,7 +116,7 @@ def library_media(
     if has_gps is not None:
         filters["has_gps"] = has_gps
     if min_rating is not None:
-        filters["min_rating"] = min_rating
+        filters["min_rating"] = max(-MAX_INT, min(min_rating, MAX_INT))
     if orientation:
         if orientation not in media_index.ORIENTATIONS:
             raise HTTPException(status_code=400, detail="orientation is landscape, portrait of square")
@@ -116,7 +124,7 @@ def library_media(
     if sort not in media_index.SORTS:
         raise HTTPException(status_code=400, detail=f"sort is een van: {', '.join(media_index.SORTS)}")
     limit = max(1, min(limit, 1000))
-    offset = max(0, offset)
+    offset = max(0, min(offset, MAX_INT))
     return {
         "ready": media_index.usable(db),
         "total": media_index.count(db, filters),
