@@ -3298,10 +3298,14 @@ function renderSpotifyStats(data) {
     }
 
     // 4. Charts - Simple Bar Implementation
-    renderSimpleChart('monthly-chart', data.monthly_activity, ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D']);
+    const months = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september',
+        'oktober', 'november', 'december'];
+    renderSimpleChart('monthly-chart', data.monthly_activity,
+        i => ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'][i],
+        (i, n) => `${months[i]}: ${formatNumberNl(n)} nummers`);
     renderSimpleChart('hourly-chart', data.hourly_activity,
-        ['12a', '', '', '', '4a', '', '', '', '8a', '', '', '', '12p', '', '', '', '4p', '', '', '', '8p', '', '', '']
-    );
+        i => (i % 6 === 0 ? `${i}:00` : ''),
+        (i, n) => `${i}:00–${(i + 1) % 24}:00: ${formatNumberNl(n)} nummers`);
 }
 
 // De server noemt luistertypes in het Engels (met een emoji); op het scherm staat Nederlands
@@ -3351,26 +3355,27 @@ function openSpotifySearch(query) {
     openExternal(spotifySearchUrl(query));
 }
 
-function renderSimpleChart(id, data, labels) {
+// Staafjes met een as eronder (axisLabel(i): '' voor geen label) en per staaf een tip
+// (tip(i, waarde)): bij hover en voor schermlezers, zonder dubbele tooltip van de browser
+function renderSimpleChart(id, data, axisLabel, tip) {
     const el = document.getElementById(id);
     if (!el) return;
 
     const max = Math.max(...data, 1);
-    el.innerHTML = '';
+    el.replaceChildren(...data.map((val, i) => createEl('div', {
+        class: 'chart-bar',
+        style: `height: ${(val / max) * 100}%`,
+        role: 'img',
+        'aria-label': tip(i, val),
+        dataset: { tip: tip(i, val) },
+    })));
 
-    data.forEach((val, i) => {
-        const height = (val / max) * 100;
-        const bar = document.createElement('div');
-        bar.className = 'chart-bar';
-        bar.style.height = `${height}%`;
-        bar.title = `${labels[i] || i}: ${val}`;
-
-        if (labels && labels[i]) {
-            bar.setAttribute('data-label', labels[i]);
-        }
-
-        el.appendChild(bar);
-    });
+    let axis = el.nextElementSibling;
+    if (!axis || !axis.classList.contains('chart-axis')) {
+        axis = createEl('div', { class: 'chart-axis', 'aria-hidden': 'true' });
+        el.after(axis);
+    }
+    axis.replaceChildren(...data.map((_, i) => createEl('span', { text: axisLabel(i) })));
 }
 
 // ==================== DA VAI OLLAMA CHATBOT ====================

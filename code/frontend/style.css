@@ -4487,7 +4487,7 @@ a.breadcrumb-item:hover {
     min-height: 2px;
     background: color-mix(in srgb, var(--spotify) 45%, var(--surface-raised));
     border-radius: var(--radius-xs) var(--radius-xs) 0 0;
-    transition: height 500ms var(--ease-out), background-color var(--duration-fast) var(--ease-out);
+    transition: height var(--duration-slow) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
 }
 
 .chart-bar:hover {
@@ -4495,7 +4495,7 @@ a.breadcrumb-item:hover {
 }
 
 .chart-bar:hover::after {
-    content: attr(title);
+    content: attr(data-tip);
     position: absolute;
     top: -28px;
     left: 50%;
@@ -4510,6 +4510,23 @@ a.breadcrumb-item:hover {
     white-space: nowrap;
     z-index: 10;
     box-shadow: var(--shadow-md);
+}
+
+/* As onder de staafjes: dezelfde kolommen, alleen de labels die er zijn */
+.chart-axis {
+    display: flex;
+    gap: 3px;
+    margin-top: var(--space-xs);
+}
+
+.chart-axis span {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-2xs);
+    color: var(--text-tertiary);
+    text-align: center;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 /* ---- Luister-DNA en uitleg (vensters) ---- */
@@ -5882,6 +5899,7 @@ button.otd-settings-icon:hover {
 
 /* ---- Pasha (chat) ---- */
 
+/* Zo hoog als de berichten (tot 360px, daarna scrollt de lijst): geen leeg vlak op Home */
 .chat-widget {
     background-color: var(--surface-card);
     border: 1px solid var(--card-border);
