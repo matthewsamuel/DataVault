@@ -229,6 +229,111 @@ def test_a_hidden_copy_never_stays_in_place_of_a_visible_one(client, vault):
     assert len(r["moved"]) == 1 and visible.exists() and not hidden.exists()
 
 
+@pytest.fixture
+def unreadable():
+    """chmod 000 a file for the test, readable again afterwards so tmp cleanup works."""
+    made = []
+
+    def make(path):
+        os.chmod(path, 0)
+        made.append(path)
+        return path
+
+    yield make
+    for path in made:
+        if os.path.lexists(path):
+            os.chmod(path, 0o644)
+
+
+def test_an_unreadable_copy_refuses_only_that_file(client, vault, unreadable):
+    """DUP-MOVE-OSERROR-500: one unreadable copy aborted the whole request with a 500."""
+    keep, dups = _group(vault, "lees.jpg", b"leesbaar" * 40, copies=3)
+    unreadable(dups[1])
+    if os.access(dups[1], os.R_OK):
+        pytest.skip("running as a user that can read mode 000 files")
+
+    r = _move(client, [(keep, dups)])
+    assert r.status_code == 200, r.text
+    assert [m["path"] for m in r.json()["moved"]] == [str(dups[0]), str(dups[2])]
+    [failed] = r.json()["failed"]
+    assert failed["path"] == str(dups[1]) and failed["status"] == 409
+    assert "Kon het bestand niet lezen" in failed["detail"] and "niets verplaatst" in failed["detail"]
+    assert dups[1].exists() and not dups[0].exists() and not dups[2].exists()
+    [run] = _runs(client)
+    assert run["run_id"] == r.json()["run_id"] and run["total_files"] == 2
+
+
+def test_an_unreadable_keeper_refuses_its_group_and_the_rest_still_runs(client, vault, unreadable):
+    k1, [d1] = _group(vault, "k1.jpg", b"bewaard een" * 40, copies=1)
+    k2, [d2] = _group(vault, "k2.jpg", b"bewaard twee" * 40, copies=1)
+    unreadable(k1)
+    if os.access(k1, os.R_OK):
+        pytest.skip("running as a user that can read mode 000 files")
+
+    r = _move(client, [(k1, [d1]), (k2, [d2])])
+    assert r.status_code == 200, r.text
+    assert [f["status"] for f in r.json()["failed"]] == [409] and r.json()["failed"][0]["path"] == str(d1)
+    assert [m["path"] for m in r.json()["moved"]] == [str(d2)]
+    assert d1.exists() and k1.exists()
+    r = client.post("/api/duplicates/delete_single", params={"file_path": str(d1), "duplicate_of": str(k1)})
+    assert r.status_code == 409 and "niet lezen" in r.json()["detail"]
+
+
+def test_a_read_error_or_a_vanished_file_is_a_per_file_refusal(client, vault, monkeypatch):
+    import errno
+    from backend.routes import duplicates
+    keep, dups = _group(vault, "io.jpg", b"leesfout" * 40, copies=3)
+    real = duplicates.files_identical
+    calls = []
+
+    def flaky(a, b):
+        calls.append(a)
+        if len(calls) == 1:
+            raise OSError(errno.EIO, "Input/output error")
+        if len(calls) == 2:
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory")
+        return real(a, b)
+
+    monkeypatch.setattr(duplicates, "files_identical", flaky)
+    r = _move(client, [(keep, dups)])
+    assert r.status_code == 200, r.text
+    assert [(f["status"], f["path"]) for f in r.json()["failed"]] == [(409, str(dups[0])), (409, str(dups[1]))]
+    assert "Input/output error" in r.json()["failed"][0]["detail"]
+    assert [m["path"] for m in r.json()["moved"]] == [str(dups[2])]
+    assert dups[0].exists() and dups[1].exists()
+
+
+def test_a_disk_unplugged_mid_batch_answers_what_was_moved(client, vault, monkeypatch):
+    import errno
+    from backend.routes import duplicates
+    keep, dups = _group(vault, "weg.jpg", b"halverwege" * 40, copies=2)
+    away = vault.with_name("vault_unplugged")
+    real = duplicates.files_identical
+    calls = []
+
+    def unplug_on_second(a, b):
+        calls.append(a)
+        if len(calls) == 2:
+            os.rename(vault, away)
+            raise OSError(errno.ENXIO, "Device not configured")
+        return real(a, b)
+
+    monkeypatch.setattr(duplicates, "files_identical", unplug_on_second)
+    try:
+        r = _move(client, [(keep, dups)])
+    finally:
+        if away.exists():
+            os.rename(away, vault)
+    assert r.status_code == 200, r.text
+    run_id = r.json()["run_id"]
+    assert run_id and [m["path"] for m in r.json()["moved"]] == [str(dups[0])]
+    [failed] = r.json()["failed"]
+    assert failed["status"] == 503 and failed["detail"] == "Archief niet bereikbaar (schijf losgekoppeld?)"
+    monkeypatch.undo()
+    assert client.post("/api/duplicates/undo", json={"run_id": run_id}).json()["restored"] == 1
+    assert dups[0].exists() and dups[1].exists()
+
+
 def test_a_failed_undo_record_puts_the_file_back(client, vault, monkeypatch):
     from backend.routes import duplicates
     keep, [dup] = _group(vault, "r.jpg", b"record" * 40, copies=1)

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Body, HTTPException
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import os
+import sqlite3
 import stat
 
 from backend.config import Config
@@ -175,13 +176,34 @@ def _hidden(path: Path) -> bool:
     return is_hidden(path, config.VAULT_ROOT, st)
 
 
+def _os_error(e: OSError, doing: str) -> HTTPException:
+    """
+    A file that cannot be read (no permission, a read error on an aging disk, gone
+    between two checks) refuses only that file. An unplugged disk gives 503.
+    """
+    from backend.main import VAULT_UNREACHABLE
+    if not config.VAULT_ROOT.is_dir():
+        return HTTPException(status_code=503, detail=VAULT_UNREACHABLE)
+    reason = e.strerror or str(e)
+    return HTTPException(status_code=409, detail=f"Kon het bestand niet {doing}: {reason}. Er is niets verplaatst")
+
+
 def _move_verified(src_path: Path, keeper: Optional[Path]) -> Tuple[Path, bool]:
     """
     Move src_path to RAW_DUPLICATES, only if keeper still exists and is byte-for-byte
     identical. The caller holds ARCHIVE_LOCK across this and recording the move, so
     nothing (another tab, the Keurer) can move the keeper away in between.
-    Raises HTTPException; returns (dst_path, was_conflict).
+    Raises HTTPException, also for read errors; returns (dst_path, was_conflict).
     """
+    try:
+        _verify(src_path, keeper)
+    except OSError as e:
+        raise _os_error(e, "lezen") from e
+    return _move_to_duplicates(src_path)
+
+
+def _verify(src_path: Path, keeper: Optional[Path]) -> None:
+    """Every check before a move; raises HTTPException (or OSError when a file cannot be read)."""
     if not os.path.lexists(src_path):
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -221,6 +243,8 @@ def _move_verified(src_path: Path, keeper: Optional[Path]) -> Tuple[Path, bool]:
             detail=f"File is no longer identical to {keeper.name}. Nothing was moved; scan again"
         )
 
+
+def _move_to_duplicates(src_path: Path) -> Tuple[Path, bool]:
     config.ensure_duplicates_folder()
 
     try:
@@ -250,6 +274,22 @@ def _move_verified(src_path: Path, keeper: Optional[Path]) -> Tuple[Path, bool]:
 
     except FileOperationError as e:
         raise HTTPException(status_code=500, detail=f"Failed to move {src_path}: {str(e)}")
+
+    except OSError as e:
+        # move_no_overwrite only lets a plain OSError through before the rename itself
+        raise _os_error(e, "verplaatsen") from e
+
+
+def _forget_hashes(*paths: Path) -> None:
+    """
+    Drop cached hashes of moved paths. Best effort: the move is already recorded, and a
+    stale cache row is never trusted anyway (validated on inode, size and times).
+    """
+    for path in paths:
+        try:
+            db.invalidate_hash(path)
+        except sqlite3.Error:
+            pass
 
 
 def _record_or_move_back(run_id: Optional[str], src_path: Path, dst_path: Path, folder: Optional[str]) -> str:
@@ -290,9 +330,7 @@ def delete_single_duplicate(file_path: str, duplicate_of: Optional[str] = None) 
         dst_path, was_conflict = _move_verified(src_path, keeper)
         run_id = _record_or_move_back(None, src_path, dst_path, None)
 
-    # Invalidate hash cache for both paths
-    db.invalidate_hash(src_path)
-    db.invalidate_hash(dst_path)
+    _forget_hashes(src_path, dst_path)
 
     return {
         "run_id": run_id,
@@ -362,12 +400,20 @@ def move_duplicates(body: Any = Body(...)) -> Dict[str, Any]:
     failed: List[Dict[str, Any]] = []
     recorded = False
 
+    # Every refusal or error stays with its own file: the rest of the batch still runs,
+    # and what was moved is always answered with its run_id
     for keep_str, move_paths in groups:
         try:
             keeper = resolve_in_vault(keep_str, config, allow_internal=True)
+        except OSError as e:
+            keeper_error = _os_error(e, "lezen")
         except HTTPException as e:
-            failed.extend({"path": p, "keep": keep_str, "status": e.status_code, "detail": e.detail}
-                          for p in move_paths)
+            keeper_error = e
+        else:
+            keeper_error = None
+        if keeper_error is not None:
+            failed.extend({"path": p, "keep": keep_str, "status": keeper_error.status_code,
+                           "detail": keeper_error.detail} for p in move_paths)
             continue
 
         for path_str in move_paths:
@@ -377,11 +423,14 @@ def move_duplicates(body: Any = Body(...)) -> Dict[str, Any]:
                     dst_path, was_conflict = _move_verified(src_path, keeper)
                     run_id = _record_or_move_back(run_id, src_path, dst_path, folder_label)
                 recorded = True
+            except OSError as e:
+                e = _os_error(e, "lezen")
+                failed.append({"path": path_str, "keep": keep_str, "status": e.status_code, "detail": e.detail})
+                continue
             except HTTPException as e:
                 failed.append({"path": path_str, "keep": keep_str, "status": e.status_code, "detail": e.detail})
                 continue
-            db.invalidate_hash(src_path)
-            db.invalidate_hash(dst_path)
+            _forget_hashes(src_path, dst_path)
             moved.append({
                 "path": path_str,
                 "src_path": str(src_path),
@@ -390,7 +439,11 @@ def move_duplicates(body: Any = Body(...)) -> Dict[str, Any]:
                 "was_conflict": was_conflict,
             })
 
-    run = db.get_delete_run(run_id) if run_id else None
+    try:
+        run = db.get_delete_run(run_id) if run_id else None
+    except sqlite3.Error:
+        # The moves are recorded; only the summary is missing (disk gone just now?)
+        return {"run_id": run_id, "moved": moved, "failed": failed, "run": None}
     if not recorded and run is None:
         run_id = None  # nothing moved and no earlier chunk: there is no run to continue
 

@@ -253,6 +253,12 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   andere onderdelen die de database gebruiken (zoals de Keurer-geschiedenis) nu met
   "Archief niet bereikbaar (schijf losgekoppeld?)" in plaats van een onduidelijke serverfout.
   Er gaat niets verloren: zodra de schijf terug is, werkt terugzetten gewoon weer.
+- Eén bestand dat niet gelezen kon worden (geen rechten, een leesfout op een oudere schijf, of
+  intussen verdwenen) brak het hele opruimen af met "Fout 500", terwijl een deel van de kopieën
+  al verplaatst was; de app meldde dan "0 verplaatst". Nu blijft alleen dat bestand staan, met
+  de reden erbij ("Kon het bestand niet lezen: ... Er is niets verplaatst"), en gaat de rest van
+  de actie gewoon door. Wat verplaatst is, staat altijd onder Herstellen. Wordt de schijf
+  halverwege losgekoppeld, dan krijgen de resterende bestanden "Archief niet bereikbaar".
 
 ### Duplicaten: nieuwe weergave
 - Het duplicatenscherm is vernieuwd en in het Nederlands. Per groep zie je één miniatuur (alle
