@@ -5,7 +5,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pathlib import Path
 from typing import Dict, Any
+import sqlite3
 
+from backend import recovery
 from backend.config import Config, content_type, is_video, media_type
 from backend.paths import resolve_in_vault, ArchiveFilter
 from backend.file_ops import (
@@ -184,27 +186,38 @@ def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
         with ARCHIVE_LOCK:
             # Only regular files, never folders or symlinks
             if source_path.is_symlink() or not source_path.is_file():
-                raise HTTPException(status_code=404, detail="Source file not found")
+                raise HTTPException(status_code=404, detail="Bestand niet gevonden")
             
             if destination_folder.exists() and not destination_folder.is_dir():
-                raise HTTPException(status_code=400, detail="Destination is not a folder")
+                raise HTTPException(status_code=400, detail="De bestemming is geen map")
             
             if same_folder(destination_folder, source_path.parent):
-                raise HTTPException(status_code=400, detail="File is already in this folder")
+                raise HTTPException(status_code=400, detail="Het bestand staat al in deze map")
             
             # Atomic, metadata-preserving, never overwrites (see backend/file_ops.py)
             destination_path = move_no_overwrite(source_path, destination_folder / source_path.name)
+            # Recorded for the recovery center (Herstelcentrum), which can move it back;
+            # if recording fails the file goes straight back and the move is refused
+            try:
+                recovery.ActionRecorder(
+                    db, "viewer_move", f"Verplaatst naar {destination_folder.name or 'het archief'}",
+                    folder=str(source_path.parent),
+                ).add(source_path, destination_path)
+            except sqlite3.OperationalError:
+                raise   # database gone with the disk: 503 (errors.py)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Verplaatsen niet vastgelegd, het bestand is teruggezet: {e}")
     except ProtectedPathError:
-        raise HTTPException(status_code=403, detail="Access denied: cache folder")
+        raise HTTPException(status_code=403, detail="Toegang geweigerd: cache-map van de app")
     except CrossDeviceError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except DestinationFolderError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileOperationError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to move file: {e}")
+        raise HTTPException(status_code=500, detail=f"Verplaatsen mislukt: {e}")
     
     return {
         "success": True,
         "new_path": str(destination_path),
-        "message": f"File moved to {destination_folder.name}/{destination_path.name}"
+        "message": f"Verplaatst naar {destination_folder.name}/{destination_path.name}"
     }

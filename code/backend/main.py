@@ -28,7 +28,9 @@ from backend.database import Database
 from backend import errors, file_ops, media_index, restart, security, thumbnail
 from backend.jobs import JobManager
 from backend.job_types import build_job_types
-from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library
+from backend.routes import (
+    folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery,
+)
 
 
 def _say(message: str) -> None:
@@ -150,6 +152,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         keurer.init_router(config, db)
         timeline.init_router(config, db)
         library.init_router(config, db, job_manager)
+        recovery.init_router(config, db)
 
         _say("DataVault Dashboard initialized successfully")
 
@@ -177,6 +180,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"], dependencies=vault)
     app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"], dependencies=vault)
     app.include_router(library.router, prefix="/api/library", tags=["library"], dependencies=vault)
+    app.include_router(recovery.router, prefix="/api/recovery", tags=["recovery"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 

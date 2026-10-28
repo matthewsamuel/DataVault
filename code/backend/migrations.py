@@ -358,6 +358,41 @@ def _m011_media_index(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_folders_parent ON media_folders(parent)")
 
 
+def _m012_recovery_actions(conn: sqlite3.Connection):
+    """
+    Undo records for every newer action that moves archive files (backend/recovery.py):
+    the move in the viewer now, later near-duplicate 'keep best' runs and assistant moves.
+    One action is one user action, however many files it moved; recovery_moves holds
+    where each file was (src_path) and where it went (dst_path), with the inode and size
+    of the moved file so an undo never takes back a different file with the same name.
+    The older Keurer decisions and duplicate runs keep their own tables; the recovery
+    center reads those as they are. Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recovery_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            folder TEXT,
+            details TEXT,
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recovery_moves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_id INTEGER NOT NULL REFERENCES recovery_actions(id),
+            src_path TEXT NOT NULL,
+            dst_path TEXT NOT NULL,
+            dst_ino INTEGER,
+            dst_size INTEGER,
+            moved_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_recovery_moves_action ON recovery_moves(action_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_recovery_actions_created ON recovery_actions(created_at)")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -371,6 +406,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (9, "media_dates", _m009_media_dates),
     (10, "app_settings", _m010_app_settings),
     (11, "media_index", _m011_media_index),
+    (12, "recovery_actions", _m012_recovery_actions),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

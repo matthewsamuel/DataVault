@@ -402,6 +402,116 @@ class Database:
                 (key, json.dumps(value, ensure_ascii=False), time.time()),
             )
 
+    # Recovery actions (migration 12, backend/recovery.py)
+    #
+    # One action is one user action that moved archive files, with one recovery_moves row
+    # per file. Like a delete run, an action only exists once its first file has moved,
+    # and it goes once its last file is restored.
+
+    def count_delete_runs(self) -> int:
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM delete_runs r "
+                "WHERE EXISTS (SELECT 1 FROM delete_operations o WHERE o.run_id = r.run_id)"
+            ).fetchone()[0]
+
+    def record_recovery_move(
+        self,
+        action_id: Optional[int],
+        kind: str,
+        title: str,
+        src_path: Path,
+        dst_path: Path,
+        dst_ino: Optional[int],
+        dst_size: Optional[int],
+        folder: Optional[str] = None,
+        details: Optional[str] = None,
+    ) -> int:
+        """
+        Record one moved file. Without an action_id (or with one that is gone, e.g. undone
+        in the meantime) a new action is started in the same transaction. Returns the
+        action id the file was recorded under.
+        """
+        now = time.time()
+        with self._connect() as conn:
+            exists = action_id is not None and conn.execute(
+                "SELECT 1 FROM recovery_actions WHERE id = ?", (action_id,)
+            ).fetchone()
+            if not exists:
+                action_id = conn.execute(
+                    "INSERT INTO recovery_actions (kind, title, folder, details, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (kind, title, folder, details, now),
+                ).lastrowid
+            conn.execute(
+                "INSERT INTO recovery_moves (action_id, src_path, dst_path, dst_ino, dst_size, moved_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (action_id, str(src_path), str(dst_path), dst_ino, dst_size, now),
+            )
+        return action_id
+
+    _ACTION_COLUMNS = """
+        a.id, a.kind, a.title, a.folder, a.details, a.created_at,
+        (SELECT COUNT(*) FROM recovery_moves m WHERE m.action_id = a.id) AS remaining
+    """
+
+    @staticmethod
+    def _action_row(row) -> Dict[str, Any]:
+        return {
+            "id": row[0], "kind": row[1], "title": row[2], "folder": row[3],
+            "details": row[4], "created_at": row[5], "remaining": row[6],
+        }
+
+    def get_recovery_actions(self, limit: int) -> List[Dict[str, Any]]:
+        """Actions that still have recorded files, newest first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {self._ACTION_COLUMNS} FROM recovery_actions a
+                WHERE EXISTS (SELECT 1 FROM recovery_moves m WHERE m.action_id = a.id)
+                ORDER BY a.created_at DESC, a.id DESC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [self._action_row(r) for r in rows]
+
+    def count_recovery_actions(self) -> int:
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM recovery_actions a "
+                "WHERE EXISTS (SELECT 1 FROM recovery_moves m WHERE m.action_id = a.id)"
+            ).fetchone()[0]
+
+    def get_recovery_action(self, action_id: int) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT {self._ACTION_COLUMNS} FROM recovery_actions a WHERE a.id = ?", (action_id,)
+            ).fetchone()
+        return self._action_row(row) if row else None
+
+    def get_recovery_moves(self, action_id: int) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, src_path, dst_path, dst_ino, dst_size, moved_at FROM recovery_moves "
+                "WHERE action_id = ? ORDER BY id",
+                (action_id,),
+            ).fetchall()
+        return [
+            {"id": r[0], "src_path": r[1], "dst_path": r[2], "dst_ino": r[3], "dst_size": r[4], "moved_at": r[5]}
+            for r in rows
+        ]
+
+    def delete_recovery_move(self, move_id: int) -> None:
+        """Forget one restored file; its action goes once it has no files left."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT action_id FROM recovery_moves WHERE id = ?", (move_id,)).fetchone()
+            conn.execute("DELETE FROM recovery_moves WHERE id = ?", (move_id,))
+            if row:
+                conn.execute(
+                    "DELETE FROM recovery_actions WHERE id = ? "
+                    "AND NOT EXISTS (SELECT 1 FROM recovery_moves WHERE action_id = ?)",
+                    (row[0], row[0]),
+                )
+
     # Delete run tracking methods
     #
     # One run is one user action in the duplicates view (one click on 'opruimen'),
@@ -593,6 +703,22 @@ class Database:
         """Verwijder een beslissing (na een geslaagde undo)."""
         with self._connect() as conn:
             conn.execute("DELETE FROM keurer_decisions WHERE id = ?", (decision_id,))
+
+    def get_keurer_moves(self, limit: int) -> List[Dict[str, Any]]:
+        """De nieuwste beslissingen die een bestand verplaatsten (weggooien, verplaatsen), voor het herstelcentrum."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT {self._KEURER_COLUMNS} FROM keurer_decisions "
+                "WHERE decision IN ('delete', 'move') ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [self._keurer_row(r) for r in rows]
+
+    def count_keurer_moves(self) -> int:
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM keurer_decisions WHERE decision IN ('delete', 'move')"
+            ).fetchone()[0]
 
     def get_keurer_stats(self) -> Dict[str, Any]:
         """Geeft streak, dagdoel-voortgang en totaal terug."""
