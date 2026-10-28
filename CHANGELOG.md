@@ -410,6 +410,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   pijltjestoetsen toonden foto's uit een ander tabblad. Een foto uit de chat openen maakte
   daarna de Files-weergave kapot (klikken gaf een fout). Alle drie opgelost. Verplaats je een
   foto vanuit de tijdlijn, dan verdwijnt hij daar ook uit de lijst.
+- Tijdlijn: na het verplaatsen van een foto klopt nu ook de balk erboven (het aantal foto's en
+  het jarenbereik), en verdwijnt een jaar waarvan je de laatste foto verplaatst uit de schuif.
 - Verplaatsvenster: na een paar keer openen kon één Enter een bestand naar een andere map
   sturen dan de gemarkeerde (en er gingen meerdere verplaatsverzoeken tegelijk). Nu reageert
   elk venster maar één keer op een toets, en verstuurt dubbel Enter of dubbelklikken nooit een

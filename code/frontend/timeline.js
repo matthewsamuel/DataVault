@@ -228,7 +228,6 @@
 
         const scrollEl = tlScrollContainer;
         const contentEl = tlContentEl;
-        const infoBar = document.getElementById('timeline-info-bar');
         const sliderWrap = document.getElementById('timeline-slider-wrap');
 
         // Show loading
@@ -268,17 +267,7 @@
             setupSlider();
 
             // Show info bar
-            if (infoBar) {
-                const years = Object.keys(tlDateIndex).sort();
-                const range = years.length > 1
-                    ? `${years[0]} – ${years[years.length - 1]}`
-                    : years[0] || '';
-                infoBar.innerHTML = html`
-                    <span class="tl-info-count"><i class="fas fa-images"></i> ${tlFiles.length.toLocaleString()} photos</span>
-                    <span class="tl-info-range"><i class="fas fa-calendar-alt"></i> ${range}</span>
-                `;
-                infoBar.style.display = 'flex';
-            }
+            renderInfoBar();
 
             // Show slider
             if (sliderWrap) sliderWrap.style.display = 'flex';
@@ -294,6 +283,21 @@
         }
 
         tlScanning = false;
+    }
+
+    // Aantal foto's en jaarbereik; ook na een verplaatsing opnieuw getekend
+    function renderInfoBar() {
+        const infoBar = document.getElementById('timeline-info-bar');
+        if (!infoBar) return;
+        const years = Object.keys(tlDateIndex).sort();
+        const range = years.length > 1
+            ? `${years[0]} – ${years[years.length - 1]}`
+            : years[0] || '';
+        infoBar.innerHTML = html`
+            <span class="tl-info-count"><i class="fas fa-images"></i> ${tlFiles.length.toLocaleString()} photos</span>
+            <span class="tl-info-range"><i class="fas fa-calendar-alt"></i> ${range}</span>
+        `;
+        infoBar.style.display = 'flex';
     }
 
     // ── Grouping ──────────────────────────────────────────
@@ -567,6 +571,9 @@
         const month = String(dt.getMonth() + 1);
         if (tlDateIndex[year] && tlDateIndex[year][month]) {
             tlDateIndex[year][month]--;
+            // Een lege maand of een leeg jaar telt niet meer mee in het bereik
+            if (tlDateIndex[year][month] <= 0) delete tlDateIndex[year][month];
+            if (Object.keys(tlDateIndex[year]).length === 0) delete tlDateIndex[year];
         }
         tlYearBoundaries = {};
         tlFiles.forEach((f, i) => {
@@ -579,6 +586,10 @@
         }
         buildGroups();
         recomputeLayout();
+        renderInfoBar();
+        // Jaarlabels opnieuw opbouwen (een jaar zonder foto's verdwijnt) en de schuif bij de scrollpositie houden
+        setupSlider();
+        updateSliderFromScroll();
     }
 
     // ── Scroll Handler ────────────────────────────────────
