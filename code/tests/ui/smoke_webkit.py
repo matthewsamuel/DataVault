@@ -330,6 +330,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 page.keyboard.press("/"), page.keyboard.type("a b")), 0.5)
             expect(page.input_value("#global-search") == "a b" and page.evaluate(keurer_state) == before,
                    f"keurer: typing in the search was taken as Keurer keys ({page.input_value('#global-search')!r})")
+            expect(page.evaluate("getComputedStyle(document.querySelector('.search-enter')).display") != "none",
+                   "search: no Enter hint while typing outside Bestanden")
             page.keyboard.press("Escape")
             page.evaluate("document.getElementById('global-search').value = ''; handleGlobalSearch('')")
             step("keurer: ArrowLeft on the page keeps", lambda: page.keyboard.press("ArrowLeft"), 1.0)
@@ -379,6 +381,16 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(storage["top"] >= 0 and storage["width"] > storage["room"] * 0.8,
                    f"storage: the list is cut off or narrow ({storage})")
             step("storage: close", lambda: page.keyboard.press("Escape"), 0.3)
+
+            # The search field searches the folder open in Bestanden: elsewhere Enter goes there
+            step("search: Enter on Home opens Bestanden", lambda: (
+                page.focus("#global-search"), page.keyboard.type("zzz"), page.keyboard.press("Enter")), 0.8)
+            expect(page.evaluate(view_now) == "viewer" and page.input_value("#global-search") == "zzz"
+                   and page.is_visible("#media-grid .empty-state .empty-state-action"),
+                   f"search: Enter on Home did not search in Bestanden ({page.evaluate(view_now)})")
+            step("search: Zoekopdracht wissen", lambda: page.click("#media-grid .empty-state-action"), 0.5)
+            expect(page.input_value("#global-search") == "", "search: 'Zoekopdracht wissen' left the search")
+            page.keyboard.press("Escape")
 
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
             # and a screenshot to look at

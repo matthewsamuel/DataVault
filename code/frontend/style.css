@@ -2079,6 +2079,17 @@ button.nav-brand {
     display: none;
 }
 
+/* Op een ander scherm dan Bestanden: met tekst in het veld de hint dat Enter daarheen gaat */
+.search-enter,
+.search-field:not(.search-elsewhere) .search-enter,
+.search-input:placeholder-shown ~ .search-enter {
+    display: none;
+}
+
+.search-elsewhere .search-input:not(:placeholder-shown) ~ .search-enter {
+    display: inline-block;
+}
+
 .nav-icon-btn,
 .theme-button {
     display: inline-flex;

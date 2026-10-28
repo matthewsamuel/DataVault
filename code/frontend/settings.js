@@ -181,7 +181,7 @@ registerSettingsSection({
     title: 'Shows',
     icon: 'fa-film',
     order: 40,
-    description: 'Welke mappen in library meedoen aan Shows.',
+    description: 'Welke mappen in de map library meedoen aan Shows.',
     render(body) {
         body.append(createEl('div', { class: 'settings-actions' },
             createEl('button', { type: 'button', class: 'btn btn-secondary btn-small', text: 'Bronnen beheren', onClick: openSettingsModal })));

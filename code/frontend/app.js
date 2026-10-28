@@ -203,6 +203,7 @@ function switchMainView(view) {
 
     // Clear search
     document.getElementById('global-search').value = '';
+    updateSearchFieldForView(view);
 
     if (view !== 'spotify') stopSpotifyClock();
     homeOtdCycle(view === 'home');
@@ -283,7 +284,7 @@ function renderShows(data) {
     if (!data || (!featured && (!shows || shows.length === 0))) {
         container.replaceChildren(emptyState({
             icon: 'fa-folder-open', title: 'Nog geen shows',
-            text: 'Shows komen uit de mappen in library. Zet er een paar aan bij Bronnen beheren.',
+            text: 'Shows komen uit de mappen in de map library. Zet er een paar aan bij Bronnen beheren.',
             action: { label: 'Bronnen beheren', onClick: openSettingsModal, primary: true },
         }));
         return;
@@ -616,7 +617,15 @@ function renderMediaGrid(keepCount = false) {
         gridItems = [];
         const searching = document.getElementById('global-search').value.trim();
         grid.replaceChildren(searching
-            ? emptyState({ icon: 'fa-search', title: 'Niets gevonden', text: `Geen bestand in deze map heeft "${searching}" in de naam.` })
+            ? emptyState({
+                icon: 'fa-search', title: 'Niets gevonden', text: `Geen bestand in deze map heeft "${searching}" in de naam.`,
+                action: { label: 'Zoekopdracht wissen', onClick: () => {
+                    const input = document.getElementById('global-search');
+                    input.value = '';
+                    handleGlobalSearch('');
+                    input.focus();
+                } },
+            })
             : currentFolder
                 ? emptyState({ icon: 'fa-folder-open', title: 'Deze map is leeg', text: 'Er staan hier geen bestanden of submappen.' })
                 : emptyState({ icon: 'fa-folder-tree', title: 'Kies een map', text: 'Kies links een map om de bestanden te zien.' }));
@@ -923,7 +932,31 @@ let searchTimer = null;
 
 function queueGlobalSearch(query) {
     clearTimeout(searchTimer);
+    // Het zoekveld zoekt (nog) alleen in de map die in Bestanden open is. Op een ander scherm
+    // filtert typen niets weg dat je niet ziet: Enter opent Bestanden en zoekt daar.
+    if (currentMainView() !== 'viewer') return;
     searchTimer = setTimeout(() => handleGlobalSearch(query), SEARCH_DEBOUNCE_MS);
+}
+
+function globalSearchKeydown(event) {
+    const input = event.currentTarget;
+    if (event.key !== 'Enter' || currentMainView() === 'viewer' || !input.value.trim()) return;
+    event.preventDefault();
+    const query = input.value;
+    switchMainView('viewer');
+    input.value = query;
+    handleGlobalSearch(query);
+}
+
+// Wat het zoekveld doet, zichtbaar in de plaatshouder en (op andere schermen) de Enter-hint
+function updateSearchFieldForView(view) {
+    const input = document.getElementById('global-search');
+    if (!input) return;
+    const here = view === 'viewer';
+    input.placeholder = here ? 'Zoek in deze map…' : 'Zoek in Bestanden…';
+    input.setAttribute('aria-label', here ? 'Zoek in de geopende map (sneltoets /)'
+        : 'Zoek in de geopende map van Bestanden: typ en druk op Enter (sneltoets /)');
+    input.closest('.search-field').classList.toggle('search-elsewhere', !here);
 }
 
 function handleGlobalSearch(query) {
@@ -2544,7 +2577,7 @@ async function openSettingsModal() {
                 <button type="button" class="modal-close" onclick="closeSettingsModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
             </div>
             <div class="modal-body modal-body-list">
-                <p class="settings-subtitle">Kies welke mappen in library meedoen aan Shows.</p>
+                <p class="settings-subtitle">Kies welke mappen in de map library meedoen aan Shows.</p>
                 <div id="settings-folders-list" class="settings-list">
                     <div class="loading-spinner"></div>
                 </div>

@@ -37,7 +37,7 @@
                 <button class="nav-tab" data-view="duplicates" onclick="switchMainView('duplicates')" title="Duplicaten (3)">
                     Duplicaten
                 </button>
-                <button class="nav-tab" data-view="spotify" onclick="switchMainView('spotify')" title="Spotify Wrapped (4)">
+                <button class="nav-tab" data-view="spotify" onclick="switchMainView('spotify')" title="Spotify (4)">
                     Spotify
                 </button>
                 <button class="nav-tab" data-view="shows" onclick="switchMainView('shows')" title="Shows (5)">
@@ -50,16 +50,18 @@
                     Tijdlijn
                 </button>
                 <button class="nav-tab" data-view="recovery" onclick="switchMainView('recovery')" title="Herstelcentrum: alles terugzetten wat de app verplaatste (8)">
-                    Herstel
+                    Herstelcentrum
                 </button>
             </div>
 
             <div class="nav-actions">
-                <div class="search-field nav-search">
+                <div class="search-field nav-search search-elsewhere">
                     <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                    <input type="search" class="search-input" id="global-search" placeholder="Zoeken…"
-                        aria-label="Zoek in de geopende map (sneltoets /)" oninput="queueGlobalSearch(this.value)">
+                    <input type="search" class="search-input" id="global-search" placeholder="Zoek in Bestanden…"
+                        aria-label="Zoek in de geopende map van Bestanden: typ en druk op Enter (sneltoets /)"
+                        oninput="queueGlobalSearch(this.value)" onkeydown="globalSearchKeydown(event)">
                     <kbd class="search-kbd" aria-hidden="true">/</kbd>
+                    <kbd class="search-kbd search-enter" aria-hidden="true">Enter</kbd>
                 </div>
 
                 <div class="theme-toggle">
@@ -233,12 +235,12 @@
         <div id="section-viewer" class="section hidden">
             <div class="content-header">
                 <div class="breadcrumb" id="breadcrumb">
-                    <span class="breadcrumb-item active">Home</span>
+                    <span class="breadcrumb-item active">Archief</span>
                 </div>
 
                 <div class="content-toolbar">
                     <div class=" toolbar-actions">
-                        <label class="toolbar-label" for="sort-select">Sorteren:</label>
+                        <label class="toolbar-label" for="sort-select">Sorteren</label>
                         <select class="toolbar-select" id="sort-select" onchange="handleSort(this.value)">
                             <option value="name">Naam</option>
                             <option value="date">Gewijzigd</option>
@@ -284,7 +286,7 @@
                 <!-- Folder Selection -->
                 <div class="folder-selection-panel">
                     <div class="folder-selection-header">
-                        <span class="folder-selection-label">Gekozen map:</span>
+                        <span class="folder-selection-label">Gekozen map</span>
                         <span class="folder-selection-path" id="selected-folder-path">Geen</span>
                     </div>
                     <div class="folder-selection-actions">
