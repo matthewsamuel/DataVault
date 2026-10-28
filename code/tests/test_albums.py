@@ -501,7 +501,6 @@ def test_camera_text_is_matched_literally(indexed):
 
 # ---------- review fixes ----------
 
-
 def test_deep_pages_keep_the_order_of_one_full_sort(tmp_path):
     """query() sorts the ids and reads the rows of the page afterwards: same order, ties included."""
     from backend import media_index
@@ -600,3 +599,44 @@ def test_an_unchanged_dit_jaar_from_before_is_updated_once(client, config, app):
                      (json.dumps({"period": "this_year"}),))
     smart_albums.ensure_defaults(db)
     assert {a["builtin"]: a for a in _albums(client)["albums"]}["this_year"]["filters"] == {"period": "this_year"}
+
+
+def test_a_folders_list_filters_like_the_on_this_day_choice(indexed, config):
+    clean = library_filters.clean
+    assert clean({"folders": ["RAW/2019/", "library", "RAW/2019"]}) == {"folders": ["RAW/2019", "library"]}
+    assert clean({"folders": "RAW,library", "recursive": False}) == {"folders": ["RAW", "library"], "recursive": False}
+    with pytest.raises(library_filters.FilterError):
+        clean({"folder": "RAW", "folders": ["library"]})
+    with pytest.raises(library_filters.FilterError):
+        clean({"folders": [f"RAW/{i}" for i in range(51)]})
+    client = indexed
+    both = _browse(client, folders=["RAW/2019", "RAW/misc"])
+    assert both["total"] == _browse(client, folder="RAW/2019")["total"] + _browse(client, folder="RAW/misc")["total"]
+    assert client.get("/api/library/browse", params={"folders": ["RAW", "../.."]}).status_code == 403
+    album = client.post("/api/library/albums", json={"name": "Twee mappen",
+                                                     "filters": {"folders": [str(config.VAULT_ROOT / "RAW/misc"),
+                                                                             "RAW/2019"]}}).json()
+    assert album["filters"] == {"folders": ["RAW/2019", "RAW/misc"]} and album["count"] == both["total"]
+
+
+def test_each_on_this_day_year_opens_exactly_its_own_files(client, config, monkeypatch):
+    leap = config.VAULT_ROOT / "RAW/schrikkel"
+    _photo(leap / "2020a.jpg", (1, 1, 1), "a", "2020:02:28 12:00:00")
+    _photo(leap / "2020b.jpg", (2, 2, 2), "b", "2020:02:29 12:00:00")
+    _photo(leap / "2019.jpg", (3, 3, 3), "c", "2019:02:28 08:00:00")
+    _photo(config.VAULT_ROOT / "library/elders/2020c.jpg", (4, 4, 4), "d", "2020:02:28 09:00:00")
+    _index(client)
+    for folders in ([], ["RAW/schrikkel"]):
+        data = _otd(client, monkeypatch, date(2026, 2, 28), allowed_folders=folders)
+        assert [g["year"] for g in data["years"]] == [2020, 2019]
+        for group in data["years"]:
+            spec = group["filters"]
+            assert ("folders" in spec) == bool(folders)
+            page = _browse(client, **spec)
+            assert page["total"] == group["total"], (folders, group["year"], spec)
+            assert {i["path"] for i in page["items"]} == {i["path"] for i in group["items"]}
+        assert data["years"][0]["filters"]["date_to"] == "2020-02-29"
+        assert data["years"][1]["filters"]["date_to"] == "2019-02-28"
+    # In a leap year 28 February is one day only
+    data = _otd(client, monkeypatch, date(2028, 2, 28))
+    assert data["years"][0]["filters"]["date_to"] == "2020-02-28" and data["years"][0]["total"] == 2

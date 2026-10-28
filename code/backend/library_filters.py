@@ -14,7 +14,9 @@ keys, all optional and combined with AND:
   month            1..12                              in that month (of year, or of any year)
   period           'this_year' | 'last_year' | 'this_month' | 'last_30_days'   (from today)
   folder           'RAW/2019'                         a folder of the archive, with its subfolders
-  recursive        false                              only the folder itself
+  folders          ['RAW/2019', 'library']            any of these folders ('op deze dag' with the
+                                                      folders chosen on Home); not with folder
+  recursive        false                              only the folder itself (or folders themselves)
   camera           'Apple iPhone 12'                  make + model, or just the model
   camera_contains  'iPhone'                           the make or model contains this text
   has_gps          true | false
@@ -40,14 +42,15 @@ KINDS = ("photo", "video", "audio")
 PERIODS = ("this_year", "last_year", "this_month", "last_30_days")
 KEURER = ("keep", "undecided")
 CAPTURE = ("known", "missing")
-LIST_KEYS = ("kind", "ext")
-KEYS = ("kind", "ext", "date_from", "date_to", "year", "month", "period", "folder", "recursive",
+LIST_KEYS = ("kind", "ext", "folders")
+KEYS = ("kind", "ext", "date_from", "date_to", "year", "month", "period", "folder", "folders", "recursive",
         "camera", "camera_contains", "has_gps", "min_rating", "keurer", "orientation", "capture_date")
 # Sorts offered to the user (media_index.SORTS also has path and random)
 SORTS = ("-taken", "taken", "name", "-name", "-size", "size", "-rating", "rating", "-added", "added")
 DEFAULT_SORT = "-taken"
 MAX_TEXT = 200
 MAX_EXTS = 30
+MAX_FOLDERS = 50
 MIN_YEAR, MAX_YEAR = 1800, 2200
 RATING_LIMIT = 10 ** 9
 _EXT_RE = re.compile(r"^\.[a-z0-9]{1,10}$")
@@ -110,6 +113,12 @@ def _day(value: Any, name: str) -> str:
     return day.strftime("%Y-%m-%d")
 
 
+def _folder(value: Any) -> str:
+    """A folder as given (relative to the vault, or absolute), without slashes at the ends."""
+    folder = _text(value, "map")
+    return folder.rstrip("/") if folder.startswith("/") and folder.strip("/") else folder.strip("/")
+
+
 def _list(value: Any) -> List[Any]:
     if isinstance(value, (list, tuple)):
         return list(value)
@@ -161,10 +170,15 @@ def clean(spec: Any) -> Dict[str, Any]:
         elif key == "period":
             out[key] = _choice(value, "Periode", PERIODS)
         elif key == "folder":
-            folder = _text(value, "map")
-            folder = folder.rstrip("/") if folder.startswith("/") and folder.strip("/") else folder.strip("/")
+            folder = _folder(value)
             if folder:
                 out[key] = folder
+        elif key == "folders":
+            folders = {f for f in (_folder(v) for v in _list(value)) if f}
+            if len(folders) > MAX_FOLDERS:
+                raise FilterError(f"Hoogstens {MAX_FOLDERS} mappen")
+            if folders:
+                out[key] = sorted(folders)
         elif key == "recursive":
             if not _bool(value, "Submappen"):
                 out[key] = False
@@ -180,7 +194,9 @@ def clean(spec: Any) -> Dict[str, Any]:
             out[key] = _choice(value, "Oriëntatie", media_index.ORIENTATIONS)
         elif key == "capture_date":
             out[key] = _choice(value, "Opnamedatum", CAPTURE)
-    if "recursive" in out and "folder" not in out:
+    if "folder" in out and "folders" in out:
+        raise FilterError("Kies één map of een lijst mappen, niet allebei")
+    if "recursive" in out and "folder" not in out and "folders" not in out:
         del out["recursive"]
     if out.get("date_from") and out.get("date_to") and out["date_from"] > out["date_to"]:
         raise FilterError("De begindatum ligt na de einddatum")
@@ -277,6 +293,9 @@ def to_query(spec: Dict[str, Any], config, today: Optional[date] = None) -> Dict
         query["month"] = spec["month"]
     if spec.get("folder"):
         query["folder"] = str(resolve_in_vault(spec["folder"], config, folder=True))
+        query["recursive"] = spec.get("recursive", True)
+    elif spec.get("folders"):
+        query["folders"] = [str(resolve_in_vault(f, config, folder=True)) for f in spec["folders"]]
         query["recursive"] = spec.get("recursive", True)
     return query
 

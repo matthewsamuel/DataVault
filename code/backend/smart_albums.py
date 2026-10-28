@@ -166,9 +166,11 @@ def _filters(value: Any, config) -> Dict[str, Any]:
         spec = library_filters.clean(value or {})
     except library_filters.FilterError as e:
         raise AlbumError(str(e))
+    # Stored relative to the vault, so the album keeps working when the disk is mounted elsewhere
     if spec.get("folder"):
-        # Stored relative to the vault, so the album keeps working when the disk is mounted elsewhere
         spec["folder"] = library_filters.relative_folder(spec["folder"], config)
+    if spec.get("folders"):
+        spec["folders"] = sorted({library_filters.relative_folder(f, config) for f in spec["folders"]})
     return spec
 
 

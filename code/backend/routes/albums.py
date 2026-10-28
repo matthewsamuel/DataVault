@@ -131,7 +131,7 @@ def browse(request: Request, album: Optional[int] = Query(None, ge=0, le=MAX_INT
     rows = media_index.query(db, query, sort=sort, offset=offset, limit=limit)
     return {
         "ready": media_index.usable(db),
-        "total": media_index.count(db, query),
+        "total": total,
         "offset": offset,
         "limit": limit,
         "sort": sort,
@@ -199,19 +199,23 @@ def on_this_day(date_: Optional[str] = Query(None, alias="date"),
     Photos and videos taken on one calendar day (today, or date=MM-DD) in the years
     before this one, newest year first: {ready, month, day, year, total, years:
     [{year, years_ago, total, items}]}. Each year holds its first per_year items by
-    capture time (total says how many there are). Capture dates are local wall-clock
-    time, as in the timeline, and only real ones count (EXIF or the video itself): a
-    file dated only by its copy day is no memory. allowed_folders (one parameter per
-    folder) limits it to those folders, like the 'op deze dag' choice on Home. In a
-    year that is not a leap year, 28 February also shows the photos of 29 February.
+    capture time (total says how many there are), and filters: the same selection as a
+    browse filter (library_filters), so 'Alle N bekijken' opens exactly those N.
+    Capture dates are local wall-clock time, as in the timeline, and only real ones
+    count (EXIF or the video itself): a file dated only by its copy day is no memory.
+    allowed_folders (one parameter per folder) limits it to those folders, like the
+    'op deze dag' choice on Home. In a year that is not a leap year, 28 February also
+    shows the photos of 29 February.
     """
     today = _today()
     day = _parse_day(date_)
     month_days = [(day.month, day.day)]
-    if (day.month, day.day) == (2, 28) and not calendar.isleap(today.year):
+    with_leap_day = (day.month, day.day) == (2, 28) and not calendar.isleap(today.year)
+    if with_leap_day:
         month_days.append((2, 29))
     filters: Dict[str, Any] = {"kind": ["photo", "video"], "capture_date": "known", "month_days": month_days,
                                "date_to": datetime(today.year, 1, 1).timestamp()}
+    browse: Dict[str, Any] = {"kind": ["photo", "video"], "capture_date": "known"}
     if allowed_folders:
         from backend.routes.timeline import selected_roots
         roots, _ = selected_roots(allowed_folders)
@@ -220,8 +224,16 @@ def on_this_day(date_: Optional[str] = Query(None, alias="date"),
                     "total": 0, "years": []}
         if not any(root == config.VAULT_ROOT for root in roots):
             filters["folders"] = [str(r) for r in roots]
+            browse["folders"] = sorted(library_filters.relative_folder(str(r), config) for r in roots)
+
+    def year_filter(year: int) -> Dict[str, Any]:
+        last = 29 if with_leap_day and calendar.isleap(year) else day.day
+        return {**browse, "date_from": f"{year:04d}-{day.month:02d}-{day.day:02d}",
+                "date_to": f"{year:04d}-{day.month:02d}-{last:02d}"}
+
     groups = media_index.year_groups(db, filters, per_year=per_year)
-    years = [{"year": y, "years_ago": today.year - y, "total": n, "items": [item(r) for r in rows]}
+    years = [{"year": y, "years_ago": today.year - y, "total": n, "items": [item(r) for r in rows],
+              "filters": year_filter(y)}
              for y, n, rows in groups]
     return {
         "ready": media_index.usable(db),
