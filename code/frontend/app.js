@@ -1127,14 +1127,23 @@ function globalSearchKeydown(event) {
 }
 
 // Wat het zoekveld doet, zichtbaar in de plaatshouder en (op andere schermen) de Enter-hint
+// Onder 1100 px is het zoekveld smal (het menu heeft tien onderdelen): dan een korte tekst die past
+const SEARCH_NARROW = window.matchMedia ? window.matchMedia('(max-width: 1100px)') : null;
+
 function updateSearchFieldForView(view) {
     const input = document.getElementById('global-search');
     if (!input) return;
     const here = view === 'viewer';
-    input.placeholder = here ? 'Zoek in deze map…' : 'Zoek in Bestanden…';
+    input.placeholder = SEARCH_NARROW && SEARCH_NARROW.matches ? 'Zoeken…' : here ? 'Zoek in deze map…' : 'Zoek in Bestanden…';
     input.setAttribute('aria-label', here ? 'Zoek in de geopende map (sneltoets /)'
         : 'Zoek in de geopende map van Bestanden: typ en druk op Enter (sneltoets /)');
     input.closest('.search-field').classList.toggle('search-elsewhere', !here);
+}
+
+if (SEARCH_NARROW) {
+    const onNarrowChange = () => updateSearchFieldForView(typeof currentMainView === 'function' ? currentMainView() : 'home');
+    if (SEARCH_NARROW.addEventListener) SEARCH_NARROW.addEventListener('change', onNarrowChange);
+    else if (SEARCH_NARROW.addListener) SEARCH_NARROW.addListener(onNarrowChange);
 }
 
 function handleGlobalSearch(query) {
@@ -1866,7 +1875,9 @@ const TOAST_ICONS = {
     info: 'fa-circle-info',
 };
 
-function showToast(title, message, type = 'info') {
+// action (optioneel): {label, onClick}, een knop in de melding (bijv. 'Ongedaan maken'); de melding
+// sluit na de klik
+function showToast(title, message, type = 'info', action = null) {
     const container = document.getElementById('toast-container');
     const duration = TOAST_MS[type] || TOAST_MS.info;
     // Dezelfde melding nog in beeld (bijv. tien mislukte miniaturen): niet opstapelen, alleen langer tonen
@@ -1891,6 +1902,13 @@ function showToast(title, message, type = 'info') {
             createEl('strong', { text: title }),
             createEl('button', { onClick: () => toast.remove(), 'aria-label': 'Melding sluiten', title: 'Sluiten' }, '\u00d7')),
         createEl('div', { class: 'toast-body', text: message }));
+    if (action) {
+        toast.append(createEl('div', { class: 'toast-actions' },
+            createEl('button', {
+                type: 'button', class: 'btn btn-secondary btn-sm toast-action', text: action.label,
+                onClick: () => { hideToast(toast); action.onClick(); },
+            })));
+    }
 
     container.appendChild(toast);
 

@@ -1558,6 +1558,12 @@ textarea.input {
     line-height: var(--lh-snug);
 }
 
+/* Een knop in de melding (showToast(..., action)), bijv. 'Ongedaan maken' */
+.toast-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
 /* ---------- Lege, mislukte en ladende stukken (ui.js) ---------- */
 
 .empty-state {
