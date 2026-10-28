@@ -1436,10 +1436,10 @@ function openMoveFileModal(fileData = null) {
     // Show source folder path
     const sourcePath = fileToMove.path || '';
     const sourceFolder = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
-    const sourceFolderName = sourceFolder.split('/').filter(Boolean).slice(-2).join(' / ') || sourceFolder;
     const sourceEl = document.getElementById('move-file-source');
     if (sourceEl) {
-        sourceEl.querySelector('span').textContent = sourceFolderName;
+        // Hetzelfde pad als in de viewer: vanaf het archief, in mono
+        sourceEl.querySelector('span').replaceChildren(...pathNodes(archivePath(sourceFolder)));
         sourceEl.title = sourceFolder;
     }
 
@@ -1536,8 +1536,7 @@ function previewMoveDestination(path, quiet) {
     const destDisplay = document.getElementById('move-dest-display');
     const destPath = document.getElementById('move-dest-path');
     if (destDisplay && destPath) {
-        const destName = path.split('/').filter(Boolean).slice(-2).join(' / ') || path;
-        destPath.querySelector('span').textContent = destName;
+        destPath.querySelector('span').replaceChildren(...pathNodes(archivePath(path)));
         destPath.title = path;
         destDisplay.style.display = '';
     }

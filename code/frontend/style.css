@@ -3184,6 +3184,13 @@ a.breadcrumb-item:hover {
     flex-shrink: 0;
 }
 
+/* Paden zoals in de viewer: vanaf het archief, in mono */
+.move-meta-location span,
+.move-meta-dest span {
+    font-family: var(--font-mono);
+    min-width: 0;
+}
+
 .move-file-dest-meta {
     padding-top: var(--space-md);
     border-top: 1px solid var(--border-hairline);
