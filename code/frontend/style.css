@@ -8121,6 +8121,12 @@ button.otd-settings-icon:hover {
     border-radius: var(--radius-full);
 }
 
+/* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar") */
+.job-dock.collapsed:not(.compact) {
+    width: max-content;
+    min-width: 200px;
+}
+
 /* Ingeklapt paneel: de bibliotheekregel klapt mee in */
 .job-dock.collapsed:not(.compact) .job-library {
     display: none;
@@ -8160,7 +8166,7 @@ button.otd-settings-icon:hover {
 /* Vaste breedte voor de toetsen: de uitleg begint in elke groep op dezelfde plek */
 .shortcut-group dl {
     display: grid;
-    grid-template-columns: 112px minmax(0, 1fr);
+    grid-template-columns: 96px minmax(0, 1fr);
     gap: var(--space-sm) var(--space-md);
     align-items: baseline;
 }
