@@ -334,6 +334,7 @@ def hash_files(
     reporter,
     record_error,
     label: str = 'Vergelijken',
+    stats: Optional[Dict[str, int]] = None,
 ) -> Tuple[Dict[str, str], int]:
     """
     xxHash3 of every path, from the cache where the fingerprint still matches.
@@ -341,6 +342,8 @@ def hash_files(
     go to the cache in batches (HASH_FLUSH_FILES / HASH_FLUSH_SECONDS) so a stopped
     or interrupted run loses at most one batch. A file that changed while it was
     read is an error, not a hash. Returns ({path: hash}, number newly hashed).
+    stats['stored'] (if given) counts the new hashes that reached the cache, also
+    when the run stops halfway (a resumed job adds them to its total).
     """
     total = len(paths)
     cache = db.get_cached_hashes(cache_folder, HASH_ALGO) if paths else {}
@@ -366,6 +369,8 @@ def hash_files(
         last_flush = time.monotonic()
         try:
             db.store_hashes(entries, HASH_ALGO)
+            if stats is not None:
+                stats['stored'] = stats.get('stored', 0) + len(entries)
         except sqlite3.Error as e:  # the cache is an optimisation; a failed write loses nothing
             print(f"Hash cache write failed: {e}")
 
@@ -407,6 +412,7 @@ def find_duplicates_in_folder(
     rule: str = DEFAULT_KEEP_RULE,
     prefer_folder: Optional[str] = None,
     reporter=None,
+    errors=None,
 ) -> Dict[str, Any]:
     """
     Find groups of byte-identical media files below folder_path.
@@ -431,7 +437,8 @@ def find_duplicates_in_folder(
     if rule not in KEEP_RULES:
         raise ValueError(f"unknown rule: {rule}")
     reporter = reporter or _QuietReporter()
-    errors = _ErrorLog()
+    if errors is None:  # a job passes its own, to see whether the vault went away meanwhile
+        errors = _ErrorLog()
     
     def gone():
         return errors.count and not folder_path.is_dir()

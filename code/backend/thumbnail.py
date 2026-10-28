@@ -2,7 +2,9 @@
 DataVault Dashboard - Thumbnail Generator
 Generate and cache thumbnails for photos and videos
 """
+import functools
 import hashlib
+import io
 import os
 import threading
 from contextlib import contextmanager
@@ -51,7 +53,7 @@ def _atomic_output(output_path: Path) -> Iterator[Path]:
             pass
 
 
-class _NoFrame(Exception):
+class _NoFrame(OSError):
     """ffmpeg wrote no frame: nothing is put in place."""
 
 
@@ -71,6 +73,34 @@ def is_thumbnail_valid(thumb_path: Path, original_path: Path) -> bool:
     
     return thumb_mtime >= original_mtime
 
+def render_photo_thumbnail(file_path: Path, output_path: Path) -> None:
+    """
+    Make the thumbnail of a photo, or raise: an unreadable or undecodable photo
+    is an error here, never a placeholder in its place (see generate_photo_thumbnail).
+    """
+    with Image.open(file_path) as img:
+        # Roteer volgens EXIF-oriëntatie zodat thumbnails altijd rechtop staan
+        img = ImageOps.exif_transpose(img)
+
+        # Convert RGBA to RGB if needed
+        if img.mode in ('RGBA', 'LA', 'P'):
+            # Create white background
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+
+        # Create thumbnail
+        img.thumbnail(THUMB_SIZE, Image.Resampling.LANCZOS)
+
+        # Save
+        with _atomic_output(output_path) as tmp:
+            img.save(tmp, 'JPEG', quality=THUMB_QUALITY, optimize=True)
+
+
 def generate_photo_thumbnail(file_path: Path, output_path: Path) -> bool:
     """
     Generate thumbnail for photo.
@@ -79,33 +109,65 @@ def generate_photo_thumbnail(file_path: Path, output_path: Path) -> bool:
         True if successful, False otherwise
     """
     try:
-        with Image.open(file_path) as img:
-            # Roteer volgens EXIF-oriëntatie zodat thumbnails altijd rechtop staan
-            img = ImageOps.exif_transpose(img)
-
-            # Convert RGBA to RGB if needed
-            if img.mode in ('RGBA', 'LA', 'P'):
-                # Create white background
-                background = Image.new('RGB', img.size, (255, 255, 255))
-                if img.mode == 'P':
-                    img = img.convert('RGBA')
-                background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                img = background
-            elif img.mode != 'RGB':
-                img = img.convert('RGB')
-            
-            # Create thumbnail
-            img.thumbnail(THUMB_SIZE, Image.Resampling.LANCZOS)
-            
-            # Save
-            with _atomic_output(output_path) as tmp:
-                img.save(tmp, 'JPEG', quality=THUMB_QUALITY, optimize=True)
-            
-            return True
-    
+        render_photo_thumbnail(file_path, output_path)
+        return True
     except Exception as e:
         print(f"Error generating photo thumbnail for {file_path}: {e}")
         return False
+
+class NoFfmpeg(OSError):
+    """ffmpeg is not installed: videos get the grey placeholder."""
+
+    def __init__(self):
+        super().__init__(0, "ffmpeg ontbreekt")
+
+
+def have_ffmpeg() -> bool:
+    import shutil
+    return shutil.which('ffmpeg') is not None
+
+
+def render_video_thumbnail(file_path: Path, output_path: Path) -> None:
+    """
+    Make the thumbnail of a video from a frame at 1 s (or the first frame), or
+    raise: NoFfmpeg without ffmpeg, OSError when the video cannot be read or
+    ffmpeg writes no frame. Never puts a placeholder in place.
+    """
+    import subprocess
+    import shutil
+
+    ffmpeg_path = shutil.which('ffmpeg')
+    if not ffmpeg_path:
+        raise NoFfmpeg()
+    with open(file_path, 'rb') as f:  # a clear error for a video that cannot be read
+        f.read(1)
+
+    with _atomic_output(output_path) as tmp:
+        # Extract frame at 1 second (or first frame if shorter)
+        cmd = [
+            ffmpeg_path,
+            '-i', str(file_path),
+            '-ss', '00:00:01',
+            '-vframes', '1',
+            '-vf', f'scale={THUMB_SIZE[0]}:{THUMB_SIZE[1]}:force_original_aspect_ratio=decrease',
+            '-y',  # Overwrite (the temporary file only)
+            str(tmp)
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10
+            )
+        except subprocess.TimeoutExpired:
+            raise OSError(0, "ffmpeg deed er te lang over")
+
+        # Only a frame that ffmpeg really wrote is put in place
+        if result.returncode != 0 or not tmp.exists():
+            raise _NoFrame(0, "ffmpeg kon geen beeld uit de video halen")
+
 
 def generate_video_thumbnail(file_path: Path, output_path: Path) -> bool:
     """
@@ -114,66 +176,58 @@ def generate_video_thumbnail(file_path: Path, output_path: Path) -> bool:
     Returns:
         True if successful, False if ffmpeg not available
     """
-    import subprocess
-    import shutil
-    
-    # Check if ffmpeg is available
-    if not shutil.which('ffmpeg'):
-        return False
-    
     try:
-        # Use absolute path to ffmpeg for reliability
-        ffmpeg_path = shutil.which('ffmpeg') or '/usr/local/bin/ffmpeg'
-        
-        with _atomic_output(output_path) as tmp:
-            # Extract frame at 1 second (or first frame if shorter)
-            cmd = [
-                ffmpeg_path,
-                '-i', str(file_path),
-                '-ss', '00:00:01',
-                '-vframes', '1',
-                '-vf', f'scale={THUMB_SIZE[0]}:{THUMB_SIZE[1]}:force_original_aspect_ratio=decrease',
-                '-y',  # Overwrite (the temporary file only)
-                str(tmp)
-            ]
-            
-            result = subprocess.run(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=10
-            )
-            
-            # Only a frame that ffmpeg really wrote is put in place
-            if result.returncode != 0 or not tmp.exists():
-                raise _NoFrame()
-        
+        render_video_thumbnail(file_path, output_path)
         return output_path.exists()
-    
-    except _NoFrame:
+    except (NoFfmpeg, _NoFrame):
         return False
-    
     except Exception as e:
         print(f"Error generating video thumbnail for {file_path}: {e}")
         return False
+
+@functools.lru_cache(maxsize=2)
+def _placeholder_bytes(is_video: bool) -> bytes:
+    """The grey (photo) or blue-grey (video) placeholder JPEG: always the same bytes."""
+    color = (100, 100, 150) if is_video else (150, 150, 150)
+    buffer = io.BytesIO()
+    Image.new('RGB', THUMB_SIZE, color).save(buffer, 'JPEG', quality=THUMB_QUALITY)
+    return buffer.getvalue()
+
+
+def is_placeholder(thumb_path: Path) -> bool:
+    """
+    True when the cached thumbnail is a placeholder rather than the picture itself
+    (one stat; the bytes are only read when the size matches a placeholder's).
+    """
+    try:
+        size = thumb_path.stat().st_size
+        for is_video in (False, True):
+            data = _placeholder_bytes(is_video)
+            if size == len(data):
+                with open(thumb_path, 'rb') as f:
+                    if f.read() == data:
+                        return True
+    except OSError:
+        return False
+    return False
+
+
+def _readable(file_path: Path) -> bool:
+    try:
+        with open(file_path, 'rb') as f:
+            f.read(1)
+        return True
+    except OSError:
+        return False
+
 
 def create_placeholder_thumbnail(output_path: Path, is_video: bool = False) -> bool:
     """
     Create a placeholder thumbnail.
     """
     try:
-        # Create simple colored placeholder
-        if is_video:
-            color = (100, 100, 150)
-        else:
-            color = (150, 150, 150)
-            
-        img = Image.new('RGB', THUMB_SIZE, color)
-        
         with _atomic_output(output_path) as tmp:
-            img.save(tmp, 'JPEG', quality=THUMB_QUALITY)
-        
+            tmp.write_bytes(_placeholder_bytes(is_video))
         return True
     except Exception as e:
         print(f"Error creating placeholder: {e}")
@@ -210,19 +264,22 @@ def get_or_create_thumbnail(
     if is_audio:
         # Instantly create a placeholder for audio files
         success = create_placeholder_thumbnail(cache_path, is_video=False)
-    elif is_video:
-        success = generate_video_thumbnail(file_path, cache_path)
-
-        # Fallback to placeholder if ffmpeg not available
-        if not success:
-            success = create_placeholder_thumbnail(cache_path, is_video=True)
     else:
-        # Photo thumbnail
-        success = generate_photo_thumbnail(file_path, cache_path)
-        
-        # Fallback to placeholder
+        if is_video:
+            success = generate_video_thumbnail(file_path, cache_path)
+        else:
+            success = generate_photo_thumbnail(file_path, cache_path)
+
+        # Fallback to placeholder. A file that cannot be read right now (disk just
+        # unplugged, no permission) gets a shared one: a placeholder under its own
+        # name would be newer than the photo and stand in for it for good.
         if not success:
-            success = create_placeholder_thumbnail(cache_path, is_video=False)
+            if not _readable(file_path):
+                shared = thumb_cache_dir / ('_placeholder_video.jpg' if is_video else '_placeholder_photo.jpg')
+                if shared.exists() or create_placeholder_thumbnail(shared, is_video=is_video):
+                    return shared
+                return None
+            success = create_placeholder_thumbnail(cache_path, is_video=is_video)
     
     if success and cache_path.exists():
         return cache_path

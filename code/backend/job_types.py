@@ -66,9 +66,30 @@ def _describe(config: Config):
     return describe
 
 
-def _vault_check(config: Config, folder: Path, errors) -> None:
+class _JobErrors(scanner._ErrorLog):
+    """
+    The read errors of one run, and whether the vault was gone when one happened.
+    A file that could not be read because the disk was unplugged (even if it is
+    back by the end of the run) is not a result: the run is done again.
+    """
+
+    def __init__(self, config: Config):
+        super().__init__()
+        self._config = config
+        self.vault_lost = False
+
+    def __call__(self, path, exc) -> None:
+        super().__call__(path, exc)
+        if not self.vault_lost:
+            try:
+                self.vault_lost = not self._config.VAULT_ROOT.is_dir()
+            except OSError:
+                self.vault_lost = True
+
+
+def _vault_check(config: Config, folder: Path, errors: _JobErrors) -> None:
     """Errors while the vault (or the folder) is gone are not a result: wait or fail."""
-    if errors.count and not config.VAULT_ROOT.is_dir():
+    if errors.vault_lost or (errors.count and not config.VAULT_ROOT.is_dir()):
         raise VaultUnavailable()
     if errors.count and not folder.is_dir():
         raise scanner.ScanAborted(str(folder))
@@ -97,16 +118,17 @@ def dup_scan_type(config: Config, db, on_done=None) -> JobType:
                 raise VaultUnavailable()
             raise scanner.ScanAborted(str(folder))
         ctx.save_checkpoint({"runs": ctx.checkpoint.get("runs", 0) + 1})
+        errors = _JobErrors(config)
         try:
             result = scanner.find_duplicates_in_folder(
                 folder, config, db, rule=ctx.params["rule"],
-                prefer_folder=ctx.params.get("prefer_folder"), reporter=ctx,
+                prefer_folder=ctx.params.get("prefer_folder"), reporter=ctx, errors=errors,
             )
         except scanner.ScanAborted:
             if not config.VAULT_ROOT.is_dir():
                 raise VaultUnavailable()
             raise ScanFolderGone()
-        if result["errors"] and not config.VAULT_ROOT.is_dir():
+        if errors.vault_lost or (result["errors"] and not config.VAULT_ROOT.is_dir()):
             raise VaultUnavailable()  # what it missed is the unplugged disk: never 'done'
         ctx.progress(message=_scan_message(result))
         return {"folder": str(folder), "total_scanned": result["total_files"],
@@ -181,21 +203,31 @@ def hashing_type(config: Config, db) -> JobType:
         folder = Path(ctx.params["folder"])
         if not folder.is_dir():
             raise VaultUnavailable() if not config.VAULT_ROOT.is_dir() else ScanFolderGone()
-        errors = scanner._ErrorLog()
-        ctx.progress(0, None, "Bestanden zoeken...")
-        fingerprints, _, _ = scanner.collect_media_files(folder, config, ctx, errors)
-        _vault_check(config, folder, errors)
-        paths = sorted(fingerprints)
-        _, newly = scanner.hash_files(paths, fingerprints, folder, db, ctx, errors, label="Indexeren")
-        _vault_check(config, folder, errors)
-        ctx.save_checkpoint({"files": len(paths), "hashed": newly})
-        ctx.progress(message=f"Klaar: {len(paths)} bestanden, {newly} nieuw berekend"
+        # Hashes an earlier run of this job stored (paused, interrupted, vault unplugged)
+        # count in its total: they are 'from the cache' for this run
+        before = ctx.checkpoint.get("hashed_before", 0)
+        stats: Dict[str, int] = {}
+        errors = _JobErrors(config)
+        try:
+            ctx.progress(0, None, "Bestanden zoeken...")
+            fingerprints, _, _ = scanner.collect_media_files(folder, config, ctx, errors)
+            _vault_check(config, folder, errors)
+            paths = sorted(fingerprints)
+            _, newly = scanner.hash_files(paths, fingerprints, folder, db, ctx, errors,
+                                          label="Indexeren", stats=stats)
+            _vault_check(config, folder, errors)
+        except BaseException:
+            ctx.save_checkpoint({**ctx.checkpoint, "hashed_before": before + stats.get("stored", 0)})
+            raise
+        hashed = before + newly
+        ctx.save_checkpoint({"files": len(paths), "hashed": hashed})
+        ctx.progress(message=f"Klaar: {len(paths)} bestanden, {hashed} nieuw berekend"
                              + (f", {errors.count} leesfout(en)" if errors.count else ""))
         return {
             "folder": str(folder),
             "files": len(paths),
-            "hashed": newly,
-            "from_cache": len(paths) - newly - errors.count,
+            "hashed": hashed,
+            "from_cache": max(0, len(paths) - hashed - errors.count),
             "errors": errors.count,
             "error_samples": errors.samples,
             "complete": errors.count == 0,
@@ -230,21 +262,32 @@ def thumbnails_type(config: Config) -> JobType:
     Resume needs no list of what was done: a thumbnail that is already there and
     newer than its photo is skipped with two stats, so a resumed (or repeated) run
     only makes what is still missing, including for files added in the meantime.
+
+    A photo or video that cannot be read or decoded is an error, never 'made': the
+    job does not put a placeholder in its place (one would be newer than the photo
+    and stand in for it for good). Placeholders a request or an older version left
+    for a photo are made again. If the vault goes away during a run, nothing new is
+    started and the run is done again once the disk is back.
     """
-    from backend.thumbnail import get_or_create_thumbnail, get_thumbnail_cache_path, is_thumbnail_valid
+    from backend.thumbnail import (get_thumbnail_cache_path, have_ffmpeg, is_placeholder,
+                                   is_thumbnail_valid, render_photo_thumbnail, render_video_thumbnail)
 
     def prepare(params: Dict[str, Any]) -> Dict[str, Any]:
         folder = _folder(params, config, default_root=True)
         return {"folder": str(folder)}
 
-    def make(path: str) -> str:
+    def make(path: str, ffmpeg: bool) -> str:
         file_path = Path(path)
+        video = is_video(file_path)
         cache_path = get_thumbnail_cache_path(file_path, config.THUMB_CACHE_PATH)
-        if is_thumbnail_valid(cache_path, file_path):
+        if is_thumbnail_valid(cache_path, file_path) and (video and not ffmpeg or not is_placeholder(cache_path)):
             return "cached"
-        thumb = get_or_create_thumbnail(file_path, config.THUMB_CACHE_PATH, is_video=is_video(file_path))
-        if thumb is None:
-            raise OSError(0, "miniatuur kon niet gemaakt worden")
+        if video and not ffmpeg:
+            return "no_ffmpeg"  # the viewer shows the video placeholder
+        if video:
+            render_video_thumbnail(file_path, cache_path)
+        else:
+            render_photo_thumbnail(file_path, cache_path)
         return "made"
 
     def run(ctx: JobContext) -> Dict[str, Any]:
@@ -252,34 +295,51 @@ def thumbnails_type(config: Config) -> JobType:
         if not folder.is_dir():
             raise VaultUnavailable() if not config.VAULT_ROOT.is_dir() else ScanFolderGone()
         config.ensure_cache_dirs()
-        errors = scanner._ErrorLog()
-        ctx.progress(0, None, "Bestanden zoeken...")
-        paths = _thumb_targets(folder, config, ctx, errors)
-        total = len(paths)
-        counts = {"made": 0, "cached": 0}
-        processed = 0
-        last = 0.0
-        ctx.progress(0, total, f"Miniaturen... 0/{total}")
-        for path, outcome, error in bounded_map(make, paths, workers=THUMB_WORKERS, stop=lambda: ctx.stopping):
-            processed += 1
-            if error is not None:
-                errors(path, error)
-            else:
-                counts[outcome] += 1
-            now = time.monotonic()
-            if now - last >= scanner.PROGRESS_SECONDS or processed == total:
-                last = now
-                ctx.progress(processed, total, f"Miniaturen... {processed}/{total} ({counts['made']} nieuw)")
-        ctx.check()
-        _vault_check(config, folder, errors)
-        ctx.save_checkpoint({"files": total, **counts})
-        ctx.progress(message=f"Klaar: {counts['made']} nieuw, {counts['cached']} waren er al"
+        ffmpeg = have_ffmpeg()
+        # Thumbnails an earlier run of this job made (paused, interrupted, vault
+        # unplugged) count as made: this run finds them 'already there'
+        before = ctx.checkpoint.get("made_before", 0)
+        errors = _JobErrors(config)
+        counts = {"made": 0, "cached": 0, "no_ffmpeg": 0}
+        try:
+            ctx.progress(0, None, "Bestanden zoeken...")
+            paths = _thumb_targets(folder, config, ctx, errors)
+            _vault_check(config, folder, errors)
+            total = len(paths)
+            processed = 0
+            last = 0.0
+            ctx.progress(0, total, f"Miniaturen... 0/{total}")
+            stop = lambda: ctx.stopping or errors.vault_lost  # noqa: E731
+            for path, outcome, error in bounded_map(lambda p: make(p, ffmpeg), paths,
+                                                    workers=THUMB_WORKERS, stop=stop):
+                processed += 1
+                if error is not None:
+                    errors(path, error)
+                else:
+                    counts[outcome] += 1
+                now = time.monotonic()
+                if now - last >= scanner.PROGRESS_SECONDS or processed == total:
+                    last = now
+                    ctx.progress(processed, total,
+                                 f"Miniaturen... {processed}/{total} ({before + counts['made']} nieuw)")
+            ctx.check()
+            _vault_check(config, folder, errors)
+        except BaseException:
+            ctx.save_checkpoint({**ctx.checkpoint, "made_before": before + counts["made"]})
+            raise
+        made = before + counts["made"]
+        cached = max(0, counts["cached"] - before)
+        ctx.save_checkpoint({"files": total, "made": made, "cached": cached})
+        ctx.progress(message=f"Klaar: {made} nieuw, {cached} waren er al"
+                             + (f", {counts['no_ffmpeg']} video('s) zonder miniatuur (ffmpeg ontbreekt)"
+                                if counts["no_ffmpeg"] else "")
                              + (f", {errors.count} mislukt" if errors.count else ""))
         return {
             "folder": str(folder),
             "files": total,
-            "made": counts["made"],
-            "cached": counts["cached"],
+            "made": made,
+            "cached": cached,
+            "no_ffmpeg": counts["no_ffmpeg"],
             "errors": errors.count,
             "error_samples": errors.samples,
             "complete": errors.count == 0,

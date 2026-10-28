@@ -3,6 +3,7 @@ import os
 import sqlite3
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -353,6 +354,131 @@ def test_thumbnail_job_for_the_whole_vault_by_default(client, vault):
     assert job["status"] == "done" and job["params"] == {"folder": str(vault.resolve())}
     assert job["target"] == "hele archief" and job["message"].startswith("Klaar: ")
     assert job["summary"]["files"] > 10
+
+
+def _photos(folder, n):
+    folder.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        Image.new("RGB", (64, 48), (i * 9 % 255, 90, 200 - i * 5 % 200)).save(folder / f"foto_{i:02d}.jpg")
+    return sorted(folder.iterdir())
+
+
+def _placeholders(paths, thumb_dir):
+    from backend import thumbnail
+    return [p for p in paths
+            if thumbnail.is_placeholder(thumbnail.get_thumbnail_cache_path(p, thumb_dir))]
+
+
+def test_an_unreadable_photo_is_an_error_and_never_gets_a_placeholder(client, vault, config):
+    from backend import thumbnail
+    folder = vault / "Kapot"
+    good = _photos(folder, 3)
+    (folder / "ruis.jpg").write_bytes(os.urandom(3000))
+    locked = folder / "op_slot.jpg"
+    Image.new("RGB", (30, 30), (1, 2, 3)).save(locked)
+    os.chmod(locked, 0)
+    # A placeholder an earlier run (or a request during an outage) left for a real photo
+    stale = thumbnail.get_thumbnail_cache_path(good[0], config.THUMB_CACHE_PATH)
+    config.ensure_cache_dirs()
+    assert thumbnail.create_placeholder_thumbnail(stale)
+    try:
+        job = _wait(client, _start(client, "thumbnails", folder=str(folder))["id"])
+    finally:
+        os.chmod(locked, 0o644)
+    assert job["status"] == "done" and job["summary"] == {
+        "folder": str(folder), "files": 5, "made": 3, "errors": 2, "complete": False}
+    assert "2 mislukt" in job["message"]
+    result = client.get(f"/api/jobs/{job['id']}/result").json()["result"]
+    assert sorted(Path(e["path"]).name for e in result["error_samples"]) == ["op_slot.jpg", "ruis.jpg"]
+    assert _placeholders(good, config.THUMB_CACHE_PATH) == []
+    for bad in (folder / "ruis.jpg", locked):
+        assert not thumbnail.get_thumbnail_cache_path(bad, config.THUMB_CACHE_PATH).exists()
+
+
+def test_the_viewer_never_caches_a_placeholder_for_a_photo_it_cannot_read(client, vault, config):
+    from backend import thumbnail
+    photo = _photos(vault / "Kijker", 1)[0]
+    os.chmod(photo, 0)
+    try:
+        r = client.get("/api/thumb", params={"path": str(photo)})
+    finally:
+        os.chmod(photo, 0o644)
+    assert r.status_code == 200 and r.content == thumbnail._placeholder_bytes(False)
+    assert not thumbnail.get_thumbnail_cache_path(photo, config.THUMB_CACHE_PATH).exists()
+    r = client.get("/api/thumb", params={"path": str(photo)})
+    assert r.status_code == 200 and r.content != thumbnail._placeholder_bytes(False)
+
+
+def test_thumbnail_job_with_the_cache_outside_the_vault_waits_out_an_unplug(tmp_path, vault, monkeypatch):
+    """R23-1: an unplugged vault mid-job never ends 'done' with placeholders for real photos."""
+    import json
+    from fastapi.testclient import TestClient
+    from backend import thumbnail
+    from backend.main import create_app
+    from fixtures.vault_builder import write_config
+    config_path = write_config(vault, tmp_path / "buiten.json")
+    data = json.loads(config_path.read_text())
+    data["cache_folder"] = str(tmp_path / "cache_buiten")  # README: /Volumes/T7/.datavault_cache
+    config_path.write_text(json.dumps(data))
+    photos = _photos(vault / "Los", 24)
+
+    calls = []
+    unplug_now = threading.Event()
+    go_on = threading.Event()
+    real = thumbnail.render_photo_thumbnail
+
+    def gated(file_path, output_path):
+        calls.append(file_path)
+        if len(calls) == 8:
+            unplug_now.set()
+            go_on.wait(20)
+        return real(file_path, output_path)
+
+    monkeypatch.setattr(thumbnail, "render_photo_thumbnail", gated)
+    app = create_app(str(config_path))
+    with TestClient(app) as c:
+        c.headers["X-DataVault-Token"] = c.get("/api/session").json()["token"]
+        app.state.jobs.vault_poll_interval = 0.05
+        config = app.state.config
+        job = _start(c, "thumbnails", folder=str(vault / "Los"))
+        assert unplug_now.wait(20)
+        root = config.VAULT_ROOT
+        away = root.with_name("vault_weg")
+        os.rename(root, away)
+        try:
+            go_on.set()
+            job = _wait(c, job["id"], until=("waiting_for_vault", "done", "failed"))
+            assert job["status"] == "waiting_for_vault", job
+        finally:
+            os.rename(away, root)
+        job = _wait(c, job["id"])
+        assert job["status"] == "done", job
+        # Counted over both runs: what the first run made is not 'already there'
+        assert job["summary"] == {"folder": str(root / "Los"), "files": 24, "made": 24,
+                                  "errors": 0, "complete": True}
+        assert job["message"] == "Klaar: 24 nieuw, 0 waren er al"
+        assert _placeholders(photos, config.THUMB_CACHE_PATH) == []
+        assert all(thumbnail.get_thumbnail_cache_path(p, config.THUMB_CACHE_PATH).exists() for p in photos)
+
+
+def test_a_resumed_hashing_job_counts_what_its_first_run_hashed(client, vault, config, monkeypatch):
+    gate = Gate(monkeypatch)
+    folder = vault / "Tellen"
+    folder.mkdir()
+    for i in range(40):
+        (folder / f"f{i:02d}.jpg").write_bytes(bytes([i]) * 2000)
+    job = _start(client, "hashing", folder=str(folder))
+    gate.wait_calls(4)
+    client.post(f"/api/jobs/{job['id']}/pause")
+    gate.open.set()
+    job = _wait(client, job["id"])
+    assert job["status"] == "paused"
+    first = _hash_rows(config, folder)
+    assert 0 < first < 40
+    client.post(f"/api/jobs/{job['id']}/resume")
+    job = _wait(client, job["id"])
+    assert job["status"] == "done" and job["summary"]["hashed"] == 40
+    assert client.get(f"/api/jobs/{job['id']}/result").json()["result"]["from_cache"] == 0
 
 
 def test_a_failed_thumbnail_write_leaves_no_partial_file(tmp_path, monkeypatch):

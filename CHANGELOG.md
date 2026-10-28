@@ -355,3 +355,16 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   (bij de start van fase 2: 73,6 s en 13,8 s). De statuscontrole van de server antwoordt tijdens
   de scan binnen 0,03 s (voorheen stond de server de hele scan stil), en de server gebruikt
   tijdens de scan hooguit zo'n 175 tot 225 MB geheugen (voorheen bijna 1 GB).
+- Miniaturen maken: een foto of video die niet gelezen of ontcijferd kan worden (kapot, geen
+  toegang, of de schijf was even weg) telt nu als "mislukt" in plaats van als "nieuw". De taak
+  zet er geen grijs vak meer voor in de plaats: zo'n vak was nieuwer dan de foto en bleef
+  daardoor voorgoed staan. Grijze vakken die eerder voor een gewone foto zijn achtergebleven,
+  maakt de taak opnieuw. Ook de viewer bewaart geen grijs vak meer voor een foto die hij even
+  niet kan lezen.
+- Wordt de schijf losgekoppeld terwijl miniaturen gemaakt of controlegetallen berekend worden,
+  dan doet de taak die ronde over zodra de schijf terug is, ook als de schijf al terug was
+  voordat de ronde klaar was. Bij een losse cache-map (buiten het archief) eindigde de taak
+  voorheen als "klaar" met honderden grijze miniaturen.
+- Na pauzeren, onderbreken of wachten op de schijf telt de eindmelding van Miniaturen maken en
+  Vooraf indexeren ook mee wat eerdere rondes van dezelfde taak al gedaan hadden (voorheen
+  stond er bijvoorbeeld "0 nieuw, 3000 waren er al").
