@@ -3,8 +3,11 @@ DataVault Dashboard - Thumbnail Generator
 Generate and cache thumbnails for photos and videos
 """
 import hashlib
+import os
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 from PIL import Image, ImageOps
 try:
     from pillow_heif import register_heif_opener
@@ -27,6 +30,30 @@ def get_thumbnail_cache_path(file_path: Path, thumb_cache_dir: Path) -> Path:
     # ALL thumbnails are JPEG
     cache_filename = f"{path_hash}.jpg"
     return thumb_cache_dir / cache_filename
+
+@contextmanager
+def _atomic_output(output_path: Path) -> Iterator[Path]:
+    """
+    Write a thumbnail under a temporary name in the same (cache) folder and rename it
+    into place only when complete. A request and the thumbnail job that make the same
+    thumbnail at once, or a server stopped halfway, never leave a half-written JPEG.
+    Only ever touches the app's own thumbnail cache.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = output_path.with_name(f".{output_path.stem}.{os.getpid()}.{threading.get_ident()}.tmp.jpg")
+    try:
+        yield tmp
+        os.replace(tmp, output_path)
+    finally:
+        try:
+            os.unlink(tmp)  # only left over when writing failed
+        except FileNotFoundError:
+            pass
+
+
+class _NoFrame(Exception):
+    """ffmpeg wrote no frame: nothing is put in place."""
+
 
 def is_thumbnail_valid(thumb_path: Path, original_path: Path) -> bool:
     """
@@ -71,8 +98,8 @@ def generate_photo_thumbnail(file_path: Path, output_path: Path) -> bool:
             img.thumbnail(THUMB_SIZE, Image.Resampling.LANCZOS)
             
             # Save
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            img.save(output_path, 'JPEG', quality=THUMB_QUALITY, optimize=True)
+            with _atomic_output(output_path) as tmp:
+                img.save(tmp, 'JPEG', quality=THUMB_QUALITY, optimize=True)
             
             return True
     
@@ -95,34 +122,37 @@ def generate_video_thumbnail(file_path: Path, output_path: Path) -> bool:
         return False
     
     try:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
         # Use absolute path to ffmpeg for reliability
         ffmpeg_path = shutil.which('ffmpeg') or '/usr/local/bin/ffmpeg'
         
-        # Extract frame at 1 second (or first frame if shorter)
-        cmd = [
-            ffmpeg_path,
-            '-i', str(file_path),
-            '-ss', '00:00:01',
-            '-vframes', '1',
-            '-vf', f'scale={THUMB_SIZE[0]}:{THUMB_SIZE[1]}:force_original_aspect_ratio=decrease',
-            '-y',  # Overwrite
-            str(output_path)
-        ]
+        with _atomic_output(output_path) as tmp:
+            # Extract frame at 1 second (or first frame if shorter)
+            cmd = [
+                ffmpeg_path,
+                '-i', str(file_path),
+                '-ss', '00:00:01',
+                '-vframes', '1',
+                '-vf', f'scale={THUMB_SIZE[0]}:{THUMB_SIZE[1]}:force_original_aspect_ratio=decrease',
+                '-y',  # Overwrite (the temporary file only)
+                str(tmp)
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10
+            )
+            
+            # Only a frame that ffmpeg really wrote is put in place
+            if result.returncode != 0 or not tmp.exists():
+                raise _NoFrame()
         
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=10
-        )
-
-        if result.returncode != 0:
-            pass
-        
-        # Return True if ffmpeg succeeded and output file exists
-        return result.returncode == 0 and output_path.exists()
+        return output_path.exists()
+    
+    except _NoFrame:
+        return False
     
     except Exception as e:
         print(f"Error generating video thumbnail for {file_path}: {e}")
@@ -141,8 +171,8 @@ def create_placeholder_thumbnail(output_path: Path, is_video: bool = False) -> b
             
         img = Image.new('RGB', THUMB_SIZE, color)
         
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        img.save(output_path, 'JPEG', quality=THUMB_QUALITY)
+        with _atomic_output(output_path) as tmp:
+            img.save(tmp, 'JPEG', quality=THUMB_QUALITY)
         
         return True
     except Exception as e:

@@ -309,3 +309,6 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Wordt de schijf losgekoppeld en weer aangesloten, dan opent de app vanzelf een nieuwe
   verbinding met de database op die schijf, in plaats van een verbinding met de oude te
   blijven gebruiken.
+- Miniaturen worden eerst onder een tijdelijke naam weggeschreven en pas als ze compleet zijn
+  op hun plek gezet. Een server die halverwege stopt, of twee verzoeken die tegelijk dezelfde
+  miniatuur maken, laten zo nooit meer een half geschreven (grijze of kapotte) miniatuur achter.
