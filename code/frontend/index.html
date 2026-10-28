@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=39">
+    <link rel="stylesheet" href="style.css?v=40">
 </head>
 
 <body>
@@ -118,7 +118,10 @@
                                 <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
                                 <div class="chat-title">
                                     <h3>Pasha (DataVault AI)</h3>
-                                    <span class="chat-status">Online (Phi3.5:latest)</span>
+                                    <div class="chat-status-row">
+                                        <span class="chat-status" data-chat-status data-state="pending">Verbinden…</span>
+                                        <select class="chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
+                                    </div>
                                 </div>
                                 <button class="chat-fullscreen-toggle" onclick="openChatFullscreen()" title="Volledig scherm">
                                     <i class="fas fa-expand"></i>
@@ -1023,7 +1026,10 @@
                     <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
                     <div class="chat-title">
                         <h3>Pasha (DataVault AI)</h3>
-                        <span class="chat-status">Online (Phi3.5:latest)</span>
+                        <div class="chat-status-row">
+                                        <span class="chat-status" data-chat-status data-state="pending">Verbinden…</span>
+                                        <select class="chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
+                                    </div>
                     </div>
                     <button class="chat-fullscreen-toggle" onclick="closeChatFullscreen()" title="Sluiten">
                         <i class="fas fa-compress"></i>
@@ -1045,7 +1051,7 @@
     <script src="api.js?v=2"></script>
     <script src="dom.js?v=1"></script>
     <script src="folder-tree.js?v=3"></script>
-    <script src="app.js?v=45"></script>
+    <script src="app.js?v=46"></script>
     <script src="jobs.js?v=2"></script>
     <script src="duplicates.js?v=20"></script>
     <script src="keurer.js?v=12"></script>

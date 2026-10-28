@@ -279,6 +279,20 @@ def _m009_media_dates(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_dates_taken ON media_dates(taken)")
 
 
+def _m010_app_settings(conn: sqlite3.Connection):
+    """
+    Small app-wide settings chosen in the UI (for now the chat model), as JSON values
+    by key. Only a new table: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -290,6 +304,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (7, "delete_runs_sequence", _m007_delete_runs_sequence),
     (8, "background_jobs", _m008_background_jobs),
     (9, "media_dates", _m009_media_dates),
+    (10, "app_settings", _m010_app_settings),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

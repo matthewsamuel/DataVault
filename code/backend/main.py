@@ -131,7 +131,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         spotify.init_router(config)
         shows.init_router(config, db)
         stats.init_router(config, db)
-        chat.init_router(config)
+        chat.init_router(config, db)
         keurer.init_router(config, db)
         timeline.init_router(config, db)
 

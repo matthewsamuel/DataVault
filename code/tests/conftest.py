@@ -21,6 +21,21 @@ sys.path.insert(0, str(CODE_DIR / "tests"))
 from fixtures.vault_builder import build_test_vault, write_config  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def fake_ollama(monkeypatch):
+    """No test talks to a real Ollama: the chat's HTTP clients go to a FakeOllama."""
+    import httpx
+    from backend.routes import chat
+    from helpers import FakeOllama
+    fake = FakeOllama()
+    transport = httpx.MockTransport(fake.handler)
+    monkeypatch.setattr(chat, "_http_client", lambda **kw: httpx.Client(transport=transport, **kw))
+    monkeypatch.setattr(chat, "_async_http_client", lambda **kw: httpx.AsyncClient(transport=transport, **kw))
+    chat.forget_ollama_status()
+    yield fake
+    chat.forget_ollama_status()
+
+
 @pytest.fixture(scope="session")
 def pristine_vault(tmp_path_factory) -> Path:
     """Built once per session; never modified (tests get copies)."""

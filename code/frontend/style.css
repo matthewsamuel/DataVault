@@ -3989,6 +3989,53 @@ input:checked+.slider:before {
     color: var(--text-secondary);
 }
 
+.chat-title {
+    min-width: 0;
+    margin-right: auto;
+}
+
+.chat-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.chat-status::before {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 5px;
+    background: var(--text-tertiary);
+    vertical-align: 1px;
+}
+
+.chat-status[data-state="ok"]::before { background: var(--success); }
+.chat-status[data-state="warning"]::before { background: var(--warning); }
+.chat-status[data-state="error"]::before { background: var(--danger); }
+
+.chat-model-select {
+    max-width: 180px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    padding: 2px 6px;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+
+.chat-error-text {
+    color: var(--danger);
+    white-space: pre-wrap;
+}
+
+.chat-model-select:disabled {
+    opacity: 0.6;
+}
+
 /* Houder waar de ene berichtenlijst in hangt (gewone of schermvullende chat) */
 .chat-messages-slot {
     display: contents;

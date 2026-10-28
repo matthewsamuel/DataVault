@@ -349,6 +349,9 @@ if (distance > 50) {
 
 **Solution:**
 - **Local Ollama Integration:** Privacy-first; no cloud data transmission
+- **Model choice:** a dropdown in the chat header lists the models Ollama has installed (`GET /api/chat/models`, from Ollama's `/api/tags`); the choice is stored server-side in `app_settings` (migration 10, `POST /api/chat/model`). The default is `qwen2.5:3b` (~1.9 GB, fast on a Mac); install another light model with e.g. `ollama pull llama3.2:3b`
+- **Clear failures:** Ollama not running, the model not installed, no answer in time (connect 3 s, read 120 s), an error or a disconnect halfway: the stream always ends with `done` or an `error` event with a code (`ollama_down`, `model_missing`, `timeout`, `ollama_error`, `incomplete`) and a Dutch message, shown in the chat bubble; the status next to the dropdown says Online / Model ontbreekt / Ollama offline
+- **Duplicates from the chat:** `scan_duplicates` only offers a button ("Scan starten") for the chosen folder; the scan runs as a background job after the click
 - **Dynamic Context Injection:**
   ```
   Current date/time
@@ -686,7 +689,7 @@ a fresh connection.
 - SQLite3 (included with Python)
 - Modern web browser
 - ffmpeg (for video thumbnails)
-- Ollama (optional, for chat feature)
+- Ollama (optional, for chat feature; `ollama pull qwen2.5:3b` for the default model)
 
 ### Installation
 

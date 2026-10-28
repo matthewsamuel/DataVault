@@ -303,6 +303,27 @@ class Database:
             conn.executemany("DELETE FROM media_dates WHERE path = ?", gone)
         return len(gone)
 
+    # App settings (migration 10): small JSON values chosen in the UI
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        import json
+        with self._connect() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        if row is None:
+            return default
+        try:
+            return json.loads(row[0])
+        except ValueError:
+            return default
+
+    def set_setting(self, key: str, value: Any) -> None:
+        import json
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
+                (key, json.dumps(value, ensure_ascii=False), time.time()),
+            )
+
     # Delete run tracking methods
     #
     # One run is one user action in the duplicates view (one click on 'opruimen'),

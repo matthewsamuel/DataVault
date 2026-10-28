@@ -1779,6 +1779,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadFolders();
     switchMainView('home');
     fetchHomeWidgets();
+    loadChatModels();
 
     // Start background prefetch na 1.5s zodat de initiële pagina eerst volledig laadt
     scheduleBackgroundPrefetch();
@@ -2889,7 +2890,61 @@ function renderSimpleChart(id, data, labels) {
 
 // ==================== DA VAI OLLAMA CHATBOT ====================
 
-const CHAT_MODEL = 'phi3.5:latest';
+// Het taalmodel kies je in de chat (keuzelijst bovenin); de server bewaart de keuze en
+// gebruikt standaard een licht model. Hier alleen de weergave van de keuze en de status.
+let chatModelState = { current: null, models: [], reachable: false, error: null };
+
+function setChatStatus(text, state, title) {
+    document.querySelectorAll('[data-chat-status]').forEach(el => {
+        el.textContent = text;
+        el.dataset.state = state;
+        el.title = title || '';
+    });
+}
+
+function renderChatModelSelects() {
+    const { current, models, reachable, error } = chatModelState;
+    const names = (models || []).map(m => m.name);
+    const installed = names.includes(current);
+    document.querySelectorAll('[data-chat-model]').forEach(select => {
+        const options = (models || []).map(m => createEl('option', {
+            value: m.name,
+            text: m.parameter_size ? `${m.name} (${m.parameter_size})` : m.name,
+        }));
+        if (current && !installed) options.unshift(createEl('option', { value: current, text: `${current} (niet geïnstalleerd)` }));
+        select.replaceChildren(...options);
+        if (current) select.value = current;
+        select.disabled = !reachable || names.length === 0;
+    });
+    if (!reachable) setChatStatus('Ollama offline', 'error', error || 'Start de Ollama-app');
+    else if (!installed) setChatStatus('Model ontbreekt', 'warning', `Kies een ander model, of installeer het met: ollama pull ${current}`);
+    else setChatStatus('Online', 'ok', `Taalmodel: ${current}`);
+}
+
+async function loadChatModels() {
+    try {
+        chatModelState = await fetchJSON(`${API_BASE}/api/chat/models`);
+        renderChatModelSelects();
+    } catch (e) {
+        setChatStatus('Niet bereikbaar', 'error', e.message);
+    }
+}
+
+async function chooseChatModel(model) {
+    if (!model || model === chatModelState.current) return;
+    try {
+        const data = await fetchJSON(`${API_BASE}/api/chat/model`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model }),
+        });
+        chatModelState.current = data.current;
+        showToast('Pasha', `Gebruikt nu het model ${data.current}`, 'success');
+    } catch (e) {
+        showToast('Model niet gekozen', e.message, 'error');
+    }
+    renderChatModelSelects();
+}
 
 // Open een enkel bestand uit het archief in de modal viewer. Het pad (van het taalmodel of
 // uit een zoekresultaat) wordt nooit zelf getoond: de server moet het bestand in de lijst
@@ -3024,8 +3079,7 @@ function chatShowPhotos(url, size, titleOf, emptyText, limit) {
     chatMessages.appendChild(loading);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
-    fetch(url)
-        .then(res => res.json())
+    fetchJSON(url)
         .then(data => {
             loading.remove();
             const photos = (data.photos || []).slice(0, limit);
@@ -3035,9 +3089,36 @@ function chatShowPhotos(url, size, titleOf, emptyText, limit) {
             chatMessages.scrollTop = chatMessages.scrollHeight;
         })
         .catch(err => {
+            // Nooit stil verdwijnen: de melding komt in de chat
             loading.remove();
-            console.error('Error fetching photos:', err);
+            chatMessages.appendChild(chatBubble(createEl('span', { class: 'chat-error-text', text: `Foto's ophalen mislukt: ${err.message}` })));
+            chatMessages.scrollTop = chatMessages.scrollHeight;
         });
+}
+
+// Een scan leest en hasht een hele map: het taalmodel mag hem voorstellen, maar alleen een
+// klik van de gebruiker start hem (als achtergrondtaak, zie jobs.js)
+function chatOfferDuplicateScan() {
+    const chatMessages = document.getElementById('chat-messages');
+    const folder = (typeof selectedFolder === 'string' && selectedFolder) || currentFolder || null;
+    if (!folder) {
+        chatMessages.appendChild(chatBubble('Kies eerst een map in het tabblad Duplicaten; dan kan ik hem scannen.'));
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        return;
+    }
+    const name = folder.slice(folder.lastIndexOf('/') + 1) || folder;
+    const start = createEl('button', { class: 'btn btn-primary', style: 'margin-top: 8px;', text: 'Scan starten' });
+    start.addEventListener('click', () => {
+        start.disabled = true;
+        const fullscreenChat = document.getElementById('chat-fullscreen-modal');
+        if (fullscreenChat && fullscreenChat.classList.contains('active')) closeChatFullscreen();
+        switchMainView('duplicates');
+        setSelectedFolder(folder);
+        scanSelectedFolder();
+    }, { once: true });
+    chatMessages.appendChild(chatBubble(createEl('div', {},
+        createEl('div', { text: `Duplicaten zoeken in "${name}"?` }), start)));
+    chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
 function executeAIAction(actionData) {
@@ -3049,12 +3130,7 @@ function executeAIAction(actionData) {
             break;
 
         case 'scan_duplicates':
-            switchMainView('duplicates');
-            {
-                const scanBtn = document.getElementById('btn-scan-folder');
-                if (scanBtn && !scanBtn.disabled) scanBtn.click();
-                else showToast('Duplicaten', 'Kies eerst een map om te scannen', 'info');
-            }
+            chatOfferDuplicateScan();
             break;
 
         case 'open_folder': {
@@ -3154,8 +3230,17 @@ async function sendChat({ inputEl, btn }) {
         bubble.classList.add('message-text');
         bubble.textContent = text;
     };
+    let failed = false;
+    let finished = false;
     const showError = (text) => {
-        bubble.replaceChildren(createEl('span', { style: 'color: var(--danger)', text }));
+        failed = true;
+        // Wat er al binnen was blijft staan, met de melding eronder
+        const parts = fullText ? [createEl('div', { class: 'message-text', text: fullText.replace(/<<ACTION[\s\S]*$/, '').trimEnd() })] : [];
+        bubble.classList.remove('message-text');
+        bubble.replaceChildren(...parts, createEl('div', { class: 'chat-error-text', text }));
+        // Geen antwoord: de vraag telt niet mee in de geschiedenis (anders twee vragen achter elkaar)
+        const last = window.chatHistory[window.chatHistory.length - 1];
+        if (last && last.role === 'user' && last.content === message) window.chatHistory.pop();
     };
 
     let fullText = '';
@@ -3164,10 +3249,14 @@ async function sendChat({ inputEl, btn }) {
         const response = await fetch(`${API_BASE}/api/chat/stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: window.chatHistory, model: CHAT_MODEL })
+            body: JSON.stringify({ messages: window.chatHistory })
         });
 
-        if (!response.ok) throw new Error(`Server returned ${response.status}`);
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            showError(apiErrorMessage(err, `Serverfout (${response.status})`));
+            return;
+        }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -3188,6 +3277,8 @@ async function sendChat({ inputEl, btn }) {
 
                 if (event.error) {
                     showError(String(event.error));
+                    // Ollama weg of model ontbreekt: de status bovenin bijwerken
+                    if (event.code === 'ollama_down' || event.code === 'model_missing') loadChatModels();
                     return;
                 }
 
@@ -3199,6 +3290,7 @@ async function sendChat({ inputEl, btn }) {
                 }
 
                 if (event.done) {
+                    finished = true;
                     const reply = parseChatReply(fullText);
                     fullText = reply.text;
                     showText(fullText);
@@ -3208,9 +3300,11 @@ async function sendChat({ inputEl, btn }) {
             }
         }
 
+        // De verbinding sloot zonder 'done' (server herstart, netwerk weg): nooit eindeloos laden
+        if (!finished && !failed) showError('Het antwoord stopte halverwege. Probeer het opnieuw.');
     } catch (e) {
         console.error('Chat error:', e);
-        showError('Fout: Kan Ollama niet bereiken. Draait de server en Ollama?');
+        showError('De DataVault-server is niet bereikbaar. Draait de server nog?');
     } finally {
         inputEl.disabled = false;
         if (btn) btn.disabled = false;

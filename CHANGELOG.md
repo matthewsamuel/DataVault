@@ -534,3 +534,18 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Een jaar met weinig muziek toont geen artiesten met 0 keer afgespeeld meer, en een ongeldig
   jaar geeft een foutmelding in plaats van stil alle jaren.
 - De chat kent nu je totale luistertijd (die kwam door een fout nooit in de context).
+
+### Chat: modelkeuze en duidelijke meldingen
+- Je kiest het taalmodel van Pasha nu zelf in een keuzelijst bovenin de chat. De lijst toont de
+  modellen die in Ollama geïnstalleerd zijn, en je keuze wordt bewaard. Standaard gebruikt Pasha
+  `qwen2.5:3b`: een licht model (1,9 GB) dat snel antwoordt. Het oude, vaste `phi3.5` was op deze
+  Mac niet eens geïnstalleerd.
+- Naast de keuzelijst staat of de chat werkt: Online, Model ontbreekt of Ollama offline.
+- Gaat er iets mis, dan staat er een duidelijke melding in de chat in plaats van eindeloos
+  ladende puntjes: Ollama draait niet, het model is niet geïnstalleerd (met het commando om het
+  te installeren), Ollama antwoordt niet op tijd, of het antwoord stopte halverwege. Een vraag
+  zonder antwoord telt niet meer mee in het gesprek.
+- "Duplicaten scannen" vanuit de chat start niet meer zomaar een scan: Pasha toont een knop
+  "Scan starten" voor de gekozen map, en pas na je klik start de scan als achtergrondtaak.
+- Foto's zoeken of tonen vanuit de chat geeft bij een fout een melding in de chat, in plaats van
+  stil te verdwijnen.

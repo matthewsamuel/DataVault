@@ -1,3 +1,12 @@
+"""
+DataVault Dashboard - Chat (Pasha) via a local Ollama
+
+The model is chosen in the UI (a dropdown filled from Ollama's /api/tags) and stored in
+the app_settings table; DEFAULT_MODEL is a light model (~2 GB) that answers fast on a Mac.
+Every way the chat can fail (Ollama not running, the model not installed, no answer in
+time, an error halfway) ends in one clear Dutch message in the chat bubble, never in an
+endless loading animation (SPOTIFY-CHAT-2, LIVE-PROBE-13).
+"""
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
@@ -6,18 +15,55 @@ import httpx
 import json
 import re
 import shutil
+import threading
+import time
 import unicodedata
-from typing import List, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator
 from datetime import datetime
 
 router = APIRouter()
 
 from backend.config import Config
 config: Optional[Config] = None
+db = None
 
-def init_router(cfg: Config):
-    global config
+OLLAMA_URL = "http://127.0.0.1:11434"
+DEFAULT_MODEL = "qwen2.5:3b"
+MODEL_SETTING = "chat_model"
+# Suggested when nothing is installed yet: small models that answer fast on a Mac
+SUGGESTED_MODELS = ["qwen2.5:3b", "llama3.2:3b", "gemma2:2b", "phi3.5:latest"]
+
+# Loading a model can take a while the first time; after that tokens come quickly
+STREAM_TIMEOUT = httpx.Timeout(connect=3.0, read=120.0, write=10.0, pool=5.0)
+STATUS_TIMEOUT = httpx.Timeout(1.5)
+STATUS_MAX_AGE = 15.0
+
+_MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$")
+
+OLLAMA_DOWN = ("Ollama draait niet (of is niet bereikbaar op 127.0.0.1:11434). "
+               "Start de Ollama-app en probeer het opnieuw.")
+OLLAMA_TIMEOUT = ("Ollama gaf niet op tijd antwoord. Het model laden kan de eerste keer even "
+                  "duren; probeer het nog eens.")
+OLLAMA_INCOMPLETE = "Het antwoord van Ollama stopte halverwege. Probeer het opnieuw."
+
+
+def _http_client(**kwargs) -> httpx.Client:
+    return httpx.Client(**kwargs)
+
+
+def _async_http_client(**kwargs) -> httpx.AsyncClient:
+    return httpx.AsyncClient(**kwargs)
+
+
+def model_missing(model: str) -> str:
+    return (f"Het model '{model}' is niet geïnstalleerd in Ollama. Kies een ander model bovenin "
+            f"de chat, of installeer het in de Terminal met: ollama pull {model}")
+
+
+def init_router(cfg: Config, database=None):
+    global config, db
     config = cfg
+    db = database
 
 
 class ChatMessage(BaseModel):
@@ -26,7 +72,116 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
-    model: str = "phi3.5:latest"
+    model: Optional[str] = None  # None: the model chosen in the UI (current_model)
+
+
+def valid_model_name(name: Any) -> bool:
+    return isinstance(name, str) and bool(_MODEL_NAME.match(name))
+
+
+def current_model() -> str:
+    """The chosen chat model; the default when none was chosen or the database is unreachable."""
+    if db is not None:
+        try:
+            chosen = db.get_setting(MODEL_SETTING)
+            if valid_model_name(chosen):
+                return chosen
+        except Exception:
+            pass
+    return DEFAULT_MODEL
+
+
+_status_lock = threading.Lock()
+_status_cache: Dict[str, Any] = {"at": 0.0, "value": None}
+
+
+def ollama_status(max_age: float = STATUS_MAX_AGE) -> Dict[str, Any]:
+    """
+    {reachable, models: [{name, size, parameter_size}], error} from Ollama's /api/tags,
+    cached for max_age seconds (the health check asks often; one asks at a time, the
+    others get the last answer).
+    """
+    now = time.monotonic()
+    cached = _status_cache["value"]
+    if cached is not None and now - _status_cache["at"] < max_age:
+        return cached
+    if not _status_lock.acquire(blocking=cached is None):
+        return cached
+    try:
+        try:
+            with _http_client(timeout=STATUS_TIMEOUT) as client:
+                response = client.get(f"{OLLAMA_URL}/api/tags")
+            response.raise_for_status()
+            models = [
+                {
+                    "name": m.get("name"),
+                    "size": m.get("size"),
+                    "parameter_size": (m.get("details") or {}).get("parameter_size"),
+                }
+                for m in response.json().get("models", [])
+                if isinstance(m, dict) and isinstance(m.get("name"), str)
+            ]
+            value = {"reachable": True, "models": sorted(models, key=lambda m: m["name"]), "error": None}
+        except (httpx.HTTPError, ValueError) as e:
+            value = {"reachable": False, "models": [], "error": OLLAMA_DOWN if isinstance(e, httpx.TransportError) else f"Ollama gaf een fout: {e}"}
+        _status_cache.update(at=time.monotonic(), value=value)
+        return value
+    finally:
+        _status_lock.release()
+
+
+def forget_ollama_status() -> None:
+    _status_cache.update(at=0.0, value=None)
+
+
+def chat_capability() -> Dict[str, Any]:
+    """What the health check reports about the chat."""
+    status = ollama_status()
+    model = current_model()
+    names = [m["name"] for m in status["models"]]
+    installed = model in names or (":" not in model and f"{model}:latest" in names)
+    message = None
+    if not status["reachable"]:
+        message = status["error"] or OLLAMA_DOWN
+    elif not installed:
+        message = model_missing(model)
+    return {
+        "reachable": status["reachable"],
+        "models": names,
+        "model": model,
+        "model_installed": status["reachable"] and installed,
+        "message": message,
+    }
+
+
+@router.get("/api/chat/models")
+def chat_models():
+    """The installed Ollama models, the chosen one and the default (for the dropdown)."""
+    status = ollama_status(max_age=0)
+    return {
+        "current": current_model(),
+        "default": DEFAULT_MODEL,
+        "reachable": status["reachable"],
+        "error": status["error"],
+        "models": status["models"],
+        "suggested": SUGGESTED_MODELS,
+    }
+
+
+@router.post("/api/chat/model")
+def set_chat_model(body: Dict[str, Any]):
+    """Choose the chat model: {model}. It must be installed when Ollama is reachable."""
+    model = body.get("model") if isinstance(body, dict) else None
+    if not valid_model_name(model):
+        raise HTTPException(status_code=400, detail="Ongeldige modelnaam")
+    status = ollama_status(max_age=0)
+    names = [m["name"] for m in status["models"]]
+    if status["reachable"] and model not in names:
+        raise HTTPException(status_code=400, detail=model_missing(model))
+    if db is None:
+        raise HTTPException(status_code=503, detail="Instelling kan niet bewaard worden: geen database")
+    db.set_setting(MODEL_SETTING, model)
+    return {"current": model}
 
 
 # Characters a name in the prompt may not contain: control characters (no fake new
@@ -125,8 +280,23 @@ Gedragsregels:
 - Antwoorden ZEER KORT (1-2 zinnen max). De actie doet het werk."""
 
 
+def _sse(event: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+def _ollama_error_text(body: bytes) -> str:
+    try:
+        return str(json.loads(body).get("error") or body.decode("utf-8", "replace"))
+    except (ValueError, AttributeError):
+        return body.decode("utf-8", "replace")[:300]
+
+
 async def stream_ollama(ollama_messages: list, model: str) -> AsyncGenerator[str, None]:
-    """Stream Ollama responses als SSE, filtert <think> blokken live."""
+    """
+    Stream Ollama responses als SSE, filtert <think> blokken live. Eindigt altijd met
+    een 'done'- of een 'error'-event (met een code: ollama_down, model_missing,
+    timeout, ollama_error, incomplete), nooit met een stille lege stroom.
+    """
     payload = {
         "model": model,
         "messages": ollama_messages,
@@ -136,64 +306,96 @@ async def stream_ollama(ollama_messages: list, model: str) -> AsyncGenerator[str
 
     buffer = ""
     in_think = False
+    finished = False
 
     try:
-        async with httpx.AsyncClient() as client:
-            async with client.stream(
-                "POST", "http://localhost:11434/api/chat",
-                json=payload, timeout=120.0
-            ) as response:
+        async with _async_http_client(timeout=STREAM_TIMEOUT) as client:
+            async with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=payload) as response:
+                if response.status_code != 200:
+                    detail = _ollama_error_text(await response.aread())
+                    if response.status_code == 404 or "not found" in detail.lower():
+                        yield _sse({"error": model_missing(model), "code": "model_missing"})
+                    else:
+                        yield _sse({"error": f"Ollama gaf een fout: {detail}", "code": "ollama_error"})
+                    return
                 async for line in response.aiter_lines():
                     if not line:
                         continue
                     try:
                         chunk = json.loads(line)
-                        token = chunk.get("message", {}).get("content", "")
-                        done = chunk.get("done", False)
-
-                        if token:
-                            buffer += token
-
-                            # Filter <think> blokken live uit de stream
-                            while True:
-                                if in_think:
-                                    end_idx = buffer.find("</think>")
-                                    if end_idx != -1:
-                                        buffer = buffer[end_idx + 8:]
-                                        in_think = False
-                                    else:
-                                        # Nog in think blok, alles weggooien behalve staart
-                                        buffer = buffer[-15:]
-                                        break
-                                else:
-                                    start_idx = buffer.find("<think>")
-                                    if start_idx != -1:
-                                        # Alles voor <think> is veilig om te sturen
-                                        safe = buffer[:start_idx]
-                                        if safe:
-                                            yield f"data: {json.dumps({'token': safe})}\n\n"
-                                        buffer = buffer[start_idx + 7:]
-                                        in_think = True
-                                    else:
-                                        # Geen think tag zichtbaar — stuur alles behalve laatste 15 chars
-                                        # (om partiële tags niet te missen)
-                                        if len(buffer) > 15:
-                                            safe = buffer[:-15]
-                                            yield f"data: {json.dumps({'token': safe})}\n\n"
-                                            buffer = buffer[-15:]
-                                        break
-
-                        if done:
-                            # Flush rest van buffer (als niet in think)
-                            if buffer and not in_think:
-                                yield f"data: {json.dumps({'token': buffer})}\n\n"
-                            yield f"data: {json.dumps({'done': True})}\n\n"
-
                     except json.JSONDecodeError:
                         continue
+                    if not isinstance(chunk, dict):
+                        continue
+                    if chunk.get("error"):
+                        # E.g. out of memory halfway: what came so far stays, plus the error
+                        yield _sse({"error": f"Ollama gaf een fout: {chunk['error']}", "code": "ollama_error"})
+                        return
+                    message = chunk.get("message")
+                    token = message.get("content", "") if isinstance(message, dict) else ""
+                    done = chunk.get("done", False)
 
+                    if token:
+                        buffer += token
+
+                        # Filter <think> blokken live uit de stream
+                        while True:
+                            if in_think:
+                                end_idx = buffer.find("</think>")
+                                if end_idx != -1:
+                                    buffer = buffer[end_idx + 8:]
+                                    in_think = False
+                                else:
+                                    # Nog in think blok, alles weggooien behalve staart
+                                    buffer = buffer[-15:]
+                                    break
+                            else:
+                                start_idx = buffer.find("<think>")
+                                if start_idx != -1:
+                                    # Alles voor <think> is veilig om te sturen
+                                    safe = buffer[:start_idx]
+                                    if safe:
+                                        yield _sse({'token': safe})
+                                    buffer = buffer[start_idx + 7:]
+                                    in_think = True
+                                else:
+                                    # Geen think tag zichtbaar — stuur alles behalve laatste 15 chars
+                                    # (om partiële tags niet te missen)
+                                    if len(buffer) > 15:
+                                        safe = buffer[:-15]
+                                        yield _sse({'token': safe})
+                                        buffer = buffer[-15:]
+                                    break
+
+                    if done:
+                        # Flush rest van buffer (als niet in think)
+                        if buffer and not in_think:
+                            yield _sse({'token': buffer})
+                        yield _sse({'done': True})
+                        finished = True
+                        return
+
+    except httpx.ConnectError:
+        forget_ollama_status()
+        yield _sse({"error": OLLAMA_DOWN, "code": "ollama_down"})
+        return
+    except httpx.TimeoutException:
+        yield _sse({"error": OLLAMA_TIMEOUT, "code": "timeout"})
+        return
     except httpx.RequestError as e:
-        yield f"data: {json.dumps({'error': f'Kan Ollama niet bereiken: {e}'})}\n\n"
+        yield _sse({"error": f"Kan Ollama niet bereiken: {e}", "code": "ollama_down"})
+        return
+
+    if not finished:
+        yield _sse({"error": OLLAMA_INCOMPLETE, "code": "incomplete"})
+
+
+def _chosen_model(request: "ChatRequest") -> str:
+    if request.model is None:
+        return current_model()
+    if not valid_model_name(request.model):
+        raise HTTPException(status_code=400, detail="Ongeldige modelnaam")
+    return request.model
 
 
 @router.post("/api/chat/stream")
@@ -207,7 +409,7 @@ async def chat_stream(request: ChatRequest):
         ollama_messages.append({"role": msg.role, "content": msg.content})
 
     return StreamingResponse(
-        stream_ollama(ollama_messages, request.model),
+        stream_ollama(ollama_messages, _chosen_model(request)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -220,37 +422,37 @@ async def chat_stream(request: ChatRequest):
 @router.post("/api/chat")
 async def chat_with_ollama(request: ChatRequest):
     """Non-streaming fallback endpoint."""
+    model = _chosen_model(request)
     system_prompt = await run_in_threadpool(build_system_prompt)
     ollama_messages = [{"role": "system", "content": system_prompt}]
     for msg in request.messages:
         ollama_messages.append({"role": msg.role, "content": msg.content})
 
     payload = {
-        "model": request.model,
+        "model": model,
         "messages": ollama_messages,
         "stream": False,
         "options": {"num_ctx": 4096}
     }
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "http://localhost:11434/api/chat", json=payload, timeout=120.0
-            )
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Ollama fout: {response.text}"
-                )
-            data = response.json()
-            raw = data.get("message", {}).get("content", "")
-            # Strip think blokken
-            import re
-            clean = re.sub(r'<think>[\s\S]*?</think>', '', raw, flags=re.IGNORECASE).strip()
-            return {"response": clean}
-
+        async with _async_http_client(timeout=STREAM_TIMEOUT) as client:
+            response = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
+    except httpx.ConnectError:
+        forget_ollama_status()
+        raise HTTPException(status_code=503, detail=OLLAMA_DOWN)
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail=OLLAMA_TIMEOUT)
     except httpx.RequestError as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Kan Ollama niet bereiken: {e}. Draait Ollama?"
-        )
+        raise HTTPException(status_code=503, detail=f"Kan Ollama niet bereiken: {e}")
+
+    if response.status_code != 200:
+        detail = _ollama_error_text(response.content)
+        if response.status_code == 404 or "not found" in detail.lower():
+            raise HTTPException(status_code=404, detail=model_missing(model))
+        raise HTTPException(status_code=502, detail=f"Ollama gaf een fout: {detail}")
+    data = response.json()
+    raw = data.get("message", {}).get("content", "")
+    # Strip think blokken
+    clean = re.sub(r'<think>[\s\S]*?</think>', '', raw, flags=re.IGNORECASE).strip()
+    return {"response": clean, "model": model}
