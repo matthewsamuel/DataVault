@@ -292,12 +292,25 @@
                 <div class="page-header">
                     <div>
                         <h1 class="page-title"><i class="fas fa-clone" aria-hidden="true"></i> Duplicaten</h1>
-                        <div class="page-subtitle">Kies een map, zoek byte voor byte identieke bestanden en
+                        <div class="page-subtitle" id="dup-subtitle">Kies een map, zoek byte voor byte identieke bestanden en
                             bepaal per groep welke kopie blijft. De andere kopieën gaan naar RAW_DUPLICATES: er wordt
                             niets gewist en elke actie is terug te zetten.</div>
                     </div>
                 </div>
 
+                <!-- Twee soorten: byte voor byte gelijke kopieën, en foto's die op elkaar lijken (series.js) -->
+                <div class="tabs dup-tabs" role="tablist" aria-label="Soort duplicaten">
+                    <button type="button" class="tab active" role="tab" id="dup-tab-exact" aria-selected="true"
+                        aria-controls="dup-panel-exact" data-tab="exact" onclick="dupShowTab('exact')">
+                        <i class="fas fa-clone" aria-hidden="true"></i> Exacte kopieën
+                    </button>
+                    <button type="button" class="tab" role="tab" id="dup-tab-series" aria-selected="false" tabindex="-1"
+                        aria-controls="dup-panel-series" data-tab="series" onclick="dupShowTab('series')">
+                        <i class="fas fa-layer-group" aria-hidden="true"></i> Beste uit reeks
+                    </button>
+                </div>
+
+                <div class="dup-panel" id="dup-panel-exact" role="tabpanel" aria-labelledby="dup-tab-exact">
                 <!-- Folder Selection -->
                 <div class="folder-selection-panel">
                     <div class="folder-selection-header">
@@ -395,6 +408,50 @@
                     <!-- Groepen worden door duplicates.js gevuld -->
                 </div>
                 <div class="dup-sentinel" id="dup-sentinel"></div>
+                </div>
+
+                <!-- Beste uit reeks: bijna-duplicaten en bursts (series.js, /api/series) -->
+                <div class="dup-panel" id="dup-panel-series" role="tabpanel" aria-labelledby="dup-tab-series" hidden>
+                    <div class="series-toolbar">
+                        <div class="series-status">
+                            <div class="series-status-text" id="series-status-text">Even kijken…</div>
+                            <div class="progress series-progress" id="series-progress" hidden>
+                                <div class="progress-fill" id="series-progress-fill"></div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-secondary" id="btn-series-compare" onclick="seriesStartCompare()"
+                            title="Vergelijkt foto's die nieuw of veranderd zijn; wat al vergeleken is, wordt overgeslagen">
+                            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> <span id="series-compare-label">Foto's vergelijken</span>
+                        </button>
+                        <div class="series-controls">
+                            <div class="series-strictness">
+                                <label class="series-control-label" for="series-strictness">Strengheid</label>
+                                <input type="range" class="tl-slider series-slider" id="series-strictness" min="0" max="2" step="1"
+                                    value="1" aria-valuetext="Normaal" oninput="seriesStrictnessInput(this.value)"
+                                    onchange="seriesStrictnessChange(this.value)">
+                                <div class="series-strictness-labels" aria-hidden="true">
+                                    <button type="button" tabindex="-1" onclick="seriesSetStrictness('streng')">Streng</button>
+                                    <button type="button" tabindex="-1" onclick="seriesSetStrictness('normaal')">Normaal</button>
+                                    <button type="button" tabindex="-1" onclick="seriesSetStrictness('ruim')">Ruim</button>
+                                </div>
+                            </div>
+                            <div class="series-sort">
+                                <label class="series-control-label" for="series-sort">Volgorde</label>
+                                <select class="select select-sm" id="series-sort" onchange="seriesSetSort(this.value)">
+                                    <option value="size">Grootste reeksen eerst</option>
+                                    <option value="recent">Nieuwste eerst</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="series-summary" id="series-summary" hidden>
+                        <span class="series-summary-text" id="series-summary-text"></span>
+                        <span class="series-strictness-help" id="series-strictness-help"></span>
+                        <button type="button" class="link-button" id="btn-series-reset" onclick="seriesResetReviews()" hidden>Behouden reeksen weer tonen</button>
+                        <span class="series-last-kept" id="series-last-kept" role="status" hidden></span>
+                    </div>
+                    <div class="series-list" id="series-list" aria-label="Reeksen"></div>
+                </div>
             </div>
         </div>
         <!-- Spotify View -->
@@ -889,6 +946,48 @@
         </div>
     </div>
 
+    <!-- Bevestiging voor 'Beste uit reeks': aantal en bestemming vóór het verplaatsen -->
+    <div class="modal" id="modal-series-confirm">
+        <div class="modal-container series-confirm-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-layer-group" aria-hidden="true"></i> <span id="series-confirm-title">Reeks opruimen?</span></h2>
+                <button class="modal-close" onclick="seriesCloseConfirm()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body modal-body-list">
+                <ul class="dup-confirm-list" id="series-confirm-list"></ul>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-series-cancel" onclick="seriesCloseConfirm()" data-autofocus>Annuleren</button>
+                <button class="btn btn-primary" id="btn-series-go" onclick="seriesRunConfirm()">Verplaatsen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Beste uit reeks: de foto's van één reeks groot naast elkaar, passend of op 100% (series.js) -->
+    <div class="modal" id="modal-series-compare">
+        <div class="modal-container series-compare-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-magnifying-glass-plus" aria-hidden="true"></i> <span id="series-compare-title">Groot bekijken</span></h2>
+                <div class="segmented series-compare-zoom" role="group" aria-label="Weergave">
+                    <button type="button" id="btn-series-fit" aria-pressed="true" onclick="seriesCompareZoom(false)" title="Elke foto heel (d)">Passend</button>
+                    <button type="button" id="btn-series-detail" aria-pressed="false" onclick="seriesCompareZoom(true)" title="Dezelfde uitsnede op ware grootte; slepen verschuift (d)">100%</button>
+                </div>
+                <button class="modal-close" onclick="seriesCloseCompare()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body series-compare-body" id="series-compare-grid"></div>
+            <div class="modal-footer">
+                <div class="series-compare-hint" aria-hidden="true">
+                    <span><kbd>←</kbd> <kbd>→</kbd> foto</span>
+                    <span><kbd>spatie</kbd> houden</span>
+                    <span><kbd>d</kbd> passend of 100%</span>
+                    <span><kbd>Esc</kbd> sluiten</span>
+                </div>
+                <button class="btn btn-secondary" onclick="seriesCloseCompare()">Sluiten</button>
+                <button class="btn btn-primary" id="btn-series-compare-go" onclick="seriesCompareConfirm()">Verplaatsen</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal Viewer -->
     <div class="modal" id="modal-viewer" onclick="if(event.target === this) closeModal()">
         <div class="modal-container">
@@ -1313,14 +1412,15 @@
     <script src="dom.js?v=1"></script>
     <script src="ui.js?v=2"></script>
     <script src="folder-tree.js?v=7"></script>
-    <script src="app.js?v=62"></script>
-    <script src="jobs.js?v=10"></script>
-    <script src="duplicates.js?v=24"></script>
+    <script src="app.js?v=63"></script>
+    <script src="jobs.js?v=11"></script>
+    <script src="duplicates.js?v=26"></script>
+    <script src="series.js?v=2"></script>
     <script src="keurer.js?v=21"></script>
     <script src="timeline.js?v=12"></script>
     <script src="wave-background.js?v=4"></script>
     <script src="resizable-sidebar.js?v=1"></script>
-    <script src="recovery.js?v=5"></script>
+    <script src="recovery.js?v=6"></script>
     <script src="settings.js?v=4"></script>
     <script src="shortcuts.js?v=6"></script>
     <script src="library.js?v=2"></script>

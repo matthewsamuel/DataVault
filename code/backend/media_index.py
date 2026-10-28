@@ -702,6 +702,9 @@ def _apply_move(db, old: Tuple, new: Tuple) -> None:
             return
         _carry_user_data(conn, old[1], new[1])
         conn.execute("DELETE FROM media WHERE id = ?", (new[0],))
+        # The old row keeps its fingerprint (near_dups); the new row's goes with it
+        conn.execute("DELETE FROM media_phash WHERE media_id = ?", (new[0],))
+        conn.execute("DELETE FROM near_dup_pairs WHERE a = ?1 OR b = ?1", (new[0],))
         conn.execute(f"UPDATE media SET {', '.join(f'{c} = ?' for c in columns)}, missing = 0 WHERE id = ?",
                      (*values, old[0]))
 
@@ -719,6 +722,8 @@ def purge_missing(db, keep: Callable[[str], bool] = lambda path: False) -> int:
         gone = [(row[0],) for row in rows if row[2] == MISSING_CONFIRMED and not keep(row[1])]
         confirm = [(MISSING_CONFIRMED, row[0]) for row in rows if row[2] == MISSING_NEW and not keep(row[1])]
         # (Later steps that keep their own per-media tables clean them here, by id)
+        conn.executemany("DELETE FROM media_phash WHERE media_id = ?", gone)
+        conn.executemany("DELETE FROM near_dup_pairs WHERE a = ?1 OR b = ?1", gone)
         conn.executemany("DELETE FROM media WHERE id = ?", gone)
         conn.executemany("UPDATE media SET missing = ? WHERE id = ? AND missing != 0", confirm)
     if gone:

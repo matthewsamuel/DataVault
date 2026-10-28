@@ -17,6 +17,7 @@ const RECOVERY_ICONS = {
     keurer: 'fa-images',
     duplicates: 'fa-clone',
     viewer_move: 'fa-right-left',
+    near_dup: 'fa-layer-group',
 };
 
 const recoveryState = {

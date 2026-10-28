@@ -30,6 +30,7 @@ from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import (
     folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, albums,
+    series,
 )
 
 
@@ -154,6 +155,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         library.init_router(config, db, job_manager)
         albums.init_router(config, db)
         recovery.init_router(config, db)
+        series.init_router(config, db, job_manager)
 
         _say("DataVault Dashboard initialized successfully")
 
@@ -183,6 +185,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(library.router, prefix="/api/library", tags=["library"], dependencies=vault)
     app.include_router(albums.router, prefix="/api/library", tags=["library"], dependencies=vault)
     app.include_router(recovery.router, prefix="/api/recovery", tags=["recovery"], dependencies=vault)
+    app.include_router(series.router, prefix="/api/series", tags=["series"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 

@@ -4269,6 +4269,633 @@ a.breadcrumb-item:hover {
         width: 90vw;
     }
 }
+/* ---- Tabbladen: Exacte kopieën | Beste uit reeks ---- */
+
+.dup-tabs {
+    margin: 0 0 var(--space-xl);
+}
+
+.dup-tabs .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--fs-base);
+}
+
+.dup-tabs .tab i {
+    font-size: var(--fs-sm);
+    color: var(--text-tertiary);
+}
+
+.dup-tabs .tab[aria-selected="true"] i {
+    color: var(--accent-text);
+}
+
+.dup-tabs .tab:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+
+/* ==================== BESTE UIT REEKS (series.js) ==================== */
+
+.series-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-lg) var(--space-xl);
+    padding: var(--space-lg) var(--space-xl);
+    margin-bottom: var(--space-md);
+    background-color: var(--surface-card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-sm);
+}
+
+.series-status {
+    flex: 1 1 260px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.series-status-text {
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+    line-height: var(--lh-snug);
+}
+
+.series-progress {
+    max-width: 360px;
+}
+
+.series-controls {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-xl);
+}
+
+.series-control-label {
+    display: block;
+    margin-bottom: var(--space-xs);
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+.series-strictness {
+    width: 200px;
+}
+
+.series-slider {
+    display: block;
+    margin: var(--space-sm) 0 var(--space-xs);
+}
+
+.series-strictness-labels {
+    display: flex;
+    justify-content: space-between;
+}
+
+.series-strictness-labels button {
+    padding: 0;
+    border: none;
+    background: none;
+    font-family: var(--font-sans);
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: color var(--duration-fast) var(--ease-out);
+}
+
+.series-strictness-labels button:hover {
+    color: var(--text-primary);
+}
+
+.series-strictness-labels button.active {
+    color: var(--text-primary);
+    font-weight: var(--fw-semibold);
+}
+
+.series-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-xs) var(--space-md);
+    margin: 0 0 var(--space-lg);
+    padding: 0 var(--space-xs);
+    font-size: var(--fs-sm);
+}
+
+.series-summary-text {
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+}
+
+.series-summary-text:empty {
+    display: none;
+}
+
+.series-strictness-help {
+    flex: 1 1 280px;
+    color: var(--text-secondary);
+}
+
+.series-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+.series-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    padding: var(--space-lg) var(--space-xl) var(--space-md);
+    background-color: var(--surface-card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out);
+}
+
+/* De reeks met de toetsenbordcursor valt op, zonder groen vlak */
+.series-card:has(.series-photo:focus-visible) {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+}
+
+/* De knoppen staan rechts naast de titel, en gaan pas naar een eigen regel als ze niet passen */
+.series-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-md) var(--space-lg);
+}
+
+.series-card-heading {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    min-width: 0;
+}
+
+.series-kind-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    font-size: var(--fs-md);
+}
+
+.series-card-titles {
+    min-width: 0;
+}
+
+.series-card-title {
+    margin: 0;
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+    line-height: var(--lh-tight);
+    color: var(--text-primary);
+}
+
+.series-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 var(--space-sm);
+    margin-top: var(--space-xs);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+    min-width: 0;
+}
+
+.series-card-meta .path-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.series-dot {
+    color: var(--text-tertiary);
+}
+
+/* (.btn zet display; een verborgen knop blijft weg) */
+#btn-series-compare[hidden],
+.series-card-actions .btn[hidden],
+.series-last-kept[hidden] {
+    display: none;
+}
+
+.series-card-actions {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    margin-left: auto;
+}
+
+.series-photos {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+    gap: var(--space-lg) var(--space-md);
+}
+
+/* Twee tot vier foto's: groter, zodat je ze hier al kunt vergelijken (--series-tile uit series.js) */
+.series-card.is-small .series-photos {
+    grid-template-columns: repeat(var(--series-count), minmax(0, var(--series-tile)));
+}
+
+.series-photo-cell {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.series-photo {
+    width: 100%;
+    aspect-ratio: 1;
+    padding: 0;
+    border: none;
+    margin-bottom: var(--space-xs);
+}
+
+/* De cursor (toetsenbord) staat los van de groene 'blijft'-ring eromheen */
+.series-photo:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 5px;
+}
+
+/* Wat weggaat, is iets gedempt (de foto blijft goed te zien) en zegt dat onderaan op de foto */
+.series-photo.is-leaving img {
+    opacity: 0.72;
+}
+
+.series-photo.is-leaving img.loading {
+    opacity: 0;
+}
+
+.series-photo-state {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: var(--space-lg) var(--space-sm) var(--space-sm);
+    background: linear-gradient(to top, var(--media-scrim), transparent);
+    color: var(--on-media);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    text-align: left;
+    text-shadow: var(--media-text-shadow);
+}
+
+.series-photo-state:empty {
+    display: none;
+}
+
+.series-photo img.is-missing {
+    opacity: 0;
+}
+
+.series-best-badge {
+    position: absolute;
+    z-index: 1;
+    top: var(--space-sm);
+    left: var(--space-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    height: 22px;
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background: var(--media-scrim-strong);
+    color: var(--on-media);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-semibold);
+}
+
+.series-best-badge i {
+    color: var(--warning);
+    font-size: 10px;
+}
+
+.series-photo-name {
+    font-size: var(--fs-sm);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.series-photo-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.series-score {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.series-score-value {
+    min-width: 2ch;
+    font-family: var(--font-mono);
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+}
+
+.series-score-bar {
+    display: inline-flex;
+    width: 40px;
+    height: 4px;
+    overflow: hidden;
+    border-radius: var(--radius-full);
+    background: var(--border-default);
+}
+
+.series-score-part {
+    height: 100%;
+}
+
+.series-score-part-1 { background: var(--viz-3); }
+.series-score-part-2 { background: var(--viz-2); }
+.series-score-part-3 { background: var(--viz-4); }
+.series-score-part-4 { background: var(--accent); }
+
+.series-photo-facts {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+}
+
+.series-copies {
+    align-self: flex-start;
+    height: 22px;
+    padding: 0 var(--space-sm);
+    color: var(--text-secondary);
+}
+
+/* De foto onder de cursor: naam, gegevens en waar de score vandaan komt */
+.series-detail {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-hairline);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.series-detail-name {
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.series-detail-facts {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+}
+
+.series-detail-score {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-md);
+    margin-left: auto;
+}
+
+.series-detail-score > span:first-child {
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+}
+
+.series-detail-part {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    white-space: nowrap;
+}
+
+.series-score-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-full);
+}
+
+.series-more {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-sm) 0;
+}
+
+/* De laatste 'Alles behouden', meteen ongedaan te maken */
+.series-last-kept {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    color: var(--text-secondary);
+}
+
+.series-last-kept i {
+    color: var(--accent-text);
+    font-size: var(--fs-xs);
+}
+
+/* ---------- Groot vergelijken (venster) ---------- */
+
+.series-compare-container {
+    width: calc(100vw - 2 * var(--space-2xl));
+    max-width: 1440px;
+    height: calc(100vh - 2 * var(--space-2xl));
+    max-height: 960px;
+}
+
+.series-compare-zoom {
+    margin-left: auto;
+}
+
+.series-compare-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    display: grid;
+    grid-template-columns: repeat(var(--compare-columns, 2), minmax(260px, 1fr));
+    grid-auto-rows: minmax(380px, 1fr);
+    align-items: stretch;
+    justify-content: normal;
+    gap: var(--space-xl) var(--space-lg);
+    padding: var(--space-lg) var(--space-xl);
+}
+
+.series-compare-pane {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    min-width: 0;
+    min-height: 0;
+}
+
+.series-compare-frame {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 220px;
+    overflow: hidden;
+    border-radius: var(--radius-thumb);
+    background: var(--media-bg);
+    box-shadow: 0 0 0 1px var(--media-border);
+    transition: box-shadow var(--duration-fast) var(--ease-out);
+}
+
+/* Wat blijft: dezelfde groene ring als een gekozen foto in de lijst */
+.series-compare-pane.is-kept .series-compare-frame {
+    box-shadow: 0 0 0 3px var(--accent);
+}
+
+.series-compare-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: opacity var(--duration-base) var(--ease-out);
+}
+
+.series-compare-img.loading {
+    opacity: 0;
+}
+
+/* 100%: elke foto even breed als de grootste op ware grootte, dezelfde uitsnede in beeld */
+.series-compare-body.is-detail .series-compare-frame {
+    cursor: grab;
+    touch-action: none;
+}
+
+.series-compare-body.is-detail .series-compare-frame.is-dragging {
+    cursor: grabbing;
+}
+
+.series-compare-body.is-detail .series-compare-img {
+    inset: auto;
+    left: 50%;
+    top: 50%;
+    width: var(--compare-detail-width);
+    max-width: none;
+    height: auto;
+    object-fit: fill;
+    transform: translate(calc(var(--compare-x, 50%) * -1), calc(var(--compare-y, 50%) * -1));
+}
+
+.series-compare-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.series-compare-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+}
+
+.series-compare-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+}
+
+.series-compare-facts {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    color: var(--text-secondary);
+}
+
+.series-compare-score {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-md);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.series-compare-score-total {
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+}
+
+.series-compare-keep {
+    align-self: flex-start;
+}
+
+.series-compare-hint {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-lg);
+    margin-right: auto;
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+.series-confirm-container {
+    width: 560px;
+}
+
+.dup-confirm-list .path-label {
+    font-size: var(--fs-xs);
+}
+
+@media (max-width: 900px) {
+    .series-compare-hint {
+        display: none;
+    }
+
+    .series-compare-container {
+        width: calc(100vw - 2 * var(--space-lg));
+        height: calc(100vh - 2 * var(--space-lg));
+    }
+
+    .series-controls {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .series-detail-score {
+        margin-left: 0;
+    }
+}
+
 /* ==================== SPOTIFY ==================== */
 /* Eigen muziekkarakter: het Spotify-groen voor iconen, balken en accenten op dit scherm,
    verder dezelfde kaarten, tekst en ruimte als de rest van de app. */
