@@ -123,7 +123,7 @@ function keurerRenderStats() {
         <div class="keurer-stat ${streakCls}" title="${keurerStats.streak} opeenvolgende dag(en) met ${keurerStats.goal}+ beoordelingen">
             <span class="keurer-stat-icon" aria-hidden="true"><i class="fas ${streakIcon}"></i></span>
             <span class="keurer-stat-value">${keurerStats.streak}</span>
-            <span class="keurer-stat-label">dagen op rij</span>
+            <span class="keurer-stat-label">Dagen op rij</span>
         </div>
         <div class="keurer-stat-divider"></div>
         <div class="keurer-stat ${goalCls}" title="Dagdoel: ${keurerStats.goal} beoordelingen">
@@ -134,13 +134,13 @@ function keurerRenderStats() {
                 </div>
                 <span class="keurer-stat-value">${keurerStats.today}<span class="keurer-stat-dim">/${keurerStats.goal}</span></span>
             </div>
-            <span class="keurer-stat-label">vandaag</span>
+            <span class="keurer-stat-label">Vandaag</span>
         </div>
         <div class="keurer-stat-divider"></div>
         <div class="keurer-stat" title="Totaal aantal beoordeelde bestanden ooit">
             <span class="keurer-stat-icon" aria-hidden="true"><i class="fas fa-tags"></i></span>
             <span class="keurer-stat-value">${keurerStats.total.toLocaleString('nl-NL')}</span>
-            <span class="keurer-stat-label">totaal beoordeeld</span>
+            <span class="keurer-stat-label">Totaal beoordeeld</span>
         </div>
     `;
 }
@@ -177,11 +177,14 @@ async function keurerLoadFiles() {
         if (remEl) {
             const rem  = data.remaining || 0;
             const done = data.decided  || 0;
-            remEl.textContent = `${rem} nog te beoordelen${done > 0 ? ` · ${done} al gedaan` : ''}`;
+            remEl.textContent = rem === 0 && done === 0 ? 'Geen foto\'s of video\'s'
+                : `${rem} nog te beoordelen${done > 0 ? ` · ${done} al gedaan` : ''}`;
         }
 
-        if (keurerFileQueue.length === 0) {
-            keurerShowDone(data.decided || 0);
+        if (keurerFileQueue.length === 0 && !data.decided) {
+            keurerShowNoMedia();
+        } else if (keurerFileQueue.length === 0) {
+            keurerShowDone(data.decided);
         } else {
             keurerShowCard();
         }
@@ -229,6 +232,26 @@ function keurerShowDone(decidedCount) {
             <div class="keurer-state-actions">
                 <button class="btn btn-secondary" onclick="keurerOpenFolderPicker()">
                     <i class="fas fa-folder"></i> Andere map
+                </button>
+            </div>
+        </div>`;
+}
+
+// Een map zonder foto's of video's (bijvoorbeeld alleen submappen): geen 'klaar', maar zeggen
+// dat er hier niets te beoordelen is
+function keurerShowNoMedia() {
+    const cardArea = document.getElementById('keurer-card-area');
+    const btnArea  = document.getElementById('keurer-action-buttons');
+    if (btnArea) btnArea.style.display = 'none';
+
+    cardArea.innerHTML = `
+        <div class="keurer-state-card">
+            <span class="keurer-state-icon" aria-hidden="true"><i class="fas fa-folder-open"></i></span>
+            <h3>Geen foto's of video's in deze map</h3>
+            <p>De Keurer kijkt alleen naar bestanden direct in deze map, niet in de submappen.</p>
+            <div class="keurer-state-actions">
+                <button class="btn btn-primary" onclick="keurerOpenFolderPicker()">
+                    <i class="fas fa-folder" aria-hidden="true"></i> Andere map
                 </button>
             </div>
         </div>`;
@@ -439,7 +462,7 @@ async function keurerUndo() {
         }
         keurerUpdateRemaining();
 
-        const label = entry.decision === 'delete' ? 'prullenmand' : entry.decision === 'move' ? 'verplaatsing' : 'bewaren';
+        const label = entry.decision === 'delete' ? 'Prullenmand' : entry.decision === 'move' ? 'Verplaatsing' : 'Bewaren';
         const where = data.folder === keurerFolder ? '' : ` (in ${keurerShortenPath(data.folder)})`;
         showToast('Ongedaan gemaakt', `${label} teruggedraaid voor ${file.name}${where}`, 'success');
 

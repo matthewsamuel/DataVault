@@ -428,6 +428,21 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate(keurer_state) == base and Path(current).exists(),
                    f"keurer: Enter on Annuleren moved the file or left the window open ({page.evaluate(keurer_state)} vs {base})")
 
+            # A folder with only subfolders: a calm 'nothing here' state, never 'fully reviewed'
+            step("keurer: a folder without photos", lambda: (
+                page.evaluate(f"keurerSelectedFolderForModal = {json.dumps(str(vault / 'RAW'))}; keurerConfirmFolderSelection()"),
+                page.wait_for_selector("#keurer-card-area .keurer-state-card h3", timeout=10000)), 0.6)
+            title = page.text_content("#keurer-card-area .keurer-state-card h3")
+            expect(title == "Geen foto's of video's in deze map", f"keurer: a folder without photos says {title!r}")
+
+            # Home: the 'op deze dag' photo opens with the keyboard
+            step("home: 'op deze dag' photo", lambda: (
+                page.evaluate("switchMainView('home')"),
+                page.wait_for_selector(".otd-large-image.active", timeout=10000)), 0.3)
+            step("home: Enter on the photo", lambda: (page.focus(".otd-large-image.active"), page.keyboard.press("Enter")), 0.8)
+            expect(page.evaluate("isViewerOpen()"), "home: Enter on the 'op deze dag' photo did not open it")
+            step("home: close the photo", lambda: page.keyboard.press("Escape"), 0.4)
+
             # Storage per folder: the list starts at the top (nothing cut off) and fills the width
             step("storage: open the window", lambda: (
                 page.evaluate("switchMainView('home'); openStorageModal()"),
