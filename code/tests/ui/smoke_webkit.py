@@ -543,9 +543,13 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     const card = document.querySelector('.tl-photo-card').getBoundingClientRect();
                     const header = document.querySelector('.tl-group-header');
                     const headerX = header.getBoundingClientRect().left + parseFloat(getComputedStyle(header).paddingLeft);
+                    // Where the menu items end on screen: the box when it clips (scrolls), else its content
+                    const tabs = document.querySelector('.nav-tabs');
+                    const box = tabs.getBoundingClientRect();
+                    const clips = getComputedStyle(tabs).overflowX !== 'visible';
                     return {tile: [Math.round(card.width), Math.round(card.height)], cardX: Math.round(card.left),
                             headerX: Math.round(headerX),
-                            navRight: Math.round(document.querySelector('.nav-tabs').getBoundingClientRect().right),
+                            navRight: Math.round(clips ? box.right : box.left + tabs.scrollWidth),
                             searchLeft: Math.round(document.querySelector('.nav-search').getBoundingClientRect().left),
                             scrollsSideways: document.documentElement.scrollWidth > innerWidth};
                 })()""")
