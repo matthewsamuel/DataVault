@@ -144,6 +144,7 @@
     --text-on-accent: #07130c;
 
     --border-hairline: #26282b;
+    --border-overlay: #3a3c41;  /* haarlijn op --surface-overlay (vensters, menu's) */
     --border-default: #34363a;
     --border-strong: #4a4d52;
 
@@ -218,6 +219,7 @@
     --text-on-accent: #ffffff;
 
     --border-hairline: #e7e7ea;
+    --border-overlay: #e7e7ea;
     --border-default: #d9d9de;
     --border-strong: #a1a1aa;
 
@@ -289,6 +291,7 @@
         --text-on-accent: #ffffff;
 
         --border-hairline: #e7e7ea;
+        --border-overlay: #e7e7ea;
         --border-default: #d9d9de;
         --border-strong: #a1a1aa;
 
@@ -341,6 +344,23 @@
 }
 
 /* @tokens:end */
+
+/* Op een zwevend vlak (venster, menu, melding, takenpaneel) is de haarlijn iets lichter: in
+   donker valt --border-hairline anders weg tegen --surface-overlay */
+.modal-container,
+.dv-overlay-panel,
+.menu,
+.toast,
+.theme-dropdown,
+.move-modal-container,
+.capability-notice,
+.restart-box,
+.audio-player-modal,
+.otd-settings-panel,
+.chat-fullscreen-wrapper,
+.job-dock {
+    --border-hairline: var(--border-overlay);
+}
 
 /* Minder beweging gevraagd (macOS: Toegankelijkheid > Beeldscherm): geen animaties */
 @media (prefers-reduced-motion: reduce) {
