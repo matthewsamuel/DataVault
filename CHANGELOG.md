@@ -89,6 +89,11 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Twee herstartverzoeken tegelijk (bijv. vanuit twee tabbladen) starten nog maar één nieuwe
   server. Voorheen startten er twee, die allebei tegelijk de database klaarzetten voordat één
   van beide afhaakte. Het tweede tabblad wacht nu gewoon mee op de herstarte server.
+- Herstarten liep vast als er nog een lange opdracht liep (bijv. het scannen van de tijdlijn of
+  het zoeken naar de grootste bestanden): de oude server wachtte tot die klaar was, het
+  hulpproces gaf het na 30 seconden op en daarna draaide er geen server meer. Nu stopt de oude
+  server na hoogstens 15 seconden toch, en nooit midden in het verplaatsen van een bestand;
+  de lange opdracht wordt dan afgebroken en kan na de herstart opnieuw.
 - Het wachtscherm tijdens herstarten herkent de nieuwe server (en niet de oude die nog even
   antwoordt), stopt met controleren zodra hij terug is en toont na 30 seconden een melding
   met een knop om het scherm te sluiten, in plaats van eindeloos te blijven wachten.

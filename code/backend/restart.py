@@ -5,7 +5,12 @@ POST /api/restart restarts only the process that received it (never anything
 else on the machine, and no fixed port): a small helper process waits until
 this PID has exited, then starts the server again with the same interpreter,
 arguments, working directory and environment. This process then shuts down
-the normal way (SIGTERM, so uvicorn finishes open requests first).
+the normal way (SIGTERM, so uvicorn finishes open requests first). If a request
+keeps it alive (a chat stream, a long synchronous scan), a SIGINT makes uvicorn
+stop waiting for it, and as a last resort the process ends itself with
+os._exit (a synchronous request runs in a non-daemon worker thread that the
+interpreter would otherwise wait for). That last step waits for ARCHIVE_LOCK,
+so it never cuts an archive move in half.
 
 The restarted server runs in its own session, so it outlives the Terminal
 window that started it. Its output therefore never goes to that Terminal: once
@@ -22,12 +27,18 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 
-# How long the helper waits for the old process before giving up (it never kills anything)
-WAIT_SECONDS = 30
+from backend import file_ops
+
+# How long the helper waits for the old process before giving up (it never kills anything).
+# Well above HARD_EXIT_DELAY: the old process may still be finishing an archive move.
+WAIT_SECONDS = 300
 # Delay before this process stops, so the HTTP response still reaches the browser
 EXIT_DELAY = 0.5
-# A second SIGTERM makes uvicorn stop without waiting for long-running streams (chat)
+# Then a SIGINT: on a second signal uvicorn only forces its exit for SIGINT (a second
+# SIGTERM is ignored), so it stops waiting for open requests and streams (chat)
 FORCE_EXIT_DELAY = 10
+# Last resort: end the process even if a synchronous request is still running
+HARD_EXIT_DELAY = 15
 
 # Where a restarted server writes its output when it cannot keep the old one (a Terminal)
 LOG_FILE = Path(os.environ.get("DATAVAULT_LOG_FILE") or Path.home() / "Library/Logs/DataVault/server.log")
@@ -135,12 +146,40 @@ def _spawn_helper(pid: int, argv: List[str], cwd: str) -> subprocess.Popen:
     )
 
 
+def _signal(pid: int, sig: int) -> None:
+    try:
+        os.kill(pid, sig)
+    except ProcessLookupError:
+        pass
+
+
+def _hard_exit(exit=os._exit) -> None:
+    """
+    End this process now, whatever still runs in it. Waits for ARCHIVE_LOCK first and
+    keeps it, so no archive move is in progress and none can start. (The database needs
+    no care: SQLite rolls back an unfinished transaction on the next open.)
+    """
+    file_ops.ARCHIVE_LOCK.acquire()
+    try:
+        sys.stderr.write("DataVault: een verzoek liep nog; de server stopt nu toch voor de herstart\n")
+        sys.stderr.flush()
+        sys.stdout.flush()
+    except Exception:
+        pass  # no (more) terminal: nothing to tell
+    exit(0)
+
+
 def _exit_soon(pid: int) -> None:
-    """Ask this process to stop (graceful first, forced if a stream keeps it alive)."""
-    threading.Timer(EXIT_DELAY, os.kill, args=(pid, signal.SIGTERM)).start()
-    force = threading.Timer(FORCE_EXIT_DELAY, os.kill, args=(pid, signal.SIGTERM))
-    force.daemon = True
-    force.start()
+    """
+    Ask this process to stop: gracefully first, then forced if a request keeps it alive.
+    The later stages are daemon timers, so they never delay an exit that already happens.
+    """
+    threading.Timer(EXIT_DELAY, _signal, args=(pid, signal.SIGTERM)).start()
+    for delay, action, args in ((FORCE_EXIT_DELAY, _signal, (pid, signal.SIGINT)),
+                                (HARD_EXIT_DELAY, _hard_exit, ())):
+        timer = threading.Timer(delay, action, args=args)
+        timer.daemon = True
+        timer.start()
 
 
 def schedule_restart(cwd: Optional[str] = None) -> dict:

@@ -245,3 +245,128 @@ def test_restart_survives_a_closed_terminal(config_file, tmp_path):
             os.close(master)
         except OSError:
             pass
+
+
+def test_forced_stages_use_sigint_then_a_hard_exit(monkeypatch):
+    """
+    R-2.1b-5: uvicorn ignores a second SIGTERM; only a second SIGINT forces it to stop
+    waiting. And a synchronous request keeps a non-daemon worker thread alive, so the
+    process must finally end itself.
+    """
+    import threading
+    events = []
+    done = threading.Event()
+    monkeypatch.setattr(restart, "EXIT_DELAY", 0.01)
+    monkeypatch.setattr(restart, "FORCE_EXIT_DELAY", 0.05)
+    monkeypatch.setattr(restart, "HARD_EXIT_DELAY", 0.1)
+    monkeypatch.setattr(restart, "_signal", lambda pid, sig: events.append((pid, sig)))
+    monkeypatch.setattr(restart, "_hard_exit", lambda: (events.append("hard"), done.set()))
+    restart._exit_soon(12345)
+    assert done.wait(5)
+    assert events == [(12345, signal.SIGTERM), (12345, signal.SIGINT), "hard"]
+
+
+def test_hard_exit_never_cuts_an_archive_move(monkeypatch):
+    """The last-resort exit waits until no archive move holds ARCHIVE_LOCK."""
+    import threading
+    from backend import file_ops
+    exits = []
+    in_move, finish_move = threading.Event(), threading.Event()
+
+    def fake_exit(code):
+        exits.append(code)
+        # The real exit keeps the lock (nothing may start a move any more); let the other tests have it
+        file_ops.ARCHIVE_LOCK.release()
+
+    def move():
+        with file_ops.ARCHIVE_LOCK:
+            in_move.set()
+            finish_move.wait(5)
+    mover = threading.Thread(target=move)
+    mover.start()
+    assert in_move.wait(5)
+    stopper = threading.Thread(target=restart._hard_exit, kwargs={"exit": fake_exit})
+    stopper.start()
+    time.sleep(0.3)
+    assert exits == []  # still waiting for the move
+    finish_move.set()
+    mover.join()
+    stopper.join(5)
+    assert exits == [0]
+
+
+SLOW_FACTORY = '''
+import time
+from backend import restart
+from backend.main import create_app as _create_app
+
+# Short stages, so the test does not wait the real 10 and 15 seconds
+restart.FORCE_EXIT_DELAY = {force}
+restart.HARD_EXIT_DELAY = {hard}
+
+
+def create_app():
+    app = _create_app()
+
+    def slow(sec: float = 120):
+        # stands in for a long synchronous request (timeline scan, largest-files walk, du)
+        time.sleep(sec)
+        return {{"slept": sec}}
+    app.add_api_route("/slow", slow, methods=["GET"])
+    app.router.routes.insert(0, app.router.routes.pop())  # before the static files mount
+    return app
+'''
+
+
+@pytest.mark.parametrize("force,hard", [(1.5, 60), (60, 3)], ids=["sigint", "hard-exit"])
+def test_restart_with_a_slow_request_still_comes_back(config_file, tmp_path, force, hard):
+    """
+    R-2.1b-5: a synchronous request that runs far longer than the restart must not block it.
+    Each forced stage on its own is enough: the SIGINT, and the hard exit behind it.
+    """
+    import threading
+    (tmp_path / "slowfactory.py").write_text(SLOW_FACTORY.format(force=force, hard=hard))
+    port = _free_port()
+    env = dict(os.environ, DATAVAULT_TESTING="1", DATAVAULT_CONFIG=str(config_file),
+               PYTHONPATH=os.pathsep.join([str(tmp_path), str(CODE_DIR)]),
+               DATAVAULT_LOG_FILE=str(tmp_path / "restarted.log"))
+    log = open(tmp_path / "server.log", "w")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "--factory", "slowfactory:create_app",
+         "--host", "127.0.0.1", "--port", str(port)],
+        cwd=str(CODE_DIR), env=env, stdout=log, stderr=subprocess.STDOUT,
+    )
+    base = f"http://127.0.0.1:{port}"
+    new_pid = None
+    try:
+        first = _wait_health(base)
+        def slow_request():
+            try:
+                httpx.get(f"{base}/slow", timeout=180)
+            except httpx.HTTPError:
+                pass  # cut off by the restart, as expected
+        threading.Thread(target=slow_request, daemon=True).start()
+        time.sleep(0.5)  # the request is now sleeping in a worker thread
+        token = httpx.get(f"{base}/api/session").json()["token"]
+        started = time.monotonic()
+        assert httpx.post(f"{base}/api/restart", headers={"X-DataVault-Token": token}).status_code == 200
+        proc.wait(timeout=20)
+        assert time.monotonic() - started < 15
+        second = _wait_health(base, timeout=30, not_instance=first["instance"])
+        new_pid = second["pid"]
+        assert new_pid != proc.pid
+        if hard < force:
+            assert "stopt nu toch voor de herstart" in (tmp_path / "server.log").read_text()
+    finally:
+        if proc.poll() is None:
+            proc.kill()  # our own test server
+            proc.wait(timeout=10)
+        if new_pid is None:
+            time.sleep(1)
+            try:
+                new_pid = httpx.get(f"{base}/api/health", timeout=2).json()["pid"]
+            except Exception:
+                pass
+        if new_pid and new_pid != proc.pid:
+            _stop(new_pid)
+        log.close()

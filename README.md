@@ -434,6 +434,12 @@ writes to that Terminal: output that went to a regular file (the DataVault app's
 `/tmp/datavault_server.log`) stays there, anything else (a tty, a pipe) goes to
 `~/Library/Logs/DataVault/server.log` (override with `DATAVAULT_LOG_FILE`; above 10 MB the old
 log moves to `server.log.1`).
+The old process stops with SIGTERM (uvicorn finishes open requests). If a request keeps it
+alive, a SIGINT after 10 s makes uvicorn stop waiting (uvicorn ignores a second SIGTERM), and
+after 15 s the process ends itself with `os._exit`, because a synchronous request (timeline scan,
+largest-files walk, `du`) runs in a non-daemon worker thread the interpreter would wait for. That
+last step first takes `ARCHIVE_LOCK`, so it never interrupts an archive move. The helper waits
+up to 5 minutes for the old PID.
 
 ## 📊 Database Design
 
