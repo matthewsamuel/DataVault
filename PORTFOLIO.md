@@ -191,18 +191,12 @@ frontend/
        results = []
        extensions = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
        
-       for root, dirs, files in os.walk(str(folder_path)):
-           # Skip excluded and hidden folders in-place (prevents recursion)
-           dirs[:] = [
-               d for d in dirs
-               if not d.startswith('.') and d not in EXCLUDED_FOLDER_NAMES
-           ]
+       # walk_archive: os.walk without the cache, TRASH, RAW_DUPLICATES, the app folder
+       # (matched by inode, not by name), hidden/'._' files and symlinks
+       for root, dirs, files in walk_archive(folder_path, config):
            dirs.sort()  # Deterministic order
            
            for filename in sorted(files):
-               if filename.startswith('.'):
-                   continue
-               
                file_path = Path(root) / filename
                if file_path.suffix.lower() not in extensions:
                    continue
@@ -931,42 +925,41 @@ progressPollInterval = setInterval(pollProgress, 1000);
 
 #### 3.5 Path Validation & Security Hardening
 
-**Security Risk:** Path traversal attacks (../../etc/passwd) could access files outside vault.
+**Security Risks:** Path traversal (`../../etc/passwd`, a symlink out of the vault), other
+websites driving the local API (wildcard CORS, DNS rebinding, "simple" cross-site POSTs) and the
+app serving or moving its own database.
 
-**Solution:** Explicit path validation before all file operations:
+**Solution:** one path check for every route, and a locked-down HTTP layer.
 
 ```python
-def validate_path_in_vault(path: Path, vault_root: Path) -> bool:
+def resolve_in_vault(user_path, config, allow_internal=False, folder=False) -> Path:
     """
-    Security-critical: Ensure path is inside vault.
-    Prevents directory traversal attacks.
+    Relative input is taken from the vault root; the on-disk (or NFC/NFD) spelling is used;
+    after resolving '..' and symlinks both the entry and its target must be inside VAULT_ROOT;
+    the cache, database and app folder are refused. 403 for anything outside, whether it
+    exists or not (no existence oracle).
     """
-    try:
-        abs_path = path.resolve()  # Resolve symlinks, .. components
-        abs_vault = vault_root.resolve()
-        
-        # is_relative_to: True only if path is under vault_root
-        return abs_path.is_relative_to(abs_vault)
-    except (ValueError, RuntimeError):
-        return False
 
-# Usage: before every file access
 @router.get("/api/file")
-def get_file(file_path: str):
-    path = Path(file_path)
-    
-    if not validate_path_in_vault(path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Now safe to access file
-    return FileResponse(path)
+def get_file_endpoint(path: str = Query(...)):
+    file_path = resolve_in_vault(path, config)   # 403 before any existence check
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path=str(file_path))
 ```
 
+HTTP layer: no CORS middleware (the frontend is same-origin), `TrustedHostMiddleware` for
+127.0.0.1/localhost, and a per-process token (`GET /api/session`) that a pure ASGI middleware
+requires in `X-DataVault-Token` on every non-GET/HEAD/OPTIONS request. `frontend/api.js` wraps
+`fetch` to add it and refreshes it once after a server restart.
+
 **Key Security Properties:**
-- Resolves all symlinks before comparison
-- Handles both absolute and relative path inputs
-- Raises exceptions explicitly rather than returning false
-- No string-based path manipulation (uses pathlib)
+- Symlinks are resolved for the containment check, but a file's own name is kept, so a route
+  can still refuse to move a symlink instead of acting on its target
+- Handles both absolute and relative path inputs, and NFC/NFD-encoded names
+- Same 403 for outside paths that exist and that do not
+- Walks over the archive share one exclusion rule (`walk_archive`), by inode instead of by name
+- Cross-site requests cannot change anything: no token, no write
 
 ---
 

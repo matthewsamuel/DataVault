@@ -11,6 +11,18 @@ cd /Volumes/T7/datavault_dashboard_dev/code
 start de server opnieuw met `venv/bin/python` en opent de browser uit `config.json`
 (`"browser"`, standaard Safari).
 
+## Herstarten vanuit de app
+
+Klik op het **DataVault**-logo linksboven en bevestig. Alleen deze server wordt herstart:
+een hulpproces wacht tot de server gestopt is en start hem daarna opnieuw met dezelfde Python,
+dezelfde argumenten (ook de poort), dezelfde werkmap en dezelfde omgevingsvariabelen. Er wordt
+niets op poort 8000 (of elders) afgeschoten. De pagina wacht tot de nieuwe server antwoordt en
+toont na 30 seconden een melding als hij niet terugkomt; start hem dan met `./start.sh`.
+Draait de server met `uvicorn --reload`, dan weigert de app te herstarten (de reloader doet dat
+al bij elke wijziging).
+
+Na een herstart heeft de server een nieuw sessietoken; de pagina haalt dat zelf op.
+
 ## Alleen stoppen
 
 ```bash

@@ -55,7 +55,7 @@ DataVault Dashboard is a full-featured web application for organizing, analyzing
 - **Background Prefetch** — Smart multi-stage prefetching (Spotify all-time → shows → per-year data) with promise-based caching
 - **Progress Tracking** — Long-running scans (duplicates, timeline) show real-time progress with cancellation support
 - **Graceful Error Handling** — Corrupt files skipped silently, cross-device moves detected, partial failures reported with details
-- **Security Hardening** — Path validation prevents directory traversal; vault boundary enforcement; safe file operations
+- **Security Hardening** — No CORS, trusted hosts only (127.0.0.1/localhost), a per-process session token on every state-changing request, one central path check (`resolve_in_vault`) and one exclusion rule for every walk over the archive
 
 ---
 
@@ -65,8 +65,11 @@ DataVault Dashboard is a full-featured web application for organizing, analyzing
 
 ```
 backend/
-├── main.py                    # FastAPI initialization, route registration, server restart
-├── config.py                  # Configuration loader, path validation, media type definitions
+├── main.py                    # FastAPI initialization, middleware, route registration, health/restart
+├── security.py                # Trusted hosts, session token (GET /api/session) and its middleware
+├── paths.py                   # resolve_in_vault() for request paths; ArchiveFilter/walk_archive() exclusions
+├── restart.py                 # Restart of this server process only (helper waits for the PID to exit)
+├── config.py                  # Configuration loader, media type definitions
 ├── database.py                # SQLite abstraction (caching, ratings, decisions, undo tracking)
 ├── scanner.py                 # File discovery, xxHash3 hashing, per-folder duplicate detection
 ├── file_ops.py                # Safe atomic file operations with metadata preservation
@@ -389,19 +392,42 @@ move_no_overwrite(trash_file, original, rename_on_conflict=False)  # undo: 409 i
 
 **Enables:** Undo for duplicates, keurer decisions, file moves
 
-### 6. Path Validation & Security Hardening
+### 6. HTTP Security, Path Validation & Exclusions
 
-**Pattern:** Validate ALL paths before access; reject directory traversal attempts.
+**HTTP layer** (`backend/security.py`): the frontend is served same-origin, so there is no CORS
+middleware at all; no other website can read an API response. `TrustedHostMiddleware` only
+answers `Host: 127.0.0.1` or `localhost` (DNS rebinding gets 400). Every request with a method
+other than GET/HEAD/OPTIONS must carry `X-DataVault-Token`, a secret generated per server
+process and served by `GET /api/session` (cross-site `Sec-Fetch-Site` is refused).
+`frontend/api.js`, loaded before every other script, wraps `fetch`: it adds the token to
+same-origin writes and, after a server restart (403 with `X-DataVault-Auth: token`), fetches the
+new token and retries once. GET endpoints have no side effects except `/api/thumb`, which fills
+the app's own thumbnail cache.
+
+**Paths** (`backend/paths.py`): every route that takes a path or folder calls
+`resolve_in_vault(user_path, config)`. Relative input is taken from the vault root; the on-disk
+spelling wins, else the NFC/NFD form; after resolving `..` and symlinks both the entry and its
+target must lie inside `VAULT_ROOT`; the cache, the database and (if it lives in the vault) the
+app folder are refused. Outside paths always get the same 403, checked before any existence
+test, so the answer reveals nothing about the disk outside the vault. A file keeps its last
+component unresolved (so a route can still refuse a symlink); a folder (`folder=True`) is fully
+resolved, so stored paths use one spelling.
 
 ```python
-def validate_path_in_vault(path: Path, vault_root: Path) -> bool:
-    """Prevent ../../../etc/passwd attacks"""
-    abs_path = path.resolve()  # Resolve symlinks
-    abs_vault = vault_root.resolve()
-    return abs_path.is_relative_to(abs_vault)
+folder_path = resolve_in_vault(folder, config, folder=True)   # 400 non-string, 403 outside/internal
+if not folder_path.is_dir():
+    raise HTTPException(status_code=404, detail="Folder not found")
 ```
 
----
+**Exclusions**: every walk over the archive (folder tree, viewer, timeline, stats, Shows,
+duplicates scan, Keurer, chat context, Spotify files) uses `ArchiveFilter` / `walk_archive()`,
+a drop-in for `os.walk`. It skips the cache, TRASH, RAW_DUPLICATES and the app folder by device +
+inode (not by name, so a user folder called `dashboard` stays visible), hidden files, `._`
+AppleDouble files and symlinks.
+
+**Restart** (`backend/restart.py`): `POST /api/restart` restarts only the process that received
+it. A helper in its own session waits for this PID to exit, then execs the same interpreter with
+the same arguments, working directory and environment. Nothing is killed by port.
 
 ## 📊 Database Design
 
@@ -502,7 +528,7 @@ CREATE TABLE show_settings (
 - **SQLite3** — Local database, schema management
 - **xxHash3** — Fast hashing (10x vs. SHA-256)
 - **Ollama** — Local LLM integration
-- **CORS Middleware** — Cross-origin handling for local development
+- **TrustedHostMiddleware + session token** — Local-only HTTP layer (no CORS)
 - **StaticFiles** — Frontend serving via FastAPI
 
 ### Design Patterns & Concepts
