@@ -73,3 +73,28 @@ def test_name_search_ignores_case_and_unicode_form(client, vault):
     (folder / "café notities.txt").write_text("x")
     photos = client.get("/api/stats/search-photos", params={"query": "notities"}).json()["photos"]
     assert photos == []
+
+
+def test_web_pages_and_svgs_from_the_archive_are_downloads_never_pages(client, vault):
+    """R25-8: a saved page in the archive must never run on the app's own origin."""
+    page = vault / "RAW/misc/saved page.html"
+    page.write_text("<script>fetch('/api/session')</script>")
+    svg = vault / "RAW/misc/pic.svg"
+    svg.write_text('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+    pdf = vault / "RAW/misc/brief.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    for f in (page, svg, pdf, vault / "RAW/misc/notes.txt"):
+        r = client.get("/api/file", params={"path": str(f)})
+        assert r.status_code == 200, f
+        assert r.headers["content-type"] == "application/octet-stream", f
+        assert r.headers["content-disposition"].startswith("attachment"), f
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["content-security-policy"] == "sandbox"
+    # Photos, videos and audio stay inline with their real type, and can still be streamed
+    r = client.get("/api/file", params={"path": str(vault / STRAND)})
+    assert r.headers["content-type"] == "image/jpeg" and "content-disposition" not in r.headers
+    assert r.headers["x-content-type-options"] == "nosniff"
+    song = next((vault / "RAW/audio").iterdir())
+    r = client.get("/api/file", params={"path": str(song)}, headers={"Range": "bytes=0-9"})
+    assert r.status_code == 206 and len(r.content) == 10
+    assert r.headers["content-type"].startswith("audio/") and "content-disposition" not in r.headers

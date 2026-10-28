@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pathlib import Path
 from typing import Dict, Any
 
-from backend.config import Config, content_type, is_video
+from backend.config import Config, content_type, is_video, media_type
 from backend.paths import resolve_in_vault, ArchiveFilter
 from backend.file_ops import (
     move_no_overwrite, same_folder, ARCHIVE_LOCK,
@@ -53,9 +53,23 @@ def get_media_endpoint(folder: str = Query(...)) -> Dict[str, Any]:
         "files": media_files
     }
 
+# Types a browser runs as a page (scripts included) even when they come from an <img>
+# URL opened on its own: never shown inline from the archive
+ACTIVE_CONTENT_TYPES = {'text/html', 'application/xhtml+xml', 'image/svg+xml', 'text/xml', 'application/xml'}
+
+
 @router.get("/api/file")
 def get_file_endpoint(path: str = Query(...)):
-    """Stream full media file (never the app's own cache or database)"""
+    """
+    Stream a file from the archive (never the app's own cache or database).
+
+    Photos, videos and audio are served inline with their real content type, so the
+    browser can show and stream them; a RAW photo is never text/plain (see
+    config.content_type). Anything else (a saved web page, an SVG, a PDF, ...) is a
+    download (application/octet-stream, attachment): a page from the archive must never
+    run on the app's own origin, where /api/session hands out the session token (R25-8).
+    nosniff and a sandbox policy keep the browser from guessing its way around that.
+    """
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
@@ -64,9 +78,12 @@ def get_file_endpoint(path: str = Query(...)):
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     
-    # The real content type, so browsers can stream it natively; a RAW photo or an
-    # unknown file is never served as text/plain (see config.content_type)
-    return FileResponse(path=str(file_path), media_type=content_type(file_path))
+    headers = {"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox"}
+    kind = content_type(file_path)
+    if media_type(file_path) == 'other' or kind in ACTIVE_CONTENT_TYPES:
+        return FileResponse(path=str(file_path), media_type='application/octet-stream', headers=headers,
+                            filename=file_path.name, content_disposition_type='attachment')
+    return FileResponse(path=str(file_path), media_type=kind, headers=headers)
 
 @router.get("/api/thumb")
 def get_thumbnail_endpoint(path: str = Query(...)):

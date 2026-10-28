@@ -43,6 +43,11 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
     De pagina doet dat automatisch (nieuw bestand `api.js`); na een herstart van de server
     haalt hij vanzelf de nieuwe sleutel op.
 
+- Een opgeslagen webpagina (.html) of SVG-afbeelding uit het archief opent niet meer als pagina
+  in de app, maar wordt gedownload. Zo'n pagina kon anders scripts uitvoeren met de rechten van
+  de app. Hetzelfde geldt voor andere bestanden die geen foto, video of muziek zijn (pdf, tekst,
+  ...). Foto's, video's en muziek worden gewoon getoond en afgespeeld zoals voorheen.
+
 - Eén centrale padcontrole voor elk onderdeel dat een pad of map ontvangt (viewer, miniaturen,
   Keurer, duplicaten, Shows, tijdlijn, opslagoverzicht, "op deze dag"). Een pad moet, na het
   oplossen van `..` en snelkoppelingen (symlinks), binnen het archief liggen. Voorheen kon het

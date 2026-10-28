@@ -472,6 +472,11 @@ process and served by `GET /api/session` (cross-site `Sec-Fetch-Site` is refused
 same-origin writes and, after a server restart (403 with `X-DataVault-Auth: token`), fetches the
 new token and retries once. GET endpoints have no side effects except `/api/thumb`, which fills
 the app's own thumbnail cache.
+`GET /api/file` serves only photos, videos and audio inline (with their real content type);
+anything else, and HTML, XHTML, SVG or XML in any case, is sent as `application/octet-stream`
+with `Content-Disposition: attachment`, so a saved web page in the archive can never run on the
+app's origin (where `/api/session` hands out the token). Every `/api/file` answer also carries
+`X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`.
 
 **Paths** (`backend/paths.py`): every route that takes a path or folder calls
 `resolve_in_vault(user_path, config)`. Relative input is taken from the vault root; the on-disk
