@@ -160,7 +160,8 @@ UI Update (render, toast notification)
 - **Which copy stays:** every rule first prefers a copy that is not hidden (dot name or the Finder
   'hidden' flag) and ends with the path in alphabetical order, so the result is fully deterministic.
   `oldest` (default): oldest capture date, then oldest file date, then shortest path. `newest`: the reverse
-  dates. `shortest`: shortest path, then oldest. `folder`: a copy inside `prefer_folder`, then oldest.
+  dates. `shortest`: shortest path, then oldest. `folder`: a copy anywhere below `prefer_folder`, then oldest
+  (the UI offers every folder holding a copy plus its parent folders up to the scanned folder).
   Identical bytes mean identical EXIF, so within a group the file date tells the copies apart.
   The UI (`keepSortKey` in duplicates.js) uses the same keys, so switching rules is instant, and the user can
   pick another copy per group.
@@ -175,7 +176,8 @@ UI Update (render, toast notification)
 - **Verified Removal** (`POST /api/duplicates/move`, body `{groups: [{keep, move: [...]}], run_id?, folder?}`):
   for every file, right before moving and under `ARCHIVE_LOCK`, the server checks that it is a regular file
   outside RAW_DUPLICATES/TRASH/cache, that `keep` still exists inside the vault, and that both are
-  **byte-for-byte identical** (`file_ops.files_identical`, no cached hash). Only then is the file moved to
+  **byte-for-byte identical** (`file_ops.files_identical`, no cached hash), and that `keep` is not hidden
+  (dot name below the vault root or UF_HIDDEN) while the file to move is visible. Only then is the file moved to
   RAW_DUPLICATES with its folder structure, via `move_no_overwrite`. Refusals are listed per file in `failed`.
   So the last copy of a photo can never be moved away, even if the folder changed since the scan.
   `POST /api/duplicates/delete_single` does the same for one file.
@@ -186,6 +188,8 @@ UI Update (render, toast notification)
   `POST /api/raw_duplicates/undo_last` restores the newest run that still has a file in RAW_DUPLICATES.
   A file that took the original place is never overwritten: the restored file then gets
   `name_RESTORED_001.ext`. Only restored files are forgotten; the rest stays recorded for a later attempt.
+  The database lives on the vault disk: while it is unplugged, every database error answers 503
+  "Archief niet bereikbaar (schijf losgekoppeld?)" (app-wide handler in `main.py`) instead of a 500.
 
 **Code Example:**
 ```python

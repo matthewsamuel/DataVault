@@ -982,13 +982,17 @@ CREATE UNIQUE INDEX idx_keurer_keep_path_folder ON keurer_decisions(path, folder
 CREATE INDEX idx_keurer_folder ON keurer_decisions(folder);
 CREATE INDEX idx_keurer_date ON keurer_decisions(decided_at);
 
--- Hash cache: avoid re-hashing unchanged files
+-- Hash cache: avoid re-hashing unchanged files (migration 6)
 CREATE TABLE file_hashes (
     path TEXT PRIMARY KEY,
     size INTEGER NOT NULL,
     mtime REAL NOT NULL,
-    sha256 TEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    hash TEXT NOT NULL,      -- was 'sha256'; holds the algo's hex digest
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    algo TEXT,               -- 'xxh3_128'; NULL = unknown, never used
+    ino INTEGER,             -- the hash is only trusted while ino, size,
+    mtime_ns INTEGER,        -- mtime_ns and ctime_ns are unchanged
+    ctime_ns INTEGER
 )
 
 -- File ratings: ELO-style scores for weighted sampling
@@ -999,11 +1003,14 @@ CREATE TABLE file_ratings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 
--- Undo tracking: record of file moves for reversals
+-- Undo tracking: one run per duplicates cleanup action (migration 7)
 CREATE TABLE delete_runs (
-    run_id TEXT PRIMARY KEY,
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,  -- order of runs; never clock time
+    run_id TEXT NOT NULL UNIQUE,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    total_files INTEGER DEFAULT 0
+    total_files INTEGER DEFAULT 0,
+    created_at REAL,                        -- UTC epoch seconds, for display
+    folder TEXT                             -- the folder that was cleaned up
 )
 
 CREATE TABLE delete_operations (
@@ -1014,6 +1021,7 @@ CREATE TABLE delete_operations (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (run_id) REFERENCES delete_runs(run_id)
 )
+CREATE INDEX idx_delops_run ON delete_operations(run_id);
 
 -- Folder visibility settings
 CREATE TABLE show_settings (
