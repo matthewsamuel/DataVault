@@ -552,6 +552,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                                "document.getElementById('spotify-year-select').options.length - 1"))), 1.5)
             step("timeline again", lambda: page.click(".nav-tab[data-view='timeline']"), 1.0)
 
+            # The job dock floats over the page: the page keeps that much room free at the bottom
+            dock = page.evaluate("""(() => { const d = document.getElementById('job-dock');
+                return [d.hidden ? 0 : Math.round(d.getBoundingClientRect().height),
+                        parseFloat(getComputedStyle(document.querySelector('.main-content')).paddingBottom)]; })()""")
+            expect(dock[1] >= dock[0], f"job dock: {dock[0]} px high, but only {dock[1]} px kept free under the page")
+
             # Library (media index): the app indexed the vault by itself; the dock shows it,
             # and 'Bibliotheek bijwerken' starts a full pass from the keyboard
             step("library: line after the automatic pass", lambda: page.wait_for_function(

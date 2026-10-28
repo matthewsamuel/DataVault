@@ -343,9 +343,34 @@ function createLibraryLine() {
         button);
 }
 
+// Het paneel zweeft rechtsonder over de pagina. Zoveel ruimte (paneel + marge) houdt de pagina
+// onderaan vrij (--job-dock-space, zie .main-content), zodat het laatste stuk inhoud onder het
+// paneel vandaan kan scrollen.
+let jobDockObserver = null;
+
+function jobDockReserveSpace() {
+    const dock = document.getElementById('job-dock');
+    if (!dock) return;
+    const update = () => {
+        const height = dock.hidden ? 0 : dock.getBoundingClientRect().height;
+        // paneel + zijn afstand tot de onderrand + nog eens die afstand als lucht erboven
+        const gap = parseFloat(getComputedStyle(dock).bottom) || 0;
+        document.documentElement.style.setProperty('--job-dock-space', height ? `${Math.ceil(height + 2 * gap)}px` : '0px');
+    };
+    if (!jobDockObserver && typeof ResizeObserver === 'function') {
+        jobDockObserver = new ResizeObserver(update);
+        jobDockObserver.observe(dock);
+    }
+    update();
+}
+
 function renderJobDock() {
     const dock = document.getElementById('job-dock');
     if (!dock) return;
+    try { renderJobDockContent(dock); } finally { jobDockReserveSpace(); }
+}
+
+function renderJobDockContent(dock) {
     const visible = jobDock.jobs.filter(jobVisible);
     const active = visible.filter(j => JOB_ACTIVE.has(j.status)).length;
     const library = createLibraryLine();

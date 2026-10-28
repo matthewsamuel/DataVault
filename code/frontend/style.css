@@ -2257,6 +2257,8 @@ button.nav-brand {
     /* Changed from hidden to allow child scrolling */
     background-color: var(--surface-page);
     min-width: 0;
+    /* Onderaan vrij voor het takenpaneel rechtsonder (hoogte gezet door jobs.js) */
+    padding-bottom: var(--job-dock-space, 0px);
 }
 
 #section-viewer.active {
