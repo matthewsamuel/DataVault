@@ -293,6 +293,71 @@ def _m010_app_settings(conn: sqlite3.Connection):
     """)
 
 
+def _m011_media_index(conn: sqlite3.Connection):
+    """
+    The media index (backend/media_index.py): one row per photo, video and audio file
+    in the vault with what later features filter and sort on (capture date, size,
+    dimensions, camera, GPS, duration), so they query SQLite instead of walking the
+    disk. media_folders remembers the mtime of every folder at its last listing: an
+    incremental pass only lists folders whose mtime changed.
+
+    id is stable for as long as the file is known (a move, in the app or in Finder,
+    keeps the row and its id), so later features (perceptual hashes, CLIP embeddings)
+    can key their own tables on media.id. missing = 1 marks a file that was not there
+    at the last listing of its folder; such rows are hidden and removed at the end of
+    the pass, once a move elsewhere had its chance to claim them.
+
+    media_dates (migration 9) stays as it is: the walks that run while the index is
+    not there yet keep using it. Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL UNIQUE,
+            folder TEXT NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ext TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            inode INTEGER,
+            birthtime REAL,
+            taken REAL,
+            taken_source TEXT,
+            width INTEGER,
+            height INTEGER,
+            orientation INTEGER,
+            camera_make TEXT,
+            camera_model TEXT,
+            lens TEXT,
+            lat REAL,
+            lon REAL,
+            altitude REAL,
+            duration REAL,
+            meta_status TEXT,
+            added_at REAL NOT NULL,
+            indexed_at REAL NOT NULL,
+            seen_at REAL NOT NULL,
+            missing INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_taken ON media(taken)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_folder ON media(folder)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_latlon ON media(lat, lon) WHERE lat IS NOT NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_camera ON media(camera_make, camera_model)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_inode ON media(inode)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_missing ON media(missing) WHERE missing = 1")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media_folders (
+            path TEXT PRIMARY KEY,
+            parent TEXT,
+            mtime_ns INTEGER NOT NULL,
+            last_scanned REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_folders_parent ON media_folders(parent)")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -305,6 +370,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (8, "background_jobs", _m008_background_jobs),
     (9, "media_dates", _m009_media_dates),
     (10, "app_settings", _m010_app_settings),
+    (11, "media_index", _m011_media_index),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
