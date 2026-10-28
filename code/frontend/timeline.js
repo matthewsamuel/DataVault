@@ -192,12 +192,12 @@
 
         tlSelectedFolders.forEach(path => {
             const name = path.split('/').pop();
-            const chip = document.createElement('div');
-            chip.className = 'tl-folder-chip';
-            chip.innerHTML = `
-                <span class="tl-chip-name">${name}</span>
-                <button class="tl-chip-remove" onclick="event.stopPropagation(); timelineRemoveFolder('${path.replace(/'/g, "\\'")}')">×</button>
-            `;
+            const chip = createEl('div', { class: 'tl-folder-chip' },
+                createEl('span', { class: 'tl-chip-name', text: name }),
+                createEl('button', {
+                    class: 'tl-chip-remove',
+                    onClick: (e) => { e.stopPropagation(); timelineRemoveFolder(path); },
+                }, '×'));
             container.appendChild(chip);
         });
     }
@@ -267,7 +267,7 @@
                 const range = years.length > 1
                     ? `${years[0]} – ${years[years.length - 1]}`
                     : years[0] || '';
-                infoBar.innerHTML = `
+                infoBar.innerHTML = html`
                     <span class="tl-info-count"><i class="fas fa-images"></i> ${tlFiles.length.toLocaleString()} photos</span>
                     <span class="tl-info-range"><i class="fas fa-calendar-alt"></i> ${range}</span>
                 `;
@@ -557,17 +557,13 @@
         if (title) title.textContent = file.name;
 
         // Create appropriate media element
-        let mediaHTML = '';
-        if (file.type === 'video') {
-            mediaHTML = `<video src="${API_BASE}/api/file?path=${encodeURIComponent(file.path)}" controls autoplay class="modal-media" style="max-width:100%;max-height:70vh;"></video>`;
-        } else {
-            mediaHTML = `<img src="${API_BASE}/api/file?path=${encodeURIComponent(file.path)}" class="modal-media" style="max-width:100%;max-height:70vh;object-fit:contain;">`;
-        }
+        const media = file.type === 'video'
+            ? createEl('video', { src: vaultFileUrl('file', file.path), controls: true, autoplay: true, class: 'modal-media', style: 'max-width:100%;max-height:70vh;' })
+            : createEl('img', { src: vaultFileUrl('file', file.path), class: 'modal-media', style: 'max-width:100%;max-height:70vh;object-fit:contain;' });
 
         // Keep nav zones
         const navZones = body.querySelectorAll('.modal-nav-zone');
-        body.innerHTML = mediaHTML;
-        navZones.forEach(z => body.appendChild(z));
+        body.replaceChildren(media, ...navZones);
 
         // Setup timeline-specific navigation
         const leftZone = body.querySelector('.modal-nav-zone.left');
@@ -588,7 +584,7 @@
         if (metadata) {
             const dt = new Date(file.timestamp * 1000);
             const sizeStr = formatSize(file.size);
-            metadata.innerHTML = `
+            metadata.innerHTML = html`
                 <div class="modal-metadata-grid">
                     <div class="metadata-item"><strong>Date</strong><span>${dt.toLocaleString()}</span></div>
                     <div class="metadata-item"><strong>Size</strong><span>${sizeStr}</span></div>
@@ -796,7 +792,7 @@
 
         if (contentEl) {
             contentEl.style.height = 'auto';
-            contentEl.innerHTML = `
+            contentEl.innerHTML = html`
                 <div class="tl-empty-state">
                     <div class="tl-empty-icon">📷</div>
                     <h3>${message || 'Select folders to explore your photo timeline'}</h3>

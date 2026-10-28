@@ -44,10 +44,10 @@ function keurerInit() {
         console.error('keurerInit fout:', e);
         const cardArea = document.getElementById('keurer-card-area');
         if (cardArea) {
-            cardArea.innerHTML = `<div class="keurer-state-card">
+            cardArea.innerHTML = html`<div class="keurer-state-card">
                 <span style="font-size:3rem">⚠️</span>
                 <h3>Initialisatie mislukt</h3>
-                <p style="color:var(--danger)">${keurerEsc(e.message)}</p>
+                <p style="color:var(--danger)">${e.message}</p>
             </div>`;
         }
     }
@@ -124,7 +124,7 @@ function keurerRenderStats() {
     const streakCls = keurerStats.streak > 0 ? 'streak-active' : '';
     const goalCls = keurerStats.goal_reached_today ? 'goal-reached' : '';
 
-    el.innerHTML = `
+    el.innerHTML = html`
         <div class="keurer-stat ${streakCls}" title="${keurerStats.streak} opeenvolgende dag(en) met ${keurerStats.goal}+ beoordelingen">
             <span class="keurer-stat-icon">${streakIcon}</span>
             <span class="keurer-stat-value">${keurerStats.streak}</span>
@@ -195,11 +195,11 @@ async function keurerLoadFiles() {
             keurerShowCard();
         }
     } catch (e) {
-        cardArea.innerHTML = `
+        cardArea.innerHTML = html`
             <div class="keurer-state-card">
                 <span style="font-size: 3rem;">⚠️</span>
                 <h3>Laden mislukt</h3>
-                <p>${keurerEsc(e.message)}</p>
+                <p>${e.message}</p>
                 <button class="btn btn-secondary" onclick="keurerLoadFiles()">Opnieuw proberen</button>
             </div>`;
     }
@@ -229,7 +229,7 @@ function keurerShowDone(decidedCount) {
     const btnArea  = document.getElementById('keurer-action-buttons');
     if (btnArea) btnArea.style.display = 'none';
 
-    cardArea.innerHTML = `
+    cardArea.innerHTML = html`
         <div class="keurer-state-card">
             <span style="font-size: 4rem;">✅</span>
             <h3>Map volledig beoordeeld!</h3>
@@ -260,7 +260,7 @@ function keurerShowCard() {
     const fileUrl  = `${API_BASE}/api/file?path=${encodeURIComponent(file.path)}`;
 
     const mediaHtml = file.is_video
-        ? `<video
+        ? html`<video
                 class="keurer-card-img"
                 id="kc-video"
                 src="${fileUrl}"
@@ -268,17 +268,17 @@ function keurerShowCard() {
                 draggable="false"
                 onerror="keurerHandleThumbError(this)"
            ></video>`
-        : `<img
+        : html`<img
                 class="keurer-card-img"
                 src="${thumbUrl}"
-                alt="${keurerEsc(file.name)}"
+                alt="${file.name}"
                 draggable="false"
                 onerror="keurerHandleThumbError(this)"
            >`;
 
     const undoAvail = keurerHistory.length > 0;
 
-    cardArea.innerHTML = `
+    cardArea.innerHTML = html`
         <div class="keurer-card-wrapper">
             <div class="keurer-card" id="keurer-card">
 
@@ -299,13 +299,13 @@ function keurerShowCard() {
                 ${mediaHtml}
                 <div class="keurer-card-fallback" id="kc-fallback" style="display:none;">
                     <i class="fas fa-${file.is_video ? 'video' : 'image'}" style="font-size:3rem;color:var(--text-secondary);"></i>
-                    <span style="color:var(--text-secondary);margin-top:12px;font-size:0.85rem;text-align:center;padding:0 16px;">${keurerEsc(file.name)}</span>
+                    <span style="color:var(--text-secondary);margin-top:12px;font-size:0.85rem;text-align:center;padding:0 16px;">${file.name}</span>
                 </div>
 
                 <div class="keurer-card-footer">
-                    <span class="keurer-card-name" title="${keurerEsc(file.name)}">${keurerEsc(file.name)}</span>
+                    <span class="keurer-card-name" title="${file.name}">${file.name}</span>
                     <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-                        ${undoAvail ? `<span class="keurer-undo-hint" title="Ongedaan maken (↓ pijl)"><i class="fas fa-undo"></i></span>` : ''}
+                        ${undoAvail ? html`<span class="keurer-undo-hint" title="Ongedaan maken (↓ pijl)"><i class="fas fa-undo"></i></span>` : ''}
                         <span class="keurer-card-progress">${keurerIndex + 1} / ${keurerFileQueue.length}</span>
                     </div>
                 </div>
@@ -603,7 +603,7 @@ function keurerFilterMoveTree(query) {
 
             const nameEl = document.createElement('span');
             nameEl.className = 'folder-name';
-            nameEl.innerHTML = keurerHighlight(f.name, q);
+            setHTML(nameEl, keurerHighlight(f.name, q));
             item.appendChild(nameEl);
 
             // Volledig pad als subtekst
@@ -636,12 +636,8 @@ function keurerClearMoveSearch() {
 function keurerHighlight(name, query) {
     // Markeer de eerste match (case-insensitief) vet
     const idx = name.toLowerCase().indexOf(query.toLowerCase());
-    if (idx === -1) return keurerEsc(name);
-    return (
-        keurerEsc(name.slice(0, idx)) +
-        '<mark class="keurer-hl">' + keurerEsc(name.slice(idx, idx + query.length)) + '</mark>' +
-        keurerEsc(name.slice(idx + query.length))
-    );
+    if (idx === -1) return html`${name}`;
+    return html`${name.slice(0, idx)}<mark class="keurer-hl">${name.slice(idx, idx + query.length)}</mark>${name.slice(idx + query.length)}`;
 }
 
 // ==================== KEYBOARD NAV IN MODAL ====================
@@ -858,7 +854,7 @@ function keurerOpenPreview() {
 
     let mediaHtml;
     if (file.is_video) {
-        mediaHtml = `<video
+        mediaHtml = html`<video
             src="${fileUrl}"
             class="keurer-preview-media"
             controls
@@ -866,16 +862,16 @@ function keurerOpenPreview() {
             playsinline
         ></video>`;
     } else {
-        mediaHtml = `<img
+        mediaHtml = html`<img
             src="${fileUrl}"
             class="keurer-preview-media"
-            alt="${keurerEsc(file.name)}"
+            alt="${file.name}"
             draggable="false"
         >`;
     }
 
     const overlay = document.getElementById('keurer-preview-overlay');
-    document.getElementById('keurer-preview-content').innerHTML = mediaHtml;
+    setHTML(document.getElementById('keurer-preview-content'), mediaHtml);
     document.getElementById('keurer-preview-filename').textContent = file.name;
     overlay.classList.add('active');
     keurerPreviewOpen = true;
@@ -1122,11 +1118,3 @@ function keurerShortenPath(p) {
     return `.../${parts.slice(-2).join('/')}`;
 }
 
-function keurerEsc(str) {
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}

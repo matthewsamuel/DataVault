@@ -254,8 +254,8 @@ function renderShows(data) {
         const cover = featured.files[0];
         hero.onclick = () => startShow(featured);
 
-        hero.innerHTML = `
-            <img src="${API_BASE}/api/thumb?path=${encodeURIComponent(cover.path)}" class="shows-hero-img">
+        hero.innerHTML = html`
+            <img src="${vaultFileUrl('thumb', cover.path)}" class="shows-hero-img">
             <div class="shows-hero-content">
                 <span class="shows-hero-tag">Featured</span>
                 <h2 class="shows-hero-title">${featured.title}</h2>
@@ -289,13 +289,13 @@ function renderShows(data) {
 
             let thumbUrl = '';
             if (show.preview) {
-                thumbUrl = `${API_BASE}/api/thumb?path=${encodeURIComponent(show.preview.path)}`;
+                thumbUrl = vaultFileUrl('thumb', show.preview.path);
             }
 
             // Full thumbnail with transparent overlay + text shadow for readability
-            card.innerHTML = `
+            card.innerHTML = html`
                 <div class="show-card-image-wrapper" style="position: relative; height: 180px; overflow: hidden; border-radius: 12px;">
-                     ${thumbUrl ? `<img src="${thumbUrl}" class="show-card-thumb" style="width: 100%; height: 100%; object-fit: cover;">` : '<div class="no-thumb" style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;background:var(--bg-tertiary);">📁</div>'}
+                     ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" style="width: 100%; height: 100%; object-fit: cover;">` : html`<div class="no-thumb" style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;background:var(--bg-tertiary);">📁</div>`}
                     <div style="position:absolute;bottom:0;left:0;right:0;padding:10px 12px;background:linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 100%);">
                         <h4 style="margin:0;font-size:14px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.8),0 0 8px rgba(0,0,0,0.5);">${show.title}</h4>
                         <span style="font-size:11px;color:rgba(255,255,255,0.75);text-shadow:0 1px 3px rgba(0,0,0,0.8);">Folder</span>
@@ -753,17 +753,17 @@ function openMediaModal(index) {
     }
 
     // Metadata
-    modalMetadata.innerHTML = `
+    modalMetadata.innerHTML = html`
         <div class="metadata-grid">
             <span class="metadata-label">Path:</span>
             <span class="metadata-value">
                 ${file.path}
-                <button class="copy-btn" onclick="copyToClipboard('${file.path.replace(/'/g, "\\'")}')">Copy</button>
+                <button class="copy-btn">Copy</button>
             </span>
             <span class="metadata-label">Size:</span>
             <span class="metadata-value">${formatBytes(file.size)}</span>
             <span class="metadata-label">Modified:</span>
-            <span class="metadata-value">${new Date(file.modified).toLocaleString()}</span>
+            <span class="metadata-value">${new Date(file.modified * 1000).toLocaleString()}</span>
             <span class="metadata-label">Type:</span>
             <span class="metadata-value">${file.type}</span>
             <span class="metadata-label" style="color: var(--primary);">ELO Rating:</span>
@@ -772,6 +772,7 @@ function openMediaModal(index) {
             </span>
         </div>
     `;
+    modalMetadata.querySelector('.copy-btn').addEventListener('click', () => copyToClipboard(file.path));
 
     modal.classList.add('active');
 }
@@ -861,7 +862,7 @@ function renderAudioPlayer(file, container) {
     const variant = Math.abs(hash) % 15 + 1;
     const coverSrc = `assets/audio_thumbs/audio_thumb_var${variant}.png`;
 
-    cover.innerHTML = `<img src="${coverSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 20px;">`;
+    cover.innerHTML = html`<img src="${coverSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 20px;">`;
 
     // Track Info
     const info = document.createElement('div');
@@ -1031,7 +1032,7 @@ function openMoveFileModal(fileData = null) {
     // Show thumbnail preview
     const previewEl = document.getElementById('move-file-preview');
     if (previewEl) {
-        previewEl.innerHTML = `<img src="${API_BASE}/api/thumb?path=${encodeURIComponent(fileToMove.path)}" alt="Preview" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">`;
+        previewEl.innerHTML = html`<img src="${vaultFileUrl('thumb', fileToMove.path)}" alt="Preview" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">`;
     }
 
     renderMoveFolderTreeUI();
@@ -1079,7 +1080,7 @@ function renderMoveFolderTreeUI() {
         indentBase: 0,
         iconMode: 'fontawesome',
         selectedPath: selectedMoveFolder,
-        chevronHtml: '<i class="fas fa-chevron-right"></i>',
+        chevronHtml: html`<i class="fas fa-chevron-right"></i>`,
         onSelect: (path) => selectMoveDestination(path),
     });
     container.scrollTop = 0;
@@ -1117,7 +1118,7 @@ async function confirmMoveFile() {
     if (!fileToMove || !selectedMoveFolder) return;
 
     const btn = document.getElementById('btn-confirm-move');
-    const originalText = btn.innerHTML;
+    const originalContent = [...btn.childNodes];
     btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Moving...';
     btn.disabled = true;
 
@@ -1174,7 +1175,7 @@ async function confirmMoveFile() {
     } catch (e) {
         console.error('Move error:', e);
         showToast('Error', `Failed to move file: ${e.message}`, 'error');
-        btn.innerHTML = originalText;
+        btn.replaceChildren(...originalContent);
         btn.disabled = false;
     }
 }
@@ -1272,13 +1273,12 @@ function showToast(title, message, type = 'info') {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    toast.innerHTML = `
-        <div class="toast-header">
-            <strong>${title}</strong>
-            <button onclick="this.parentElement.parentElement.remove()">&times;</button>
-        </div>
-        <div class="toast-body">${message}</div>
-    `;
+    // Titel en melding zijn tekst: ze bevatten vaak bestandsnamen of een foutmelding van de server
+    toast.append(
+        createEl('div', { class: 'toast-header' },
+            createEl('strong', { text: title }),
+            createEl('button', { onClick: () => toast.remove() }, '\u00d7')),
+        createEl('div', { class: 'toast-body', text: message }));
 
     container.appendChild(toast);
 
@@ -1335,16 +1335,11 @@ async function fetchHomeWidgets() {
 
         if (data.track) {
             const t = data.track;
-            const searchUrl = `https://open.spotify.com/search/${encodeURIComponent(t.track + ' ' + t.artist)}`;
-            const placeholder = `<div class="otd-spotify-placeholder"><i class="fab fa-spotify"></i></div>`;
-
-            content.innerHTML = `
-                <div class="otd-item" onclick="window.open('${searchUrl}', '_blank')">
-                    ${placeholder}
-                    <div class="otd-title">${t.track}</div>
-                    <div class="otd-subtitle">${t.artist} • ${t.year}</div>
-                </div>
-            `;
+            content.replaceChildren(
+                createEl('div', { class: 'otd-item', onClick: () => openSpotifySearch(`${t.track} ${t.artist}`) },
+                    createEl('div', { class: 'otd-spotify-placeholder' }, createEl('i', { class: 'fab fa-spotify' })),
+                    createEl('div', { class: 'otd-title', text: t.track }),
+                    createEl('div', { class: 'otd-subtitle', text: `${t.artist} • ${t.year}` })));
 
             // Geen albumcover van buitenaf (zoals vroeger via iTunes): dat zou luistergeschiedenis
             // naar een externe dienst sturen. Het lokale Spotify-icoon blijft staan.
@@ -1412,17 +1407,19 @@ async function loadPhotoOtdWidget() {
         content.style.display = 'block';
 
         if (data.photos && data.photos.length > 0) {
-            let imagesHtml = '';
+            content.replaceChildren();
             data.photos.forEach((p, index) => {
-                imagesHtml += `
-                    <div class="otd-large-image ${index === 0 ? 'active' : ''}" style="background-image: url('${API_BASE}/api/thumb?path=${encodeURIComponent(p.path)}'); background-size: cover; background-position: center;" onclick="openPhotoOTD('${p.path.replace(/'/g, "\\'")}')"></div>
-                    <div class="otd-large-overlay" style="display: ${index === 0 ? 'flex' : 'none'};">
-                        <div class="otd-large-title">${p.name}</div>
-                        <div class="otd-large-subtitle">${p.year}</div>
-                    </div>
-                `;
+                const image = createEl('div', {
+                    class: 'otd-large-image' + (index === 0 ? ' active' : ''),
+                    style: 'background-size: cover; background-position: center;',
+                    onClick: () => openPhotoOTD(p.path),
+                });
+                image.style.backgroundImage = cssUrl(vaultFileUrl('thumb', p.path));
+                const overlay = createEl('div', { class: 'otd-large-overlay', style: `display: ${index === 0 ? 'flex' : 'none'};` },
+                    createEl('div', { class: 'otd-large-title', text: p.name }),
+                    createEl('div', { class: 'otd-large-subtitle', text: p.year }));
+                content.append(image, overlay);
             });
-            content.innerHTML = imagesHtml;
 
             if (data.photos.length > 1) {
                 let currentOtd = 0;
@@ -1710,7 +1707,7 @@ function showDnaExplanation() {
         if (isActual) {
             newItem.classList.add('actual-personality');
             if (!newItem.querySelector('.actual-dna-badge')) {
-                newItem.innerHTML += '<div class="actual-dna-badge">Your DNA</div>';
+                newItem.appendChild(createEl('div', { class: 'actual-dna-badge', text: 'Your DNA' }));
             }
         }
 
@@ -1853,7 +1850,7 @@ async function storageNavigateToPath(folderPath) {
             const icon = getFolderIcon(folder);
             const newPath = folderPath ? `${folderPath}/${folder}` : folder;
 
-            li.innerHTML = `
+            li.innerHTML = html`
                 <div class="storage-folder-header">
                     <span class="storage-folder-name"><i class="fas ${icon}"></i>${folder}</span>
                     <span class="storage-folder-size">${gb} GB</span>
@@ -1889,7 +1886,7 @@ async function storageNavigateToPath(folderPath) {
 
                     const displaySize = file.size_gb > 1 ? `${file.size_gb.toFixed(2)} GB` : `${file.size_mb.toFixed(2)} MB`;
 
-                    li.innerHTML = `
+                    li.innerHTML = html`
                         <div class="storage-file-header">
                             <span class="storage-file-name"><i class="fas ${fileIcon}"></i>${filename}</span>
                             <span class="storage-file-size">${displaySize}</span>
@@ -2113,7 +2110,7 @@ function createSettingsFolderElement(item) {
         }
     };
 
-    header.innerHTML = `
+    header.innerHTML = html`
     <div class="settings-chevron ${hasChildren ? '' : 'hidden'}">
         <i class="fas fa-chevron-right"></i>
     </div>
@@ -2122,11 +2119,12 @@ function createSettingsFolderElement(item) {
         <span>${item.name}</span>
     </div>
     <label class="switch">
-        <input type="checkbox" ${item.enabled ? 'checked' : ''} 
-               onchange="toggleSettingsFolder('${item.path.replace(/\\/g, '\\\\')}', this.checked)">
+        <input type="checkbox" ${item.enabled ? html`checked` : ''}>
         <span class="slider round"></span>
     </label>
 `;
+    const toggle = header.querySelector('input[type="checkbox"]');
+    toggle.addEventListener('change', () => toggleSettingsFolder(item.path, toggle.checked));
 
     el.appendChild(header);
 
@@ -2150,16 +2148,21 @@ function createSettingsFolderElement(item) {
 
 async function toggleSettingsFolder(path, enabled) {
     try {
-        await fetch(`${API_BASE}/api/shows/settings`, {
+        const res = await fetch(`${API_BASE}/api/shows/settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path, enabled })
         });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            showToast('Fout', err.detail || `Instelling opslaan mislukt (${res.status})`, 'error');
+            return;
+        }
         showToast('Instellingen', `Folder ${enabled ? 'ingeschakeld' : 'uitgeschakeld'}`, 'success');
         reloadShows();
     } catch (e) {
         console.error("Error toggling folder:", e);
-        showToast('Failed to update settings', 'error');
+        showToast('Fout', 'Instelling opslaan mislukt', 'error');
     }
 }
 
@@ -2316,7 +2319,7 @@ class CinematicPlayer {
         if (metaEl) {
             const badge = metaEl.querySelector('.elo-rating-badge');
             if (badge) {
-                badge.innerHTML = `<i class="fas fa-star"></i> ELO: ${newRating}`;
+                badge.innerHTML = html`<i class="fas fa-star"></i> ELO: ${newRating}`;
                 badge.classList.add('updated'); // Add a glow effect in CSS if desired
                 setTimeout(() => badge.classList.remove('updated'), 1000);
             }
@@ -2384,7 +2387,7 @@ class CinematicPlayer {
             slide.appendChild(video);
         } else {
             const kbEffect = Math.random() > 0.5 ? 'ken-burns-in' : 'ken-burns-out';
-            slide.innerHTML = `<img src="${API_BASE}/api/file?path=${encodeURIComponent(file.path)}" class="cinematic-media ${kbEffect}">`;
+            slide.innerHTML = html`<img src="${vaultFileUrl('file', file.path)}" class="cinematic-media ${kbEffect}">`;
         }
 
         container.appendChild(slide);
@@ -2403,11 +2406,11 @@ class CinematicPlayer {
 
         titleEl.textContent = folderName;
 
-        metaEl.innerHTML = `
+        metaEl.innerHTML = html`
 <i class="fas fa-folder"></i> ${folderName} <span style="opacity:0.5; margin:0 5px;">|</span>
 <i class="fas fa-camera"></i> ${file.name} <span style="opacity:0.5; margin:0 5px;">|</span>
 <i class="fas fa-calendar"></i> ${new Date(file.modified * 1000).toLocaleDateString()}
-${file.size ? `<span style="margin-left: 15px;"><i class="fas fa-hdd"></i> ${(file.size / (1024 * 1024)).toFixed(1)} MB</span>` : ''}
+${file.size ? html`<span style="margin-left: 15px;"><i class="fas fa-hdd"></i> ${(file.size / (1024 * 1024)).toFixed(1)} MB</span>` : ''}
 <div class="elo-rating-badge">
     <i class="fas fa-star"></i> ELO: ${file.rating || 1000}
 </div>
@@ -2500,27 +2503,15 @@ function renderSpotifyStats(data) {
     updateText('stat-dna', data.listening_dna);
 
     // 2. Lists
-    renderSpotifyList('top-artists-list', data.top_artists, (item, i) => `
-<div class="spotify-list-item clickable" role="button" onclick="window.open('https://open.spotify.com/search/${encodeURIComponent(item.name)}', '_blank'); event.stopPropagation();">
-    <div class="item-rank">#${i + 1}</div>
-    <div class="item-info">
-        <div class="item-name">${item.name}</div>
-        <div class="item-meta">${Math.round(item.ms / 60000).toLocaleString()} mins</div>
-    </div>
-    <div class="action-icon"><i class="fab fa-spotify"></i></div>
-</div>
-`);
+    renderSpotifyList('top-artists-list', data.top_artists, (item, i) => spotifyListItem({
+        rank: `#${i + 1}`, name: item.name, meta: `${Math.round(item.ms / 60000).toLocaleString()} mins`,
+        icon: 'fab fa-spotify', query: item.name,
+    }));
 
-    renderSpotifyList('top-tracks-list', data.top_tracks, (item, i) => `
-<div class="spotify-list-item clickable" role="button" onclick="window.open('https://open.spotify.com/search/${encodeURIComponent(item.name + ' ' + item.artist)}', '_blank'); event.stopPropagation();">
-    <div class="item-rank">#${i + 1}</div>
-    <div class="item-info">
-        <div class="item-name">${item.name}</div>
-        <div class="item-meta">${item.artist} • ${item.count} plays</div>
-    </div>
-    <div class="action-icon"><i class="fas fa-play"></i></div>
-</div>
-`);
+    renderSpotifyList('top-tracks-list', data.top_tracks, (item, i) => spotifyListItem({
+        rank: `#${i + 1}`, name: item.name, meta: `${item.artist} • ${item.count} plays`,
+        icon: 'fas fa-play', query: `${item.name} ${item.artist}`,
+    }));
 
     // 2.5 New Insights
     if (data.new_insights) {
@@ -2535,7 +2526,12 @@ function renderSpotifyStats(data) {
         // Binge
         if (insights.top_binge) {
             const bingeEl = document.getElementById('stat-top-binge');
-            bingeEl.innerHTML = `<a href="https://open.spotify.com/search/${encodeURIComponent(insights.top_binge.track + ' ' + insights.top_binge.artist)}" target="_blank" onclick="event.stopPropagation();" style="color: inherit; text-decoration: underline;">${insights.top_binge.track}</a>`;
+            const binge = insights.top_binge;
+            bingeEl.replaceChildren(createEl('a', {
+                href: spotifySearchUrl(`${binge.track} ${binge.artist}`), target: '_blank', rel: 'noopener noreferrer',
+                style: 'color: inherit; text-decoration: underline;', text: binge.track,
+                onClick: (e) => e.stopPropagation(),
+            }));
             updateText('stat-top-binge-count', `Binge: ${insights.top_binge.count}x in a row`);
         } else {
             updateText('stat-top-binge', 'No binges');
@@ -2556,16 +2552,11 @@ function renderSpotifyStats(data) {
         const discoveriesContainer = document.getElementById('discoveries-container');
         if (insights.discoveries && insights.discoveries.length > 0) {
             discoveriesContainer.style.display = 'block';
-            renderSpotifyList('discoveries-list', insights.discoveries, (item, i) => `
-            <div class="spotify-list-item clickable" role="button" onclick="window.open('https://open.spotify.com/search/${encodeURIComponent(item.name)}', '_blank'); event.stopPropagation();">
-                <div class="item-rank">#${i + 1}</div>
-                <div class="item-info">
-                    <div class="item-name">${item.name}</div>
-                    <div class="item-meta">First played this year • ${Math.round(item.ms / 60000).toLocaleString()} mins</div>
-                </div>
-                <div class="action-icon"><i class="fab fa-spotify"></i></div>
-            </div>
-            `);
+            renderSpotifyList('discoveries-list', insights.discoveries, (item, i) => spotifyListItem({
+                rank: `#${i + 1}`, name: item.name,
+                meta: `First played this year • ${Math.round(item.ms / 60000).toLocaleString()} mins`,
+                icon: 'fab fa-spotify', query: item.name,
+            }));
         } else {
             discoveriesContainer.style.display = 'none';
         }
@@ -2628,9 +2619,9 @@ function renderSpotifyStats(data) {
             el.role = "button";
             el.onclick = (e) => {
                 e.stopPropagation();
-                window.open(`https://open.spotify.com/search/${encodeURIComponent(play.track + ' ' + play.artist)}`, '_blank');
+                openSpotifySearch(`${play.track} ${play.artist}`);
             };
-            el.innerHTML = `
+            el.innerHTML = html`
         <div class="item-rank">${play.year}</div>
         <div class="item-info">
             <div class="item-name">${play.track}</div>
@@ -2668,13 +2659,32 @@ function updateText(id, text) {
     if (el) el.textContent = text;
 }
 
-function renderSpotifyList(id, items, templateFn) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.innerHTML = '';
-    items.forEach((item, i) => {
-        el.innerHTML += templateFn(item, i);
-    });
+function renderSpotifyList(id, items, buildItem) {
+    const list = document.getElementById(id);
+    if (!list) return;
+    list.replaceChildren(...items.map((item, i) => buildItem(item, i)));
+}
+
+// Eén klikbare regel in een Spotify-lijst; namen komen uit de export en zijn altijd tekst
+function spotifyListItem({ rank, name, meta, icon, query }) {
+    return createEl('div', {
+        class: 'spotify-list-item clickable', role: 'button',
+        onClick: (e) => { e.stopPropagation(); openSpotifySearch(query); },
+    },
+        createEl('div', { class: 'item-rank', text: rank }),
+        createEl('div', { class: 'item-info' },
+            createEl('div', { class: 'item-name', text: name }),
+            createEl('div', { class: 'item-meta', text: meta })),
+        createEl('div', { class: 'action-icon' }, createEl('i', { class: icon })));
+}
+
+// Een nummer of artiest opzoeken op Spotify: alleen na een klik, in een nieuw tabblad
+function spotifySearchUrl(query) {
+    return `https://open.spotify.com/search/${encodeURIComponent(query)}`;
+}
+
+function openSpotifySearch(query) {
+    openExternal(spotifySearchUrl(query));
 }
 
 function renderSimpleChart(id, data, labels) {
@@ -2833,15 +2843,6 @@ async function sendChatMessage() {
         inputEl.focus();
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
-}
-
-function escapeHTML(str) {
-    return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
 }
 
 function executeAIAction(actionData) {

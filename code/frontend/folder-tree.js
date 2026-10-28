@@ -29,7 +29,7 @@ function renderFolderTree(container, folders, config = {}) {
         selectedPath = null,
 
         showChevron = true,
-        chevronHtml = '▶',
+        chevronHtml = html`▶`,        // markup from html`...` (dom.js)
         showCheckbox = (selectionMode === 'multi'),
         showCount = false,
 
@@ -59,7 +59,7 @@ function renderFolderTree(container, folders, config = {}) {
     function getIcon(folder, depth, expanded, isSelected) {
         if (iconMode === 'fontawesome') {
             const cls = isSelected ? 'fa-folder-open' : 'fa-folder';
-            return { html: `<i class="fas ${cls}"></i>` };
+            return { html: html`<i class="fas ${cls}"></i>` };
         }
         if (iconMode === 'emoji-state') {
             if (isSelected) return { text: '🗂️' };
@@ -127,7 +127,7 @@ function renderFolderTree(container, folders, config = {}) {
             if (hasChildren) {
                 const chevron = document.createElement('span');
                 chevron.className = 'folder-chevron' + (expanded ? ' expanded' : '');
-                chevron.innerHTML = chevronHtml;
+                setHTML(chevron, chevronHtml);
                 chevron.onclick = (e) => {
                     e.stopPropagation();
                     doToggleExpand(folder.path, chevron, childrenContainer);
@@ -137,7 +137,7 @@ function renderFolderTree(container, folders, config = {}) {
                 const spacer = document.createElement('span');
                 spacer.className = 'folder-chevron no-children';
                 spacer.style.cssText = 'visibility:hidden;';
-                spacer.innerHTML = chevronHtml;
+                setHTML(spacer, chevronHtml);
                 row.appendChild(spacer);
             }
         }
@@ -154,7 +154,7 @@ function renderFolderTree(container, folders, config = {}) {
         const iconEl = document.createElement('span');
         iconEl.className = 'folder-icon';
         const iconData = getIcon(folder, depth, expanded, isSel);
-        if (iconData.html) iconEl.innerHTML = iconData.html;
+        if (iconData.html) setHTML(iconEl, iconData.html);
         else iconEl.textContent = iconData.text;
 
         if (separateClicks && hasChildren) {

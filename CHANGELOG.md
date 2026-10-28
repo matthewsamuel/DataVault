@@ -104,6 +104,23 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   antwoordt), stopt met controleren zodra hij terug is en toont na 30 seconden een melding
   met een knop om het scherm te sluiten, in plaats van eindeloos te blijven wachten.
 
+### Namen worden altijd als tekst getoond
+- Bestands- en mapnamen, paden, Spotify-titels en -artiesten worden nu overal als gewone tekst
+  op het scherm gezet. Een bestand dat (bijv. uit een zip of WhatsApp-export) een naam als
+  `foto <img src=x onerror=...>.jpg` heeft, kon voorheen code uitvoeren in de app zodra je de
+  homepage opende (Foto On This Day), het bestand in de viewer bekeek, of de map in Shows,
+  Opslag, Timeline of Manage Sources tegenkwam. Die code kon bestanden verplaatsen. Nu zie je
+  gewoon de naam, met `<` en `&` erin.
+- Klikken op een Spotify-nummer of -artiest met een apostrof (zoals "Don't Stop Me Now" of
+  "Guns N' Roses") deed niets; dat werkt nu overal (top-lijsten, ontdekkingen, On This Day en
+  de widget op de homepage). Hetzelfde gold voor een map met een apostrof in Manage Sources
+  ("Matthew's Trip" aan- of uitzetten werd niet opgeslagen) en in de Timeline-mapkiezer.
+- Meldingen (toasts) tonen hun tekst, ook foutmeldingen van de server met een bestandsnaam erin,
+  als tekst.
+- Manage Sources meldt nu een fout als de server het aan- of uitzetten van een map weigert, in
+  plaats van altijd "ingeschakeld/uitgeschakeld".
+- De viewer toont bij "Modified" weer de echte datum (stond op januari 1970).
+
 ### Offline en privacy
 - De app werkt nu volledig zonder internet. De iconen (Font Awesome 6.4.0) en het lettertype
   (JetBrains Mono) staan lokaal in `code/frontend/vendor/`, met hun licenties. Voorheen kwamen

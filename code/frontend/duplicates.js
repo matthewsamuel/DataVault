@@ -243,7 +243,7 @@ function renderDuplicates() {
     gridDiv.innerHTML = '';
 
     if (filteredDuplicates.length === 0) {
-        gridDiv.innerHTML = `<p class="text-center">No ${currentFilter === 'all' ? '' : currentFilter} duplicates found.</p>`;
+        gridDiv.innerHTML = html`<p class="text-center">No ${currentFilter === 'all' ? '' : currentFilter} duplicates found.</p>`;
         return;
     }
 
