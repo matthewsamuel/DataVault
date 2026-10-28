@@ -262,22 +262,41 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Per reeks staan de foto's naast elkaar, met de beste voorgesteld (**Beste**). Die keuze komt uit een
   score van 0 tot 100: scherpte, resolutie, belichting (geen weggevallen schaduwen of hoge lichten) en
   jouw eigen keuze (Keurer "houden" en de Shows-waardering); bij gelijke stand het grootste bestand.
-  Onder de foto's staat waar de score vandaan komt. Een wazige kopie verliest het altijd van de scherpe.
+  Onder de foto's staat waar de score vandaan komt. Een wazige kopie verliest het altijd van de scherpe,
+  en een verkleinde kopie telt nooit als scherper dan het origineel (scherpte wordt bij elke foto op
+  dezelfde grootte gemeten; daarom worden alle foto's één keer opnieuw vergeleken).
+- **Groot bekijken** (of de toets **v**) zet de foto's van een reeks groot naast elkaar. Met **100%** (of
+  **d**) zie je van elke foto dezelfde uitsnede op ware grootte, zodat een verkleinde of wazige kopie echt
+  zachter oogt; slepen verschuift de uitsnede van alle foto's tegelijk. Ook daar kies je wat blijft.
+  Reeksen van twee tot vier foto's krijgen in de lijst grotere foto's, en een foto die weggaat is nog goed
+  te zien.
 - Je kiest zelf wat blijft, ook meerdere foto's. **Bevestigen** vraagt eerst hoeveel bestanden waarheen
   gaan, en verplaatst de rest dan naar `RAW_DUPLICATES/near-duplicates`, in dezelfde mappen als nu. Er
   wordt niets gewist: elke reeks is één actie in het Herstelcentrum en gaat in één keer terug, met
-  dezelfde inhoud en datums. **Overslaan** laat een reeks voor nu liggen; **Alles behouden** laat alles
-  staan en de reeks komt niet meer terug (tot er een foto bij komt; in het tabblad kun je ze weer tonen).
-- Met de schuif **Strengheid** kies je hoe ver foto's mogen afwijken: **Streng** (vrijwel dezelfde foto),
+  dezelfde inhoud en datums. De vraag vooraf begint op **Annuleren**: twee keer Enter verplaatst niets.
+  **Overslaan** laat een reeks voor nu liggen; **Alles behouden** laat alles staan en de reeks komt niet
+  meer terug (tot er een foto bij komt; in het tabblad kun je ze weer tonen). Een **Alles behouden** maak
+  je meteen ongedaan met **Ongedaan maken** boven de lijst.
+- Na het laatste besluit zegt de lijst wat er is: **Alles bekeken**, of **Alle reeksen overgeslagen** met
+  **Overgeslagen tonen**. Er worden geen reeksen meer overgeslagen bij het verder laden na een besluit,
+  en het laden gaat vanzelf als je naar het einde scrolt of met ↓ voorbij de laatste reeks gaat.
+- Met de schuif **Strengheid** kies je hoe ver foto's mogen afwijken: **Streng** (vrijwel dezelfde foto, en
+  bursts met bijna geen beweging),
   **Normaal** of **Ruim** (ook iets bijgesneden of lichter gemaakt). Volgorde: grootste reeksen eerst of
   nieuwste eerst; beide worden onthouden.
 - Exacte kopieën (byte voor byte gelijk) blijven bij **Exacte kopieën** horen: hier tellen ze als één foto
-  met "+2 exacte kopieën" erbij, en ze gaan alleen mee als die foto weggaat.
+  met "+2 exacte kopieën" erbij, en ze gaan alleen mee als die foto weggaat. Zolang van een mogelijke kopie
+  nog niet vaststaat of hij byte voor byte gelijk is (een vergelijking die gepauzeerd of gestopt is), staat
+  hij niet in een reeks. Dat herkennen ("Exacte kopieën herkennen") toont voortgang, bewaart wat klaar is
+  en gebruikt wat **Exacte kopieën** al eerder las.
 - Een map met honderden foto's die er precies hetzelfde uitzien (bijvoorbeeld kopieën van één opname)
   wordt één groep, in delen van hoogstens 48 foto's, zonder dat het vergelijken daar traag van wordt.
 - Volledig met het toetsenbord: ← → naar de vorige of volgende foto, ↑ ↓ naar de vorige of volgende
-  reeks, spatie houden of laten gaan, Enter bevestigen, s overslaan, a alles behouden (ook in het
-  overzicht onder **?**). De tabbladen werken met ← →.
+  reeks, Home/End eerste of laatste foto, spatie houden of laten gaan, v groot bekijken, Enter
+  bevestigen, s overslaan, a alles behouden (ook in het overzicht onder **?**). **g** en een letter
+  wisselt ook vanaf een foto van pagina. De tabbladen werken met ← →.
+- Vóór de eerste vergelijking staat er één knop **Foto's vergelijken**; terwijl er vergeleken wordt, zegt
+  de lijst dat zonder tweede knop.
 - Snelheid op deze Mac: een gewone 12 MP JPEG kost ongeveer 8 ms (130 foto's per seconde); HEIC is
   trager omdat de hele foto gelezen wordt. Het zoeken van reeksen in 100.000 foto's duurt daarna een
   paar seconden.

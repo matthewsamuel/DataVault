@@ -130,8 +130,17 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   vergeleken bestand is. **Alles behouden** onthoudt de reeks (tot hij verandert); **Overslaan**
   geldt voor deze sessie.
 - API: `GET /api/series/status`, `GET /api/series?strictness=&sort=size|recent&offset=&limit=`,
-  `POST /api/series/keep {members, keep}`, `POST /api/series/keep-all {members}`,
-  `POST /api/series/reviews/reset`.
+  `POST /api/series/keep {members, keep}`, `POST /api/series/keep-all {members}` (antwoordt `{key}`),
+  `POST /api/series/reviews/undo {key}` (één keep-all terug), `POST /api/series/reviews/reset`.
+- Exacte kopieën herkennen (`hash_twins`, vóór het zoeken van paren): tweelingen van dezelfde grootte
+  krijgen een xxh3 (`media_phash.content`), in stapels van 100 weggeschreven, uit de cache van
+  `file_hashes` als het bestand onveranderd is (inode, grootte, mtime, ctime), en nieuwe hashes gaan die
+  cache in. `all_series` laat een tweeling van dezelfde grootte zonder hash weg, zodat een gestopte taak
+  nooit kopieën als verschillende foto's toont.
+- Scherm (`series.js`): een bevestigde of behouden reeks verdwijnt ook op de server, dus gaat
+  `nextOffset` per besluit één omlaag (`seriesState.gone` corrigeert een verzoek dat al onderweg was);
+  een overgeslagen reeks telt mee. **Groot bekijken** (`#modal-series-compare`, toets v) toont de reeks
+  passend of op 100% (breedte van de grootste foto in CSS-pixels, `--compare-x/y` als gedeelde uitsnede).
 - Snelheid (M3 Pro, 4 threads): 12 MP JPEG ~130 foto's/s; 4.000 foto's van 2 MP via de server in
   10 s (390/s; `/api/health` p95 12 ms tijdens de taak), een tweede ronde zonder nieuwe foto's
   0,2 s. HEIC wordt volledig gedecodeerd (36 MP: ~0,7 s per foto per thread, ~5 per seconde met
