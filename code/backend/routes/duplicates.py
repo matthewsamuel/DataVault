@@ -123,6 +123,9 @@ def scan_folder_for_duplicates(
 
     # Inside the vault first, existence second: the same 403 for anything outside
     folder = resolve_in_vault(folder_path, config, folder=True)
+    # RAW_DUPLICATES and TRASH hold what was already moved: groups there could never be cleaned
+    if _in_protected_folder(folder) is not None:
+        raise HTTPException(status_code=400, detail="Deze map wordt niet op duplicaten gescand")
     if not folder.is_dir():
         raise HTTPException(status_code=404, detail="Folder not found")
 

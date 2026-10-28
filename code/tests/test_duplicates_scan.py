@@ -96,6 +96,17 @@ def test_scan_without_candidates_or_cancelled_answers_200(client, vault, monkeyp
     assert client.get("/api/raw_duplicates/progress").json()["status"] == "cancelled"
 
 
+def test_scan_refuses_folders_that_hold_moved_files(client, vault, config):
+    """DUP-SCAN-PROTECTED-ROOT: groups found in RAW_DUPLICATES could never be cleaned."""
+    for folder in (config.DUPLICATES_FOLDER / "zz", config.TRASH_FOLDER):
+        _write(folder / "a.jpg", b"al verplaatst" * 20)
+        _write(folder / "b.jpg", b"al verplaatst" * 20)
+    for folder in (config.DUPLICATES_FOLDER, config.DUPLICATES_FOLDER / "zz", config.TRASH_FOLDER):
+        r = _scan(client, folder)
+        assert r.status_code == 400 and r.json()["detail"] == "Deze map wordt niet op duplicaten gescand"
+    assert _scan(client, config.CACHE_FOLDER).status_code == 403
+
+
 def test_scan_counts_and_reports_unreadable_folders(client, vault):
     """SCAN-DUP-DB-10: a folder it could not read made the scan say 'complete' with files missing."""
     if os.geteuid() == 0:

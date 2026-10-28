@@ -221,6 +221,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   stil overgeslagen en de scan meldde toch "klaar". Nu telt de scan zulke leesfouten, noemt hij
   de eerste paden en meldt hij dat het resultaat onvolledig is. Verdwijnt de map tijdens de scan,
   dan stopt hij met een duidelijke melding.
+- RAW_DUPLICATES en TRASH (en hun submappen) worden niet meer op duplicaten gescand. Wat daar
+  staat is al opgeruimd, en groepen daaruit konden toch nooit opgeruimd worden.
 - Voortgang en annuleren werken nu tijdens een scan (de scan blokkeerde voorheen de hele
   server), en er loopt nooit meer dan één duplicatenscan tegelijk.
 - De opgeslagen controlegetallen (hashes) vermelden nu met welk algoritme ze berekend zijn, en
