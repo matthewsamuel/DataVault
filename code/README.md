@@ -81,7 +81,9 @@ pip install -r requirements.txt
 ### Media Viewer
 - Mapboom bladeren (RAW_DUPLICATES en cache uitgesloten)
 - Foto's en video's bekijken met thumbnails
-- Volledig scherm met metadata
+- Volledig scherm met metadata (echte datum; Shows-waardering alleen als je erop gestemd hebt)
+- Bladeren met de pijltjestoetsen of de zones links en rechts; Verplaatsen en Open in Finder
+  werken altijd op het bestand dat je ziet (ook vanuit de tijdlijn en de chat)
 
 ### Duplicaten
 - Scan een map op byte voor byte identieke bestanden (grootte, dan xxHash3; vlak voor elke verplaatsing een volledige vergelijking)

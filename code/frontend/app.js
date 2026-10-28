@@ -12,7 +12,6 @@ let expandedFolders = new Set();
 let currentView = 'grid';
 let currentSort = 'name';
 let modalZoom = 1;
-let currentModalIndex = -1;
 let selectedMoveFolder = null;  // For move file destination
 let activeShow = null; // Current slideshow instance
 
@@ -548,8 +547,8 @@ function renderMediaGrid() {
     });
 
     // Then render media files
-    mediaFiles.forEach((file, index) => {
-        const card = createMediaCard(file, index);
+    mediaFiles.forEach(file => {
+        const card = createMediaCard(file);
         grid.appendChild(card);
     });
 }
@@ -609,10 +608,10 @@ function createFolderCard(folder) {
     return card;
 }
 
-function createMediaCard(file, index) {
+function createMediaCard(file) {
     const card = document.createElement('div');
     card.className = 'media-card';
-    card.onclick = () => openMediaModal(index);
+    card.onclick = () => openMediaModal(file);
 
     // Thumbnail
     const img = document.createElement('img');
@@ -675,7 +674,7 @@ function createMediaCard(file, index) {
     infoIcon.title = file.name;
     infoIcon.onclick = (e) => {
         e.stopPropagation();
-        openMediaModal(index);
+        openMediaModal(file);
     };
 
     card.appendChild(infoIcon);
@@ -708,107 +707,148 @@ function handleGlobalSearch(query) {
 }
 
 // ==================== MODAL VIEWER ====================
+// Eén viewer voor de Files-weergave, de tijdlijn en de chat. Wie hem opent, geeft zijn
+// eigen lijst bestanden mee (nooit mappen). Vorige/volgende, Verplaatsen en Open in Finder
+// werken altijd op het bestand dat nu te zien is; de lijsten van de Files-weergave
+// (currentMedia/filteredMedia) worden door de viewer nooit vervangen.
 
 let currentAudioPlayer = null;
 let audioKeyHandler = null;
 
-function openMediaModal(index) {
-    currentModalIndex = index;
-    const file = filteredMedia[index];
-    const modal = document.getElementById('modal-viewer');
-    const modalBody = document.getElementById('modal-body');
-    const modalTitle = document.getElementById('modal-title');
-    const modalControls = document.getElementById('modal-controls');
-    const modalMetadata = document.getElementById('modal-metadata');
+const viewer = {
+    items: [],          // bestanden waar vorige/volgende doorheen bladert
+    index: -1,          // het bestand dat nu te zien is
+    onRemoved: null,    // (file) => void: de opener haalt een verplaatst bestand uit zijn lijst
+};
 
-    modalTitle.textContent = file.name;
-
-    // Clear previous content
-    modalBody.innerHTML = '';
-    modalZoom = 1;
-    panOffset = { x: 0, y: 0 };  // Reset pan offset
-
-    if (file.type === 'video') {
-        const video = document.createElement('video');
-        video.controls = true;
-        video.style.maxWidth = '100%';
-        video.style.maxHeight = '70vh';
-        video.src = `${API_BASE}/api/file?path=${encodeURIComponent(file.path)}`;
-        modalBody.appendChild(video);
-        modalControls.style.display = 'none';
-    } else if (file.type === 'audio') {
-        renderAudioPlayer(file, modalBody);
-        modalControls.style.display = 'none'; // hide default pan/zoom controls
-    } else {
-        const img = document.createElement('img');
-        img.src = `${API_BASE}/api/file?path=${encodeURIComponent(file.path)}`;
-        img.style.transform = `scale(${modalZoom})`;
-        img.id = 'modal-image';
-        img.style.cursor = 'default';
-        img.style.userSelect = 'none';
-
-        // Add pan event listeners
-        img.addEventListener('mousedown', startPan);
-
-        modalBody.appendChild(img);
-        modalControls.style.display = 'flex';
-    }
-
-    // Metadata
-    modalMetadata.innerHTML = html`
-        <div class="metadata-grid">
-            <span class="metadata-label">Path:</span>
-            <span class="metadata-value">
-                ${file.path}
-                <button class="copy-btn">Copy</button>
-            </span>
-            <span class="metadata-label">Size:</span>
-            <span class="metadata-value">${formatBytes(file.size)}</span>
-            <span class="metadata-label">Modified:</span>
-            <span class="metadata-value">${new Date(file.modified * 1000).toLocaleString()}</span>
-            <span class="metadata-label">Type:</span>
-            <span class="metadata-value">${file.type}</span>
-            <span class="metadata-label" style="color: var(--primary);">ELO Rating:</span>
-            <span class="metadata-value" style="color: var(--primary); font-weight: bold;">
-                <i class="fas fa-star" style="margin-right: 5px;"></i>${file.rating || 1000}
-            </span>
-        </div>
-    `;
-    modalMetadata.querySelector('.copy-btn').addEventListener('click', () => copyToClipboard(file.path));
-
-    modal.classList.add('active');
+function viewerFile() {
+    return viewer.index >= 0 && viewer.index < viewer.items.length ? viewer.items[viewer.index] : null;
 }
 
-function closeModal() {
-    const modal = document.getElementById('modal-viewer');
+function isViewerOpen() {
+    return document.getElementById('modal-viewer').classList.contains('active');
+}
 
-    // Stop any playing video
-    const video = modal.querySelector('video');
+// items: lijst bestandsobjecten van de server ({path, name, type, size, modified|timestamp, rating?})
+function openViewer(items, index, { onRemoved = null } = {}) {
+    const files = (items || []).filter(f => f && f.type !== 'folder');
+    const start = files.indexOf(items[index]);
+    if (start < 0) return;
+    viewer.items = files;
+    viewer.index = start;
+    viewer.onRemoved = onRemoved;
+    renderViewerFile();
+    document.getElementById('modal-viewer').classList.add('active');
+}
+
+// De bestanden zoals ze in de Files-grid staan (zonder mappen), in dezelfde volgorde
+function gridFiles() {
+    return filteredMedia.filter(item => item.type !== 'folder');
+}
+
+function openMediaModal(file) {
+    openViewer(gridFiles(), gridFiles().indexOf(file), { onRemoved: removeFromFilesView });
+}
+
+function removeFromFilesView(file) {
+    currentMedia = currentMedia.filter(f => f.path !== file.path);
+    filteredMedia = filteredMedia.filter(f => f.path !== file.path);
+    renderMediaGrid();
+}
+
+// Video of audio van het vorige bestand stoppen (ook bij bladeren, niet alleen bij sluiten)
+function stopViewerMedia() {
+    const video = document.querySelector('#modal-viewer video');
     if (video) {
         video.pause();
-        video.src = ''; // Clear source to stop buffering
+        video.removeAttribute('src');
+        video.load();
     }
-
-    // Stop audio
     if (currentAudioPlayer) {
         currentAudioPlayer.pause();
         currentAudioPlayer.src = '';
         currentAudioPlayer = null;
     }
-
-    // Cleanup spacebar handler
     if (audioKeyHandler) {
         document.removeEventListener('keydown', audioKeyHandler);
         audioKeyHandler = null;
     }
+}
 
-    modal.classList.remove('active');
-    currentModalIndex = -1;
+function renderViewerFile() {
+    const file = viewerFile();
+    if (!file) return;
+    const modalBody = document.getElementById('modal-body');
+    const modalControls = document.getElementById('modal-controls');
+    const modalMetadata = document.getElementById('modal-metadata');
+
+    document.getElementById('modal-title').textContent = file.name;
+
+    stopViewerMedia();
+    // Alles behalve de navigatiezones vervangen
+    const zones = [...modalBody.querySelectorAll(':scope > .modal-nav-zone')];
+    modalBody.replaceChildren(...zones);
+    modalZoom = 1;
+    panOffset = { x: 0, y: 0 };
+    modalBody.classList.remove('zoomed');
+    modalBody.classList.toggle('has-video', file.type === 'video');
+    zones.forEach(zone => {
+        const right = zone.classList.contains('right');
+        zone.hidden = right ? viewer.index >= viewer.items.length - 1 : viewer.index <= 0;
+    });
+
+    let media;
+    if (file.type === 'video') {
+        media = createEl('video', { controls: true, src: vaultFileUrl('file', file.path), style: 'max-width: 100%; max-height: 70vh;' });
+        modalControls.style.display = 'none';
+    } else if (file.type === 'audio') {
+        renderAudioPlayer(file, modalBody); // voegt de speler zelf toe
+        modalControls.style.display = 'none';
+    } else {
+        media = createEl('img', { id: 'modal-image', src: vaultFileUrl('file', file.path), alt: file.name });
+        media.style.cursor = 'default';
+        media.style.userSelect = 'none';
+        media.addEventListener('mousedown', startPan);
+        modalControls.style.display = 'flex';
+    }
+    if (media) modalBody.insertBefore(media, modalBody.firstChild);
+
+    modalMetadata.replaceChildren(viewerMetadata(file));
+}
+
+// Alleen echte gegevens: de datum van het bestand (of de opnamedatum uit de tijdlijn) en
+// de Shows-waardering als er echt over dit bestand is gestemd
+function viewerMetadata(file) {
+    const rows = [];
+    const add = (label, ...value) => rows.push(
+        createEl('span', { class: 'metadata-label', text: label }),
+        createEl('span', { class: 'metadata-value' }, ...value));
+
+    add('Pad:', file.path, ' ', createEl('button', { class: 'copy-btn', text: 'Kopieer', onClick: () => copyToClipboard(file.path) }));
+    if (typeof file.size === 'number') add('Grootte:', formatBytes(file.size));
+    if (typeof file.timestamp === 'number' && file.timestamp > 0) {
+        add('Datum:', new Date(file.timestamp * 1000).toLocaleString());
+    } else if (typeof file.modified === 'number' && file.modified > 0) {
+        add('Gewijzigd:', new Date(file.modified * 1000).toLocaleString());
+    }
+    add('Type:', file.type);
+    if (typeof file.rating === 'number') {
+        const votes = typeof file.votes === 'number' ? ` (${file.votes} ${file.votes === 1 ? 'stem' : 'stemmen'})` : '';
+        add('Shows-waardering:', createEl('i', { class: 'fas fa-star', style: 'margin-right: 5px;' }), `${file.rating}${votes}`);
+    }
+    return createEl('div', { class: 'metadata-grid' }, ...rows);
+}
+
+function closeModal() {
+    stopViewerMedia();
+    document.getElementById('modal-viewer').classList.remove('active');
+    viewer.items = [];
+    viewer.index = -1;
+    viewer.onRemoved = null;
 }
 
 async function openInFinder() {
-    if (currentModalIndex < 0) return;
-    const file = filteredMedia[currentModalIndex];
+    const file = viewerFile();
     if (!file || !file.path) return;
 
     // Show visual feedback immediately
@@ -825,9 +865,8 @@ async function openInFinder() {
         });
 
         if (!response.ok) {
-            console.error('Failed to open in Finder');
-        } else {
-            // revealed in Finder
+            const err = await response.json().catch(() => ({}));
+            showToast('Open in Finder', err.detail || `Mislukt (${response.status})`, 'error');
         }
     } catch (e) {
         console.error('Error opening in Finder:', e);
@@ -1002,16 +1041,19 @@ function renderAudioPlayer(file, container) {
 // ==================== MOVE FILE SYSTEM ====================
 
 let fileToMove = null;
+let moveInFlight = false;   // één verplaatsing tegelijk: dubbel Enter/klikken stuurt niets extra
+let moveNav = null;         // toetsenbordnavigatie van de mappenboom (één per modal)
 
 function openMoveFileModal(fileData = null) {
-    // Determine which file to move
+    if (moveInFlight) return;
+    // Welk bestand: expliciet meegegeven, de dia van de slideshow, of wat de viewer toont
     if (fileData) {
         fileToMove = fileData;
     } else if (activeShow) {
         fileToMove = activeShow.files[activeShow.currentIndex];
         activeShow.stopLoop(); // Pause show while moving
-    } else if (currentModalIndex >= 0) {
-        fileToMove = filteredMedia[currentModalIndex];
+    } else {
+        fileToMove = viewerFile();
     }
 
     if (!fileToMove) return;
@@ -1020,6 +1062,8 @@ function openMoveFileModal(fileData = null) {
     document.getElementById('move-file-name').textContent = fileToMove.name || 'Unknown File';
     document.getElementById('btn-confirm-move').disabled = true;
     selectedMoveFolder = null;
+    const destDisplay = document.getElementById('move-dest-display');
+    if (destDisplay) destDisplay.style.display = 'none';
 
     // Show source folder path
     const sourcePath = fileToMove.path || '';
@@ -1040,9 +1084,9 @@ function openMoveFileModal(fileData = null) {
     renderMoveFolderTreeUI();
     modal.classList.add('active');
 
-    // Activate keyboard navigation
-    if (window._moveNav) window._moveNav.nav.resetIndex();
-    window._moveNav = activateFolderTreeModal({
+    // Toetsenbordnavigatie: activateFolderTreeModal vervangt de vorige luisteraar van deze
+    // modal, zodat één Enter nooit meer dan één keer bevestigt
+    moveNav = activateFolderTreeModal({
         modalId: 'modal-move-file',
         containerId: 'move-folder-tree',
         itemSelector: '.move-folder-node',
@@ -1054,13 +1098,19 @@ function openMoveFileModal(fileData = null) {
         },
         onConfirm: () => { if (selectedMoveFolder) confirmMoveFile(); },
         onClose: closeMoveFileModal,
-    });
+    }).nav;
+}
+
+function isMoveModalOpen() {
+    const modal = document.getElementById('modal-move-file');
+    return !!modal && modal.classList.contains('active');
 }
 
 function closeMoveFileModal() {
+    if (moveInFlight) return; // het verzoek loopt al; het antwoord sluit de modal
     const modal = document.getElementById('modal-move-file');
     if (modal) modal.classList.remove('active');
-    if (window._moveNav) { window._moveNav.nav.resetIndex(); }
+    if (moveNav) moveNav.resetIndex();
 
     fileToMove = null;
     selectedMoveFolder = null;
@@ -1089,6 +1139,7 @@ function renderMoveFolderTreeUI() {
 }
 
 function selectMoveDestination(path) {
+    if (moveInFlight || !fileToMove) return;
     selectedMoveFolder = path;
     const btn = document.getElementById('btn-confirm-move');
 
@@ -1117,20 +1168,24 @@ function selectMoveDestination(path) {
 }
 
 async function confirmMoveFile() {
-    if (!fileToMove || !selectedMoveFolder) return;
+    if (moveInFlight || !fileToMove || !selectedMoveFolder) return;
+    moveInFlight = true;
+    const file = fileToMove;
+    const destination = selectedMoveFolder;
 
     const btn = document.getElementById('btn-confirm-move');
     const originalContent = [...btn.childNodes];
     btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Moving...';
     btn.disabled = true;
 
+    let moved;
     try {
         const response = await fetch(`${API_BASE}/api/move-file`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                source_path: fileToMove.path,
-                destination_folder: selectedMoveFolder
+                source_path: file.path,
+                destination_folder: destination
             })
         });
 
@@ -1138,48 +1193,50 @@ async function confirmMoveFile() {
             const err = await response.json().catch(() => ({}));
             throw new Error(err.detail || `HTTP ${response.status}`);
         }
-
-        const moved = await response.json();
-        showToast('Moved', moved.message || 'File successfully moved', 'success');
-
-        // Remove from current view
-        if (activeShow) {
-            // Add a fly-away animation to the current active slide
-            const overlay = document.getElementById('cinematic-player');
-            const activeSlide = overlay.querySelector('.cinematic-slide.active');
-            if (activeSlide) {
-                activeSlide.classList.add('fly-away-animation');
-            }
-
-            setTimeout(() => {
-                activeShow.files.splice(activeShow.currentIndex, 1);
-                if (activeShow.files.length === 0) {
-                    closeMoveFileModal();
-                    activeShow.close();
-                } else {
-                    if (activeShow.currentIndex >= activeShow.files.length) {
-                        activeShow.currentIndex = 0;
-                    }
-                    activeShow.renderSlide();
-                    closeMoveFileModal();
-                }
-            }, 600); // Wait for fly away animation
-
-            return; // Exit early to avoid closing modal before animation
-        } else if (currentModalIndex >= 0) {
-            filteredMedia.splice(currentModalIndex, 1);
-            renderMediaGrid(); // Re-render grid without file
-            closeModal(); // Close viewer
-        }
-
-        closeMoveFileModal();
-
+        moved = await response.json();
     } catch (e) {
         console.error('Move error:', e);
         showToast('Error', `Failed to move file: ${e.message}`, 'error');
         btn.replaceChildren(...originalContent);
         btn.disabled = false;
+        moveInFlight = false;
+        return;
     }
+
+    showToast('Moved', moved.message || 'File successfully moved', 'success');
+    btn.replaceChildren(...originalContent);
+
+    if (activeShow && activeShow.files.includes(file)) {
+        // Add a fly-away animation to the current active slide
+        const show = activeShow;
+        const overlay = document.getElementById('cinematic-player');
+        const activeSlide = overlay && overlay.querySelector('.cinematic-slide.active');
+        if (activeSlide) activeSlide.classList.add('fly-away-animation');
+
+        setTimeout(() => {
+            moveInFlight = false;
+            // Het verplaatste bestand zelf eruit halen, niet "de huidige dia"
+            const at = show.files.indexOf(file);
+            if (at >= 0) show.files.splice(at, 1);
+            closeMoveFileModal();
+            if (show !== activeShow) return;
+            if (show.files.length === 0) {
+                show.close();
+            } else {
+                if (show.currentIndex >= show.files.length) show.currentIndex = 0;
+                show.renderSlide();
+            }
+        }, 600); // Wait for fly away animation
+        return;
+    }
+
+    moveInFlight = false;
+    if (viewerFile() === file) {
+        const onRemoved = viewer.onRemoved;
+        closeModal();
+        if (onRemoved) onRemoved(file);
+    }
+    closeMoveFileModal();
 }
 
 function zoomIn() {
@@ -1199,6 +1256,8 @@ function fitToScreen() {
 
 function updateModalZoom() {
     const img = document.getElementById('modal-image');
+    // Ingezoomd sleep je de foto; dan zitten de bladerzones in de weg
+    document.getElementById('modal-body').classList.toggle('zoomed', modalZoom > 1);
     if (img) {
         updateImageTransform();
         img.style.cursor = modalZoom > 1 ? 'grab' : 'default';
@@ -1249,23 +1308,30 @@ function updateImageTransform() {
 }
 
 function prevFile() {
-    if (currentModalIndex > 0) {
-        openMediaModal(currentModalIndex - 1);
+    if (viewer.index > 0) {
+        viewer.index--;
+        renderViewerFile();
     }
 }
 
 function nextFile() {
-    if (currentModalIndex < filteredMedia.length - 1) {
-        openMediaModal(currentModalIndex + 1);
+    if (viewer.index >= 0 && viewer.index < viewer.items.length - 1) {
+        viewer.index++;
+        renderViewerFile();
     }
 }
 
-// Keyboard navigation
+// Keyboard navigation (niet terwijl de verplaats-modal erboven open is)
 document.addEventListener('keydown', (e) => {
-    if (document.getElementById('modal-viewer').classList.contains('active')) {
-        if (e.key === 'ArrowLeft') prevFile();
-        if (e.key === 'ArrowRight') nextFile();
-        if (e.key === 'Escape') closeModal();
+    if (!isViewerOpen() || isMoveModalOpen()) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.key === 'ArrowLeft') prevFile();
+    if (e.key === 'ArrowRight') nextFile();
+    if (e.key === 'Escape') {
+        // Alleen de viewer sluiten, niet ook de chat of slideshow eronder
+        e.stopImmediatePropagation();
+        closeModal();
     }
 });
 
@@ -1377,10 +1443,8 @@ async function openPhotoOTD(filePath) {
     updateBreadcrumb(folder);
 
     // Zoek de foto in de geladen bestanden en open de modal
-    const index = filteredMedia.findIndex(f => f.name === fileName);
-    if (index !== -1) {
-        openMediaModal(index);
-    }
+    const file = gridFiles().find(f => f.name === fileName);
+    if (file) openMediaModal(file);
 }
 
 // ==================== PHOTO OTD SETTINGS ====================
@@ -2234,6 +2298,7 @@ class CinematicPlayer {
 
         // Keyboard support
         this.keyHandler = (e) => {
+            if (isMoveModalOpen()) return; // toetsen zijn dan voor de mappenboom
             if (e.key === 'Escape') this.close();
             if (e.key === 'ArrowRight') this.next();
             if (e.key === 'ArrowLeft') this.prev();
@@ -2760,8 +2825,8 @@ async function openFileInViewer(path) {
         const file = (data.files || []).find(f =>
             ['photo', 'video', 'audio'].includes(f.type) && f.name.normalize('NFC') === name);
         if (!file) { notFound(); return; }
-        filteredMedia = [file];
-        openMediaModal(0);
+        // Eigen lijst van één bestand: de Files-weergave blijft zoals hij was
+        openViewer([file], 0);
     } catch (e) {
         console.error('Bestand openen mislukt:', e);
         notFound();

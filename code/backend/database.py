@@ -147,6 +147,17 @@ class Database:
             results = conn.execute("SELECT path, rating FROM file_ratings").fetchall()
         return {row[0]: row[1] for row in results}
 
+    def get_ratings_in_folder(self, folder: str) -> Dict[str, Tuple[int, int]]:
+        """Ratings of the files directly inside folder: {path: (rating, votes)}.
+        A range query on the primary key, so it stays fast with many ratings."""
+        prefix = folder.rstrip("/") + "/"
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT path, rating, votes FROM file_ratings WHERE path >= ? AND path < ?",
+                (prefix, prefix[:-1] + "0"),  # '0' is the character right after '/'
+            ).fetchall()
+        return {path: (rating, votes) for path, rating, votes in rows if "/" not in path[len(prefix):]}
+
     # Settings methods
     def get_folder_status(self, path: str) -> bool:
         """Check if a folder is enabled for shows"""

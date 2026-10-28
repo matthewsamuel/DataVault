@@ -144,3 +144,18 @@ def test_one_unreadable_folder_does_not_end_the_show_list(client, vault):
         os.chmod(lib / "AAA dicht", 0o755)
     assert {"ZZZ open", "Familie", "Reis Italië"} <= titles
 
+
+def test_media_listing_carries_only_real_ratings(client, vault):
+    """The viewer shows a Shows rating only for files that were voted on."""
+    folder = vault / "library" / "Familie"
+    opa = folder / "opa.jpg"
+    _fill(folder, 1, prefix="ander")
+    assert client.post("/api/shows/vote", json={"path": str(opa), "vote": "up"}).status_code == 200
+    # A rating in a subfolder with a similar prefix must not leak into this folder
+    sub = folder / "sub"
+    _fill(sub, 1)
+    client.post("/api/shows/vote", json={"path": str(sub / "f0000.jpg"), "vote": "down"})
+    files = {f["name"]: f for f in client.get("/api/media", params={"folder": str(folder)}).json()["files"]}
+    assert files["opa.jpg"]["rating"] == 1050 and files["opa.jpg"]["votes"] == 1
+    assert "rating" not in files["ander0000.jpg"]
+    assert "rating" not in files["sub"]

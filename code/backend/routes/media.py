@@ -40,6 +40,13 @@ def get_media_endpoint(folder: str = Query(...)) -> Dict[str, Any]:
     from backend.scanner import get_media_files
     
     media_files = get_media_files(folder_path, ArchiveFilter(config))
+
+    # The Shows rating, only for files that were actually voted on (the viewer shows
+    # nothing rather than a made-up default)
+    ratings = db.get_ratings_in_folder(str(folder_path)) if db else {}
+    for item in media_files:
+        if item["path"] in ratings:
+            item["rating"], item["votes"] = ratings[item["path"]]
     
     return {
         "folder": str(folder_path),

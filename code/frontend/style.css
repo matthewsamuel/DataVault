@@ -815,6 +815,11 @@ body::before {
     /* Ensure on top */
 }
 
+/* De viewer opent ook vanuit de schermvullende chat (z-index 10000) en moet daarboven liggen */
+#modal-viewer {
+    z-index: 15000;
+}
+
 #modal-move-file {
     z-index: 30000;
 }
@@ -1149,12 +1154,13 @@ body::before {
     object-fit: contain;
 }
 
-/* Navigation zones */
+/* Navigation zones: smal genoeg om de video-bediening en het slepen niet te blokkeren */
 .modal-nav-zone {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 30%;
+    width: clamp(56px, 12%, 140px);
+    z-index: 1;
     cursor: pointer;
     transition: background-color var(--transition-fast);
     display: flex;
@@ -1174,6 +1180,15 @@ body::before {
 
 .modal-nav-zone.right {
     right: 0;
+}
+
+.modal-nav-zone[hidden],
+.modal-body.zoomed .modal-nav-zone {
+    display: none;
+}
+
+.modal-body.has-video .modal-nav-zone {
+    bottom: 64px;
 }
 
 .modal-nav-arrow {
@@ -1322,7 +1337,8 @@ body::before {
     position: fixed;
     top: var(--space-lg);
     right: var(--space-lg);
-    z-index: 3000;
+    /* Boven alle modals en de slideshow, zodat een melding nooit onzichtbaar blijft */
+    z-index: 40000;
     display: flex;
     flex-direction: column;
     gap: var(--space-md);

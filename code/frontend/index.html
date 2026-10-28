@@ -683,10 +683,10 @@
             <div class="modal-body" id="modal-body">
                 <!-- Media content will be inserted here -->
                 <!-- Navigation zones -->
-                <div class="modal-nav-zone left" onclick="navigateModal(-1)">
+                <div class="modal-nav-zone left" onclick="prevFile()" title="Vorige" hidden>
                     <span class="modal-nav-arrow">‹</span>
                 </div>
-                <div class="modal-nav-zone right" onclick="navigateModal(1)">
+                <div class="modal-nav-zone right" onclick="nextFile()" title="Volgende" hidden>
                     <span class="modal-nav-arrow">›</span>
                 </div>
             </div>
@@ -709,9 +709,6 @@
                     </button>
                     <button class="btn btn-primary" id="btn-move-file" onclick="openMoveFileModal()">
                         Move
-                    </button>
-                    <button class="btn btn-danger" id="btn-delete-file" onclick="confirmDeleteFile()">
-                        Delete
                     </button>
                 </div>
                 <div style="flex: 1;"></div>

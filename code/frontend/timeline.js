@@ -544,76 +544,34 @@
         return card;
     }
 
+    // De gedeelde viewer van app.js, met de tijdlijn als eigen lijst: bladeren gaat door de
+    // tijdlijn, en Open in Finder en Verplaatsen werken op de foto die te zien is
     function openTimelinePhoto(file, index) {
-        // Reuse the existing media modal from app.js
-        // We need to set up the modal data for timeline context
-        const modal = document.getElementById('modal-viewer');
-        if (!modal) return;
-
-        const title = document.getElementById('modal-title');
-        const body = document.getElementById('modal-body');
-        const metadata = document.getElementById('modal-metadata');
-
-        if (title) title.textContent = file.name;
-
-        // Create appropriate media element
-        const media = file.type === 'video'
-            ? createEl('video', { src: vaultFileUrl('file', file.path), controls: true, autoplay: true, class: 'modal-media', style: 'max-width:100%;max-height:70vh;' })
-            : createEl('img', { src: vaultFileUrl('file', file.path), class: 'modal-media', style: 'max-width:100%;max-height:70vh;object-fit:contain;' });
-
-        // Keep nav zones
-        const navZones = body.querySelectorAll('.modal-nav-zone');
-        body.replaceChildren(media, ...navZones);
-
-        // Setup timeline-specific navigation
-        const leftZone = body.querySelector('.modal-nav-zone.left');
-        const rightZone = body.querySelector('.modal-nav-zone.right');
-
-        if (leftZone) {
-            leftZone.onclick = () => {
-                if (index > 0) openTimelinePhoto(tlFiles[index - 1], index - 1);
-            };
-        }
-        if (rightZone) {
-            rightZone.onclick = () => {
-                if (index < tlFiles.length - 1) openTimelinePhoto(tlFiles[index + 1], index + 1);
-            };
-        }
-
-        // Metadata
-        if (metadata) {
-            const dt = new Date(file.timestamp * 1000);
-            const sizeStr = formatSize(file.size);
-            metadata.innerHTML = html`
-                <div class="modal-metadata-grid">
-                    <div class="metadata-item"><strong>Date</strong><span>${dt.toLocaleString()}</span></div>
-                    <div class="metadata-item"><strong>Size</strong><span>${sizeStr}</span></div>
-                    <div class="metadata-item"><strong>Type</strong><span>${file.type}</span></div>
-                    <div class="metadata-item"><strong>Path</strong><span style="font-size:0.8em;word-break:break-all;">${file.path}</span></div>
-                </div>
-            `;
-        }
-
-        // Wire up Finder / Delete buttons
-        const finderBtn = document.getElementById('btn-open-finder');
-        if (finderBtn) {
-            finderBtn.onclick = () => {
-                fetch(`${API_BASE}/api/open-in-finder`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path: file.path })
-                });
-            };
-        }
-
-        modal.classList.add('active');
+        openViewer(tlFiles, index, { onRemoved: removeTimelineFile });
     }
 
-    function formatSize(bytes) {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-        return (bytes / 1073741824).toFixed(2) + ' GB';
+    // Een verplaatst bestand uit de tijdlijn halen en de indeling opnieuw opbouwen
+    function removeTimelineFile(file) {
+        const at = tlFiles.findIndex(f => f.path === file.path);
+        if (at < 0) return;
+        tlFiles.splice(at, 1);
+        const dt = new Date(file.timestamp * 1000);
+        const year = String(dt.getFullYear());
+        const month = String(dt.getMonth() + 1);
+        if (tlDateIndex[year] && tlDateIndex[year][month]) {
+            tlDateIndex[year][month]--;
+        }
+        tlYearBoundaries = {};
+        tlFiles.forEach((f, i) => {
+            const y = String(new Date(f.timestamp * 1000).getFullYear());
+            if (!(y in tlYearBoundaries)) tlYearBoundaries[y] = i;
+        });
+        if (tlFiles.length === 0) {
+            renderEmptyState('No photos found in selected folders');
+            return;
+        }
+        buildGroups();
+        recomputeLayout();
     }
 
     // ── Scroll Handler ────────────────────────────────────

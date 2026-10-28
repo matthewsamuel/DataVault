@@ -393,6 +393,25 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   een serverfout als je de scan intussen in het takenpaneel pauzeerde. Nu krijg je een
   duidelijke melding met het nummer van de taak, die je in het takenpaneel kunt hervatten.
 
+### Viewer, chat en bediening
+- Viewer: in een map met submappen opende een klik op een foto soms een ander bestand (of een
+  map), en dan werkten Verplaatsen en Open in Finder ook op dat verkeerde bestand. Nu opent de
+  viewer altijd het bestand waarop je klikt, slaan vorige/volgende de mappen over, en werken
+  Verplaatsen en Open in Finder altijd op het bestand dat je ziet.
+- Viewer: bladeren kan weer met de muis via de zones links en rechts (ze verdwijnen aan het
+  begin en eind van de lijst en tijdens inzoomen, en zitten de videobediening niet in de weg).
+  De rode knop "Delete" deed niets en is weg; weggooien gaat via de Keurer (omkeerbaar, naar de
+  prullenmand). Een video of geluid van het vorige bestand stopt nu als je verder bladert.
+- Viewer: de metadata toont alleen nog echte gegevens. De nep-"ELO Rating 1000" is weg; de
+  Shows-waardering staat er alleen bij als je in Shows op die foto gestemd hebt (met het aantal
+  stemmen). In de tijdlijn staat de opnamedatum.
+- Tijdlijn en chat gebruiken dezelfde viewer met hun eigen lijst. Na een foto uit de tijdlijn
+  opende "Open in Finder" in de gewone viewer voortaan de laatste tijdlijnfoto, en de
+  pijltjestoetsen toonden foto's uit een ander tabblad. Een foto uit de chat openen maakte
+  daarna de Files-weergave kapot (klikken gaf een fout). Alle drie opgelost. Verplaats je een
+  foto vanuit de tijdlijn, dan verdwijnt hij daar ook uit de lijst.
+- Meldingen (toasts) staan nu altijd bovenop, ook boven de viewer en de slideshow.
+
 ### Shows
 - Een mapshow toont nu elke foto en video uit de map precies één keer, in een willekeurige
   volgorde waarin foto's met een hogere waardering eerder komen. Voorheen werd er getrokken

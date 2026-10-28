@@ -394,6 +394,12 @@ Listening time: 45,000 minutes
 - **Video Frame Extraction:** ffmpeg extracts the frame at the 1s mark; a clip shorter than that gets a second try for its first frame
 - **Never above the cache:** a thumbnail write only ever makes the thumbnail folder itself, and `Config.ensure_cache_dirs` makes folders below the vault root one at a time, so a vault renamed or unplugged mid-job is never recreated as an empty folder at the old path
 - **Concurrent Processing:** ThreadPoolExecutor for multi-core hash/thumbnail operations
+- **One viewer, its own list:** the Files grid, the timeline and the chat each open the shared
+  viewer with their own list of files (`openViewer(items, index, {onRemoved})`). Previous/next
+  (keys and the side zones), Move and Open in Finder always act on the file that is shown, and
+  the Files grid's own lists are never replaced. The metadata shows only real values: the file
+  date (or the timeline's capture date) and a Shows rating only for files that were voted on
+  (`/api/media` adds `rating` and `votes` for those)
 
 **Performance:**
 - Thumbnail generation: 50-100ms per image
