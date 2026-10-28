@@ -538,6 +538,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   halverwege weg), dan meldt hij dat de tijdlijn mogelijk onvolledig is en bewaart hij dat
   onvolledige antwoord niet meer. Voorheen bleef zo'n lege of halve tijdlijn staan, ook nadat de
   map weer leesbaar was, tot een herstart.
+- Panorama's en scans boven 600 megapixel staan nu op hun EXIF-datum in de tijdlijn en bij "op
+  deze dag". Voorheen kregen ze voorgoed hun bestandsdatum, omdat de app hun EXIF niet las.
 - "Op deze dag" doet per bezoek een begrensde hoeveelheid werk (eerst wat de app al weet, daarna
   hooguit 300 mappen of 2 seconden) in plaats van soms het hele archief door te lopen. Het toont
   alleen foto's en video's, nooit meer een muziekbestand als grijs vlak.

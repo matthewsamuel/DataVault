@@ -339,3 +339,53 @@ def test_nothing_is_stored_when_the_vault_is_gone_by_the_end(tmp_path):
     assert dates[str(photo)][1] == "exif" and db.stored is None
     media_dates.capture_dates([(str(photo), os.stat(photo))], db, vault_root=tmp_path / "v")
     assert db.stored and db.stored[0][0] == str(photo)
+
+
+def _giant_jpeg(path, exif_dt, width=32000, height=20000):
+    """A 64x64 JPEG with EXIF whose header states 640 MP, above Pillow's limit (2 x 300 MP)."""
+    import io
+    import struct
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64), (10, 200, 10)).save(buf, "JPEG", exif=_exif(exif_dt))
+    data = bytearray(buf.getvalue())
+    sof = data.find(b"\xff\xc0")
+    struct.pack_into(">HH", data, sof + 5, height, width)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(data))
+    return path
+
+
+def test_an_image_above_pillows_size_limit_still_gives_its_exif_date(client, vault):
+    # R25B-2: such panoramas get a thumbnail, so they must land on their own date too
+    folder = vault / "RAW/panorama"
+    pano = _giant_jpeg(folder / "pano.jpg", "2015:06:01 12:00:00")
+    with pytest.raises(Image.DecompressionBombError):
+        Image.open(pano)
+    assert media_dates.exif_date(pano) == _ts("2015-06-01 12:00")
+    [row] = timeline_files(_scan(client, folder))
+    assert row["date_source"] == "e" and row["timestamp"] == _ts("2015-06-01 12:00")
+    # A TIFF above the limit (here a lowered one) too
+    tif = folder / "scan.tif"
+    Image.new("RGB", (300, 200)).save(tif, exif=_exif("2011:02:03 04:05:06"))
+    import backend.thumbnail  # noqa: F401  (sets the limit this test lowers)
+    old = Image.MAX_IMAGE_PIXELS
+    Image.MAX_IMAGE_PIXELS = 1000
+    try:
+        with pytest.raises(Image.DecompressionBombError):
+            Image.open(tif)
+        assert media_dates.exif_date(tif) == _ts("2011-02-03 04:05") + 6
+    finally:
+        Image.MAX_IMAGE_PIXELS = old
+
+
+def test_a_huge_png_is_never_decoded_to_look_for_a_date(tmp_path, monkeypatch):
+    from backend import thumbnail
+    png = tmp_path / "groot.png"
+    Image.new("L", (400, 300), 100).save(png)
+    monkeypatch.setattr(thumbnail, "BIG_IMAGE_PIXELS", 1000)
+    loads = []
+    monkeypatch.setattr(Image.Image, "load", lambda self: loads.append(self.size))
+    from PIL import ImageFile
+    monkeypatch.setattr(ImageFile.ImageFile, "load", lambda self: loads.append(self.size))
+    assert media_dates.exif_date(png) is None
+    assert loads == []

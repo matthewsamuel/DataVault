@@ -55,18 +55,22 @@ def exif_date(path: Path) -> Optional[float]:
     when the file has none or is no readable image. Raises OSError when the file could
     not be read (see _read_error).
     """
-    from PIL import Image
-    from backend import thumbnail  # noqa: F401  (registers the HEIC opener, raises the pixel limit)
-    with open(path, "rb") as f:
-        try:
-            with Image.open(f) as img:
-                exif = img.getexif()
-                sub = exif.get_ifd(0x8769)
-                values = (sub.get(0x9003), sub.get(0x9004), exif.get(0x0132))
-        except Exception as e:
-            if _read_error(e):
-                raise
-            return None
+    from backend import thumbnail  # also registers the HEIC opener and raises the pixel limit
+    try:
+        # Reading EXIF decodes no pixels, so an image above Pillow's size limit (a
+        # 640 MP panorama) is opened too, or it would keep its file date for good
+        with thumbnail.open_unchecked(path) as img:
+            if img.format == "PNG" and "exif" not in img.info and \
+                    img.size[0] * img.size[1] > thumbnail.BIG_IMAGE_PIXELS:
+                # Pillow decodes a whole PNG to look for EXIF after the pixel data
+                return None
+            exif = img.getexif()
+            sub = exif.get_ifd(0x8769)
+            values = (sub.get(0x9003), sub.get(0x9004), exif.get(0x0132))
+    except Exception as e:
+        if _read_error(e):
+            raise
+        return None
     for value in values:
         if isinstance(value, bytes):
             value = value.decode("ascii", "ignore")
