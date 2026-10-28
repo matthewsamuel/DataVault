@@ -741,7 +741,11 @@ function openViewer(items, index, { onRemoved = null } = {}) {
     viewer.index = start;
     viewer.onRemoved = onRemoved;
     renderViewerFile();
-    document.getElementById('modal-viewer').classList.add('active');
+    const modal = document.getElementById('modal-viewer');
+    modal.classList.add('active');
+    // Focus uit een bedekt veld halen (bv. de chat-invoer), anders typt de gebruiker daar blind verder
+    const focused = document.activeElement;
+    if (focused && focused !== document.body && !modal.contains(focused)) focused.blur();
 }
 
 // De bestanden zoals ze in de Files-grid staan (zonder mappen), in dezelfde volgorde
@@ -1327,8 +1331,11 @@ function nextFile() {
 // Keyboard navigation (niet terwijl de verplaats-modal erboven open is)
 document.addEventListener('keydown', (e) => {
     if (!isViewerOpen() || isMoveModalOpen()) return;
+    // Alleen invoervelden in de viewer zelf houden de toetsen; een veld eronder
+    // (zoals de chat die het bestand opende) is bedekt en telt niet mee
     const tag = e.target && e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if ((tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')
+        && e.target.closest('#modal-viewer')) return;
     if (e.key === 'ArrowLeft') prevFile();
     if (e.key === 'ArrowRight') nextFile();
     if (e.key === 'Escape') {
@@ -3027,6 +3034,9 @@ function executeAIAction(actionData) {
                 showToast('Map niet gevonden', actionData.target, 'warning');
                 break;
             }
+            // De volledige chat ligt boven alle tabbladen; sluiten zodat de map te zien is
+            const fullscreenChat = document.getElementById('chat-fullscreen-modal');
+            if (fullscreenChat && fullscreenChat.classList.contains('active')) closeChatFullscreen();
             switchMainView('viewer');
             selectFolder(folder.path);
             break;

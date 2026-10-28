@@ -127,6 +127,29 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("home: chat full screen", lambda: (page.click(".nav-tab[data-view='home']"),
                                                     page.click("#section-home .chat-fullscreen-toggle")), 0.5)
             step("home: close full screen", lambda: page.keyboard.press("Escape"), 0.4)
+
+            # Chat actions from the full-screen chat: the file opens above the chat while the chat
+            # input keeps focus, Escape closes only the file, and open_folder shows the folder
+            def expect(ok, message):
+                if not ok:
+                    problems.append(message)
+
+            fullscreen_open = "document.getElementById('chat-fullscreen-modal').classList.contains('active')"
+            photo = str(next(f for f in sorted((vault / "RAW" / "misc").resolve().iterdir())
+                             if f.suffix == ".jpg" and not f.name.startswith(".")))
+            step("chat: open_file from full screen", lambda: (
+                page.click("#section-home .chat-fullscreen-toggle"),
+                page.wait_for_function("document.activeElement.id === 'chat-input-fullscreen'"),
+                page.evaluate(f"executeAIAction({{action: 'open_file', path: {json.dumps(photo)}}})")), 1.2)
+            expect(page.evaluate("isViewerOpen()"), "chat open_file: viewer did not open")
+            step("chat: Escape closes the file", lambda: page.keyboard.press("Escape"), 0.4)
+            expect(not page.evaluate("isViewerOpen()") and page.evaluate(fullscreen_open),
+                   "chat open_file: Escape did not close only the viewer")
+            step("chat: open_folder from full screen",
+                 lambda: page.evaluate("executeAIAction({action: 'open_folder', target: 'misc'})"), 1.2)
+            expect(not page.evaluate(fullscreen_open) and page.is_visible("#section-viewer"),
+                   "chat open_folder: the folder stays hidden behind the full-screen chat")
+            page.click(".nav-tab[data-view='home']")
             for theme in ("light", "dark", "auto"):
                 step(f"theme {theme}", lambda: (page.click(".theme-button"),
                                                  page.click(f".theme-option[data-theme='{theme}']")), 0.3)

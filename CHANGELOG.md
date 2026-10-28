@@ -420,6 +420,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   chat verhuist. Foto's die Pasha toont verschijnen in de chat die je ziet, blijven staan als
   je terugschakelt en blijven aanklikbaar. Een foto uit de chat opent boven de chat, en Escape
   sluit dan eerst alleen de foto.
+- Chat: opende Pasha een foto terwijl je cursor nog in het chatvak stond, dan deden Escape en de
+  pijltjestoetsen niets tot je eerst in de foto klikte (en in de schermvullende chat sloot
+  Escape helemaal niets). Nu werken ze meteen. Vraag je in de schermvullende chat om een map te
+  openen, dan gaat de chat dicht zodat je de map ook echt ziet.
 - Meldingen (toasts) staan nu altijd bovenop, ook boven de viewer en de slideshow.
 - Spotify: lukte het laden één keer niet (bijv. tijdens een herstart), dan bleef de pagina leeg
   tot je de hele app herlaadde. Nu zie je een melding met de knop "Opnieuw proberen", en de
