@@ -6269,6 +6269,17 @@ button.otd-settings-icon:hover {
     box-shadow: none;
 }
 
+/* Op volledig scherm vult de berichtenlijst de hoogte: de invoer staat onderaan */
+.chat-fullscreen-modal .chat-widget .chat-messages {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+}
+
+.chat-fullscreen-modal .chat-suggestions {
+    padding-top: var(--space-sm);
+}
+
 /* ---- Opslag per map (venster) ---- */
 
 .storage-modal-container {

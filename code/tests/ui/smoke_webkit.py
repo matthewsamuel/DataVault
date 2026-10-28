@@ -159,7 +159,18 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # Home: chat full screen open and closed, theme switch
             step("home: chat full screen", lambda: (page.click(".nav-tab[data-view='home']"),
                                                     page.click("#section-home .chat-fullscreen-toggle")), 0.5)
+            # The messages fill the window, the input sits at the bottom, the example questions come along
+            chat = page.evaluate("""(() => {
+                const w = document.querySelector('.chat-fullscreen-wrapper').getBoundingClientRect();
+                const i = document.querySelector('#chat-fullscreen-modal .chat-input-container').getBoundingClientRect();
+                const s = document.querySelector('#chat-fullscreen-modal #chat-suggestions');
+                return {gap: Math.round(w.bottom - i.bottom), suggestions: !!(s && s.getClientRects().length)};
+            })()""")
+            if chat["gap"] > 40 or not chat["suggestions"]:
+                problems.append(f"home: full-screen chat layout {chat} (input not at the bottom, or no example questions)")
             step("home: close full screen", lambda: page.keyboard.press("Escape"), 0.4)
+            if not page.evaluate("!!document.querySelector('#chat-home-slot #chat-suggestions')"):
+                problems.append("home: the example questions did not come back to the chat on Home")
 
             # Chat actions from the full-screen chat: the file opens above the chat while the chat
             # input keeps focus, Escape closes only the file, and open_folder shows the folder

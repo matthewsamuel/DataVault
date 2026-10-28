@@ -3684,10 +3684,14 @@ function sendChatMessage() {
 
 // Een voorbeeldvraag onder de chat op Home: meteen versturen
 function askPasha(question) {
-    const input = document.getElementById('chat-input');
+    // De voorbeeldvragen verhuizen mee naar de schermvullende chat
+    const modal = document.getElementById('chat-fullscreen-modal');
+    const fullscreen = modal && modal.classList.contains('active');
+    const input = document.getElementById(fullscreen ? 'chat-input-fullscreen' : 'chat-input');
     if (!input || input.disabled) return;
     input.value = question.trim();
-    sendChatMessage();
+    if (fullscreen) sendChatMessageFullscreen();
+    else sendChatMessage();
 }
 
 function sendChatMessageFullscreen() {
@@ -3848,9 +3852,12 @@ function handleFullscreenEscape(e) {
 // Verhuist de ene berichtenlijst (dezelfde DOM-knopen, met hun klikgedrag) naar een houder
 function moveChatMessages(slotId) {
     const messages = document.getElementById('chat-messages');
+    const suggestions = document.getElementById('chat-suggestions');
     const slot = document.getElementById(slotId);
     if (messages && slot && messages.parentElement !== slot) {
         slot.appendChild(messages);
+        // De voorbeeldvragen (tot het eerste bericht) staan steeds onder de berichten
+        if (suggestions) slot.appendChild(suggestions);
         messages.scrollTop = messages.scrollHeight;
     }
 }
