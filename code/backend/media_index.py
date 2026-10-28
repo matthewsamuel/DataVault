@@ -729,18 +729,21 @@ def purge_missing(db, keep: Callable[[str], bool] = lambda path: False) -> int:
 # ---------- queries ----------
 
 ORIENTATIONS = ("landscape", "portrait", "square")
+# Ties are broken by id (the order the index found the files in, which follows the
+# sorted walk), not by path: a long path in every sort record made a deep page of a
+# 100k library three times slower. Names keep the path, so equal names go by folder.
 SORTS = {
-    "taken": "m.taken ASC, m.path ASC",
-    "-taken": "m.taken DESC, m.path DESC",
+    "taken": "m.taken ASC, m.id ASC",
+    "-taken": "m.taken DESC, m.id DESC",
     "name": "m.name ASC, m.path ASC",
     "-name": "m.name DESC, m.path DESC",
-    "size": "m.size ASC, m.path ASC",
-    "-size": "m.size DESC, m.path ASC",
+    "size": "m.size ASC, m.id ASC",
+    "-size": "m.size DESC, m.id ASC",
     "added": "m.added_at ASC, m.id ASC",
     "-added": "m.added_at DESC, m.id DESC",
     # Shows rating (query() joins file_ratings as r); files nobody voted on come last
-    "rating": "r.rating IS NULL, r.rating ASC, m.taken ASC, m.path ASC",
-    "-rating": "r.rating IS NULL, r.rating DESC, m.taken DESC, m.path DESC",
+    "rating": "r.rating IS NULL, r.rating ASC, m.taken ASC, m.id ASC",
+    "-rating": "r.rating IS NULL, r.rating DESC, m.taken DESC, m.id DESC",
     "path": "m.path ASC",
     "random": "random()",
 }
@@ -891,18 +894,34 @@ def query(db, filters: Optional[Dict[str, Any]] = None, sort: str = "taken",
     """
     The media rows matching filters (see _where), sorted (SORTS), one page of them.
     Each row is a dict of ROW_COLUMNS, plus rating and votes when the file was voted on.
+
+    A deferred join: the sort and the offset run over the ids and the sort keys only,
+    and the full rows are read for the ids of this page. Sorting every full row (paths,
+    camera names, ...) up to a deep offset made page 250 of 500 take most of a second.
     """
     if sort not in SORTS:
         raise ValueError(f"sort must be one of {', '.join(SORTS)}")
     where, args = _where(filters)
     limit = max(0, min(int(limit), MAX_LIMIT))
     offset = max(0, int(offset))
+    if not limit:
+        return []
+    order = SORTS[sort]
+    # file_ratings is only needed in the sort for the rating sorts
+    ratings = "LEFT JOIN file_ratings r ON r.path = m.path " if "r." in order else ""
     columns = ", ".join(f"m.{c}" for c in ROW_COLUMNS)
     with db._connect() as conn:
+        ids = [row[0] for row in conn.execute(
+            f"SELECT m.id FROM media m {ratings}WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
+            (*args, limit, offset)).fetchall()]
+        if not ids:
+            return []
         rows = conn.execute(
             f"SELECT {columns}, r.rating, r.votes FROM media m LEFT JOIN file_ratings r ON r.path = m.path "
-            f"WHERE {where} ORDER BY {SORTS[sort]} LIMIT ? OFFSET ?", (*args, limit, offset)).fetchall()
-    return [_item(row) for row in rows]
+            f"WHERE m.id IN ({', '.join('?' * len(ids))})", ids).fetchall()
+    by_id = {row[0]: row for row in rows}
+    # In the order of the sort (a row removed between the two reads is left out)
+    return [_item(by_id[i]) for i in ids if i in by_id]
 
 
 def count(db, filters: Optional[Dict[str, Any]] = None) -> int:
@@ -970,19 +989,25 @@ def facets(db) -> Dict[str, Any]:
             "exts": [{"kind": kind, "ext": ext, "count": n} for kind, ext, n in exts]}
 
 
-def selection_version(db, filters: Optional[Dict[str, Any]] = None) -> str:
+def selection_info(db, filters: Optional[Dict[str, Any]] = None) -> Tuple[int, str]:
     """
-    A short tag that changes when the rows matching filters change (a row added,
-    removed, hidden, shown again, re-read or moved), and stays the same for writes
-    elsewhere in the index or a pass that changes nothing. For a client that pages
-    through one selection. Ratings are not part of it.
+    (count, version) of the rows matching filters, in one read. The version is a short
+    tag that changes when those rows change (a row added, removed, hidden, shown again,
+    re-read or moved), and stays the same for writes elsewhere in the index or a pass
+    that changes nothing. For a client that pages through one selection. Ratings are
+    not part of it.
     """
     where, args = _where(filters)
     with db._connect() as conn:
         n, ids, newest = conn.execute(
             f"SELECT COUNT(*), COALESCE(SUM(m.id), 0), COALESCE(MAX(m.indexed_at), 0) FROM media m WHERE {where}",
             args).fetchone()
-    return f"{n:x}.{ids:x}.{int(newest * 1000):x}"
+    return n, f"{n:x}.{ids:x}.{int(newest * 1000):x}"
+
+
+def selection_version(db, filters: Optional[Dict[str, Any]] = None) -> str:
+    """The version of selection_info() alone."""
+    return selection_info(db, filters)[1]
 
 
 def timeline_page(db, roots: Sequence[Path], offset: int, limit: Optional[int]) -> List[Tuple]:

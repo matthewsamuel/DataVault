@@ -497,3 +497,38 @@ def test_camera_text_is_matched_literally(indexed):
     assert _browse(indexed, camera_contains="iPhone")["total"] >= 2
     assert _browse(indexed, camera_contains="%")["total"] == 0
     assert _browse(indexed, camera_contains="i_hone")["total"] == 0
+
+
+# ---------- review fixes ----------
+
+
+def test_deep_pages_keep_the_order_of_one_full_sort(tmp_path):
+    """query() sorts the ids and reads the rows of the page afterwards: same order, ties included."""
+    from backend import media_index
+    db = Database(tmp_path / "datavault.db")
+    now = time.time()
+    rows = [(f"/v/RAW/{i % 7}/f{i:03d}.jpg", f"/v/RAW/{i % 7}", f"f{i % 40:03d}.jpg", "photo", ".jpg",
+             1000 + i % 5, i, now - (i % 9) * 3600, "exif", now, now - i, now) for i in range(300)]
+    with db._connect() as conn:
+        conn.executemany("INSERT INTO media (path, folder, name, kind, ext, size, mtime_ns, taken, taken_source, "
+                         "added_at, indexed_at, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        conn.executemany("INSERT INTO file_ratings (path, rating, votes) VALUES (?, ?, 1)",
+                         [(rows[i][0], 1000 + 50 * (i % 3)) for i in range(0, 300, 4)])
+        columns = ", ".join(f"m.{c}" for c in media_index.ROW_COLUMNS)
+        for sort, order in media_index.SORTS.items():
+            if sort == "random":
+                continue
+            expected = [r[0] for r in conn.execute(
+                f"SELECT m.path FROM media m LEFT JOIN file_ratings r ON r.path = m.path WHERE m.missing = 0 "
+                f"ORDER BY {order}")]
+            paged = [row["path"] for offset in range(0, 300, 23)
+                     for row in media_index.query(db, {}, sort=sort, offset=offset, limit=23)]
+            assert paged == expected, sort
+            # Ratings come along with the rows of the page
+            rated = media_index.query(db, {}, sort="-rating", limit=1)[0]
+            assert rated["rating"] == 1100 and rated["votes"] == 1
+    assert media_index.query(db, {}, sort="name", offset=10 ** 6) == []
+    assert media_index.query(db, {}, limit=0) == []
+    n, version = media_index.selection_info(db, {"kind": "photo"})
+    assert n == 300 and version == media_index.selection_version(db, {"kind": "photo"})
+    db.close_all()

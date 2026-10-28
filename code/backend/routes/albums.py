@@ -126,7 +126,8 @@ def browse(request: Request, album: Optional[int] = Query(None, ge=0, le=MAX_INT
     query = _query_for(spec)
     limit = max(1, min(limit, PAGE_MAX))
     offset = max(0, min(offset, MAX_INT))
-    version = media_index.selection_version(db, query)
+    # Count and version in one read, before the rows: a page never claims a newer version than it shows
+    total, version = media_index.selection_info(db, query)
     rows = media_index.query(db, query, sort=sort, offset=offset, limit=limit)
     return {
         "ready": media_index.usable(db),
