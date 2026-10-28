@@ -306,3 +306,18 @@ def test_app_files_are_not_servable(client, config):
         assert _get_raw(client, "/api/media", "folder", str(p)).status_code == 403
     r = _get_raw(client, "/api/file", "path", ".datavault_cache/datavault.db")
     assert r.status_code == 403 and b"SQLite format" not in r.content
+
+
+def test_keurer_speaks_one_spelling_of_a_folder(client, vault):
+    """A folder reached through an in-vault symlink is answered (and stored) in its real spelling."""
+    real = vault / "RAW/2019/zomer vakantie"
+    alias = vault / "RAW/alias"
+    os.symlink(real, alias)
+    data = client.get("/api/keurer/files", params={"folder": str(alias)}).json()
+    assert data["folder"] == str(real)
+    assert all(f["path"].startswith(str(real) + "/") for f in data["files"])
+    photo = data["files"][0]
+    r = client.post("/api/keurer/decide", json={"path": str(alias / photo["name"]), "folder": str(alias), "decision": "keep"})
+    assert r.status_code == 200, r.text
+    again = client.get("/api/keurer/files", params={"folder": str(real)}).json()
+    assert photo["name"] not in {f["name"] for f in again["files"]} and again["decided"] == 1

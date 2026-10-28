@@ -174,6 +174,12 @@ async function keurerLoadFiles() {
             throw new Error(err.detail || `HTTP ${res.status}`);
         }
         const data = await res.json();
+        // De server geeft de map in één vaste schrijfwijze terug (symlinks en Unicode-vorm
+        // opgelost); die gebruiken we voortaan, zodat undo de beslissing aan deze map koppelt
+        if (data.folder && data.folder !== keurerFolder) {
+            keurerFolder = data.folder;
+            localStorage.setItem('keurer_folder', keurerFolder);
+        }
         keurerFileQueue = data.files;
         keurerIndex = 0;
 
