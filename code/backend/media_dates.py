@@ -65,12 +65,17 @@ def exif_date(path: Path) -> Optional[float]:
                 # Pillow decodes a whole PNG to look for EXIF after the pixel data
                 return None
             exif = img.getexif()
-            sub = exif.get_ifd(0x8769)
-            values = (sub.get(0x9003), sub.get(0x9004), exif.get(0x0132))
+            return exif_timestamp(exif)
     except Exception as e:
         if _read_error(e):
             raise
         return None
+
+
+def exif_timestamp(exif) -> Optional[float]:
+    """DateTimeOriginal (or DateTimeDigitized, DateTime) of a Pillow Exif as a local-time epoch, or None."""
+    sub = exif.get_ifd(0x8769)
+    values = (sub.get(0x9003), sub.get(0x9004), exif.get(0x0132))
     for value in values:
         if isinstance(value, bytes):
             value = value.decode("ascii", "ignore")
