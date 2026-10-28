@@ -258,6 +258,16 @@
         }
     };
 
+    // Nieuw slim album: vanaf alles, met de filters in beeld; Bewaar als album maakt het
+    window.albumsNew = function () {
+        albumsShow(null, {}, DEFAULT_SORT);
+        showToast('Nieuw slim album', 'Kies hierboven de filters en klik dan op Bewaar als album.', 'info');
+        setTimeout(() => {
+            const first = document.querySelector('#albums-kinds .pill');
+            if (first) first.focus();
+        }, 100);
+    };
+
     // ── Zijbalk ──────────────────────────────────────────
 
     async function loadAlbums() {
@@ -1256,7 +1266,6 @@
             }
             const grid = createEl('div', { class: 'albums-otd-grid' },
                 ...group.items.map((file, i) => tileNode(file, start + i, openOtd)));
-            const day = `${data.year - group.years_ago}-${pad2(data.month)}-${pad2(data.day)}`;
             const realDay = `${group.year}-${pad2(data.month)}-${pad2(data.day)}`;
             return createEl('section', { class: 'albums-otd-year', 'aria-label': `${yearsAgo(group.years_ago)}, ${group.year}` },
                 createEl('header', { class: 'albums-otd-year-head' },
