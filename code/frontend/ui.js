@@ -155,9 +155,38 @@ function closeOverlay(el) {
     else el.classList.remove('active');
 }
 
+// Wat Tab in een venster langsgaat, in de volgorde van de pagina
 function tabbables(root) {
-    return [...root.querySelectorAll(TABBABLE)].filter(el => el.getClientRects().length > 0
+    const items = [...root.querySelectorAll(TABBABLE)].filter(el => el.getClientRects().length > 0
+        && !(el.hasAttribute('tabindex') && el.tabIndex < 0)
         && !el.closest('[hidden], [inert]') && getComputedStyle(el).visibility !== 'hidden');
+    // Een groep keuzerondjes is één stop, zoals in de browser: het gekozen rondje (of het eerste)
+    const isRadio = el => el.tagName === 'INPUT' && el.type === 'radio' && el.name;
+    const stops = new Map();
+    return items.filter(el => {
+        if (!isRadio(el)) return true;
+        if (!stops.has(el.name)) {
+            const group = items.filter(r => isRadio(r) && r.name === el.name);
+            stops.set(el.name, group.find(r => r.checked) || group[0]);
+        }
+        return stops.get(el.name) === el;
+    });
+}
+
+// Het element waar Tab (of Shift+Tab) vanaf 'active' heen gaat, binnen top, rondom aan de randen
+function nextTabStop(top, active, back) {
+    const items = tabbables(top);
+    if (!items.length) return null;
+    if (!active || !top.contains(active) || active === top) return back ? items[items.length - 1] : items[0];
+    const at = items.indexOf(active);
+    if (at >= 0) return items[(at + (back ? -1 : 1) + items.length) % items.length];
+    // De focus staat op iets dat zelf geen Tab-stop is (een kaart met tabindex -1, het venster):
+    // de eerstvolgende stop erna (of ervoor) in de pagina
+    if (back) {
+        return [...items].reverse().find(el => el.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING)
+            || items[items.length - 1];
+    }
+    return items.find(el => active.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) || items[0];
 }
 
 // Waar de focus na sluiten heen gaat. Een foto die vanuit de chat geopend werd, geeft de
@@ -246,30 +275,16 @@ document.addEventListener('mousedown', (e) => {
     if (target) lastFocused = target;
 }, true);
 
-// Tab blijft in het bovenste venster
+// Tab blijft in het bovenste venster. De focus gaat hier altijd met de hand naar de volgende
+// stop: Safari slaat bij Tab (met de standaardinstelling) knoppen over en zou zo uit het venster
+// springen, naar de pagina erachter.
 document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Tab') return;
+    if (e.key !== 'Tab' || e.ctrlKey || e.metaKey || e.altKey) return;
     const top = topOverlay();
     if (!top) return;
-    const items = tabbables(top);
-    if (!items.length) {
-        e.preventDefault();
-        top.focus({ preventScroll: true });
-        return;
-    }
-    const first = items[0];
-    const last = items[items.length - 1];
-    const active = document.activeElement;
-    if (!top.contains(active) || active === top) {
-        e.preventDefault();
-        (e.shiftKey ? last : first).focus();
-    } else if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-    } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-    }
+    e.preventDefault();
+    const next = nextTabStop(top, document.activeElement, e.shiftKey);
+    (next || top).focus({ preventScroll: !next });
 }, true);
 
 // Escape: wat het bovenste venster vóór de toets was. Sloot zijn eigen code het al (de viewer,

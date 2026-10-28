@@ -87,12 +87,13 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Geen sneltoets doet iets terwijl je in een invoerveld typt, of samen met Cmd, Ctrl of Alt. Ook de
   Keurer-toetsen niet: een spatie in het zoekveld opent geen voorbeeld meer.
 - De pijltjes in het themamenu kiezen alleen een thema. Op het Keurer-tabblad beslisten ze ook over
-  de foto erachter (naar de prullenbak, terugdraaien, verplaatsen); dat kan niet meer. De Keurer
+  de foto erachter (naar de prullenmand, terugdraaien, verplaatsen); dat kan niet meer. De Keurer
   reageert op pijltjes en spatie alleen als de focus op de Keurer zelf staat (of nergens, of op het
   tabblad).
 - Elk venster houdt de focus binnen zich (Tab gaat rond), **Esc** sluit alleen het bovenste venster,
   en daarna staat de focus weer waar hij was: op de foto in het raster of in het chatvak. Na het
   sluiten van een foto die vanuit de chat geopend werd, kun je dus meteen verder typen.
+  Ook in Safari: daar sloeg Tab knoppen over en kwam de focus zo op de pagina achter het venster.
 - Overal een duidelijke focusrand als je met het toetsenbord werkt. Het themamenu, de mapkeuze van
   de tijdlijn, de opslagwidget, Shows-kaarten en de Spotify-tegels werken ook met het toetsenbord.
 
