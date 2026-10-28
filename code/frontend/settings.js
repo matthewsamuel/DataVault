@@ -97,7 +97,7 @@ registerSettingsSection({
         const group = createEl('div', { class: 'settings-choice-group', role: 'radiogroup', 'aria-label': 'Thema' },
             ...choices.map(([value, label]) => createEl('label', { class: 'settings-choice' },
                 createEl('input', {
-                    type: 'radio', name: 'settings-theme', value, checked: value === theme,
+                    type: 'radio', class: 'radio', name: 'settings-theme', value, checked: value === theme,
                     dataset: { themeChoice: value }, onChange: () => setTheme(value),
                 }),
                 createEl('span', { text: label }))));

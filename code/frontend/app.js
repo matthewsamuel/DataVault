@@ -290,13 +290,19 @@ function renderShows(data) {
     }
 
     container.innerHTML = `
-        <div class="shows-header" style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
+        <div class="page-header shows-header">
+            <div>
+                <h1 class="page-title"><i class="fas fa-film" aria-hidden="true"></i> Shows</h1>
+                <p class="page-subtitle">Diavoorstellingen van je mappen, met je mooiste foto's vaker in beeld.</p>
+            </div>
+            <div class="shows-header-actions">
             <button class="btn btn-secondary" id="btn-shuffle-shows" onclick="shuffleShows()">
                 <i class="fas fa-random" aria-hidden="true"></i> Shows husselen
             </button>
             <button class="btn btn-secondary" onclick="openSettingsModal()">
                 <i class="fas fa-sliders-h" aria-hidden="true"></i> Bronnen beheren
             </button>
+            </div>
         </div>
     `;
 
@@ -309,13 +315,13 @@ function renderShows(data) {
         makeActivatable(hero, `Afspelen: ${featured.title}`);
 
         hero.innerHTML = html`
-            <img src="${vaultFileUrl('thumb', cover.path)}" class="shows-hero-img">
+            <img src="${vaultFileUrl('thumb', cover.path)}" class="shows-hero-img" alt="">
             <div class="shows-hero-content">
-                <span class="shows-hero-tag">Featured</span>
+                <span class="shows-hero-tag"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Uitgelicht</span>
                 <h2 class="shows-hero-title">${featured.title}</h2>
                 <p class="shows-hero-subtitle">${featured.subtitle}</p>
                 <button class="btn btn-primary btn-lg" tabindex="-1">
-                    <i class="fas fa-play" style="margin-right: 10px;" aria-hidden="true"></i> Afspelen
+                    <i class="fas fa-play" aria-hidden="true"></i> Afspelen
                 </button>
             </div>
         `;
@@ -327,18 +333,14 @@ function renderShows(data) {
         const gridTitle = document.createElement('h3');
         gridTitle.className = 'section-title';
         gridTitle.textContent = 'Collecties';
-        gridTitle.style.marginTop = '40px';
         container.appendChild(gridTitle);
 
         const grid = document.createElement('div');
         grid.className = 'shows-grid-folders';
-        grid.style.display = 'grid';
-        grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(200px, 1fr))';
-        grid.style.gap = '20px';
 
         shows.forEach(show => {
             const card = document.createElement('div');
-            card.className = 'show-card folder-card';
+            card.className = 'show-card';
             card.onclick = () => playFolderShow(show);
             makeActivatable(card, `Afspelen: ${show.title}`);
 
@@ -349,12 +351,10 @@ function renderShows(data) {
 
             // Full thumbnail with transparent overlay + text shadow for readability
             card.innerHTML = html`
-                <div class="show-card-image-wrapper" style="position: relative; height: 180px; overflow: hidden; border-radius: 12px;">
-                     ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" style="width: 100%; height: 100%; object-fit: cover;">` : html`<div class="no-thumb" style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;background:var(--surface-raised);">📁</div>`}
-                    <div style="position:absolute;bottom:0;left:0;right:0;padding:10px 12px;background:linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 100%);">
-                        <h4 style="margin:0;font-size:14px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.8),0 0 8px rgba(0,0,0,0.5);">${show.title}</h4>
-                        <span style="font-size:11px;color:rgba(255,255,255,0.75);text-shadow:0 1px 3px rgba(0,0,0,0.8);">Map</span>
-                    </div>
+                ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" alt="" loading="lazy">` : html`<div class="show-card-empty"><i class="fas fa-images" aria-hidden="true"></i></div>`}
+                <div class="show-card-caption">
+                    <h4 class="show-card-title">${show.title}</h4>
+                    <span class="show-card-meta">Map</span>
                 </div>
             `;
 
@@ -475,24 +475,28 @@ function updateBreadcrumb(path) {
     const breadcrumb = document.getElementById('breadcrumb');
     breadcrumb.innerHTML = '';
 
-    const parts = path.split('/').filter(p => p);
+    // Vanaf de archiefmap tonen (RAW / 2019 / zomer), niet het hele pad op de schijf
+    const root = folderTree.find(f => path === f.path || path.startsWith(f.path + '/'));
+    const base = root ? root.path.slice(0, root.path.lastIndexOf('/')) : '';
+    const parts = path.slice(base.length).split('/').filter(p => p);
 
     if (parts.length === 0) {
-        breadcrumb.innerHTML = '<span class="breadcrumb-item active">Home</span>';
+        breadcrumb.innerHTML = '<span class="breadcrumb-item active">Archief</span>';
         return;
     }
 
-    let currentPath = '';
+    if (base) {
+        breadcrumb.appendChild(createEl('span', { class: 'breadcrumb-item breadcrumb-root', text: 'Archief' }));
+    }
+
+    let currentPath = base;
     parts.forEach((part, index) => {
         currentPath += '/' + part;
 
         const isLast = index === parts.length - 1;
 
-        if (index > 0) {
-            const separator = document.createElement('span');
-            separator.className = 'breadcrumb-separator';
-            separator.textContent = '/';
-            breadcrumb.appendChild(separator);
+        if (index > 0 || base) {
+            breadcrumb.appendChild(createEl('i', { class: 'fas fa-chevron-right breadcrumb-separator', 'aria-hidden': 'true' }));
         }
 
         const item = document.createElement(isLast ? 'span' : 'a');
@@ -1072,7 +1076,7 @@ function viewerMetadata(file) {
     add('Type:', file.type);
     if (typeof file.rating === 'number') {
         const votes = typeof file.votes === 'number' ? ` (${file.votes} ${file.votes === 1 ? 'stem' : 'stemmen'})` : '';
-        add('Shows-waardering:', createEl('i', { class: 'fas fa-star', style: 'margin-right: 5px;' }), `${file.rating}${votes}`);
+        add('Shows-waardering:', createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), `${file.rating}${votes}`);
     }
     return createEl('div', { class: 'metadata-grid' }, ...rows);
 }
@@ -1136,7 +1140,7 @@ function renderAudioPlayer(file, container) {
     const variant = Math.abs(hash) % 15 + 1;
     const coverSrc = `assets/audio_thumbs/audio_thumb_var${variant}.png`;
 
-    cover.innerHTML = html`<img src="${coverSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 20px;">`;
+    cover.innerHTML = html`<img src="${coverSrc}" alt="">`;
 
     // Track Info
     const info = document.createElement('div');
@@ -1153,7 +1157,7 @@ function renderAudioPlayer(file, container) {
 
     const artist = document.createElement('div');
     artist.className = 'audio-artist';
-    artist.textContent = 'Local File';
+    artist.textContent = 'Lokaal bestand';
 
     info.appendChild(title);
     info.appendChild(artist);
@@ -1311,7 +1315,7 @@ function openMoveFileModal(fileData = null) {
     // Show thumbnail preview
     const previewEl = document.getElementById('move-file-preview');
     if (previewEl) {
-        previewEl.innerHTML = html`<img src="${vaultFileUrl('thumb', fileToMove.path)}" alt="Voorbeeld" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">`;
+        previewEl.innerHTML = html`<img src="${vaultFileUrl('thumb', fileToMove.path)}" alt="Voorbeeld">`;
     }
 
     renderMoveFolderTreeUI();
@@ -1408,7 +1412,7 @@ async function confirmMoveFile() {
 
     const btn = document.getElementById('btn-confirm-move');
     const originalContent = [...btn.childNodes];
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Verplaatsen…';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Verplaatsen…';
     btn.disabled = true;
 
     let moved;
@@ -2221,7 +2225,7 @@ function renderDnaVisualization() {
     container.innerHTML = '';
 
     // Animated colored blobs
-    const colors = ['rgba(29,185,84,0.5)', 'rgba(155,89,182,0.4)', 'rgba(30,144,255,0.3)', 'rgba(255,165,0,0.3)'];
+    const colors = ['var(--viz-1)', 'var(--viz-2)', 'var(--viz-3)', 'var(--viz-4)'];
     for (let i = 0; i < 6; i++) {
         const blob = document.createElement('div');
         blob.className = 'dna-blob';
@@ -2307,11 +2311,11 @@ async function storageNavigateToPath(folderPath) {
             breadcrumb.style.display = 'flex';
             breadcrumbPath.textContent = `/ ${folderPath}`;
             tabs.style.display = 'flex';
-            summaryCard.style.display = 'block';
+            summaryCard.style.display = 'flex';
         } else {
             breadcrumb.style.display = 'none';
             tabs.style.display = 'none';
-            summaryCard.style.display = 'block';
+            summaryCard.style.display = 'flex';
         }
 
         totalDisplay.textContent = formatBytes(total);
@@ -2471,12 +2475,16 @@ async function openSettingsModal() {
         modal.id = 'modal-show-settings';
         modal.className = 'modal'; // Centered by CSS
         modal.innerHTML = `
-        <div class="modal-content settings-modal-content">
-            <button type="button" class="close-modal" onclick="closeSettingsModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
-            <h2>Bronnen beheren</h2>
-            <p class="settings-subtitle">Kies welke mappen in library meedoen aan Shows.</p>
-            <div id="settings-folders-list" class="settings-list">
-                <div class="loading-spinner"></div>
+        <div class="modal-container settings-modal-content" role="dialog" aria-labelledby="show-settings-title">
+            <div class="modal-header">
+                <h2 class="modal-title" id="show-settings-title">Bronnen beheren</h2>
+                <button type="button" class="modal-close" onclick="closeSettingsModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
+            </div>
+            <div class="modal-body modal-body-list">
+                <p class="settings-subtitle">Kies welke mappen in library meedoen aan Shows.</p>
+                <div id="settings-folders-list" class="settings-list">
+                    <div class="loading-spinner"></div>
+                </div>
             </div>
         </div>
     `;
@@ -2515,12 +2523,12 @@ async function openSettingsModal() {
             addEnabledState(showFolders);
             renderSettingsTree(showFolders, list);
         } else {
-            list.innerHTML = '<div class="error-message">Ongeldige mappenlijst van de server.</div>';
+            list.innerHTML = '<div class="inline-error">Ongeldige mappenlijst van de server.</div>';
         }
 
     } catch (e) {
         console.error("Error loading settings:", e);
-        list.replaceChildren(createEl('div', { class: 'error-message', text: `Instellingen laden mislukt: ${e.message}` }));
+        list.replaceChildren(createEl('div', { class: 'inline-error', text: `Instellingen laden mislukt: ${e.message}` }));
     }
 }
 
@@ -2577,10 +2585,10 @@ function createSettingsFolderElement(item) {
 
     header.innerHTML = html`
     <div class="settings-chevron ${hasChildren ? '' : 'hidden'}">
-        <i class="fas fa-chevron-right"></i>
+        <i class="fas fa-chevron-right" aria-hidden="true"></i>
     </div>
     <div class="settings-label">
-        <i class="fas fa-folder${item.enabled ? '-open' : ''}" style="opacity: ${item.enabled ? 1 : 0.5}"></i>
+        <i class="fas fa-folder${item.enabled ? '-open' : ''} ${item.enabled ? '' : 'is-off'}" aria-hidden="true"></i>
         <span>${item.name}</span>
     </div>
     <label class="switch">
@@ -2811,10 +2819,9 @@ class CinematicPlayer {
     }
 
     showVoteEffect(type) {
-        const icon = type === 'up' ? '❤️' : '👎';
         const el = document.createElement('div');
-        el.className = 'vote-floater';
-        el.textContent = icon;
+        el.className = `vote-floater ${type === 'up' ? 'is-up' : 'is-down'}`;
+        setHTML(el, type === 'up' ? html`<i class="fas fa-heart"></i>` : html`<i class="fas fa-thumbs-down"></i>`);
         this.playerEl.appendChild(el);
         setTimeout(() => el.remove(), 1000);
     }
@@ -2887,17 +2894,17 @@ class CinematicPlayer {
         }, 50);
 
         // Show folder name (from API or extracted from path)
-        const folderName = file.folder || file.path.split(/[/\\\\]/).slice(-2, -1)[0] || 'Unknown Folder';
+        const folderName = file.folder || file.path.split(/[/\\\\]/).slice(-2, -1)[0] || 'Onbekende map';
 
         titleEl.textContent = folderName;
 
         metaEl.innerHTML = html`
-<i class="fas fa-folder"></i> ${folderName} <span style="opacity:0.5; margin:0 5px;">|</span>
-<i class="fas fa-camera"></i> ${file.name} <span style="opacity:0.5; margin:0 5px;">|</span>
-<i class="fas fa-calendar"></i> ${new Date(file.modified * 1000).toLocaleDateString()}
-${file.size ? html`<span style="margin-left: 15px;"><i class="fas fa-hdd"></i> ${(file.size / (1024 * 1024)).toFixed(1)} MB</span>` : ''}
-<div class="elo-rating-badge">
-    <i class="fas fa-star"></i> ELO: ${file.rating || 1000}
+<span class="player-meta-item"><i class="fas fa-folder" aria-hidden="true"></i> ${folderName}</span>
+<span class="player-meta-item"><i class="fas fa-camera" aria-hidden="true"></i> ${file.name}</span>
+<span class="player-meta-item"><i class="fas fa-calendar" aria-hidden="true"></i> ${new Date(file.modified * 1000).toLocaleDateString('nl-NL')}</span>
+${file.size ? html`<span class="player-meta-item"><i class="fas fa-hard-drive" aria-hidden="true"></i> ${formatBytes(file.size)}</span>` : ''}
+<div class="elo-rating-badge" title="Score (ELO): stijgt als je een foto mooi vindt">
+    <i class="fas fa-star" aria-hidden="true"></i> ${file.rating || 1000}
 </div>
 `;
 
@@ -3051,7 +3058,7 @@ function renderSpotifyStats(data) {
             const binge = insights.top_binge;
             bingeEl.replaceChildren(createEl('a', {
                 href: spotifySearchUrl(`${binge.track} ${binge.artist}`), target: '_blank', rel: 'noopener noreferrer',
-                style: 'color: inherit; text-decoration: underline;', text: binge.track,
+                class: 'stat-link', text: binge.track,
                 onClick: (e) => e.stopPropagation(),
             }));
             updateText('stat-top-binge-count', `${insights.top_binge.count}× achter elkaar`);
@@ -3152,9 +3159,9 @@ function renderSpotifyStats(data) {
         <div class="item-rank">${play.year}</div>
         <div class="item-info">
             <div class="item-name">${play.track}</div>
-            <div style="font-size:0.85rem;color:var(--text-secondary);">${play.artist}</div>
+            <div class="item-meta">${play.artist}</div>
         </div>
-        <div style="font-size:0.85rem;color:var(--text-tertiary);white-space:nowrap;"><i class="far fa-clock"></i> ${play.time}</div>
+        <div class="otd-play-time"><i class="far fa-clock" aria-hidden="true"></i> ${play.time}</div>
     `;
             otdList.appendChild(el);
         });
@@ -3421,15 +3428,16 @@ function chatLoadingBubble() {
 }
 
 function chatPhotoGrid(photos, size, titleOf) {
-    const grid = createEl('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px;' });
+    const grid = createEl('div', { class: 'chat-photo-grid' });
     photos.forEach(p => grid.appendChild(createEl('img', {
+        class: 'chat-photo',
         src: vaultFileUrl('thumb', p.path),
-        style: `width: ${size}px; height: ${size}px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.1);`,
+        style: `width: ${size}px; height: ${size}px;`,
         title: titleOf(p),
         dataset: { path: p.path },
     })));
     const message = chatBubble(grid);
-    message.firstChild.style.cssText = 'background: transparent; border: none; padding: 0;';
+    message.firstChild.classList.add('message-bubble-bare');
     return message;
 }
 

@@ -498,7 +498,7 @@
     // ── Layout Computation ────────────────────────────────
     function getColumns() {
         if (!tlScrollContainer) return COLS;
-        const w = tlScrollContainer.clientWidth - 48; // padding
+        const w = tlScrollContainer.clientWidth - 64; // paginamarge (--page-gutter) links en rechts
         if (w < 500) return 2;
         if (w < 750) return 3;
         if (w < 1050) return 4;
@@ -650,12 +650,12 @@
             row.setAttribute('data-row-idx', rowIndex);
             row.style.position = 'absolute';
             row.style.top = `${layoutRow.top}px`;
-            row.style.left = '24px';
-            row.style.right = '24px';
+            row.style.left = '32px';
+            row.style.right = '32px';
             row.style.height = `${ROW_HEIGHT}px`;
             row.style.display = 'grid';
             row.style.gridTemplateColumns = `repeat(${getColumns()}, 1fr)`;
-            row.style.gap = '10px';
+            row.style.gap = '12px';
 
             layoutRow.rowFiles.forEach(fileIdx => {
                 const file = tlFiles[fileIdx];

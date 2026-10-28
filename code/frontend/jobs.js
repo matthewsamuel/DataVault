@@ -345,7 +345,7 @@ function renderJobDock() {
         onClick: () => { jobDock.collapsed = !jobDock.collapsed; saveJobDockPrefs(); renderJobDock(); },
     },
         createEl('span', { class: 'job-dock-title', text: title }),
-        createEl('span', { class: 'job-dock-toggle', text: jobDock.collapsed ? '▴' : '▾' }));
+        createEl('i', { class: `fas ${jobDock.collapsed ? 'fa-chevron-up' : 'fa-chevron-down'} job-dock-toggle`, 'aria-hidden': 'true' }));
 
     const body = createEl('div', { class: 'job-dock-body' },
         jobDock.error ? createEl('div', { class: 'job-dock-error', text: `Taken niet op te halen: ${jobDock.error}` }) : null,

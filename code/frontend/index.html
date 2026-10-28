@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=45">
+    <link rel="stylesheet" href="style.css?v=46">
 </head>
 
 <body>
@@ -22,7 +22,10 @@
 
         <!-- Top Navigation (sneltoetsen: 1-9 of g + letter, ? voor het overzicht; shortcuts.js) -->
         <nav class="top-nav" aria-label="Hoofdmenu">
-            <button type="button" class="nav-brand" onclick="restartServer()" title="Server herstarten">DataVault</button>
+            <button type="button" class="nav-brand" onclick="restartServer()" title="Server herstarten" aria-label="DataVault (server herstarten)">
+                <span class="nav-brand-mark" aria-hidden="true"><i class="fas fa-vault"></i></span>
+                <span class="nav-brand-name">DataVault</span>
+            </button>
 
             <div class="nav-tabs" aria-label="Onderdelen">
                 <button class="nav-tab active" data-view="home" onclick="switchMainView('home')" title="Home (1)">
@@ -52,15 +55,19 @@
             </div>
 
             <div class="nav-actions">
-                <input type="search" class="search-input" id="global-search" placeholder="Zoek in deze map…  /"
-                    aria-label="Zoek in de geopende map (sneltoets /)" oninput="queueGlobalSearch(this.value)">
+                <div class="search-field nav-search">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                    <input type="search" class="search-input" id="global-search" placeholder="Zoeken…"
+                        aria-label="Zoek in de geopende map (sneltoets /)" oninput="queueGlobalSearch(this.value)">
+                    <kbd class="search-kbd" aria-hidden="true">/</kbd>
+                </div>
 
                 <div class="theme-toggle">
                     <button type="button" class="theme-button" id="theme-button" onclick="toggleThemeDropdown()"
-                        aria-haspopup="true" aria-expanded="false" aria-controls="theme-dropdown" title="Thema (t wisselt)">
+                        aria-haspopup="true" aria-expanded="false" aria-controls="theme-dropdown" title="Thema (t wisselt)" aria-label="Thema kiezen">
                         <i class="fas fa-circle-half-stroke" aria-hidden="true"></i>
                         <span id="theme-label">Auto</span>
-                        <span aria-hidden="true">▼</span>
+                        <i class="fas fa-chevron-down theme-caret" aria-hidden="true"></i>
                     </button>
                     <div class="theme-dropdown" id="theme-dropdown" role="menu" aria-label="Thema">
                         <button type="button" class="theme-option" role="menuitemradio" data-theme="auto" onclick="setTheme('auto')">
@@ -265,7 +272,7 @@
             <div class="duplicates-container" id="duplicates-container">
                 <div class="duplicates-header">
                     <div>
-                        <h1 class="duplicates-title">Duplicaten</h1>
+                        <h1 class="duplicates-title"><i class="fas fa-clone" aria-hidden="true"></i> Duplicaten</h1>
                         <div class="duplicates-subtitle">Kies een map, zoek byte voor byte identieke bestanden en
                             bepaal per groep welke kopie blijft. De andere kopieën gaan naar RAW_DUPLICATES: er wordt
                             niets gewist en elke actie is terug te zetten.</div>
@@ -374,9 +381,12 @@
         <!-- Spotify View -->
         <div id="section-spotify" class="section hidden">
             <div class="spotify-header">
-                <h2>Jouw Spotify Wrapped</h2>
+                <div>
+                    <h1 class="spotify-title"><i class="fab fa-spotify" aria-hidden="true"></i> Jouw jaar in muziek</h1>
+                    <p class="page-subtitle">Uit je eigen Spotify-export, alleen op deze Mac.</p>
+                </div>
                 <div class="year-selector">
-                    <select id="spotify-year-select" onchange="loadSpotifyStats()" aria-label="Jaar">
+                    <select class="select" id="spotify-year-select" onchange="loadSpotifyStats()" aria-label="Jaar">
                         <option value="all">Alle jaren</option>
                     </select>
                 </div>
@@ -391,57 +401,54 @@
                 <!-- Summary Cards -->
                 <div class="spotify-stats-grid">
                     <div class="stat-card total-time">
-                        <div class="stat-icon">⏱️</div>
+                        <div class="stat-icon"><i class="fas fa-stopwatch" aria-hidden="true"></i></div>
                         <div class="stat-value" id="stat-minutes">0</div>
                         <div class="stat-label">Minuten geluisterd</div>
                     </div>
                     <div class="stat-card top-artist-card">
-                        <div class="stat-icon">🎤</div>
+                        <div class="stat-icon"><i class="fas fa-microphone" aria-hidden="true"></i></div>
                         <div class="stat-value" id="stat-top-artist">-</div>
                         <div class="stat-label">Topartiest</div>
                     </div>
                     <div class="stat-card total-plays">
-                        <div class="stat-icon">▶️</div>
+                        <div class="stat-icon"><i class="fas fa-play" aria-hidden="true"></i></div>
                         <div class="stat-value" id="stat-plays">0</div>
                         <div class="stat-label">Keer afgespeeld</div>
                     </div>
                     <div class="stat-card listening-personality" onclick="showDnaExplanation()" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
-                        <div class="stat-icon">🧬</div>
-                        <div class="stat-value" id="stat-dna" style="font-size: 1.5rem;">-</div>
+                        <div class="stat-icon"><i class="fas fa-dna" aria-hidden="true"></i></div>
+                        <div class="stat-value stat-value-text" id="stat-dna">-</div>
                         <div class="stat-label">Luister-DNA</div>
                     </div>
                 </div>
 
                 <!-- New Insights Grid -->
-                <div class="spotify-stats-grid" style="margin-top: 20px;">
-                    <div class="stat-card" onclick="showInsightExplanation('record_day')" style="cursor: pointer;" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
-                        <div class="stat-icon">🏆</div>
-                        <div class="stat-value" id="stat-record-day-hours" style="font-size: 1.5rem;">-</div>
+                <div class="spotify-stats-grid">
+                    <div class="stat-card is-clickable" onclick="showInsightExplanation('record_day')" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                        <div class="stat-icon"><i class="fas fa-trophy" aria-hidden="true"></i></div>
+                        <div class="stat-value" id="stat-record-day-hours">-</div>
                         <div class="stat-label" id="stat-record-day-date">Recorddag</div>
                     </div>
-                    <div class="stat-card" onclick="showInsightExplanation('top_binge')" style="cursor: pointer;" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
-                        <div class="stat-icon">🔁</div>
-                        <div class="stat-value" id="stat-top-binge"
-                            style="font-size: 1.2rem; white-space: normal; word-wrap: break-word; line-height: 1.4;">
-                            None</div>
+                    <div class="stat-card is-clickable" onclick="showInsightExplanation('top_binge')" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                        <div class="stat-icon"><i class="fas fa-repeat" aria-hidden="true"></i></div>
+                        <div class="stat-value stat-value-text" id="stat-top-binge">-</div>
                         <div class="stat-label" id="stat-top-binge-count">Langste reeks achter elkaar</div>
                     </div>
-                    <div class="stat-card" onclick="showInsightExplanation('mainstream_score')"
-                        style="cursor: pointer;" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
-                        <div class="stat-icon">📈</div>
-                        <div class="stat-value" id="stat-mainstream-score" style="font-size: 1.2rem;">-</div>
+                    <div class="stat-card is-clickable" onclick="showInsightExplanation('mainstream_score')" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                        <div class="stat-icon"><i class="fas fa-chart-line" aria-hidden="true"></i></div>
+                        <div class="stat-value stat-value-text" id="stat-mainstream-score">-</div>
                         <div class="stat-label" id="stat-mainstream-percent">Mainstreamscore</div>
                     </div>
-                    <div class="stat-card" onclick="showInsightExplanation('seasonal_mood')" style="cursor: pointer;" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
-                        <div class="stat-icon">🌤️</div>
-                        <div class="stat-value" id="stat-seasonal-mood" style="font-size: 1.2rem;">-</div>
+                    <div class="stat-card is-clickable" onclick="showInsightExplanation('seasonal_mood')" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                        <div class="stat-icon"><i class="fas fa-cloud-sun" aria-hidden="true"></i></div>
+                        <div class="stat-value stat-value-text" id="stat-seasonal-mood">-</div>
                         <div class="stat-label">Seizoensstemming</div>
                     </div>
                 </div>
 
                 <!-- Top Discoveries Section -->
-                <div class="on-this-day-section" id="discoveries-container" style="display: none; margin-top: 30px;">
-                    <h3>🌟 Ontdekkingen</h3>
+                <div class="on-this-day-section" id="discoveries-container" style="display: none;">
+                    <h3 class="spotify-section-title"><i class="fas fa-star" aria-hidden="true"></i> Ontdekkingen</h3>
                     <p class="section-subtitle">De nieuwe artiesten die je dit jaar het meest draaide</p>
                     <div class="on-this-day-list" id="discoveries-list">
                         <!-- Populated dynamically -->
@@ -451,7 +458,7 @@
                 <!-- On This Day Section -->
                 <div class="on-this-day-section" id="on-this-day-container" style="display: none;">
                     <div class="otd-header-row">
-                        <h3>📅 Op deze dag</h3>
+                        <h3><i class="fas fa-calendar-day" aria-hidden="true"></i> Op deze dag</h3>
                         <span class="otd-vs">en</span>
                         <div class="otd-date-block">
                             <span class="otd-today-date" id="otd-today-date"></span>
@@ -467,13 +474,13 @@
                     <div class="spotify-list-section">
                         <h3 class="spotify-section-heading"
                             title="Je meest beluisterde artiesten, op totale luistertijd. Klik om op Spotify te zoeken.">
-                            🏆 Topartiesten</h3>
+                            <i class="fas fa-microphone" aria-hidden="true"></i> Topartiesten</h3>
                         <div id="top-artists-list" class="spotify-list"></div>
                     </div>
                     <div class="spotify-list-section">
                         <h3 class="spotify-section-heading"
                             title="Je vaakst gespeelde nummers. Klik om op Spotify te zoeken.">
-                            🎵 Topnummers</h3>
+                            <i class="fas fa-music" aria-hidden="true"></i> Topnummers</h3>
                         <div id="top-tracks-list" class="spotify-list"></div>
                     </div>
                 </div>
@@ -483,13 +490,13 @@
                     <div class="chart-wrapper">
                         <h3 class="spotify-section-heading"
                             title="Aantal gespeelde nummers per maand.">
-                            📅 Per maand</h3>
+                            <i class="fas fa-calendar-days" aria-hidden="true"></i> Per maand</h3>
                         <div id="monthly-chart" class="simple-bar-chart"></div>
                     </div>
                     <div class="chart-wrapper">
                         <h3 class="spotify-section-heading"
                             title="Wanneer je luistert, per uur van de dag.">
-                            🕒 Per uur</h3>
+                            <i class="fas fa-clock" aria-hidden="true"></i> Per uur</h3>
                         <div id="hourly-chart" class="simple-bar-chart"></div>
                     </div>
                 </div>
@@ -515,8 +522,7 @@
                 <div class="keurer-folder-bar">
                     <span class="keurer-folder-label">Map:</span>
                     <span class="keurer-folder-path" id="keurer-folder-display">Geen map geselecteerd</span>
-                    <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem; flex-shrink: 0;"
-                        onclick="keurerOpenFolderPicker()">
+                    <button class="btn btn-secondary btn-sm" onclick="keurerOpenFolderPicker()">
                         <i class="fas fa-folder-open" aria-hidden="true"></i> Andere map
                     </button>
                 </div>
@@ -527,7 +533,7 @@
                 <!-- Kaart -->
                 <div class="keurer-card-area" id="keurer-card-area">
                     <div class="keurer-state-card">
-                        <span style="font-size: 4rem;">📁</span>
+                        <span class="keurer-state-icon" aria-hidden="true"><i class="fas fa-folder-open"></i></span>
                         <h3>Kies een map</h3>
                         <p>Selecteer een map om foto's en video's te beoordelen.</p>
                         <button class="btn btn-primary" onclick="keurerOpenFolderPicker()">
@@ -554,8 +560,11 @@
 
                 <!-- Hint -->
                 <p class="keurer-hint">
-                    ← houden &nbsp;|&nbsp; ↑ verplaatsen &nbsp;|&nbsp; → prullenmand &nbsp;|&nbsp; ↓ ongedaan
-                    &nbsp;·&nbsp; spatie = preview
+                    <span><kbd>←</kbd> houden</span>
+                    <span><kbd>↑</kbd> verplaatsen</span>
+                    <span><kbd>→</kbd> prullenmand</span>
+                    <span><kbd>↓</kbd> ongedaan</span>
+                    <span><kbd>spatie</kbd> voorbeeld</span>
                 </p>
 
             </div>
@@ -754,34 +763,32 @@
                 <!-- Media content will be inserted here -->
                 <!-- Navigation zones -->
                 <div class="modal-nav-zone left" onclick="prevFile()" title="Vorige (←)" hidden>
-                    <span class="modal-nav-arrow" aria-hidden="true">‹</span>
+                    <span class="modal-nav-arrow" aria-hidden="true"><i class="fas fa-chevron-left"></i></span>
                 </div>
                 <div class="modal-nav-zone right" onclick="nextFile()" title="Volgende (→)" hidden>
-                    <span class="modal-nav-arrow" aria-hidden="true">›</span>
+                    <span class="modal-nav-arrow" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
                 </div>
             </div>
 
             <div class="modal-controls" id="modal-controls" style="display: none;">
-                <button class="modal-control-btn" onclick="zoomIn()" title="Inzoomen (+)">Inzoomen</button>
-                <button class="modal-control-btn" onclick="zoomOut()" title="Uitzoomen (−)">Uitzoomen</button>
-                <button class="modal-control-btn" onclick="fitToScreen()" title="Passend maken (0)">Passend</button>
+                <button class="modal-control-btn" onclick="zoomOut()" title="Uitzoomen (−)" aria-label="Uitzoomen"><i class="fas fa-minus" aria-hidden="true"></i></button>
+                <button class="modal-control-btn" onclick="fitToScreen()" title="Passend maken (0)" aria-label="Passend maken"><i class="fas fa-expand" aria-hidden="true"></i></button>
+                <button class="modal-control-btn" onclick="zoomIn()" title="Inzoomen (+)" aria-label="Inzoomen"><i class="fas fa-plus" aria-hidden="true"></i></button>
             </div>
 
             <div class="modal-metadata" id="modal-metadata">
                 <!-- Metadata will be inserted here -->
             </div>
 
-            <div class="modal-footer"
-                style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-md); border-top: 1px solid var(--border-hairline);">
-                <div style="display: flex; gap: var(--space-sm);">
+            <div class="modal-footer">
+                <div class="viewer-actions">
                     <button class="btn btn-secondary" id="btn-open-finder" onclick="openInFinder()" title="Toon in Finder (f)">
-                        Toon in Finder
+                        <i class="fas fa-up-right-from-square" aria-hidden="true"></i> Toon in Finder
                     </button>
                     <button class="btn btn-primary" id="btn-move-file" onclick="openMoveFileModal()" title="Verplaatsen (m)">
-                        Verplaatsen
+                        <i class="fas fa-folder-open" aria-hidden="true"></i> Verplaatsen
                     </button>
                 </div>
-                <div style="flex: 1;"></div>
             </div>
         </div>
     </div>
@@ -790,7 +797,7 @@
     <div class="modal" id="modal-move-file">
         <div class="move-modal-container">
             <div class="move-modal-header">
-                <h2><i class="fas fa-exchange-alt" aria-hidden="true"></i>Bestand verplaatsen</h2>
+                <h2><i class="fas fa-folder-open" aria-hidden="true"></i> Bestand verplaatsen</h2>
                 <button class="modal-close" onclick="closeMoveFileModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
             </div>
             <div class="move-modal-body">
@@ -842,29 +849,27 @@
                 </div>
                 <div class="storage-breakdown-content" id="storage-breakdown-content" style="display: none;">
                     <!-- Breadcrumb Navigation -->
-                    <div class="storage-breadcrumb" id="storage-breadcrumb" style="display: none; margin-bottom: 16px;">
-                        <button class="storage-breadcrumb-btn" onclick="storageNavigateToRoot()" style="margin-right: 8px;">
-                            <i class="fas fa-home" aria-hidden="true"></i> Archief
+                    <div class="storage-breadcrumb" id="storage-breadcrumb" style="display: none;">
+                        <button class="storage-breadcrumb-btn" onclick="storageNavigateToRoot()">
+                            <i class="fas fa-house" aria-hidden="true"></i> Archief
                         </button>
-                        <span id="storage-breadcrumb-path" style="color: var(--text-secondary); font-size: 0.85rem;"></span>
+                        <span class="storage-breadcrumb-path" id="storage-breadcrumb-path"></span>
                     </div>
 
                     <!-- Summary Card -->
-                    <div class="storage-summary-card" id="storage-summary" style="display: none; margin-bottom: 20px; padding: 16px; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.1) 0%, rgba(var(--accent-rgb), 0.05) 100%); border: 1px solid var(--accent); border-radius: 8px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
-                            <div>
-                                <div style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px;">Totaal</div>
-                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent);" id="storage-total-display">0 GB</div>
-                            </div>
-                            <div style="text-align: right;">
-                                <div style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px;">Grootste map</div>
-                                <div style="font-size: 1rem; font-weight: 600; color: var(--text-primary);" id="storage-largest-display">-</div>
-                            </div>
+                    <div class="storage-summary-card" id="storage-summary" style="display: none;">
+                        <div class="storage-summary-item">
+                            <div class="stat-tile-label">Totaal</div>
+                            <div class="stat-tile-value" id="storage-total-display">0 GB</div>
+                        </div>
+                        <div class="storage-summary-item">
+                            <div class="stat-tile-label">Grootste map</div>
+                            <div class="storage-summary-largest" id="storage-largest-display">-</div>
                         </div>
                     </div>
 
                     <!-- Tabs for switching between views -->
-                    <div class="storage-tabs" id="storage-tabs" style="display: none; margin-bottom: 16px;">
+                    <div class="storage-tabs" id="storage-tabs" style="display: none;">
                         <button class="storage-tab-btn active" data-tab="subfolders" onclick="storageShowTab('subfolders')">
                             <i class="fas fa-folder" aria-hidden="true"></i> Submappen
                         </button>
@@ -950,26 +955,25 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-primary" style="width: 100%;" onclick="closeDnaModal()">Sluiten</button>
+                <button class="btn btn-secondary" onclick="closeDnaModal()">Sluiten</button>
             </div>
         </div>
     </div>
 
     <!-- Generic Insight Modal -->
     <div class="modal" id="modal-insight-explanation">
-        <div class="modal-container dna-modal-container">
+        <div class="modal-container insight-modal-container">
             <div class="modal-header">
                 <h2 class="modal-title" id="insight-modal-header">Uitleg</h2>
                 <button class="modal-close" onclick="closeInsightModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
-            <div class="modal-body dna-modal-body" style="display: block; text-align: center; padding: 2rem;">
-                <div id="insight-modal-icon" style="font-size: 4rem; margin-bottom: 1rem;">ℹ️</div>
-                <h3 id="insight-modal-title"
-                    style="margin-bottom: 1rem; color: var(--text-primary); font-size: 1.5rem;">Title</h3>
-                <p id="insight-modal-description" style="color: var(--text-secondary); line-height: 1.6;"></p>
+            <div class="modal-body insight-modal-body">
+                <div id="insight-modal-icon" class="insight-modal-icon">ℹ️</div>
+                <h3 id="insight-modal-title" class="insight-modal-title">Uitleg</h3>
+                <p id="insight-modal-description" class="insight-modal-text"></p>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-primary" style="width: 100%;" onclick="closeInsightModal()">Sluiten</button>
+                <button class="btn btn-secondary" onclick="closeInsightModal()">Sluiten</button>
             </div>
         </div>
     </div>
@@ -1059,7 +1063,7 @@
                 <button class="modal-close" onclick="timelineCloseFolderPicker()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body folder-selector-body">
-                <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 0.9rem;">Kies een of meer mappen. De foto's en video's uit alle gekozen mappen komen op volgorde van datum in de tijdlijn.</p>
+                <p class="picker-intro">Kies een of meer mappen. De foto's en video's uit alle gekozen mappen komen op volgorde van datum in de tijdlijn.</p>
                 <div class="folder-tree-container" id="timeline-folder-tree">
                     <!-- Populated by timeline.js -->
                 </div>
@@ -1087,15 +1091,15 @@
     <!-- Chat Fullscreen Modal -->
     <div class="chat-fullscreen-modal" id="chat-fullscreen-modal" onclick="if(event.target === this) closeChatFullscreen()">
         <div class="chat-fullscreen-wrapper">
-            <div class="chat-widget" style="height: 100%; max-width: 100%; margin: 0; border-radius: 0;">
+            <div class="chat-widget">
                 <div class="chat-header">
                     <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
                     <div class="chat-title">
-                        <h3>Pasha (DataVault AI)</h3>
+                        <h3>Pasha</h3>
                         <div class="chat-status-row">
-                                        <span class="chat-status" data-chat-status data-state="pending">Verbinden…</span>
-                                        <select class="chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
-                                    </div>
+                            <span class="chat-status" data-chat-status data-state="pending">Verbinden…</span>
+                            <select class="select chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
+                        </div>
                     </div>
                     <button class="chat-fullscreen-toggle" onclick="closeChatFullscreen()" title="Sluiten (Esc)" aria-label="Volledig scherm sluiten">
                         <i class="fas fa-compress" aria-hidden="true"></i>
@@ -1103,10 +1107,10 @@
                 </div>
                 <div class="chat-messages-slot" id="chat-fullscreen-slot"></div>
                 <div class="chat-input-container">
-                    <input type="text" id="chat-input-fullscreen" class="chat-input" placeholder="Typ een bericht…"
+                    <input type="text" id="chat-input-fullscreen" class="chat-input" placeholder="Vraag Pasha iets…"
                         aria-label="Bericht aan Pasha" onkeypress="handleChatKeyPressFullscreen(event)">
                     <button class="chat-send-btn" onclick="sendChatMessageFullscreen()" title="Versturen" aria-label="Versturen">
-                        <i class="fas fa-paper-plane" aria-hidden="true"></i>
+                        <i class="fas fa-arrow-up" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
@@ -1117,16 +1121,16 @@
     <script src="api.js?v=3"></script>
     <script src="dom.js?v=1"></script>
     <script src="ui.js?v=2"></script>
-    <script src="folder-tree.js?v=4"></script>
-    <script src="app.js?v=55"></script>
-    <script src="jobs.js?v=5"></script>
+    <script src="folder-tree.js?v=5"></script>
+    <script src="app.js?v=56"></script>
+    <script src="jobs.js?v=6"></script>
     <script src="duplicates.js?v=21"></script>
-    <script src="keurer.js?v=17"></script>
-    <script src="timeline.js?v=10"></script>
-    <script src="wave-background.js?v=3"></script>
+    <script src="keurer.js?v=18"></script>
+    <script src="timeline.js?v=11"></script>
+    <script src="wave-background.js?v=4"></script>
     <script src="resizable-sidebar.js?v=1"></script>
     <script src="recovery.js?v=3"></script>
-    <script src="settings.js?v=1"></script>
+    <script src="settings.js?v=2"></script>
     <script src="shortcuts.js?v=3"></script>
 </body>
 

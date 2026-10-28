@@ -104,8 +104,7 @@ class WaveBackground {
         this.svg.style.height = '100%';
         this.svg.style.pointerEvents = 'none';
         this.svg.style.zIndex = '0';
-        // Opacity will be controlled by CSS or set here, stick to user preference
-        this.svg.style.opacity = '0.4';
+        // Kleur en doorzichtigheid komen uit style.css (.wave-background-svg)
 
         // Ensure it's the first child so it's behind content
         if (this.container.firstChild) {
@@ -355,13 +354,7 @@ class WaveBackground {
 
 // Initialize wave background on sidebar and other elements
 document.addEventListener('DOMContentLoaded', () => {
-    // Sidebar background
-    const sidebar = document.querySelector('.sidebar');
-    if (sidebar) {
-        sidebar.style.position = 'relative';
-        window.sidebarWave = new WaveBackground(sidebar);
-    }
-
+    // Alleen achter Spotify (muziek); de mappenzijbalk blijft rustig
     // Spotify background (will be initialized when view is shown, or now if we want it always running)
     // Better to have it running because the view is just hidden via display:none
     const spotifyView = document.getElementById('section-spotify');
