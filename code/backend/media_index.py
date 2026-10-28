@@ -21,12 +21,15 @@ Keeping it up to date (the 'index' job, job_types.index_type -> run_pass):
   below this folder was in the index at this mtime": a cancelled, paused or
   interrupted pass resumes by itself (what was written is skipped next time, what
   was not is listed again), and a folder that failed is tried again next time.
-- A file that is gone from its folder is marked missing (hidden from every query),
-  never deleted at once. At the end of a pass, once every folder had its turn, a
-  missing file whose (inode, size, birthtime), or (size, content hash), matches a
-  file that appeared since is a move made outside the app (Finder): the row keeps
-  its id and its ratings and Keurer 'keep' follow it. Only then are the rows still
-  missing removed (never below a folder that could not be read in this pass).
+- A file that is gone from its folder is marked missing (MISSING_NEW, hidden from
+  every query), never deleted at once. At the end of a pass, once every folder had
+  its turn, a missing file whose (inode, size, birthtime), or (size, content hash),
+  matches a file that appeared since is a move made outside the app (Finder): the
+  row keeps its id and its ratings and Keurer 'keep' follow it. A row is removed
+  only when it was already missing at the end of the pass before (MISSING_CONFIRMED)
+  and is still not found: a file moved during a pass, into a folder the walk had
+  already listed, is only seen in its new place by the next pass, and must still be
+  there to be matched then. Never below a folder that could not be read in this pass.
 - Moves made by the app (every move_no_overwrite) update the row, the rating and
   the Keurer decisions at once: record_move(), registered in main.create_app.
 
@@ -67,6 +70,12 @@ META_COLUMNS = ("kind", "ext", "size", "mtime_ns", "inode", "birthtime", "taken"
                 "width", "height", "orientation", "camera_make", "camera_model", "lens",
                 "lat", "lon", "altitude", "duration", "meta_status")
 ROW_COLUMNS = ("id", "path", "folder", "name") + META_COLUMNS + ("added_at", "indexed_at", "seen_at")
+
+# media.missing: 0 present; MISSING_NEW gone since the end of the last pass (or moved
+# into TRASH/RAW_DUPLICATES by the app); MISSING_CONFIRMED still gone when a pass
+# finished, removed at the end of the next one unless it is found (back) by then
+MISSING_NEW = 1
+MISSING_CONFIRMED = 2
 
 # Bumped on every write, so a client paging through a result can tell it changed
 _generation = 0
@@ -414,7 +423,8 @@ class _Pass:
             self._progress()
         now = time.time()
         with self.db._connect() as conn:
-            conn.executemany("UPDATE media SET missing = 1 WHERE path = ?", [(p,) for p in self.pending_missing])
+            conn.executemany("UPDATE media SET missing = ? WHERE path = ?",
+                             [(MISSING_NEW, p) for p in self.pending_missing])
             conn.executemany("UPDATE media SET missing = 0, seen_at = ? WHERE path = ?",
                              [(now, p) for p in self.pending_present])
             conn.executemany("UPDATE media SET seen_at = ? WHERE folder = ? AND missing = 0",
@@ -441,8 +451,8 @@ class _Pass:
                 if path not in self.visited and not self._under_failed(path)]
         if gone:
             with self.db._connect() as conn:
-                conn.executemany("UPDATE media SET missing = 1 WHERE folder = ? AND missing = 0",
-                                 [(p,) for p in gone])
+                conn.executemany("UPDATE media SET missing = ? WHERE folder = ? AND missing = 0",
+                                 [(MISSING_NEW, p) for p in gone])
                 conn.executemany("DELETE FROM media_folders WHERE path = ?", [(p,) for p in gone])
             self.counts["folders_gone"] = len(gone)
             _bump()
@@ -468,7 +478,7 @@ def run_pass(ctx, config, db, full: bool, errors, read_errors, vault_unavailable
     now = time.time()
     with db._connect() as conn:
         files, missing = conn.execute(
-            "SELECT COUNT(*) - COALESCE(SUM(missing), 0), COALESCE(SUM(missing), 0) FROM media").fetchone()
+            "SELECT COUNT(*) - COALESCE(SUM(missing != 0), 0), COALESCE(SUM(missing != 0), 0) FROM media").fetchone()
         folders = conn.execute("SELECT COUNT(*) FROM media_folders").fetchone()[0]
     info = {**state(db), "last_pass_at": now, "files": files, "folders": folders,
             "failed_folders": sorted(set(run.failed))[:FAILED_FOLDERS_KEPT],
@@ -554,8 +564,8 @@ def record_move(db, config, src, dst) -> None:
     """
     The app moved src to dst (file_ops.on_moved): the index row, the rating and the
     Keurer decisions follow at once. Into TRASH or RAW_DUPLICATES the row stays (with
-    its id) but is hidden as missing, so an undo brings it back as it was; the next
-    pass removes it if it stays there. Best effort: the next pass recognises the move
+    its id) but is hidden as missing, so an undo brings it back as it was; passes
+    remove it once it stayed there (see purge_missing). Best effort: the next pass recognises the move
     by inode anyway.
     """
     src, dst = str(src), str(dst)
@@ -577,7 +587,7 @@ def record_move(db, config, src, dst) -> None:
         conn.execute("DELETE FROM media WHERE path = ?", (dst,))
         if row is not None:
             conn.execute("UPDATE media SET path = ?, folder = ?, name = ?, missing = ?, seen_at = ? WHERE id = ?",
-                         (dst, folder, name, 0 if shown else 1, now, row[0]))
+                         (dst, folder, name, 0 if shown else MISSING_NEW, now, row[0]))
         elif meta is not None:
             conn.execute(_UPSERT, _row_values(dst, meta, now))
     _bump()
@@ -592,7 +602,7 @@ def match_moves(db, ctx=None) -> int:
     """
     with db._connect() as conn:
         missing = conn.execute(
-            "SELECT id, path, inode, size, birthtime, seen_at, mtime_ns FROM media WHERE missing = 1").fetchall()
+            "SELECT id, path, inode, size, birthtime, seen_at, mtime_ns FROM media WHERE missing != 0").fetchall()
         if not missing:
             return 0
         since = min(row[5] for row in missing)
@@ -674,12 +684,20 @@ def _apply_move(db, old: Tuple, new: Tuple) -> None:
 
 
 def purge_missing(db, keep: Callable[[str], bool] = lambda path: False) -> int:
-    """Remove the rows still marked missing, except those keep(path) protects."""
+    """
+    At the end of a pass: remove the rows that were already missing when the pass
+    before ended (MISSING_CONFIRMED), then confirm the ones that went missing since
+    (MISSING_NEW), so they are removed at the end of the next pass unless it finds
+    them. Rows keep(path) protects (below a folder that could not be read) are left
+    as they are. Returns the count removed.
+    """
     with db._connect() as conn:
-        rows = conn.execute("SELECT id, path FROM media WHERE missing = 1").fetchall()
-        gone = [(row[0],) for row in rows if not keep(row[1])]
+        rows = conn.execute("SELECT id, path, missing FROM media WHERE missing != 0").fetchall()
+        gone = [(row[0],) for row in rows if row[2] == MISSING_CONFIRMED and not keep(row[1])]
+        confirm = [(MISSING_CONFIRMED, row[0]) for row in rows if row[2] == MISSING_NEW and not keep(row[1])]
         # (Later steps that keep their own per-media tables clean them here, by id)
         conn.executemany("DELETE FROM media WHERE id = ?", gone)
+        conn.executemany("UPDATE media SET missing = ? WHERE id = ? AND missing != 0", confirm)
     if gone:
         _bump()
     return len(gone)
@@ -871,7 +889,7 @@ def stats(db) -> Dict[str, Any]:
     """Counts for the library status: files per kind, hidden rows, folders."""
     with db._connect() as conn:
         kinds = dict(conn.execute("SELECT kind, COUNT(*) FROM media WHERE missing = 0 GROUP BY kind").fetchall())
-        missing = conn.execute("SELECT COUNT(*) FROM media WHERE missing = 1").fetchone()[0]
+        missing = conn.execute("SELECT COUNT(*) FROM media WHERE missing != 0").fetchone()[0]
         folders = conn.execute("SELECT COUNT(*) FROM media_folders").fetchone()[0]
     return {"files": sum(kinds.values()), "photos": kinds.get("photo", 0), "videos": kinds.get("video", 0),
             "audio": kinds.get("audio", 0), "missing": missing, "folders": folders}

@@ -158,13 +158,18 @@ def test_a_file_edited_in_place_is_found_by_a_full_pass(client, config):
     assert _row(config, "RAW/misc/UPPER.JPEG")["taken_source"] == "exif"
 
 
-def test_a_removed_file_is_hidden_then_removed_after_the_pass(client, config):
+def test_a_removed_file_is_hidden_then_removed_by_the_next_pass(client, config):
     _index(client)
     target = config.VAULT_ROOT / "RAW/2022/bursts/burst_03.jpg"
     keep = target.read_bytes()
     target.unlink()  # (the test vault is a temporary copy)
     result = _index(client)
-    assert result["removed"] == 1 and result["moved"] == 0
+    # Hidden at once, removed only when the next pass still does not find it
+    assert result["removed"] == 0 and result["moved"] == 0 and result["still_missing"] == 1
+    assert "RAW/2022/bursts/burst_03.jpg" not in _paths(config)
+    assert _row(config, "RAW/2022/bursts/burst_03.jpg")["missing"] == 2
+    result = _index(client)
+    assert result["removed"] == 1 and result["still_missing"] == 0
     assert _row(config, "RAW/2022/bursts/burst_03.jpg") is None
     target.write_bytes(keep)
     assert _index(client)["new"] == 1
@@ -177,7 +182,8 @@ def test_a_removed_folder_and_a_folder_that_became_hidden_leave_the_index(client
     result = _index(client)
     paths = _paths(config)
     assert not any("deep/" in p or "bursts/" in p for p in paths)
-    assert result["removed"] == 7 and result["errors"] == 0
+    assert result["removed"] == 0 and result["still_missing"] == 7 and result["errors"] == 0
+    assert _index(client)["removed"] == 7
     with _sqlite3.connect(str(config.DB_PATH)) as conn:
         folders = {r[0] for r in conn.execute("SELECT path FROM media_folders")}
     assert not any("/deep" in f or "bursts" in f for f in folders)
@@ -273,11 +279,44 @@ def test_a_copied_then_removed_file_is_a_move_only_with_a_known_content_hash(cli
         shutil.copyfile(config.VAULT_ROOT / src, config.VAULT_ROOT / dst)   # a new inode and birthtime
         (config.VAULT_ROOT / src).unlink()
     result = _index(client)
-    assert result["moved"] == 1 and result["removed"] == 1
+    assert result["moved"] == 1 and result["removed"] == 0 and result["still_missing"] == 1
+    assert _index(client)["removed"] == 1
     assert _row(config, pairs[0][1])["id"] == ids[pairs[0][0]] and _rating(config, pairs[0][1]) == (1300, 4)
     # No known content: no guessing, the old rating stays where it was
     assert _row(config, pairs[1][1])["id"] != ids[pairs[1][0]] and _rating(config, pairs[1][1]) is None
     assert _rating(config, pairs[1][0]) == (1300, 4)
+
+
+def test_a_move_outside_the_app_during_a_pass_is_matched_by_the_next_pass(client, config, monkeypatch):
+    # The user moves a rated file in Finder while a pass runs: from a folder the walk
+    # has not reached yet into one it already listed. This pass only sees it gone;
+    # the next one finds it in its new place, and the row, id and rating follow.
+    from backend import media_index
+    _index(client)
+    src, dst = "RAW/misc/strand 001 kopie.jpg", "RAW/2019/zomer vakantie/verplaatst.jpg"
+    _rate(config, src)
+    row_id = _row(config, src)["id"]
+    real_scan = media_index.scan_dir
+    moved = []
+
+    def scan(folder, archive_filter):
+        entries = real_scan(folder, archive_filter)
+        if not moved and str(folder).endswith("RAW/2021"):   # after zomer vakantie, before misc
+            os.rename(config.VAULT_ROOT / src, config.VAULT_ROOT / dst)
+            moved.append(1)
+        return entries
+
+    monkeypatch.setattr(media_index, "scan_dir", scan)
+    result = _index(client, full=True)
+    assert moved and result["complete"] and (result["moved"], result["removed"]) == (0, 0)
+    assert result["still_missing"] == 1
+    monkeypatch.setattr(media_index, "scan_dir", real_scan)
+    files = result["files"]
+    result = _index(client)
+    assert (result["moved"], result["removed"], result["still_missing"]) == (1, 0, 0)
+    assert result["files"] == files + 1   # the hidden row is shown again in its new place
+    assert _row(config, dst)["id"] == row_id and _row(config, src) is None
+    assert _rating(config, dst) == (1300, 4) and _rating(config, src) is None
 
 
 def test_a_move_in_the_app_updates_the_row_and_rating_at_once(client, config):
@@ -318,12 +357,14 @@ def test_keurer_delete_hides_the_row_and_undo_brings_it_back_with_its_id(client,
     assert client.get("/api/keurer/stats").json()["total"] == stats_before["total"]
 
 
-def test_a_file_that_stays_in_trash_leaves_the_index_after_a_pass(client, config):
+def test_a_file_that_stays_in_trash_leaves_the_index_after_two_passes(client, config):
     _index(client)
     src = "RAW/2019/zomer vakantie/IMG_0002.JPG"
     client.post("/api/keurer/decide", json={
         "path": str(config.VAULT_ROOT / src), "folder": str(config.VAULT_ROOT / "RAW/2019/zomer vakantie"),
         "decision": "delete"})
+    assert _index(client)["removed"] == 0
+    assert _row(config, "TRASH/IMG_0002.JPG")["missing"] == 2
     assert _index(client)["removed"] == 1
     assert _row(config, "TRASH/IMG_0002.JPG") is None
     assert (config.VAULT_ROOT / "TRASH/IMG_0002.JPG").exists()   # the index never touches the file

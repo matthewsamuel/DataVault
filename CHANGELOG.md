@@ -32,9 +32,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   nieuwe plek. Een waardering raakt dus niet meer kwijt door een verplaatsing.
 - Verplaats je een bestand buiten de app (bijv. in Finder), dan herkent de volgende ronde het aan
   zijn kenmerken (hetzelfde bestand op schijf, of dezelfde inhoud als die al bekend was) en gaat de
-  waardering ook mee. Bij twijfel wordt niets gekoppeld.
-- Een bestand dat van de schijf verdwenen is, wordt eerst alleen verborgen en pas aan het eind van
-  een volledige ronde uit de bibliotheek gehaald, en nooit als een map niet gelezen kon worden. De
+  waardering ook mee, ook als je het verplaatst terwijl er net een ronde loopt. Bij twijfel wordt
+  niets gekoppeld.
+- Een bestand dat van de schijf verdwenen is, wordt eerst alleen verborgen en pas uit de bibliotheek
+  gehaald als ook de ronde daarna het nergens terugvindt, en nooit als een map niet gelezen kon worden. De
   bibliotheek leest alleen: hij verplaatst of wist nooit een bestand. Waarderingen en
   Keurer-beslissingen blijven altijd bewaard.
 
