@@ -2300,6 +2300,14 @@ button.nav-brand {
     background-color: transparent;
 }
 
+/* Geen mappen (archief leeg of niet bereikbaar) */
+.folder-tree-empty {
+    padding: var(--space-lg);
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
 /* Mapregels: zelfde vorm in de zijbalk en in elke mappenkiezer */
 .folder-item {
     display: flex;

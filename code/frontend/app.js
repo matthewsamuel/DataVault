@@ -420,6 +420,8 @@ async function loadFolders() {
         }
 
         renderSidebarFolderTree();
+        // Nog geen map gekozen: Bestanden begint bij de bovenste mappen van het archief
+        if (!currentFolder) showArchiveRoot();
     } catch (error) {
         toastFetchError('Mappen laden mislukt', error);
     }
@@ -466,8 +468,45 @@ function collapseAllFolders() {
 async function selectFolder(path) {
     currentFolder = path;
     await loadMedia(path);
-    renderSidebarFolderTree(); // Re-render to update selection
+    revealFolderInSidebar(path);
     updateBreadcrumb(path);
+}
+
+// De boom links volgt de gekozen map, ook als je via het raster of het kruimelpad gaat: de
+// bovenliggende mappen klappen open en de map zelf staat gemarkeerd in beeld
+function revealFolderInSidebar(path) {
+    let opened = false;
+    (function walk(folders) {
+        for (const folder of folders || []) {
+            if (path.startsWith(folder.path + '/')) {
+                if (!expandedFolders.has(folder.path)) {
+                    expandedFolders.add(folder.path);
+                    opened = true;
+                }
+                walk(folder.children);
+                return;
+            }
+        }
+    })(folderTree);
+    if (opened) localStorage.setItem('expandedFolders', JSON.stringify([...expandedFolders]));
+    renderSidebarFolderTree();
+    const selected = document.querySelector('#folder-tree .folder-item.selected');
+    if (selected) selected.scrollIntoView({ block: 'nearest' });
+}
+
+// Het beginpunt van Bestanden: de bovenste mappen van het archief als mapkaarten. 'Archief'
+// in het kruimelpad en Backspace in een bovenste map komen hier terug.
+function showArchiveRoot() {
+    ++mediaLoadSeq;  // een map die nog laadt, tekent er niet meer overheen
+    currentFolder = '';
+    currentMedia = (folderTree || []).map(f => ({ type: 'folder', name: f.name, path: f.path }));
+    filteredMedia = [...currentMedia];
+    gridFocusIndex = 0;
+    const query = document.getElementById('global-search');
+    if (query && query.value.trim()) handleGlobalSearch(query.value);
+    else applySortAndRender();
+    renderSidebarFolderTree();
+    updateBreadcrumb('');
 }
 
 // ==================== BREADCRUMB ====================
@@ -501,12 +540,17 @@ function updateBreadcrumb(path) {
     const parts = path.slice(base.length).split('/').filter(p => p);
 
     if (parts.length === 0) {
-        breadcrumb.innerHTML = '<span class="breadcrumb-item active">Archief</span>';
+        breadcrumb.replaceChildren(createEl('span', { class: 'breadcrumb-item active', text: 'Archief' }));
         return;
     }
 
+    // 'Archief' gaat terug naar de bovenste mappen
     if (base) {
-        breadcrumb.appendChild(createEl('span', { class: 'breadcrumb-item breadcrumb-root', text: 'Archief' }));
+        breadcrumb.appendChild(createEl('a', {
+            class: 'breadcrumb-item breadcrumb-root', href: '#', text: 'Archief',
+            title: 'Naar de bovenste mappen van het archief',
+            onClick: (e) => { e.preventDefault(); showArchiveRoot(); },
+        }));
     }
 
     let currentPath = base;
@@ -744,6 +788,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (parent && parent.length > root.length) {
                 e.preventDefault();
                 selectFolder(parent);
+            } else if (folderTree.some(f => f.path === currentFolder)) {
+                // Uit een bovenste map terug naar het archief zelf
+                e.preventDefault();
+                showArchiveRoot();
             }
         }
     });

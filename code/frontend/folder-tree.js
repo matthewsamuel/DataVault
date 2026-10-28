@@ -46,7 +46,7 @@ function renderFolderTree(container, folders, config = {}) {
     container.innerHTML = '';
 
     if (!folders || folders.length === 0) {
-        container.innerHTML = '<div style="padding:20px;color:var(--text-secondary);text-align:center;">No folders available</div>';
+        container.replaceChildren(createEl('div', { class: 'folder-tree-empty', text: 'Geen mappen gevonden' }));
         return { refresh: () => renderFolderTree(container, folders, config), getSelectedPaths: () => selectedPaths };
     }
 

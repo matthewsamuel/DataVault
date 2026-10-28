@@ -132,6 +132,25 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 if not page.is_visible(f"#section-{view}"):
                     problems.append(f"tab {view}: section not visible")
 
+            # Files starts at the top folders of the archive (never a blank page); walking down
+            # through the grid keeps the folder tree in step, and 'Archief' in the breadcrumb goes back
+            def grid_folders():
+                return page.evaluate("[...document.querySelectorAll('#media-grid .folder-card-name')].map(e => e.textContent)")
+
+            step("files: the archive root", lambda: page.click(".top-nav [data-view='viewer']"), 0.6)
+            if "RAW" not in grid_folders() or page.text_content("#breadcrumb").strip() != "Archief":
+                problems.append(f"files: the first page shows {grid_folders()} instead of the archive folders")
+            step("files: RAW and misc from the grid", lambda: (
+                page.click("#media-grid .folder-card[aria-label='Map RAW']"), page.wait_for_timeout(600),
+                page.click("#media-grid .folder-card[aria-label='Map misc']")), 0.6)
+            selected = page.evaluate("(() => { const s = document.querySelector('#folder-tree .folder-item.selected');"
+                                     " return s ? s.dataset.path : ''; })()")
+            if not selected.endswith("/RAW/misc"):
+                problems.append(f"files: the folder tree marks {selected!r}, not the folder opened from the grid")
+            step("files: 'Archief' in the breadcrumb", lambda: page.click("#breadcrumb .breadcrumb-root"), 0.6)
+            if "RAW" not in grid_folders() or page.evaluate("currentFolder") != "":
+                problems.append("files: 'Archief' in the breadcrumb did not go back to the archive folders")
+
             # Files: a folder with a subfolder, open a file, browse, move dialog, close
             folder = str(vault / "RAW" / "misc")
             step("viewer: open folder", lambda: (page.click(".nav-tab[data-view='viewer']"),
