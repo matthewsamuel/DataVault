@@ -96,6 +96,21 @@ pip install -r requirements.txt
 - Het takenpaneel rechtsonder toont voortgang en resterende tijd, met Pauzeren, Hervatten en Annuleren
 - Blijft bewaard na herladen of herstarten ("onderbroken", hervatbaar); bij een losgekoppelde schijf wacht een taak tot de schijf terug is
 
+## Testen
+
+```bash
+cd code
+venv/bin/python -m pytest                      # alle tests (tijdelijke testkluis, nooit je archief)
+python3 tests/ui/smoke_webkit.py               # browser-rooktest in WebKit (Safari-engine)
+python3 tests/ui/smoke_webkit.py chromium      # of in Chromium; --headed om mee te kijken
+```
+
+De rooktest bouwt zelf een wegwerp-testkluis, start een eigen server op een vrije poort
+(`DATAVAULT_TESTING=1`), klikt door alle tabbladen (en viewer, verplaatsvenster, chat,
+thema's, Shows) en faalt bij elke JavaScript-fout, consolefout of mislukte API-aanroep. Hij
+heeft een Python met Playwright nodig (`pip install playwright && playwright install webkit`)
+en wordt niet door pytest meegenomen.
+
 ## Veiligheidsgaranties
 
 | | |

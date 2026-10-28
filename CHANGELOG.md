@@ -458,3 +458,6 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   elf ongebruikte `... Background Removed.png`-afbeeldingen (ca. 2,6 MB) en ongeveer 14 kB
   CSS voor onderdelen die niet meer bestaan (de drie verschillende versies van de schakelaar
   zijn er nu één).
+- Nieuw: `code/tests/ui/smoke_webkit.py`, een browsertest die in WebKit (Safari) door alle
+  tabbladen klikt en faalt bij elke JavaScript-fout (zie `code/README.md`), en een test die
+  controleert dat elke knop een bestaande functie aanroept en elke CSS-kleur bestaat.
