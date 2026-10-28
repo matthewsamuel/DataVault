@@ -627,7 +627,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                   el.dispatchEvent(new Event('change')); };
                                   set('albums-from', '2020-01-01'); set('albums-to', '2019-01-01'); })()"""),
                 page.wait_for_timeout(600)), 0.2)
-            rng = page.evaluate("""[document.getElementById('albums-range-error').hidden, location.hash,
+            rng = page.evaluate("""[(document.getElementById('albums-range-error') || {}).hidden, location.hash,
                                     !!document.querySelector('#albums-state .empty-state-error'),
                                     document.querySelector('#albums-when').getBoundingClientRect().top
                                     === document.querySelector('#albums-sort').getBoundingClientRect().top]""")
@@ -652,8 +652,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 problems.append(f"albums: hiding showed no toast with an action: {str(e).splitlines()[0]}")
             expect("iPhone" not in page.evaluate(side_names) and page.evaluate("document.activeElement.id") == "albums-title",
                    f"albums: hiding left {page.evaluate(side_names)} with focus on {page.evaluate('document.activeElement.id')}")
-            step("albums: undo hiding from the toast", lambda: (
-                page.click(".toast .toast-action"), page.wait_for_timeout(800)), 0.2)
+            try:
+                step("albums: undo hiding from the toast", lambda: (
+                    page.click(".toast .toast-action", timeout=5000), page.wait_for_timeout(800)), 0.2)
+            except PlaywrightError:
+                problems.append("albums: no 'Ongedaan maken' in a toast after hiding")
             expect("iPhone" in page.evaluate(side_names), f"albums: 'Ongedaan maken' left {page.evaluate(side_names)}")
             page.set_viewport_size({"width": 1024, "height": 768})
             step("albums: a changed album at 1024", lambda: (
