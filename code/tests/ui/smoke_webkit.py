@@ -572,6 +572,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 return [d.hidden ? 0 : Math.round(d.getBoundingClientRect().height),
                         parseFloat(getComputedStyle(document.querySelector('.main-content')).paddingBottom)]; })()""")
             expect(dock[1] >= dock[0], f"job dock: {dock[0]} px high, but only {dock[1]} px kept free under the page")
+            # ... except on pages that are exactly as high as the window: they keep it free inside
+            for view in ("keurer", "duplicates"):
+                page.evaluate(f"switchMainView('{view}')")
+                page.wait_for_timeout(300)
+                extra = page.evaluate("document.documentElement.scrollHeight - innerHeight")
+                expect(extra <= 1, f"job dock: the {view} page scrolls the window by {extra} px")
 
             # Library (media index): the app indexed the vault by itself; the dock shows it,
             # and 'Bibliotheek bijwerken' starts a full pass from the keyboard

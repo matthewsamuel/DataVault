@@ -2262,6 +2262,13 @@ button.nav-brand {
     padding-bottom: var(--job-dock-space, 0px);
 }
 
+/* Pagina's die zelf precies vensterhoog zijn en binnenin scrollen (Keurer, Duplicaten) houden
+   die ruimte zelf vrij, binnen hun eigen hoogte: anders zou het venster 'n stukje gaan scrollen */
+.main-content:has(> #section-keurer.active),
+.main-content:has(> #section-duplicates.active) {
+    padding-bottom: 0;
+}
+
 #section-viewer.active {
     flex: 1;
     display: flex;
@@ -3594,7 +3601,7 @@ a.breadcrumb-item:hover {
     overflow-y: auto;
     overflow-x: hidden;
     /* Zelfde breedte en marges als .page (--page-max, in het midden) */
-    padding: var(--space-2xl) max(var(--page-gutter), calc((100% - var(--page-max)) / 2 + var(--page-gutter))) var(--space-4xl);
+    padding: var(--space-2xl) max(var(--page-gutter), calc((100% - var(--page-max)) / 2 + var(--page-gutter))) max(var(--space-4xl), var(--job-dock-space, 0px));
 }
 
 /* Panelen: dezelfde kaart als overal */
@@ -6811,8 +6818,8 @@ button.otd-settings-icon:hover {
     margin: 0 auto;
     height: calc(100vh - var(--nav-h));
     min-height: 540px;
-    /* onderaan ruimte voor de smalle balk van het takenpaneel, zodat die de toetsen niet bedekt */
-    padding: var(--space-2xl) var(--page-gutter) var(--space-4xl);
+    /* onderaan ruimte voor het takenpaneel (minstens de smalle balk), zodat het de toetsen niet bedekt */
+    padding: var(--space-2xl) var(--page-gutter) max(var(--space-4xl), var(--job-dock-space, 0px));
 }
 
 .keurer-header {
