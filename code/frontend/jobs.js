@@ -6,6 +6,11 @@
 // te pauzeren, hervatten en annuleren. Alles komt van de server, dus na herladen staat alles er
 // gewoon weer. Andere schermen volgen een taak met jobsWatch(id, fn) en starten er een met
 // jobsStart(type, params).
+//
+// Onderaan staat altijd de regel van de bibliotheek (de media-index): hoeveel bestanden erin staan,
+// wanneer hij bijgewerkt is, en de knop 'Bibliotheek bijwerken' (een volledige controle). De app
+// werkt de bibliotheek ook zelf bij (bij het starten, als de schijf terug is); zo'n automatische
+// ronde staat alleen in het paneel zolang hij loopt en geeft geen melding als hij gewoon klaar is.
 
 const JOB_STATUS_LABELS = {
     queued: 'In de wachtrij',
@@ -32,6 +37,8 @@ const jobDock = {
     collapsed: false,
     dismissed: new Set(),
     error: null,
+    library: null,           // /api/library/status, of null zolang onbekend
+    libraryLoading: false,
 };
 
 try {
@@ -116,7 +123,35 @@ function noticeJob(job) {
     }
 }
 
+// Een automatische bijwerkronde van de bibliotheek (door de app zelf gestart)
+function jobIsAuto(job) {
+    return job.type === 'index' && !!(job.params && job.params.auto);
+}
+
+async function jobsLibraryRefresh() {
+    if (jobDock.libraryLoading) return;
+    jobDock.libraryLoading = true;
+    try {
+        jobDock.library = await jobsRequest('/api/library/status');
+    } catch (error) {
+        jobDock.library = null;  // archief weg: de banner meldt het al; de regel verdwijnt even
+    } finally {
+        jobDock.libraryLoading = false;
+    }
+    renderJobDock();
+}
+
+async function startLibraryUpdate() {
+    try {
+        const job = await jobsStart('index', { full: true });
+        showToast('Bibliotheek bijwerken', `Gestart (taak ${job.id}); de voortgang staat rechtsonder.`, 'info');
+    } catch (error) {
+        toastFetchError('Bibliotheek bijwerken', error);
+    }
+}
+
 async function jobsRefresh() {
+    const before = new Map(jobDock.jobs.filter(j => j.type === 'index').map(j => [j.id, j.status]));
     try {
         const data = await jobsRequest('/api/jobs?limit=20');
         jobDock.error = null;
@@ -128,6 +163,11 @@ async function jobsRefresh() {
         jobDock.jobs.forEach(noticeJob);
     } catch (error) {
         jobDock.error = error.message;
+    }
+    // De bibliotheekregel bijwerken als een bijwerkronde begon of klaar is, en anders af en toe
+    const indexChanged = jobDock.jobs.some(j => j.type === 'index' && before.get(j.id) !== j.status);
+    if (indexChanged || !jobDock.library || !jobDock.jobs.some(j => JOB_ACTIVE.has(j.status))) {
+        jobsLibraryRefresh();
     }
     renderJobDock();
     scheduleJobPoll();
@@ -169,6 +209,8 @@ function jobPercent(job) {
 function jobVisible(job) {
     if (jobDock.dismissed.has(job.id)) return false;
     if (JOB_ACTIVE.has(job.status) || ['paused', 'interrupted'].includes(job.status)) return true;
+    // Een automatische ronde die gewoon klaar of geannuleerd is, hoeft niet te blijven staan
+    if (jobIsAuto(job) && job.status !== 'failed') return false;
     const finished = (job.finished_at || job.updated_at || 0) * 1000;
     return Date.now() - finished < JOB_SHOW_FINISHED_MS || jobDock.watchers.has(job.id);
 }
@@ -236,13 +278,64 @@ function createJobItem(job) {
             createEl('span', { class: 'job-actions' }, actions)));
 }
 
+function formatLibraryTime(seconds) {
+    if (!seconds) return '';
+    const when = new Date(seconds * 1000);
+    const today = new Date();
+    const time = when.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+    if (when.toDateString() === today.toDateString()) return time;
+    return `${when.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })} ${time}`;
+}
+
+// De regel van de bibliotheek: aantal bestanden, laatst bijgewerkt, en de knop om bij te werken
+function createLibraryLine() {
+    const lib = jobDock.library;
+    if (!lib) return null;
+    const running = jobDock.jobs.find(j => j.type === 'index' && JOB_ACTIVE.has(j.status));
+    let text;
+    if (!lib.ready) {
+        text = running ? 'Bibliotheek wordt opgebouwd…' : 'Bibliotheek nog niet opgebouwd';
+    } else {
+        text = `Bibliotheek: ${lib.files.toLocaleString('nl-NL')} bestanden`;
+        const when = formatLibraryTime(lib.last_pass_at);
+        if (when) text += ` · bijgewerkt ${when}`;
+    }
+    const title = lib.ready
+        ? `${lib.photos.toLocaleString('nl-NL')} foto's, ${lib.videos.toLocaleString('nl-NL')} video's, ` +
+          `${lib.audio.toLocaleString('nl-NL')} audio in ${lib.folders.toLocaleString('nl-NL')} mappen`
+        : 'De app leest het archief één keer helemaal in; daarna gaat bijwerken snel';
+    const button = createEl('button', {
+        class: 'btn btn-secondary btn-small job-library-update',
+        id: 'btn-library-update',
+        title: 'Controleer alle mappen en bestanden op wijzigingen (ook bestanden die op hun plek zijn bewerkt)',
+        text: running ? 'Bezig…' : 'Bibliotheek bijwerken',
+        onClick: async (event) => {
+            const btn = event.currentTarget;
+            btn.disabled = true;
+            try { await startLibraryUpdate(); } finally { btn.disabled = false; renderJobDock(); }
+        },
+    });
+    if (running) button.disabled = true;
+    return createEl('div', { class: 'job-library', id: 'job-library' },
+        createEl('span', { class: 'job-library-text', text, title }),
+        button);
+}
+
 function renderJobDock() {
     const dock = document.getElementById('job-dock');
     if (!dock) return;
     const visible = jobDock.jobs.filter(jobVisible);
     const active = visible.filter(j => JOB_ACTIVE.has(j.status)).length;
-    dock.hidden = !visible.length && !jobDock.error;
+    const library = createLibraryLine();
+    dock.hidden = !visible.length && !jobDock.error && !library;
     dock.classList.toggle('collapsed', jobDock.collapsed);
+    // Zonder taken alleen de regel van de bibliotheek, als smalle balk
+    const compact = !visible.length && !jobDock.error;
+    dock.classList.toggle('compact', compact);
+    if (compact) {
+        if (library) dock.replaceChildren(library);
+        return;
+    }
 
     const title = active ? `Taken (${active} bezig)` : `Taken (${visible.length})`;
     const header = createEl('button', {
@@ -257,10 +350,13 @@ function renderJobDock() {
         jobDock.error ? createEl('div', { class: 'job-dock-error', text: `Taken niet op te halen: ${jobDock.error}` }) : null,
         visible.map(createJobItem));
     dock.replaceChildren(header, body);
+    if (library) dock.appendChild(library);
 }
 
 function jobsInit() {
     jobsOnFinished(job => {
+        // Een automatische ronde meldt zich alleen als er iets misging
+        if (jobIsAuto(job) && job.status !== 'failed') return;
         const kind = job.status === 'done' ? 'success' : job.status === 'failed' ? 'error' : 'info';
         const text = job.status === 'failed' ? (job.error || 'Mislukt') : (job.message || JOB_STATUS_LABELS[job.status]);
         showToast(`${job.label}: ${JOB_STATUS_LABELS[job.status] || job.status}`, text, kind);

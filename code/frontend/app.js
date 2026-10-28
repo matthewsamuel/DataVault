@@ -1507,6 +1507,7 @@ function reloadAfterVaultReturn() {
     else if (view === 'timeline' && typeof timelineVaultReturned === 'function') timelineVaultReturned();
     else if (view === 'keurer' && typeof keurerVaultReturned === 'function') keurerVaultReturned();
     else if (view === 'duplicates' && typeof duplicatesInit === 'function') duplicatesInit();
+    if (typeof jobsLibraryRefresh === 'function') jobsLibraryRefresh();
     loadChatModels();
 }
 
