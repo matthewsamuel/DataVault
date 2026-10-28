@@ -42,7 +42,25 @@ from pathlib import Path
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 CODE_DIR = Path(__file__).resolve().parents[2]
-VENV_PYTHON = CODE_DIR / "venv" / "bin" / "python"
+
+
+def server_python() -> str:
+    """
+    The Python that runs the test server: $DATAVAULT_PYTHON, else this checkout's venv,
+    else the venv of the main checkout when this is a git worktree (worktrees share it),
+    else the Python running this script.
+    """
+    if os.environ.get("DATAVAULT_PYTHON"):
+        return os.environ["DATAVAULT_PYTHON"]
+    candidates = [CODE_DIR / "venv" / "bin" / "python"]
+    try:
+        common = subprocess.run(["git", "-C", str(CODE_DIR), "rev-parse", "--path-format=absolute",
+                                 "--git-common-dir"], capture_output=True, text=True, timeout=10).stdout.strip()
+        if common:
+            candidates.append(Path(common).parent / "code" / "venv" / "bin" / "python")
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return str(next((c for c in candidates if c.exists()), Path(sys.executable)))
 BIG_FOLDER = "Groot"
 BIG_FILES = 1500
 MAX_THUMBS_ON_OPEN = 100
@@ -58,7 +76,8 @@ def free_port() -> int:
 
 def start_server(workdir: Path):
     vault = workdir / "vault"
-    python = str(VENV_PYTHON if VENV_PYTHON.exists() else sys.executable)
+    python = server_python()
+    print(f"server python: {python}")
     subprocess.run([python, str(CODE_DIR / "tests/fixtures/vault_builder.py"), str(vault)],
                    check=True, stdout=subprocess.DEVNULL)
     # A big folder: opening it may only fetch thumbnails for what is (nearly) in view
