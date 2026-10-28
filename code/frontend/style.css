@@ -6689,3 +6689,209 @@ input:checked+.slider:before {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
+
+/* ==================== ACHTERGRONDTAKEN (job dock) ==================== */
+
+.job-dock {
+    position: fixed;
+    right: var(--space-lg);
+    bottom: var(--space-lg);
+    z-index: 2500;
+    width: min(380px, calc(100vw - 32px));
+    max-height: min(60vh, 520px);
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+    font-size: 12px;
+}
+
+.job-dock[hidden] {
+    display: none;
+}
+
+.job-dock-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-tertiary);
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font: inherit;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+}
+
+.job-dock.collapsed .job-dock-body {
+    display: none;
+}
+
+.job-dock.collapsed .job-dock-header {
+    border-bottom: none;
+}
+
+.job-dock-body {
+    overflow-y: auto;
+    padding: var(--space-sm);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.job-dock-error {
+    color: var(--danger);
+    padding: var(--space-xs);
+}
+
+.job-item {
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--accent);
+    padding: var(--space-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.job-item.job-paused,
+.job-item.job-interrupted,
+.job-item.job-waiting_for_vault {
+    border-left-color: var(--warning);
+}
+
+.job-item.job-failed {
+    border-left-color: var(--danger);
+}
+
+.job-item.job-cancelled,
+.job-item.job-queued {
+    border-left-color: var(--border-color);
+}
+
+.job-item-head,
+.job-item-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+}
+
+.job-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.job-folder {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.job-status {
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.job-waiting_for_vault .job-status,
+.job-paused .job-status,
+.job-interrupted .job-status {
+    color: var(--warning);
+}
+
+.job-failed .job-status,
+.job-failed .job-message {
+    color: var(--danger);
+}
+
+.job-progress {
+    height: 6px;
+    background-color: var(--bg-tertiary);
+    overflow: hidden;
+}
+
+.job-bar {
+    height: 100%;
+    width: 0;
+    background-color: var(--accent);
+    transition: width 0.4s ease;
+}
+
+.job-paused .job-bar,
+.job-interrupted .job-bar,
+.job-waiting_for_vault .job-bar {
+    background-color: var(--warning);
+}
+
+.job-bar.indeterminate,
+.progress-bar.indeterminate {
+    width: 100%;
+    background-image: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.35) 50%, transparent 100%);
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    animation: job-indeterminate 1.2s linear infinite;
+}
+
+@keyframes job-indeterminate {
+    from { background-position: -40% 0; }
+    to { background-position: 140% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .job-bar.indeterminate,
+    .progress-bar.indeterminate {
+        animation: none;
+    }
+}
+
+.job-message {
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.job-details {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.job-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+}
+
+.job-dismiss {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.job-dismiss:hover {
+    color: var(--text-primary);
+}
+
+@media (max-width: 600px) {
+    .job-dock {
+        right: 16px;
+        left: 16px;
+        bottom: 16px;
+        width: auto;
+    }
+}

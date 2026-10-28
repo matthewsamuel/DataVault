@@ -1,0 +1,290 @@
+// DataVault Dashboard - Achtergrondtaken (takenpaneel rechtsonder)
+// Note: API_BASE is defined in app.js
+//
+// Zware klussen (duplicaten zoeken, controlegetallen berekenen, miniaturen maken) lopen op de
+// server als taak (/api/jobs). Dit paneel toont ze met voortgang, resterende tijd en knoppen om
+// te pauzeren, hervatten en annuleren. Alles komt van de server, dus na herladen staat alles er
+// gewoon weer. Andere schermen volgen een taak met jobsWatch(id, fn) en starten er een met
+// jobsStart(type, params).
+
+const JOB_STATUS_LABELS = {
+    queued: 'In de wachtrij',
+    running: 'Bezig',
+    paused: 'Gepauzeerd',
+    waiting_for_vault: 'Wacht op archief',
+    cancelled: 'Geannuleerd',
+    failed: 'Mislukt',
+    done: 'Klaar',
+    interrupted: 'Onderbroken',
+};
+const JOB_ACTIVE = new Set(['queued', 'running', 'waiting_for_vault']);
+const JOB_POLL_ACTIVE_MS = 1000;
+const JOB_POLL_IDLE_MS = 15000;
+const JOB_SHOW_FINISHED_MS = 30 * 60 * 1000;  // afgeronde taken blijven een half uur zichtbaar
+
+const jobDock = {
+    jobs: [],
+    known: new Map(),        // id -> status bij de vorige keer ophalen
+    watchers: new Map(),     // id -> Set van functies(job)
+    finishedHandlers: [],    // functies(job) als een taak deze sessie klaar, mislukt of gestopt is
+    changeHandlers: [],      // functies(job) bij elke opgehaalde stand van elke taak
+    timer: null,
+    collapsed: false,
+    dismissed: new Set(),
+    error: null,
+};
+
+try {
+    jobDock.collapsed = localStorage.getItem('jobDockCollapsed') === '1';
+    JSON.parse(localStorage.getItem('jobDockDismissed') || '[]').forEach(id => jobDock.dismissed.add(id));
+} catch (e) { /* geen opslag: alles zichtbaar */ }
+
+function saveJobDockPrefs() {
+    try {
+        localStorage.setItem('jobDockCollapsed', jobDock.collapsed ? '1' : '0');
+        localStorage.setItem('jobDockDismissed', JSON.stringify([...jobDock.dismissed].slice(-100)));
+    } catch (e) { /* geen opslag */ }
+}
+
+async function jobsRequest(url, options) {
+    const response = await fetch(`${API_BASE}${url}`, options);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(typeof data.detail === 'string' ? data.detail : `Fout ${response.status}`);
+    }
+    return data;
+}
+
+async function jobsStart(type, params) {
+    const data = await jobsRequest('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, params }),
+    });
+    jobDock.dismissed.delete(data.job.id);
+    upsertJob(data.job);
+    scheduleJobPoll(0);
+    return data.job;
+}
+
+async function jobsAction(id, action) {
+    const job = await jobsRequest(`/api/jobs/${id}/${action}`, { method: 'POST' });
+    upsertJob(job);
+    scheduleJobPoll(300);
+    return job;
+}
+
+function jobsResult(id) {
+    return jobsRequest(`/api/jobs/${id}/result`);
+}
+
+// fn(job) bij elke nieuwe stand van deze taak; geeft een functie terug om te stoppen met volgen
+function jobsWatch(id, fn) {
+    if (!jobDock.watchers.has(id)) jobDock.watchers.set(id, new Set());
+    jobDock.watchers.get(id).add(fn);
+    const job = jobDock.jobs.find(j => j.id === id);
+    if (job) fn(job);
+    scheduleJobPoll(0);
+    return () => {
+        const set = jobDock.watchers.get(id);
+        if (set) { set.delete(fn); if (!set.size) jobDock.watchers.delete(id); }
+    };
+}
+
+function jobsOnFinished(fn) {
+    jobDock.finishedHandlers.push(fn);
+}
+
+function jobsOnChange(fn) {
+    jobDock.changeHandlers.push(fn);
+}
+
+function upsertJob(job) {
+    const i = jobDock.jobs.findIndex(j => j.id === job.id);
+    if (i >= 0) jobDock.jobs[i] = job; else jobDock.jobs.unshift(job);
+    noticeJob(job);
+    renderJobDock();
+}
+
+// Meldt nieuwe standen aan wie meekijkt, en een overgang van bezig naar klaar/mislukt/gestopt
+function noticeJob(job) {
+    const before = jobDock.known.get(job.id);
+    jobDock.known.set(job.id, job.status);
+    [...(jobDock.watchers.get(job.id) || []), ...jobDock.changeHandlers].forEach(fn => {
+        try { fn(job); } catch (e) { console.error(e); }
+    });
+    if (before && JOB_ACTIVE.has(before) && !JOB_ACTIVE.has(job.status)) {
+        jobDock.finishedHandlers.forEach(fn => {
+            try { fn(job); } catch (e) { console.error(e); }
+        });
+    }
+}
+
+async function jobsRefresh() {
+    try {
+        const data = await jobsRequest('/api/jobs?limit=20');
+        jobDock.error = null;
+        // Taken die al buiten de lijst vallen maar wel gevolgd worden, apart ophalen
+        const listed = new Set(data.jobs.map(j => j.id));
+        const extra = await Promise.all([...jobDock.watchers.keys()].filter(id => !listed.has(id))
+            .map(id => jobsRequest(`/api/jobs/${id}`).catch(() => null)));
+        jobDock.jobs = data.jobs.concat(extra.filter(Boolean));
+        jobDock.jobs.forEach(noticeJob);
+    } catch (error) {
+        jobDock.error = error.message;
+    }
+    renderJobDock();
+    scheduleJobPoll();
+}
+
+function scheduleJobPoll(delay) {
+    clearTimeout(jobDock.timer);
+    if (delay === undefined) {
+        const busy = jobDock.jobs.some(j => JOB_ACTIVE.has(j.status) || j.stopping);
+        delay = busy || jobDock.watchers.size ? JOB_POLL_ACTIVE_MS : JOB_POLL_IDLE_MS;
+    }
+    jobDock.timer = setTimeout(jobsRefresh, delay);
+}
+
+// ==================== WEERGAVE ====================
+
+function formatEta(seconds) {
+    if (seconds === null || seconds === undefined) return '';
+    if (seconds < 60) return `nog ~${Math.max(1, Math.round(seconds))} s`;
+    if (seconds < 3600) return `nog ~${Math.round(seconds / 60)} min`;
+    const hours = Math.floor(seconds / 3600);
+    return `nog ~${hours} u ${Math.round((seconds % 3600) / 60)} min`;
+}
+
+function jobFolderLabel(job) {
+    if (job.target) return job.target;  // van de server: map binnen het archief, of 'hele archief'
+    const folder = job.params && job.params.folder;
+    if (!folder) return 'hele archief';
+    const parts = folder.split('/').filter(Boolean);
+    return parts.slice(-2).join('/') || folder;
+}
+
+function jobPercent(job) {
+    if (job.status === 'done') return 100;
+    if (!job.total) return null;
+    return Math.min(100, Math.floor(job.processed / job.total * 100));
+}
+
+function jobVisible(job) {
+    if (jobDock.dismissed.has(job.id)) return false;
+    if (JOB_ACTIVE.has(job.status) || ['paused', 'interrupted'].includes(job.status)) return true;
+    const finished = (job.finished_at || job.updated_at || 0) * 1000;
+    return Date.now() - finished < JOB_SHOW_FINISHED_MS || jobDock.watchers.has(job.id);
+}
+
+function jobButton(text, title, onClick, extraClass = '') {
+    return createEl('button', {
+        class: `btn btn-secondary btn-small ${extraClass}`.trim(),
+        title,
+        text,
+        onClick: async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try { await onClick(); } catch (error) { showToast('Taak', error.message, 'error'); }
+            finally { button.disabled = false; }
+        },
+    });
+}
+
+function createJobItem(job) {
+    const percent = jobPercent(job);
+    const bar = createEl('div', { class: 'job-bar' });
+    if (percent === null) bar.classList.add('indeterminate');
+    else bar.style.width = `${percent}%`;
+
+    const details = [];
+    if (job.total) details.push(`${job.processed.toLocaleString('nl-NL')} / ${job.total.toLocaleString('nl-NL')}`);
+    else if (job.processed && JOB_ACTIVE.has(job.status)) details.push(`${job.processed.toLocaleString('nl-NL')} gevonden`);
+    const eta = formatEta(job.eta_seconds);
+    if (eta) details.push(eta);
+
+    const actions = [];
+    if (job.type === 'dup_scan' && job.status === 'done') {
+        actions.push(jobButton('Bekijk', 'Toon dit resultaat in Duplicaten', () => openDuplicateScanJob(job.id)));
+    }
+    if (job.can_pause && !job.stopping) {
+        actions.push(jobButton('Pauzeren', 'Pauzeer; hervatten gaat verder waar hij was', () => jobsAction(job.id, 'pause')));
+    }
+    if (job.can_resume) {
+        actions.push(jobButton('Hervatten', 'Ga verder; wat al klaar was wordt overgeslagen', () => jobsAction(job.id, 'resume')));
+    }
+    if (job.can_cancel && !(job.stopping && job.status !== 'waiting_for_vault')) {
+        actions.push(jobButton('Annuleren', 'Stop deze taak', () => jobsAction(job.id, 'cancel'), 'job-cancel'));
+    }
+    if (!JOB_ACTIVE.has(job.status)) {
+        actions.push(createEl('button', {
+            class: 'job-dismiss',
+            title: 'Verberg uit dit paneel',
+            'aria-label': 'Verberg',
+            text: '×',
+            onClick: () => { jobDock.dismissed.add(job.id); saveJobDockPrefs(); renderJobDock(); },
+        }));
+    }
+
+    const message = job.status === 'failed' && job.error ? job.error : (job.message || '');
+    return createEl('div', { class: `job-item job-${job.status}`, dataset: { id: String(job.id) } },
+        createEl('div', { class: 'job-item-head' },
+            createEl('span', { class: 'job-title', text: job.label, title: (job.params && job.params.folder) || '' }),
+            createEl('span', { class: 'job-folder', text: jobFolderLabel(job), title: (job.params && job.params.folder) || '' }),
+            createEl('span', { class: 'job-status', text: JOB_STATUS_LABELS[job.status] || job.status })),
+        createEl('div', { class: 'job-progress' }, bar),
+        createEl('div', { class: 'job-message', text: message }),
+        createEl('div', { class: 'job-item-foot' },
+            createEl('span', { class: 'job-details', text: details.join(' · ') }),
+            createEl('span', { class: 'job-actions' }, actions)));
+}
+
+function renderJobDock() {
+    const dock = document.getElementById('job-dock');
+    if (!dock) return;
+    const visible = jobDock.jobs.filter(jobVisible);
+    const active = visible.filter(j => JOB_ACTIVE.has(j.status)).length;
+    dock.hidden = !visible.length && !jobDock.error;
+    dock.classList.toggle('collapsed', jobDock.collapsed);
+
+    const title = active ? `Taken (${active} bezig)` : `Taken (${visible.length})`;
+    const header = createEl('button', {
+        class: 'job-dock-header',
+        'aria-expanded': jobDock.collapsed ? 'false' : 'true',
+        onClick: () => { jobDock.collapsed = !jobDock.collapsed; saveJobDockPrefs(); renderJobDock(); },
+    },
+        createEl('span', { class: 'job-dock-title', text: title }),
+        createEl('span', { class: 'job-dock-toggle', text: jobDock.collapsed ? '▴' : '▾' }));
+
+    const body = createEl('div', { class: 'job-dock-body' },
+        jobDock.error ? createEl('div', { class: 'job-dock-error', text: `Taken niet op te halen: ${jobDock.error}` }) : null,
+        visible.map(createJobItem));
+    dock.replaceChildren(header, body);
+}
+
+function jobsInit() {
+    jobsOnFinished(job => {
+        const kind = job.status === 'done' ? 'success' : job.status === 'failed' ? 'error' : 'info';
+        const text = job.status === 'failed' ? (job.error || 'Mislukt') : (job.message || JOB_STATUS_LABELS[job.status]);
+        showToast(`${job.label}: ${JOB_STATUS_LABELS[job.status] || job.status}`, text, kind);
+    });
+    jobsRefresh();
+}
+
+// ==================== TAKEN STARTEN VANUIT DE APP ====================
+
+async function startThumbnailJob() {
+    const folder = typeof currentFolder === 'string' && currentFolder ? currentFolder : null;
+    if (!folder && !confirm('Miniaturen maken voor het hele archief?\n\nDit kan bij een groot archief uren duren. ' +
+                            'Het loopt op de achtergrond; je kunt het pauzeren en later hervatten.')) {
+        return;
+    }
+    try {
+        const job = await jobsStart('thumbnails', folder ? { folder } : {});
+        showToast('Miniaturen maken', `Gestart voor ${jobFolderLabel(job)}; de voortgang staat rechtsonder.`, 'info');
+    } catch (error) {
+        showToast('Miniaturen maken', error.message, 'error');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', jobsInit);

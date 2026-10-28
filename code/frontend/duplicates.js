@@ -1,8 +1,10 @@
 // DataVault Dashboard - Duplicaten
 // Note: API_BASE is defined in app.js
 //
-// De scan (POST /api/duplicates/scan_folder) geeft groepen byte voor byte identieke
-// bestanden terug, met per kopie de gegevens die de regels nodig hebben. Welke kopie
+// De scan loopt als achtergrondtaak (jobsStart('dup_scan'), zie jobs.js): de voortgang staat
+// hier en in het takenpaneel, en het resultaat blijft op de server bewaard, zodat het na
+// herladen terugkomt. Het resultaat bestaat uit groepen byte voor byte identieke
+// bestanden, met per kopie de gegevens die de regels nodig hebben. Welke kopie
 // blijft, rekent deze pagina zelf uit (keepSortKey, dezelfde sleutels als
 // scanner.keeper_sort_key op de server), zodat een andere regel meteen zichtbaar is.
 // Per groep kun je ook zelf een kopie aanklikken. Opruimen stuurt per groep
@@ -38,9 +40,11 @@ const dupState = {
     rendered: 0,
     cards: new Map(),      // groep-id -> kaart-element
     cleanup: null,         // lopende of klaargezette opruimactie
+    scanJob: null,         // id van de scantaak die dit scherm volgt of toont
 };
 
-let progressPollInterval = null;
+let dupScanUnwatch = null;
+let dupRestored = false;
 let selectedFolder = null;
 let selectedFolderForModal = null;
 let currentComparisonGroup = null;
@@ -89,90 +93,171 @@ function closeFolderSelector() {
 function confirmFolderSelection() {
     if (!selectedFolderForModal) return;
 
-    selectedFolder = selectedFolderForModal;
-    document.getElementById('selected-folder-path').textContent = selectedFolder;
-    document.getElementById('btn-scan-folder').disabled = false;
+    setSelectedFolder(selectedFolderForModal);
 
     closeFolderSelector();
     showToast('Map gekozen', 'Klaar om te scannen op duplicaten', 'success');
 }
 
-// ==================== SCAN ====================
+// ==================== SCAN (achtergrondtaak) ====================
+
+function setSelectedFolder(folder) {
+    selectedFolder = folder;
+    document.getElementById('selected-folder-path').textContent = folder || 'Geen';
+    document.getElementById('btn-scan-folder').disabled = !folder;
+    document.getElementById('btn-index-folder').disabled = !folder;
+}
 
 async function scanSelectedFolder() {
     if (!selectedFolder) {
         showToast('Geen map', 'Kies eerst een map', 'info');
         return;
     }
-
-    const btnScan = document.getElementById('btn-scan-folder');
-    const btnCancel = document.getElementById('btn-cancel-scan');
-    const progressContainer = document.getElementById('scan-progress-container');
-    const progressBar = document.getElementById('progress-bar');
-    const progressText = document.getElementById('progress-text');
-
-    btnScan.disabled = true;
-    btnScan.style.display = 'none';
-    btnCancel.style.display = 'inline-flex';
-
-    progressContainer.style.display = 'block';
-    progressBar.style.width = '0%';
-    progressBar.textContent = '0%';
-    progressText.textContent = 'Scan starten...';
-
-    progressPollInterval = setInterval(async () => {
-        try {
-            const resp = await fetch(`${API_BASE}/api/raw_duplicates/progress`);
-            if (!resp.ok) return;
-            const progress = await resp.json();
-            const percent = progress.progress_percent || 0;
-            progressBar.style.width = percent + '%';
-            progressBar.textContent = percent + '%';
-            progressText.textContent = `${progress.phase} (${progress.processed_files}/${progress.total_files} bestanden)`;
-        } catch (e) {
-            console.error('Error polling progress:', e);
-        }
-    }, 500);
-
+    const button = document.getElementById('btn-scan-folder');
+    button.disabled = true;
     try {
-        const params = new URLSearchParams({ folder_path: selectedFolder });
-        const response = await fetch(`${API_BASE}/api/duplicates/scan_folder?${params}`, { method: 'POST' });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.detail || 'Scan mislukt');
+        // De regel bepaalt alleen de eerste keuze; de pagina rekent elke regel zelf door
+        const rule = dupState.rule === 'folder' ? 'oldest' : dupState.rule;
+        const job = await jobsStart('dup_scan', { folder: selectedFolder, rule });
+        followScanJob(job.id);
+    } catch (error) {
+        showToast('Scan mislukt', error.message, 'error');
+        button.disabled = false;
+    }
+}
 
-        if (data.cancelled) {
-            showToast('Scan gestopt', 'De scan is geannuleerd', 'info');
+// Controlegetallen vooraf berekenen: een volgende scan van deze map hoeft dan alleen nog
+// gewijzigde bestanden te lezen
+async function indexSelectedFolder() {
+    if (!selectedFolder) return;
+    try {
+        const job = await jobsStart('hashing', { folder: selectedFolder });
+        showToast('Indexeren', `Gestart voor ${jobFolderLabel(job)}; de voortgang staat rechtsonder.`, 'info');
+    } catch (error) {
+        showToast('Indexeren mislukt', error.message, 'error');
+    }
+}
+
+function setScanRunning(running) {
+    document.getElementById('btn-scan-folder').style.display = running ? 'none' : 'inline-flex';
+    document.getElementById('btn-scan-folder').disabled = running || !selectedFolder;
+    document.getElementById('btn-cancel-scan').style.display = running ? 'inline-flex' : 'none';
+    document.getElementById('scan-progress-container').style.display = running ? 'block' : 'none';
+}
+
+function followScanJob(id) {
+    if (dupScanUnwatch) dupScanUnwatch();
+    dupLoadSeq++;  // een uitkomst die nog onderweg is, mag deze scan niet meer overschrijven
+    dupState.scanJob = id;
+    setScanRunning(true);
+    updateScanProgress(null);
+    let finished = false;
+    let unwatch = null;
+    const stop = () => {
+        finished = true;
+        if (unwatch) unwatch();
+        if (dupScanUnwatch === stop) dupScanUnwatch = null;
+    };
+    dupScanUnwatch = stop;
+    unwatch = jobsWatch(id, job => {
+        if (finished) return;
+        if (JOB_ACTIVE.has(job.status)) {
+            updateScanProgress(job);
             return;
         }
-        showScanResult(data);
-        const found = countMoves(dupState.groups);
-        showToast(data.complete ? 'Scan klaar' : 'Scan onvolledig',
-            `${dupState.groups.length} groepen, ${found} te verplaatsen` +
-            (data.complete ? '' : ` (${data.errors} leesfout(en))`),
-            data.complete ? 'success' : 'warning');
-    } catch (error) {
-        console.error('Error scanning folder:', error);
-        showToast('Scan mislukt', error.message, 'error');
-    } finally {
-        clearInterval(progressPollInterval);
-        progressPollInterval = null;
-        progressContainer.style.display = 'none';
-        btnScan.disabled = false;
-        btnScan.style.display = 'inline-flex';
-        btnCancel.style.display = 'none';
+        // Klaar, mislukt, geannuleerd of gepauzeerd: het takenpaneel meldt dat al
+        stop();
+        setScanRunning(false);
+        if (job.status === 'done') loadScanJobResult(job.id);
+    });
+    if (finished) unwatch();
+}
+
+function updateScanProgress(job) {
+    const bar = document.getElementById('progress-bar');
+    const text = document.getElementById('progress-text');
+    if (!job) {
+        bar.style.width = '0%';
+        bar.textContent = '';
+        text.textContent = 'Scan starten...';
+        return;
     }
+    const percent = jobPercent(job);
+    bar.classList.toggle('indeterminate', percent === null);
+    bar.style.width = percent === null ? '100%' : `${percent}%`;
+    bar.textContent = percent === null ? '' : `${percent}%`;
+    const parts = [job.message || JOB_STATUS_LABELS[job.status]];
+    const eta = formatEta(job.eta_seconds);
+    if (eta) parts.push(eta);
+    text.textContent = parts.join(' · ');
 }
 
 async function cancelScan() {
+    if (!dupState.scanJob) return;
     try {
-        const response = await fetch(`${API_BASE}/api/raw_duplicates/cancel`, { method: 'POST' });
-        if (response.ok) showToast('Stoppen', 'De scan wordt gestopt...', 'info');
+        await jobsAction(dupState.scanJob, 'cancel');
+        showToast('Stoppen', 'De scan wordt gestopt...', 'info');
     } catch (error) {
-        console.error('Error cancelling scan:', error);
+        showToast('Stoppen mislukt', error.message, 'error');
     }
 }
 
-function showScanResult(data) {
+// Een bewaard scanresultaat tonen (na herladen, of via 'Bekijk' in het takenpaneel)
+let dupLoadSeq = 0;
+
+async function loadScanJobResult(id) {
+    const seq = ++dupLoadSeq;
+    try {
+        const data = await jobsResult(id);
+        // Intussen een nieuwere keuze (andere uitkomst, of een nieuwe scan gestart): deze is oud
+        if (seq !== dupLoadSeq || (dupScanUnwatch && dupState.scanJob !== id)) return;
+        dupState.scanJob = id;
+        setSelectedFolder(data.result.folder);
+        showScanResult(data.result, data.job.finished_at);
+        if (data.result.stale_removed > 0) {
+            showToast('Bijgewerkt', `${data.result.stale_removed} kopie${data.result.stale_removed === 1 ? '' : 'ën'} ` +
+                'zijn sinds de scan al verplaatst of gewijzigd en worden niet meer getoond.', 'info');
+        }
+    } catch (error) {
+        showToast('Resultaat laden mislukt', error.message, 'error');
+    }
+}
+
+// Een scan die elders gestart of hervat wordt (takenpaneel, ander tabblad) volgt dit scherm ook
+jobsOnChange(job => {
+    if (job.type === 'dup_scan' && JOB_ACTIVE.has(job.status) && !dupScanUnwatch) {
+        setSelectedFolder(job.params.folder);
+        followScanJob(job.id);
+    }
+});
+
+function openDuplicateScanJob(id) {
+    switchMainView('duplicates');
+    loadScanJobResult(id);
+}
+
+// Bij het openen van Duplicaten: een lopende scan weer volgen, of de laatste uitkomst tonen
+async function restoreLatestScan() {
+    if (dupRestored) return;
+    dupRestored = true;
+    try {
+        const { jobs } = await jobsRequest('/api/jobs?type=dup_scan&limit=1');
+        const job = jobs[0];
+        if (!job || dupState.scanJob) return;
+        if (JOB_ACTIVE.has(job.status)) {
+            setSelectedFolder(job.params.folder);
+            followScanJob(job.id);
+        } else if (job.status === 'done' && !dupState.folder) {
+            await loadScanJobResult(job.id);
+        } else if (job.params && job.params.folder && !selectedFolder) {
+            setSelectedFolder(job.params.folder);
+        }
+    } catch (error) {
+        dupRestored = false;  // volgende keer opnieuw proberen
+    }
+}
+
+function showScanResult(data, finishedAt) {
     dupState.folder = data.folder;
     dupState.groups = data.groups || [];
     dupState.overrides = new Map();
@@ -181,7 +266,10 @@ function showScanResult(data) {
     dupState.prefer = null;
 
     document.getElementById('status-scanned').textContent = data.total_scanned;
-    document.getElementById('status-timestamp').textContent = new Date().toLocaleTimeString('nl-NL');
+    const when = finishedAt ? new Date(finishedAt * 1000) : new Date();
+    document.getElementById('status-timestamp').textContent = when.toDateString() === new Date().toDateString()
+        ? when.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })
+        : when.toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     document.getElementById('status-panel').style.display = 'block';
 
     const warning = document.getElementById('dup-scan-warning');
@@ -806,4 +894,5 @@ async function undoDuplicateRun(run, button) {
 function duplicatesInit() {
     loadDuplicateRuns();
     document.getElementById('dup-rule').value = dupState.rule;
+    restoreLatestScan();
 }

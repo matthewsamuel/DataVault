@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=36">
+    <link rel="stylesheet" href="style.css?v=37">
 </head>
 
 <body>
@@ -206,6 +206,11 @@
                         </select>
                     </div>
 
+                    <button class="btn btn-secondary btn-small" id="btn-make-thumbs" onclick="startThumbnailJob()"
+                        title="Maakt op de achtergrond alle ontbrekende miniaturen van deze map (of van het hele archief)">
+                        Miniaturen maken
+                    </button>
+
                     <div class="view-toggle">
                         <button class="view-toggle-btn active" data-view="grid" onclick="toggleView('grid')">
                             Grid
@@ -252,6 +257,10 @@
                         <button class="btn btn-secondary" id="btn-cancel-scan" onclick="cancelScan()"
                             style="display: none;">
                             Scan stoppen
+                        </button>
+                        <button class="btn btn-secondary" id="btn-index-folder" onclick="indexSelectedFolder()" disabled
+                            title="Berekent de controlegetallen van deze map op de achtergrond, zodat een volgende scan alleen gewijzigde bestanden hoeft te lezen">
+                            Vooraf indexeren
                         </button>
                     </div>
                 </div>
@@ -998,6 +1007,9 @@
     </div>
 
     <!-- Toast Container -->
+    <!-- Achtergrondtaken: voortgang, pauzeren, hervatten, annuleren (jobs.js) -->
+    <div class="job-dock" id="job-dock" role="region" aria-label="Achtergrondtaken" hidden></div>
+
     <div class="toast-container" id="toast-container">
         <!-- Toasts will be added here dynamically -->
     </div>
@@ -1035,7 +1047,8 @@
     <script src="dom.js?v=1"></script>
     <script src="folder-tree.js?v=2"></script>
     <script src="app.js?v=41"></script>
-    <script src="duplicates.js?v=17"></script>
+    <script src="jobs.js?v=1"></script>
+    <script src="duplicates.js?v=18"></script>
     <script src="keurer.js?v=11"></script>
     <script src="timeline.js?v=3"></script>
     <script src="wave-background.js?v=2"></script>

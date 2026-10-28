@@ -336,3 +336,17 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   de schijf of de Spotify-export op de hoofdthread van de server. Ze lopen nu op een eigen
   thread, zodat de rest van de app (miniaturen, mappen, voortgang, de statuscontrole) gewoon
   blijft antwoorden. Alleen het wachten op het taalmodel van de chat is nog asynchroon.
+- Nieuw: het **takenpaneel** rechtsonder. Het toont elke lopende taak met een voortgangsbalk,
+  aantallen, de geschatte resterende tijd en knoppen Pauzeren, Hervatten en Annuleren; een
+  afgeronde duplicatenscan heeft een knop "Bekijk". Het paneel komt terug na herladen, kan
+  ingeklapt worden en afgeronde taken kun je wegklikken. Op een telefoonscherm past het binnen
+  het scherm.
+- Duplicaten: "Zoek duplicaten" start de scan nu als achtergrondtaak. Je kunt intussen gewoon
+  verder in de app; de voortgang staat in het duplicatenscherm én in het takenpaneel. Na
+  herladen volgt het scherm een lopende scan weer, of toont het de laatste uitkomst. Een scan
+  die je in het takenpaneel hervat, volgt het scherm vanzelf.
+- Duplicaten: nieuwe knop **Vooraf indexeren** berekent de controlegetallen van de gekozen map
+  op de achtergrond, zodat een volgende scan alleen gewijzigde bestanden hoeft te lezen.
+- Bestanden: nieuwe knop **Miniaturen maken** maakt op de achtergrond alle ontbrekende
+  miniaturen van de geopende map (of, zonder geopende map, van het hele archief, na
+  bevestiging).
