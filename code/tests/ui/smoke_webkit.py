@@ -573,6 +573,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     storage: document.getElementById('storage-used-text').textContent,
                 }))()""")
                 expect(home == {"spinners": 0, "storage": "–"}, f"home unplugged: {home}")
+                # The three library tiles say the same thing, not one tile apart
+                metas = page.evaluate("['home-stat-folders', 'home-stat-videos-meta', 'home-stat-audio-meta']"
+                                      ".map(id => document.getElementById(id).textContent)")
+                expect(len(set(metas)) == 1 and "niet bereikbaar" in metas[0], f"home unplugged: tile lines {metas}")
                 page.screenshot(path=str(shots / "home_unplugged.png"))
                 # (the 503s of an unplugged archive are expected here)
                 problems[seen:] = [p for p in problems[seen:] if "503" not in p and "Failed to load resource" not in p]

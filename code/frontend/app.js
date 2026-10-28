@@ -1899,11 +1899,15 @@ function homeRenderLibraryStats(lib) {
     show('home-stat-photos', lib && lib.photos);
     show('home-stat-videos', lib && lib.videos);
     show('home-stat-audio', lib && lib.audio);
-    const folders = document.getElementById('home-stat-folders');
-    if (folders) {
-        folders.textContent = ready ? `In ${Number(lib.folders || 0).toLocaleString('nl-NL')} mappen`
-            : lib ? 'Bibliotheek wordt opgebouwd' : 'Bibliotheek niet bereikbaar';
-    }
+    // Zonder bibliotheek zeggen alle drie de tegels hetzelfde, niet één tegel apart
+    const status = lib ? 'Bibliotheek wordt opgebouwd' : 'Bibliotheek niet bereikbaar';
+    const meta = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = ready ? text : status;
+    };
+    meta('home-stat-folders', ready ? `In ${Number(lib.folders || 0).toLocaleString('nl-NL')} mappen` : '');
+    meta('home-stat-videos-meta', 'In de bibliotheek');
+    meta('home-stat-audio-meta', 'In de bibliotheek');
 }
 
 async function fetchHomeWidgets() {
