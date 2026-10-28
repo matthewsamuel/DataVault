@@ -172,15 +172,17 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                                  page.evaluate(f"selectFolder({json.dumps(folder)})")))
             # A photo tile shows its name on hover (burst shots look alike); list rows line up
             step("files: hover a photo", lambda: page.hover("#media-grid .media-card:not(.folder-card):not(.other-card)"), 0.4)
-            hovered = page.evaluate("getComputedStyle(document.querySelector('#media-grid .media-card:hover .media-card-name')).opacity")
-            if hovered != "1":
-                problems.append(f"files: a photo tile shows no name on hover (opacity {hovered})")
+            hovered = page.evaluate("(() => { const s = getComputedStyle(document.querySelector('#media-grid .media-card:hover .media-card-name'));"
+                                    " return s.display + ' ' + s.opacity; })()")
+            if hovered != "block 1":
+                problems.append(f"files: a photo tile shows no name on hover ({hovered})")
             page.evaluate("toggleView('list')")
             page.wait_for_timeout(300)
             columns = page.evaluate("""[...document.querySelectorAll('#media-grid .media-card')].map(c => {
                 const icon = c.querySelector('.folder-card-icon, .media-thumbnail, .other-card-icon');
                 const name = c.querySelector('.folder-card-name, .media-card-name');
-                return Math.round(icon.getBoundingClientRect().left) + '/' + Math.round(name.getBoundingClientRect().left); })""")
+                const text = name.getBoundingClientRect().left + parseFloat(getComputedStyle(name).paddingLeft);
+                return Math.round(icon.getBoundingClientRect().left) + '/' + Math.round(text); })""")
             if len(set(columns)) != 1:
                 problems.append(f"files: list rows do not line up (icon/name x: {sorted(set(columns))})")
             page.evaluate("toggleView('grid')")
@@ -539,7 +541,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     expect(rows[0] <= rows[1] + 1 and rows[2] <= rows[3] + 1,
                            f"shows: slideshow chrome overlaps the photo at height {height} ({rows})")
                 page.set_viewport_size({"width": 1400, "height": 900})
-                expect(page.get_attribute(".elo-rating-badge", "aria-label", timeout=2000).startswith("Score "),
+                expect((page.get_attribute(".elo-rating-badge", "aria-label", timeout=2000) or "").startswith("Score "),
                        "shows: the score badge has no name")
                 step("shows: next slide", lambda: page.keyboard.press("ArrowRight"), 0.8)
                 step("shows: close slideshow", lambda: page.keyboard.press("Escape"), 0.8)
@@ -717,8 +719,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 page.screenshot(path=str(shots / "home_unplugged.png"))
                 # Bestanden: not a blank page and an empty folder column, but say what is going on
                 page.evaluate("switchMainView('viewer')")
-                page.wait_for_selector("#media-grid .empty-state", timeout=10000)
-                files = page.evaluate("[document.querySelector('#media-grid .empty-state-title').textContent,"
+                try:
+                    page.wait_for_selector("#media-grid .empty-state", timeout=10000)
+                except PlaywrightError:
+                    pass   # reported below
+                files = page.evaluate("[(document.querySelector('#media-grid .empty-state-title') || {}).textContent || '',"
                                       " document.getElementById('folder-tree').textContent.trim()]")
                 expect(files == ["Archief niet bereikbaar", "Archief niet bereikbaar"], f"files unplugged: {files}")
                 page.screenshot(path=str(shots / "files_unplugged.png"))
@@ -733,8 +738,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.reload()
             page.wait_for_load_state("networkidle")
             page.evaluate("switchMainView('viewer')")
-            page.wait_for_selector("#media-grid .empty-state", timeout=10000)
-            empty = page.text_content("#media-grid .empty-state-title")
+            try:
+                page.wait_for_selector("#media-grid .empty-state", timeout=10000)
+            except PlaywrightError:
+                pass   # reported below
+            empty = page.evaluate("(document.querySelector('#media-grid .empty-state-title') || {}).textContent")
             expect(empty == "Het archief is leeg", f"files: an empty archive says {empty!r}")
             page.unroute("**/api/folders")
             browser.close()
