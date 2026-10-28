@@ -3677,6 +3677,14 @@ function sendChatMessage() {
     });
 }
 
+// Een voorbeeldvraag onder de chat op Home: meteen versturen
+function askPasha(question) {
+    const input = document.getElementById('chat-input');
+    if (!input || input.disabled) return;
+    input.value = question.trim();
+    sendChatMessage();
+}
+
 function sendChatMessageFullscreen() {
     return sendChat({
         inputEl: document.getElementById('chat-input-fullscreen'),
@@ -3696,6 +3704,8 @@ async function sendChat({ inputEl, btn }) {
     inputEl.value = '';
     inputEl.disabled = true;
     if (btn) btn.disabled = true;
+    const suggestions = document.getElementById('chat-suggestions');
+    if (suggestions) suggestions.hidden = true;
 
     const userMsg = createEl('div', { class: 'chat-message user-message' },
         createEl('div', { class: 'message-bubble message-text', text: message }));

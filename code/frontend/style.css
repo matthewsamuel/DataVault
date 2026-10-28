@@ -5893,6 +5893,22 @@ button.otd-settings-icon:hover {
     overflow: hidden;
 }
 
+.chat-widget .chat-messages {
+    flex: none;
+    max-height: 360px;
+}
+
+.chat-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    padding: 0 var(--space-lg) var(--space-xs) calc(var(--space-lg) + 40px);
+}
+
+.chat-suggestions[hidden] {
+    display: none;
+}
+
 .chat-header {
     display: flex;
     align-items: center;
