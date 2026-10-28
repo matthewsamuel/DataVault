@@ -42,6 +42,8 @@ STATUS = {
     "geregistreerd": ("In het archief", "neutral"),
     "niet_ingesteld": ("Niet ingesteld", "neutral"),
 }
+KEYCHAIN_NOTE = ("De Sleutelhanger van macOS is niet bereikbaar (vergrendeld, of toegang geweigerd). Ontgrendel hem, "
+                "of klik op 'Sta toe' als macOS het vraagt, en laad deze pagina opnieuw.")
 DOWNLOADS_NOTICE_DAYS = 14
 EXISTING_CACHE_SECONDS = 120     # finding existing exports walks data/: not on every card load
 
@@ -89,7 +91,12 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     now = time.time()
     cov = connector.coverage(gctx)
     api = connector.has("api_sync")
-    configured = api and connector.is_configured(gctx)
+    keychain_ok = True
+    try:
+        configured = api and connector.is_configured(gctx)
+    except keychain.SecretStoreError:
+        # Locked, or the user clicked 'Weigeren' at the Keychain prompt: the tab still works
+        configured, keychain_ok = False, False
     pending = state.pending_raw(db, connector.id)
     unread = unread_existing(connector, gctx)
     raws = state.list_raw(db, connector.id, limit=200)
@@ -175,7 +182,12 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         actions.append("upload")
     actions = [a for a in dict.fromkeys(actions) if a and a != primary and not (primary == "reconnect" and a == "connect")]
 
-    notes = list(connector.notes(gctx))
+    try:
+        notes = list(connector.notes(gctx))
+    except keychain.SecretStoreError:
+        notes, keychain_ok = [], False
+    if not keychain_ok:
+        notes.insert(0, {"tone": "warning", "text": KEYCHAIN_NOTE})
     notice = downloads_notice(raws, now)
     if notice:
         notes.append({"tone": "info", "text": f"{notice['name']} staat in het archief. Het origineel in Downloads mag je "
@@ -207,6 +219,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         "actions": [{"action": a, "label": ACTIONS[a][0], "icon": ACTIONS[a][1]} for a in actions],
         "exports": [{"id": k.id, "label": k.label} for k in connector.exports],
         "configured": configured,
+        "keychain_available": keychain_ok,
         "connected_at": st["connected_at"],
         "needs_reconnect": bool(st["needs_reconnect"]),
         "last_sync_at": st["last_sync_at"],
@@ -286,7 +299,7 @@ def detail(config, db, connector: Connector, port: Optional[int]) -> Dict[str, A
             "value": None if f.kind == "secret" else st["settings"].get(f.key),
             "stored": secrets.get(f.key, False) if f.kind == "secret" else None,
         } for f in connector.settings],
-        "keychain_available": keychain_ok,
+        "keychain_available": keychain_ok and data["keychain_available"],
         "setup": None if connector.setup is None else {
             "intro": connector.setup.intro,
             "steps": [s.replace("{redirect_uri}", redirect) for s in connector.setup.steps],

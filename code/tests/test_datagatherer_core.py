@@ -123,6 +123,42 @@ def test_secrets_are_never_echoed_or_stored_in_the_database(client, config):
 
 # ---------- the network guard ----------
 
+def test_a_locked_keychain_never_breaks_the_tab(client, app):
+    """F-F4: a locked Keychain (or 'Weigeren' at its prompt) gives notes and 503s, never a 500."""
+    import keyring
+    from keyring.backend import KeyringBackend
+    from keyring.errors import KeyringLocked
+
+    class LockedKeyring(KeyringBackend):
+        priority = 1
+        datavault_fake = True
+
+        def get_password(self, service, username):
+            raise KeyringLocked("locked")
+
+        def set_password(self, service, username, password):
+            raise KeyringLocked("locked")
+
+        def delete_password(self, service, username):
+            raise KeyringLocked("locked")
+
+    keyring.set_keyring(LockedKeyring())
+    r = client.get("/api/datagatherer/sources")
+    assert r.status_code == 200
+    spotify = next(c for c in r.json()["sources"] if c["id"] == "spotify")
+    assert spotify["keychain_available"] is False and spotify["primary"]["action"] != "sync"
+    assert "Sleutelhanger" in spotify["notes"][0]["text"]
+    google = next(c for c in r.json()["sources"] if c["id"] == "google_takeout")
+    assert google["keychain_available"] is True
+    detail = client.get("/api/datagatherer/sources/spotify")
+    assert detail.status_code == 200 and detail.json()["keychain_available"] is False
+    assert client.get("/api/datagatherer/sources/lastfm").status_code == 200
+    assert client.post("/api/datagatherer/sources/spotify/sync").status_code == 503
+    assert client.post("/api/datagatherer/sources/spotify/connect").status_code == 503
+    assert client.post("/api/datagatherer/sources/spotify/forget").status_code == 503
+    assert client.put("/api/datagatherer/sources/lastfm/secrets", json={"api_key": "x"}).status_code == 503
+
+
 def _guard_client(db, connector_id="spotify", trigger="user"):
     return net.client(db, registry.get(connector_id), trigger)
 

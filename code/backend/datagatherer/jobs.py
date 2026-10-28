@@ -25,7 +25,7 @@ from typing import Any, Callable, Dict, List
 import httpx
 from fastapi import HTTPException
 
-from backend.datagatherer import net, raw_store, registry, state
+from backend.datagatherer import keychain, net, raw_store, registry, state
 from backend.datagatherer.base import ConnectorError, GatherContext
 from backend.jobs import JobContext, JobStopped, JobType, VaultUnavailable
 
@@ -80,6 +80,9 @@ def run_sync(config, db, connector, trigger: str, job=None, sleep=None) -> Dict[
         if e.retry_after:
             fields["retry_after"] = e.retry_after
         state.update(db, connector.id, **fields)
+        raise GatherFailed(str(e)) from e
+    except keychain.SecretStoreError as e:
+        state.update(db, connector.id, last_error=str(e))
         raise GatherFailed(str(e)) from e
     except net.NetworkRefused as e:
         state.update(db, connector.id, last_error=str(e))

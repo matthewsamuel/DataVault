@@ -201,6 +201,8 @@ def connect(source_id: str, request: Request) -> Dict[str, Any]:
         url = connector.authorize_url(GatherContext(config, db, connector), redirect, state_value, challenge)
     except ConnectorError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except keychain.SecretStoreError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     return {"authorize_url": url, "redirect_uri": redirect}
 
 
@@ -237,7 +239,7 @@ def oauth_callback(source_id: str, request: Request):
     gctx = GatherContext(config, db, connector, trigger="user")
     try:
         connector.finish_authorization(gctx, params.get("code") or "", redirect, verifier)
-    except ConnectorError as e:
+    except (ConnectorError, keychain.SecretStoreError) as e:
         return _page("Niet verbonden", str(e), False)
     except Exception as e:  # network refused or unreachable: say so, never a stack trace
         return _page("Niet verbonden", f"{connector.name} was niet bereikbaar ({type(e).__name__}).", False)
@@ -255,7 +257,11 @@ def start_sync(source_id: str):
     if not (connector.has("api_sync") or connector.has("local_import")):
         raise HTTPException(status_code=400, detail=f"{connector.name} kan niet bijwerken")
     gctx = GatherContext(config, db, connector)
-    if not connector.is_configured(gctx):
+    try:
+        configured = connector.is_configured(gctx)
+    except keychain.SecretStoreError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if not configured:
         raise HTTPException(status_code=409, detail=f"{connector.name} is nog niet verbonden: klik Verbinden")
     return _start(sync_type_name(connector.id), {"trigger": "user"})
 

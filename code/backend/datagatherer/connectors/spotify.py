@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
-from backend.datagatherer import raw_store, spotify_store, state
+from backend.datagatherer import keychain, raw_store, spotify_store, state
 from backend.datagatherer.base import (Connector, ConnectorError, Coverage, ExportKind, GatherContext, HelpOption,
                                        SettingField, Setup)
 
@@ -342,9 +342,10 @@ class Spotify(Connector):
                         segments=[(s["from"], s["until"], s["estimated"]) for s in c["segments"]])
 
     def consent_expires(self, ctx: GatherContext) -> Optional[float]:
+        """When the 6-month consent ends; None when unknown (also when the Keychain cannot be read)."""
         try:
             token = json.loads(ctx.secrets.get("token") or "")
-        except ValueError:
+        except (ValueError, keychain.SecretStoreError):
             return None
         authorized = token.get("authorized_at") if isinstance(token, dict) else None
         return authorized + CONSENT_DAYS * 86400 if authorized else None
