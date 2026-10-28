@@ -129,9 +129,11 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - API: `GET /api/series/status`, `GET /api/series?strictness=&sort=size|recent&offset=&limit=`,
   `POST /api/series/keep {members, keep}`, `POST /api/series/keep-all {members}`,
   `POST /api/series/reviews/reset`.
-- Snelheid (M3 Pro, 4 threads): 12 MP JPEG ~130 foto's/s; HEIC wordt volledig gedecodeerd (36 MP:
-  ~0,7 s per foto per thread, ~5 per seconde met 4 threads). Paren en bursts voor 100.000 foto's:
-  ~5 s, alleen als er iets nieuw of veranderd is; een pagina reeksen daarna in enkele ms.
+- Snelheid (M3 Pro, 4 threads): 12 MP JPEG ~130 foto's/s; 4.000 foto's van 2 MP via de server in
+  10 s (390/s; `/api/health` p95 12 ms tijdens de taak), een tweede ronde zonder nieuwe foto's
+  0,2 s. HEIC wordt volledig gedecodeerd (36 MP: ~0,7 s per foto per thread, ~5 per seconde met
+  4 threads). Paren en bursts voor 100.000 foto's: ~5 s, alleen als er iets nieuw of veranderd is;
+  een pagina reeksen daarna in enkele ms.
 
 ### Bibliotheek (media-index)
 - De app houdt een index bij van elke foto, video en audiobestand in het archief (datum, afmetingen,
