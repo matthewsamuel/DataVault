@@ -3493,6 +3493,10 @@ a.breadcrumb-item:hover {
     .theme-button .theme-caret {
         display: none;
     }
+
+    .search-input {
+        width: 216px;
+    }
 }
 
 @media (max-width: 1240px) {
@@ -3506,9 +3510,9 @@ a.breadcrumb-item:hover {
     }
 }
 
-/* Onder 1180 px alleen het logo, zodat er tussen het menu en het zoekveld altijd minstens
+/* Onder 1280 px alleen het logo, zodat er tussen het menu en het zoekveld altijd minstens
    --space-xl lucht blijft (zie navgap in de smoke-test) */
-@media (max-width: 1180px) {
+@media (max-width: 1280px) {
     .nav-brand-name {
         display: none;
     }
@@ -3526,6 +3530,28 @@ a.breadcrumb-item:hover {
 
     .search-input {
         width: 184px;
+    }
+}
+
+/* Onder 1100 px (tien onderdelen sinds Albums): iets smallere tabs en een kort zoekveld zonder
+   de /-hint, zodat het hele menu blijft passen (navgap in de smoke-test) */
+@media (max-width: 1100px) {
+    .nav-tab {
+        padding: 0 var(--space-sm);
+    }
+
+    .nav-tab.active::after {
+        left: var(--space-sm);
+        right: var(--space-sm);
+    }
+
+    .search-input {
+        width: 148px;
+        padding-right: var(--space-md);
+    }
+
+    .nav-search .search-kbd {
+        display: none;
     }
 }
 
