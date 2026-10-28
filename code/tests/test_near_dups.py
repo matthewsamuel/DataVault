@@ -466,6 +466,76 @@ def test_the_job_waits_for_the_index_and_waits_for_an_unplugged_vault(client, va
     assert len(_series(client)["items"]) == 2
 
 
+def _byte_copies_in_one_series(client, vault):
+    """Series in which two photos shown side by side are byte for byte the same file."""
+    found = []
+    for series in _series(client, "ruim")["items"]:
+        shas = [_sha(Path(m["path"])) for m in series["members"]]
+        if len(set(shas)) < len(shas):
+            found.append(_names(series))
+    return found
+
+
+@pytest.mark.parametrize("how", ["pause", "fail"])
+def test_a_run_that_stops_before_the_copies_are_hashed_never_shows_copies_as_a_series(
+        client, vault, config, monkeypatch, how):
+    from backend import scanner
+    monkeypatch.setattr(near_dups, "CONTENT_BATCH", 1)
+    _index(client)
+    original = scanner.hash_file_xxh3
+    calls = []
+    job_id = {}
+
+    def hashing(path):
+        calls.append(str(path))
+        if len(calls) == 2:
+            if how == "fail":
+                raise RuntimeError("stopped while hashing")
+            _manager().pause(job_id["id"])
+        return original(path)
+
+    monkeypatch.setattr(scanner, "hash_file_xxh3", hashing)
+    job_id["id"] = client.post("/api/jobs", json={"type": "phash"}).json()["job"]["id"]
+    job = _manager().wait(job_id["id"], timeout=60)
+    assert job["status"] == ("paused" if how == "pause" else "failed"), job
+    with sqlite3.connect(str(config.DB_PATH)) as conn:
+        hashed = conn.execute("SELECT COUNT(*) FROM media_phash WHERE content IS NOT NULL").fetchone()[0]
+    assert hashed >= 1            # written as it went, not only at the end
+    # The analysis is stored, the copies are not all known: none of them is shown as a different photo
+    assert _byte_copies_in_one_series(client, vault) == []
+    assert not any(len(s["members"]) == len(s.get("copies", [])) for s in _series(client, "ruim")["items"])
+
+    if how == "pause":
+        _manager().resume(job_id["id"])
+        job = _manager().wait(job_id["id"], statuses=("queued", "running"), timeout=60)
+        assert job["status"] == "done", job
+    else:
+        monkeypatch.setattr(scanner, "hash_file_xxh3", original)
+        _run(client)
+    assert _byte_copies_in_one_series(client, vault) == []
+    listed = _series(client)
+    assert len(listed["items"]) == 2
+    strand = _with(listed, "strand klein.jpg")[0]
+    assert len(next(m for m in strand["members"] if m["name"] != "strand klein.jpg")["copies"]) >= 2
+    if how == "pause":
+        # What the paused run hashed was not read again
+        assert len(calls) == len(set(calls))
+
+
+def test_copies_the_duplicates_screen_already_hashed_are_not_read_again(client, vault, config, monkeypatch):
+    from backend import scanner
+    job = client.post("/api/jobs", json={"type": "dup_scan", "params": {"folder": str(vault)}}).json()["job"]
+    assert _manager().wait(job["id"], timeout=60)["status"] == "done"
+    _index(client)
+    original = scanner.hash_file_xxh3
+    calls = []
+    monkeypatch.setattr(scanner, "hash_file_xxh3", lambda path: (calls.append(path), original(path))[1])
+    result = _run(client)
+    assert result["copies_cached"] >= 4 and result["copies_hashed"] == 0 and calls == []
+    strand = _with(_series(client), "strand klein.jpg")[0]
+    assert len(next(m for m in strand["members"] if m["name"] != "strand klein.jpg")["copies"]) >= 2
+
+
 def test_rows_of_removed_files_are_cleaned_up_with_the_index(client, vault, config):
     _index(client)
     _run(client)

@@ -506,6 +506,14 @@ def run_job(ctx, config, db, errors, vault_check) -> Dict[str, Any]:
         from backend import media_index
         media_index.request_update()
 
+    def check() -> None:
+        ctx.check()
+        if errors.vault_lost:
+            vault_check()
+
+    twins = hash_twins(db, check, lambda n, of: ctx.progress(n, of, f"Exacte kopieën herkennen... {n}/{of}"),
+                       errors)
+    vault_check()
     ctx.progress(total, total, "Reeksen zoeken...")
     paired = update_pairs(db, ctx.check)
     seconds = round(time.time() - started, 2)
@@ -515,7 +523,9 @@ def run_job(ctx, config, db, errors, vault_check) -> Dict[str, Any]:
         "photos": figures["photos"],
         "analysed": done["analysed"],
         "undecodable": done["undecodable"],
-        "behind": done["behind"],
+        "behind": done["behind"] + twins["behind"],
+        "copies_hashed": twins["hashed"],
+        "copies_cached": twins["cached"],
         "errors": errors.count,
         "error_samples": errors.samples,
         "complete": errors.count == 0,
@@ -565,6 +575,104 @@ def _twins(rows) -> Dict[Tuple, List[int]]:
     return twins
 
 
+CONTENT_BATCH = 100           # content hashes written per transaction
+
+
+def hash_twins(db, check: Callable[[], None] = lambda: None,
+               progress: Optional[Callable[[int, int], None]] = None,
+               on_error: Optional[Callable[[str, BaseException], None]] = None) -> Dict[str, int]:
+    """
+    Content hashes (xxh3, media_phash.content) of the twins of the same size that have
+    none yet: photos with the same hashes, colours and size may be byte-for-byte copies,
+    and those are the duplicates screen's work. Until a twin has its hash, all_series
+    leaves it out, so a stopped run never shows copies as different photos.
+
+    A hash the duplicates screen already made of the unchanged file (file_hashes, same
+    inode, size, mtime and ctime) is reused; new ones go into that cache too. Written in
+    batches, so a stop or an unplugged disk keeps what was hashed. check() between files.
+    """
+    from backend.scanner import HASH_ALGO, _fingerprint, hash_file_xxh3
+    with db._connect() as conn:
+        rows = conn.execute(
+            f"SELECT m.id, h.phash, h.dhash, h.colors, m.size, m.path, m.mtime_ns, h.content FROM media m "
+            f"JOIN media_phash h ON h.media_id = m.id "
+            f"WHERE m.missing = 0 AND h.status = 'ok' AND {_CURRENT} ORDER BY m.id", (ALGO_VERSION,)).fetchall()
+    buckets: Dict[Tuple, List[Tuple]] = {}
+    for r in rows:
+        buckets.setdefault((r[1], r[2], r[3], r[4]), []).append(r)
+    todo = [r for bucket in buckets.values() if len(bucket) > 1 for r in bucket if r[7] is None]
+    done = {"hashed": 0, "cached": 0, "failed": 0, "behind": 0}
+    if not todo:
+        return done
+    cache: Dict[str, Tuple[Tuple, str]] = {}
+    with db._connect() as conn:
+        for chunk in _chunks([r[5] for r in todo]):
+            for path, ino, size, mtime_ns, ctime_ns, digest in conn.execute(
+                    f"SELECT path, ino, size, mtime_ns, ctime_ns, hash FROM file_hashes "
+                    f"WHERE algo = ? AND path IN ({','.join('?' * len(chunk))})", (HASH_ALGO, *chunk)):
+                cache[path] = ((ino, size, mtime_ns, ctime_ns), digest)
+
+    contents: List[Tuple[str, int]] = []
+    fresh: List[Tuple[str, Tuple, str]] = []
+    last_flush = last_progress = time.monotonic()
+
+    def flush() -> None:
+        nonlocal last_flush
+        last_flush = time.monotonic()
+        if contents:
+            with db._connect() as conn:
+                conn.executemany("UPDATE media_phash SET content = ? WHERE media_id = ?", contents)
+            contents.clear()
+            _bump()
+        if fresh:
+            try:
+                db.store_hashes(list(fresh), HASH_ALGO)
+            except Exception:
+                pass          # the cache is an optimisation
+            fresh.clear()
+
+    total = len(todo)
+    try:
+        for n, r in enumerate(todo):
+            check()
+            media_id, path, size, mtime_ns = r[0], r[5], r[4], r[6]
+            try:
+                st = os.lstat(path)
+                if not stat_module.S_ISREG(st.st_mode) or (st.st_size, st.st_mtime_ns) != (size, mtime_ns):
+                    done["behind"] += 1      # changed since it was analysed: analysed again next time
+                    continue
+                fingerprint = _fingerprint(st)
+                cached = cache.get(path)
+                if cached and cached[0] == fingerprint:
+                    digest = cached[1]
+                    done["cached"] += 1
+                else:
+                    digest = hash_file_xxh3(Path(path))
+                    if _fingerprint(os.lstat(path)) != fingerprint:
+                        done["behind"] += 1  # changed while it was read
+                        continue
+                    fresh.append((path, fingerprint, digest))
+                    done["hashed"] += 1
+            except OSError as e:
+                done["failed"] += 1
+                if on_error is not None:
+                    on_error(path, e)
+                continue
+            contents.append((digest, media_id))
+            tick = time.monotonic()
+            if len(contents) >= CONTENT_BATCH or tick - last_flush >= FLUSH_SECONDS:
+                flush()
+            if progress is not None and (tick - last_progress >= PROGRESS_SECONDS or n + 1 == total):
+                last_progress = tick
+                progress(n + 1, total)
+    finally:
+        flush()
+    if done["behind"]:
+        from backend import media_index
+        media_index.request_update()
+    return done
+
+
 def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]:
     """
     When any analysed photo is new or changed (paired = 0), find the pairs again from the
@@ -575,18 +683,16 @@ def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]
       of 1,500 copies of one shot is one group, not a million pairs. The series are made
       from the groups when they are shown (all_series), so a group's first photo may be
       gone (moved, or back after an undo) without breaking anything.
-    - Twins of the same size get a content hash (xxh3, media_phash.content): the ones
-      with the same hash are byte-for-byte copies, the duplicates screen's work.
     - Bursts: shots by the same camera within BURST_GAP seconds, compared one by one.
 
+    Which twins are byte-for-byte copies is hash_twins' work (run before this).
     Photos hidden as missing (moved to RAW_DUPLICATES by the app) stay in: when an undo
     brings them back, their pairs are still there. Returns the counts written.
     """
-    from backend.scanner import hash_file_xxh3
     with db._connect() as conn:
         rows = conn.execute(
             f"SELECT m.id, h.phash, h.dhash, h.colors, h.paired, m.size, m.path, m.taken, m.taken_source, "
-            f"m.camera_make, m.camera_model, h.contrast, h.content FROM media m "
+            f"m.camera_make, m.camera_model, h.contrast FROM media m "
             f"JOIN media_phash h ON h.media_id = m.id "
             f"WHERE h.status = 'ok' AND {_CURRENT} ORDER BY m.id", (ALGO_VERSION,)).fetchall()
     dirty = [r[0] for r in rows if not r[4]]
@@ -594,22 +700,7 @@ def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]
     signature = [len(rows), sum(r[0] for r in rows)]
     if not dirty and state(db).get("pairs_signature") == signature:
         return {"near": 0, "burst": 0}
-
-    # Content hashes of twins of the same size (only the ones not known yet)
     twins = _twins(rows)
-    contents = []
-    for members in twins.values():
-        by_size: Dict[int, List[int]] = {}
-        for i in members:
-            by_size.setdefault(rows[i][5], []).append(i)
-        for same in by_size.values():
-            for i in (same if len(same) > 1 else ()):
-                if rows[i][12] is None:
-                    check()
-                    try:
-                        contents.append((hash_file_xxh3(Path(rows[i][6])), rows[i][0]))
-                    except OSError:
-                        pass
 
     # Near pairs between the groups, by their first photo
     firsts = [members[0] for members in twins.values()]
@@ -636,7 +727,6 @@ def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]
         conn.execute("DELETE FROM near_dup_pairs")
         conn.executemany(_INSERT_PAIR, near)
         conn.executemany(_INSERT_PAIR, bursts)
-        conn.executemany("UPDATE media_phash SET content = ? WHERE media_id = ?", contents)
         for chunk in _chunks(dirty):
             conn.execute(f"UPDATE media_phash SET paired = 1 WHERE media_id IN ({','.join('?' * len(chunk))})", chunk)
     db.set_setting(STATE_KEY, {**state(db), "pairs_signature": signature})
@@ -797,12 +887,19 @@ def all_series(db, strictness: str) -> Dict[str, Any]:
             burst_photos.update((a, b))
         groups.union(ga, gb)
 
-    # 1. Byte-identical copies count as one photo: the oldest (then shortest path) stands for them
+    # 1. Byte-identical copies count as one photo: the oldest (then shortest path) stands for them.
+    #    A twin of the same size without a content hash yet (a run stopped before hash_twins
+    #    got to it) may be such a copy: it is left out until the next run knows.
     copies_of: Dict[int, List[int]] = {}
     reps_of_group: Dict[int, List[int]] = {}
     for g, members in members_of.items():
+        sizes: Dict[int, int] = {}
+        for i in members:
+            sizes[rows[i][3]] = sizes.get(rows[i][3], 0) + 1
         clusters: Dict[Tuple, List[int]] = {}
         for i in members:
+            if content[i] is None and sizes[rows[i][3]] > 1:
+                continue
             clusters.setdefault((rows[i][3], content[i]) if content[i] else ("photo", i), []).append(i)
         reps = []
         for cluster in clusters.values():
