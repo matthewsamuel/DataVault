@@ -9,7 +9,15 @@ summary) is computed from that list, and the last few answers are cached too.
 Both export formats may be present (Account Data 'StreamingHistory*.json' and Extended
 'Streaming_History_Audio_*.json'): a legacy play that the extended export also has
 (same minute, track and artist) is counted once (SPOTIFY-CHAT-4).
+
+Once DataGatherer has read the exports into the database (backend/datagatherer/), the plays
+come from the merged view spotify_plays_merged instead: the exports, the Web API and
+Last.fm, each play once (spotify_store.py), cached until that data changes (data_version).
+The files are only the fallback while nothing was read yet. /coverage says up to when
+the data goes and since when listening time is an estimate (API and Last.fm plays).
+The chat never gets the Web API plays (Spotify's developer terms): for_assistant.
 """
+import sqlite3
 import json
 import threading
 import unicodedata
@@ -23,18 +31,20 @@ from backend.config import Config
 
 router = APIRouter()
 config: Config = None
+db = None
 
 _lock = threading.Lock()
-_plays_cache: dict = {"key": None, "plays": []}
+_plays_cache: dict = {}         # mode ('dashboard' | 'assistant') -> (key, plays)
 _stats_cache: "OrderedDict[tuple, dict]" = OrderedDict()
 STATS_CACHE_SIZE = 32
 
 
-def init_router(cfg: Config):
-    global config
+def init_router(cfg: Config, database=None):
+    global config, db
     config = cfg
+    db = database
     with _lock:
-        _plays_cache.update(key=None, plays=[])
+        _plays_cache.clear()
         _stats_cache.clear()
 
 
@@ -120,16 +130,51 @@ def _same_track(name: str) -> str:
     return unicodedata.normalize("NFC", name or "").strip().casefold()
 
 
-def load_plays() -> Tuple[tuple, List[Play]]:
+def _from_database() -> bool:
+    """True once DataGatherer has read Spotify plays into the database."""
+    if db is None or not db.ready:
+        return False
+    from backend.datagatherer import spotify_store
+    try:
+        return spotify_store.has_plays(db)
+    except sqlite3.Error:
+        return False
+
+
+def _db_plays(for_assistant: bool) -> Tuple[tuple, List[Play]]:
+    from backend.datagatherer import spotify_store
+    mode = "assistant" if for_assistant else "dashboard"
+    key = ("db", mode, spotify_store.data_version(db))
+    with _lock:
+        cached = _plays_cache.get(mode)
+        if cached and cached[0] == key:
+            return cached
+    rows = []
+    for ts_ms, track, artist, ms, platform in spotify_store.dashboard_plays(db, include_api=not for_assistant):
+        utc = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+        rows.append((utc, track, artist, int(ms), platform))
+    rows.sort(key=lambda p: (p[0], p[1], p[2]))
+    plays = [Play(utc, utc.astimezone().replace(tzinfo=None), track, artist, ms, platform)
+             for utc, track, artist, ms, platform in rows]
+    with _lock:
+        _plays_cache[mode] = (key, plays)
+    return key, plays
+
+
+def load_plays(for_assistant: bool = False) -> Tuple[tuple, List[Play]]:
     """
-    Every play of every export, oldest first (ties by track and artist, so the order never
-    depends on the order of the files), each counted once. Cached until a file changes.
+    Every play, oldest first (ties by track and artist, so the order never depends on the
+    order of the files), each counted once: from the database once DataGatherer read the
+    exports, else from the export files. Cached until the data or a file changes.
     """
+    if _from_database():
+        return _db_plays(for_assistant)
     files = get_spotify_files()
     key = _files_key(files)
     with _lock:
-        if _plays_cache["key"] == key:
-            return key, _plays_cache["plays"]
+        cached = _plays_cache.get("files")
+        if cached and cached[0] == key:
+            return cached
 
     extended, legacy = [], []
     seen = set()
@@ -158,18 +203,19 @@ def load_plays() -> Tuple[tuple, List[Play]]:
     plays = [Play(utc, utc.astimezone().replace(tzinfo=None), track, artist, ms, platform)
              for utc, track, artist, ms, platform in extended]
     with _lock:
-        _plays_cache.update(key=key, plays=plays)
-        _stats_cache.clear()
+        _plays_cache["files"] = (key, plays)
     return key, plays
 
 
-def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[tuple] = None):
+def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[tuple] = None,
+                       for_assistant: bool = False):
     """
     Spotify stats from the cached plays.
     year_filter: int year (e.g. 2023) or None for all time
     date_filter: tuple (month, day) for "On This Day" or None
+    for_assistant: for the chat (Pasha): without the Web API plays
     """
-    key, plays = load_plays()
+    key, plays = load_plays(for_assistant)
     today = datetime.now().date()
     cache_key = (key, year_filter, date_filter, today)
     with _lock:
@@ -381,6 +427,25 @@ def _aggregate(plays: List[Play], year_filter: Optional[int], date_filter: Optio
              'discoveries': [{'name': d['name'], 'ms': d['ms']} for d in discoveries]
         }
     }
+
+@router.get("/coverage")
+def get_coverage():
+    """
+    Up to when the plays go and since when listening time is an estimate: the chip on the
+    Spotify page ('Bijgewerkt t/m 27 okt · luistertijd na 14 jul is een schatting').
+    """
+    if _from_database():
+        from backend.datagatherer import spotify_store
+        c = spotify_store.coverage(db)
+        return {"mode": "database", "last": c["last"], "first": c["first"], "estimated_since": c["estimated_since"],
+                "export_until": c["export_until"], "plays": c["plays"],
+                "sources": {k: v["plays"] for k, v in c["by_source"].items()}}
+    _, plays = load_plays()
+    return {"mode": "files", "last": plays[-1].utc.timestamp() if plays else None,
+            "first": plays[0].utc.timestamp() if plays else None, "estimated_since": None,
+            "export_until": plays[-1].utc.timestamp() if plays else None, "plays": len(plays),
+            "sources": {"export": len(plays)} if plays else {}}
+
 
 @router.get("/years")
 def get_years():
