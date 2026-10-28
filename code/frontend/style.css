@@ -9446,3 +9446,7 @@ button.otd-settings-icon:hover {
     overflow-wrap: anywhere;
     user-select: all;
 }
+
+.backup-command-option {
+    white-space: nowrap;
+}

@@ -379,20 +379,30 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 expect(page.is_visible(f"#settings-{part}"), f"settings: part {part} missing")
             # Back-ups: 'Nu back-uppen' makes one (checked and compressed, next to the vault in this
             # test), the part then shows it, and the focus stays on the button
+            # ... in place: the page does not jump while the part is drawn again
+            button_top = "document.getElementById('settings-backup-now').getBoundingClientRect().top"
+            page.evaluate("document.getElementById('settings-backup-now').scrollIntoView({block: 'center'})")
+            top_before = page.evaluate(button_top)
             try:
                 step("settings: Nu back-uppen", lambda: (
                     page.focus("#settings-backup-now"), page.keyboard.press("Enter"),
                     page.wait_for_selector("#settings-backups .backup-kind", timeout=15000)), 0.5)
             except PlaywrightError:
                 problems.append("settings: 'Nu back-uppen' did not show the new backup")
+            top_after = page.evaluate(button_top)
+            expect(abs(top_after - top_before) < 4,
+                   f"settings: 'Nu back-uppen' moved on screen ({top_before:.0f} -> {top_after:.0f} px)")
             made = sorted(vault.parent.glob("vault_backups/datavault-*-handmatig.db.gz"))
             expect(len(made) == 1, f"settings: expected one backup file, found {[m.name for m in made]}")
             expect("vandaag" in (page.text_content("#settings-backups") or ""), "settings: the last backup time is not shown")
             expect(page.evaluate("document.activeElement.id") == "settings-backup-now",
                    f"settings: focus left 'Nu back-uppen' ({page.evaluate('document.activeElement.id')})")
             page.evaluate("document.querySelector('#settings-backups .backup-restore').open = true")
-            expect("restore_backup.py" in (page.text_content("#settings-backups .backup-restore") or ""),
-                   "settings: the restore steps do not show the command")
+            restore_text = page.text_content("#settings-backups .backup-restore") or ""
+            expect("restore_backup.py" in restore_text, "settings: the restore steps do not show the command")
+            # The smoke server runs with its own config: the command must name it, never code/config.json
+            expect("--config" in restore_text and "vault_config.json" in restore_text,
+                   "settings: the restore command does not name the config the app runs with")
             expect(page.evaluate("getComputedStyle(document.querySelector('.nav-tab-settings.active'), '::after').content") != "none",
                    "settings: the gear has no active indicator")
             step("settings: dark theme", lambda: page.check("input[data-theme-choice='dark']"), 0.3)

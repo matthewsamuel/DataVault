@@ -19,11 +19,21 @@ function backupWhen(seconds) {
     return `${when.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' })} ${time}`;
 }
 
+function backupClock(seconds) {
+    return new Date(seconds * 1000).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Wanneer de volgende back-up komt. De app kijkt elk uur (en kort na het starten) of er een
+// nodig is; is er nog geen, of is de laatste ouder dan een dag, dan komt hij bij die controle.
 function backupNext(status) {
     if (!status.auto) return 'Automatische back-ups staan uit';
-    if (!status.next_due_at) return 'Binnen een minuut na het starten';
-    const due = status.next_due_at * 1000;
-    if (due <= Date.now()) return 'Bij de volgende controle (elk uur)';
+    if (status.running) return 'Wordt nu gemaakt';
+    const due = status.next_due_at ? status.next_due_at * 1000 : 0;
+    if (due <= Date.now()) {
+        const check = status.next_check_at ? status.next_check_at * 1000 : 0;
+        if (check > Date.now()) return `Bij de volgende controle, rond ${backupClock(status.next_check_at)}`;
+        return `Bij de volgende controle (elke ${status.check_interval_minutes === 60 ? 'uur' : `${status.check_interval_minutes} minuten`})`;
+    }
     const tomorrow = new Date(Date.now() + 86400000);
     const when = new Date(due);
     const time = when.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
@@ -31,7 +41,13 @@ function backupNext(status) {
 }
 
 function backupCommandBlock(command, label) {
-    const code = createEl('code', { class: 'backup-command-text', text: command });
+    // Een optie (--config) blijft heel; lange paden mogen afbreken. De tekst zelf is precies de opdracht.
+    const parts = [];
+    command.split(' ').forEach((word, i) => {
+        if (i) parts.push(' ');
+        parts.push(word.startsWith('-') ? createEl('span', { class: 'backup-command-option', text: word }) : word);
+    });
+    const code = createEl('code', { class: 'backup-command-text' }, ...parts);
     const copy = createEl('button', {
         type: 'button', class: 'btn btn-ghost btn-sm btn-icon backup-copy', 'aria-label': `${label} kopiëren`, title: 'Kopiëren',
         onClick: async () => {
@@ -70,14 +86,17 @@ function backupRenderStatus(box, status) {
                text: last.kind === 'handmatig' ? 'Handmatig' : 'Automatisch' })]
         : [createEl('span', { class: 'backup-none', text: 'Nog geen back-up' })];
     const kept = status.count === 1 ? '1 back-up' : `${formatNumberNl(status.count)} back-ups`;
+    const rule = `de laatste ${status.keep_daily} dagen, ${status.keep_weekly} weken en je ${status.keep_manual} nieuwste handmatige`;
     const rows = [
         settingsRow('Laatste back-up', ...lastValue),
         settingsRow('Volgende', backupNext(status)),
         settingsRow('Locatie', createEl('span', { class: 'path-label', text: status.folder, title: status.folder })),
-        settingsRow('Bewaard', createEl('span', { text: `${kept}, samen ` }),
-            createEl('span', { class: 'tabular', text: formatBytes(status.total_size) }),
-            createEl('span', { class: 'backup-muted',
-                text: ` · de laatste ${status.keep_daily} dagen en ${status.keep_weekly} weken` })),
+        status.count
+            ? settingsRow('Bewaard', createEl('span', { text: `${kept}, samen ` }),
+                createEl('span', { class: 'tabular', text: formatBytes(status.total_size) }),
+                createEl('span', { class: 'backup-muted', text: ` · ${rule}` }))
+            : settingsRow('Bewaard', createEl('span', { class: 'backup-none', text: 'Nog niets bewaard' }),
+                createEl('span', { class: 'backup-muted', text: ` · straks ${rule}` })),
     ];
     if (status.last_error) {
         rows.push(createEl('div', { class: 'backup-error', role: 'alert' },
@@ -91,7 +110,7 @@ function backupRenderStatus(box, status) {
     'aria-busy': running ? 'true' : null }, createEl('i', { class: 'fas fa-shield-halved', 'aria-hidden': 'true' }), ' Nu back-uppen');
     box.replaceChildren(...rows,
         createEl('p', { class: 'backup-note',
-            text: 'Elke back-up wordt gecontroleerd (PRAGMA integrity_check) voordat hij bewaard wordt. Niet erin: wat de app '
+            text: 'Elke back-up wordt eerst op fouten gecontroleerd en pas daarna bewaard. Niet erin: wat de app '
                 + 'zelf opnieuw maakt (hashes, datums, de mappenlijst van de index, scanresultaten); zo blijft hij klein.' }),
         createEl('div', { class: 'settings-actions' }, button),
         backupRestoreHelp(status));
@@ -109,19 +128,29 @@ async function backupNow(e) {
     if (backupBusy) return;
     backupBusy = true;
     const button = e && e.currentTarget;
+    const box = button && button.closest('.backup-status');
     if (button) {
         button.classList.add('is-loading');
         button.setAttribute('aria-busy', 'true');
     }
+    let status = null;
     try {
         const data = await fetchJSON(`${API_BASE}/api/backup/run`, { method: 'POST' });
+        status = data.status;
         showToast('Back-up gemaakt', `${formatBytes(data.backup.size)}, gecontroleerd en bewaard.`, 'success');
     } catch (err) {
         toastFetchError('Back-up mislukt', err);
     }
     backupBusy = false;
     backupRefocus = !!button && document.activeElement === button;
-    settingsRefreshSection('backups');
+    // Op dezelfde plek opnieuw tekenen, zonder skelet ertussen: dan springt de pagina niet
+    try {
+        if (!status) status = await fetchJSON(`${API_BASE}/api/backup/status`);
+    } catch (_) {
+        status = null;
+    }
+    if (box && box.isConnected && status) backupRenderStatus(box, status);
+    else settingsRefreshSection('backups');
 }
 
 registerSettingsSection({
