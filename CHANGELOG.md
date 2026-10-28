@@ -260,10 +260,14 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   klein: wat de app zelf opnieuw kan opbouwen (hashes, datums, de mappenlijst van de index,
   scanresultaten, later beeldvectoren) zit er niet in, en hij is gecomprimeerd. Een index van
   100.000 foto's: ongeveer 7 MB in plaats van 109 MB, in een seconde.
-- Bewaard blijven de laatste back-up van elk van de laatste 7 dagen en van de laatste 4 weken, en je
-  5 nieuwste handmatige: maak je op één dag twee keer een back-up (bijvoorbeeld vóór iets
-  spannends en daarna nog eens), dan blijven ze allebei. Oudere gaan weg. Alleen de eigen
-  back-upbestanden worden ooit opgeruimd.
+- Bewaard blijven de automatische back-up van elk van de laatste 7 dagen en van de laatste 4 weken,
+  en je 5 nieuwste handmatige: maak je op één dag twee keer een back-up (bijvoorbeeld vóór iets
+  spannends en daarna nog eens), dan blijven ze allebei. Een handmatige back-up haalt de
+  automatische van die ochtend nooit weg, want dat is vaak de enige van vóór wat er misging. Oudere
+  gaan weg. Alleen de eigen back-upbestanden worden ooit opgeruimd.
+- Een eigen back-upmap in config.json mag met `~/` beginnen (je thuismap). Een pad dat niet
+  helemaal is uitgeschreven gebruikt de app niet: dan blijft de standaardmap in gebruik en zegt
+  Instellingen waarom.
 - Een back-upmap op een USB-stick of schijf met exFAT werkt ook (die kent geen harde links; de
   back-up wordt dan als nieuw bestand gemaakt dat nooit iets overschrijft, en opnieuw vergeleken).
 - **Instellingen > Back-ups** toont de laatste back-up, wanneer de volgende komt (de app kijkt elk

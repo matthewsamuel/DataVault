@@ -35,11 +35,13 @@ How a backup is made (make_backup):
    it fails if the name exists), synced and compared again. A failed copy is removed and
    the error is reported in Dutch. 'gunzip -k <file>' gives a normal SQLite database to
    look into.
-4. Rotation: the newest backup of each of the last KEEP_DAILY days that have one, plus
-   the newest of each of the last KEEP_WEEKLY weeks, plus the newest KEEP_MANUAL made
-   with 'Nu back-uppen' (a backup made by hand just before something risky must not go
-   because a second one was made the same day); the others go. Only files in the backup
-   folder with exactly these names are ever removed, never anything else.
+4. Rotation: one backup of each of the last KEEP_DAILY days that have one, plus one of
+   each of the last KEEP_WEEKLY weeks (the newest automatic one of that day or week, or
+   the newest made by hand when there is no automatic one), plus the newest KEEP_MANUAL
+   made with 'Nu back-uppen' (a backup made by hand just before something risky must not
+   go because a second one was made the same day, and it never pushes out that day's
+   automatic one); the others go. Only files in the backup folder with exactly these
+   names are ever removed, never anything else.
 
 The backup folder is ~/Library/Application Support/DataVault/backups unless config.json
 says otherwise ("backup_folder", "backup_keep_daily", "backup_keep_weekly"). With
@@ -181,27 +183,30 @@ def is_due(config, now: Optional[float] = None, max_age: float = MAX_AGE) -> boo
 def rotate(folder: Path, keep_daily: int = KEEP_DAILY, keep_weekly: int = KEEP_WEEKLY,
            keep_before_restore: int = KEEP_BEFORE_RESTORE, keep_manual: int = KEEP_MANUAL) -> List[str]:
     """
-    Keep the newest backup of each of the newest keep_daily days, and of each of the newest
-    keep_weekly ISO weeks (always at least the newest backup); remove the rest. Kept apart:
-    the newest keep_manual backups made by hand ('Nu back-uppen') and the newest
-    keep_before_restore safety copies made before a restore. Returns the names removed.
-    Only regular files with our exact names are touched.
+    Keep one backup for each of the newest keep_daily days, and for each of the newest
+    keep_weekly ISO weeks (always at least the newest backup); remove the rest. A day or
+    week keeps its newest AUTOMATIC backup when it has one: a backup made by hand later that
+    day must not push out the morning's automatic one (often the last copy from before
+    whatever made you click 'Nu back-uppen'); only a day with nothing automatic keeps its
+    newest one made by hand. Kept apart as well: the newest keep_manual backups made by
+    hand and the newest keep_before_restore safety copies made before a restore. Returns
+    the names removed. Only regular files with our exact names are touched.
     """
     backups = list_backups(folder)
     regular = [b for b in backups if b["kind"] != "voor-herstel"]
     keep: Set[str] = set()
-    days: List[str] = []
-    weeks: List[tuple] = []
-    for item in regular:    # newest first, so the first one per day or week is its newest
-        moment = datetime.fromtimestamp(item["created_at"])
-        day = moment.strftime("%Y-%m-%d")
-        week = moment.isocalendar()[:2]
-        if day not in days and len(days) < keep_daily:
-            days.append(day)
-            keep.add(item["name"])
-        if week not in weeks and len(weeks) < keep_weekly:
-            weeks.append(week)
-            keep.add(item["name"])
+    for key, limit in ((lambda m: m.strftime("%Y-%m-%d"), keep_daily),
+                       (lambda m: m.isocalendar()[:2], keep_weekly)):
+        chosen: Dict[Any, Dict[str, Any]] = {}     # period -> its backup, newest period first
+        for item in regular:    # newest first, so the first one per period is its newest
+            period = key(datetime.fromtimestamp(item["created_at"]))
+            if period not in chosen:
+                if len(chosen) >= limit:
+                    break
+                chosen[period] = item
+            elif chosen[period]["kind"] == "handmatig" and item["kind"] == "auto":
+                chosen[period] = item
+        keep.update(item["name"] for item in chosen.values())
     if regular:
         keep.add(regular[0]["name"])
     keep.update(b["name"] for b in [b for b in regular if b["kind"] == "handmatig"][:keep_manual])

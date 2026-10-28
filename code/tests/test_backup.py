@@ -162,14 +162,16 @@ def test_rotation_keeps_seven_days_and_four_weeks_and_nothing_else_is_touched(tm
 
     removed = backup.rotate(folder, keep_daily=7, keep_weekly=4)
     left = {p.name for p in folder.iterdir()}
-    # The newest of each of the last 7 days (the handmatig one, 5 hours later)
-    expected = {names[d][1] for d in range(7)}
-    # ... and the newest of each of the last 4 ISO weeks (2026-10-28 is a Wednesday)
+    # The automatic one of each of the last 7 days (not the handmatig one, 5 hours later) ...
+    expected = {names[d][0] for d in range(7)}
+    # ... the newest automatic one of each of the last 4 ISO weeks (2026-10-28 is a Wednesday)
     weeks = {}
     for day in range(40):
         moment = start - timedelta(days=day)
-        weeks.setdefault(moment.isocalendar()[:2], names[day][1])
+        weeks.setdefault(moment.isocalendar()[:2], names[day][0])
     expected |= set(list(weeks.values())[:4])
+    # ... and the 5 newest made by hand, kept apart
+    expected |= {names[d][1] for d in range(5)}
     voor_herstel = sorted(n for n in left if n.startswith("datavault-voor-herstel-"))
     assert len(voor_herstel) == 5
     assert left == expected | set(others) | {"datavault-20200101-000000.db.gz"} | set(voor_herstel)
@@ -266,13 +268,41 @@ def test_backups_made_by_hand_are_kept_apart_from_the_daily_rotation(client, app
     auto = _touch(folder, day - timedelta(hours=1))
     manual = [_touch(folder, day + timedelta(minutes=i), "-handmatig") for i in range(7)]
     backup.rotate(folder, keep_daily=7, keep_weekly=4)
-    assert {p.name for p in folder.iterdir()} == set(manual[2:])   # the newest 5 by hand
+    # The newest 5 by hand, and the automatic one of that day: a backup made by hand never
+    # pushes it out
+    assert {p.name for p in folder.iterdir()} == set(manual[2:]) | {auto}
     # Through the API: two backups by hand on one day both stay
     first = client.post("/api/backup/run").json()["backup"]["name"]
     time.sleep(1.05)
     second = client.post("/api/backup/run").json()["backup"]["name"]
     assert {b["name"] for b in backup.list_backups(config.BACKUP_FOLDER)} == {first, second}
     assert client.get("/api/backup/status").json()["keep_manual"] == backup.KEEP_MANUAL
+
+
+def test_a_backup_by_hand_keeps_the_automatic_one_of_that_day(client, app, config):
+    """'Nu back-uppen' after something went wrong must not remove this morning's automatic
+    backup: that is the only one from before the change."""
+    morning = backup.make_backup(config)
+    assert morning["kind"] == "auto"
+    time.sleep(1.05)   # one name per second
+    r = client.post("/api/backup/run")
+    assert r.status_code == 200, r.text
+    assert r.json()["backup"]["removed"] == []
+    names = {b["name"] for b in backup.list_backups(config.BACKUP_FOLDER)}
+    assert names == {morning["name"], r.json()["backup"]["name"]}
+    # A day with only backups made by hand still has one in its day slot (beyond the 5 kept
+    # apart), and an older day keeps its automatic one over a later one by hand
+    folder = config.BACKUP_FOLDER
+    old = datetime(2026, 9, 1, 9, 0, 0)
+    only_manual = _touch(folder, old, "-handmatig")
+    auto_before = _touch(folder, old - timedelta(days=1))
+    manual_after = _touch(folder, old - timedelta(days=1) + timedelta(hours=3), "-handmatig")
+    for i in range(6):
+        _touch(folder, datetime.now() - timedelta(minutes=10 + i), "-handmatig")
+    backup.rotate(folder, keep_daily=7, keep_weekly=4)
+    left = {p.name for p in folder.iterdir()}
+    assert only_manual in left and auto_before in left and manual_after not in left
+    assert morning["name"] in left
 
 
 def test_a_backup_folder_that_cannot_be_written_says_so_in_dutch(client, app, config):

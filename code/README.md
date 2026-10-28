@@ -209,10 +209,12 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Waarom compact: met een index van 100.000 foto's is de database 109 MB; de back-up is 62 MB zonder
   de caches en 6,7 MB gecomprimeerd (gemeten: 1 s om te maken, 0,25 s om uit te pakken en te
   controleren). Elf back-ups passen zo ruim op een volle interne schijf.
-- Rotatie: de nieuwste van elk van de laatste 7 dagen en van de laatste 4 ISO-weken blijven, plus de
+- Rotatie: van elk van de laatste 7 dagen en van de laatste 4 ISO-weken blijft de nieuwste
+  automatische back-up (een dag of week zonder automatische houdt zijn nieuwste handmatige), plus de
   5 nieuwste handmatige (`KEEP_MANUAL`; een tweede **Nu back-uppen** op dezelfde dag haalt de eerste
-  niet weg) en de 5 nieuwste veiligheidskopieën van vóór een herstel. Alleen bestanden met precies die namen in de
-  back-upmap worden ooit verwijderd.
+  niet weg, en een handmatige duwt de automatische van die dag er nooit uit) en de 5 nieuwste
+  veiligheidskopieën van vóór een herstel. Alleen bestanden met precies die namen in de back-upmap
+  worden ooit verwijderd.
 - **Terugzetten** (met de app gestopt):
   ```bash
   cd code
