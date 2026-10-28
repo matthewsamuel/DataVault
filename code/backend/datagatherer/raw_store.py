@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import shutil
+import threading
 import time
 import zipfile
 from datetime import datetime
@@ -37,6 +38,11 @@ HASH_CHUNK = 4 * 1024 * 1024
 FREE_SPACE_MARGIN = 200 * 1024 * 1024
 MAX_MEMBER_BYTES = 1024 * 1024 * 1024     # one JSON file in an export; more is not an export
 MAX_RATIO = 200                            # uncompressed / compressed: more looks like a zip bomb
+
+
+# One export at a time from 'is it new?' to its row: two uploads of the same bytes (or an upload
+# and the watcher) would otherwise both copy it and leave an orphan copy nobody may delete
+_archive_lock = threading.Lock()
 
 
 class RawStoreError(Exception):
@@ -115,25 +121,28 @@ def archive_file(config, db, connector, kind: str, src: Path, origin: str,
     export = connector.export_kind(kind)
     label = export.folder_label if export else kind
     sha, size = sha256_file(src, check)
-    existing = state.raw_by_sha(db, sha)
-    if existing is not None:
-        return existing, False
-    folder = target_folder(config, connector, label)
-    _make_folder(config, folder)
-    free = shutil.disk_usage(folder).free
-    if free < size + FREE_SPACE_MARGIN:
-        raise RawStoreError(f"Te weinig vrije ruimte in het archief voor deze export ({size // (1024 * 1024)} MB nodig)")
-    name = original_name or src.name
-    final, copied_sha, copied_size = file_ops.copy_no_overwrite(src, folder / name, expected_sha256=sha, check=check)
-    _write_manifest(folder, {
-        "file": final.name, "sha256": copied_sha, "size": copied_size, "source": connector.id, "kind": kind,
-        "origin": origin, "original_path": str(src) if origin != "upload" else None, "original_name": name,
-        "received_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "parser_version": connector.parser_version,
-    })
-    raw_id = state.insert_raw(db, source_id=connector.id, kind=kind, path=str(final), is_folder=0, sha256=copied_sha,
-                              size=copied_size, origin=origin, original_path=str(src) if origin != "upload" else None,
-                              parser_version=connector.parser_version)
+    with _archive_lock:
+        existing = state.raw_by_sha(db, sha)
+        if existing is not None:
+            return existing, False
+        folder = target_folder(config, connector, label)
+        _make_folder(config, folder)
+        free = shutil.disk_usage(folder).free
+        if free < size + FREE_SPACE_MARGIN:
+            raise RawStoreError(f"Te weinig vrije ruimte in het archief voor deze export ({size // (1024 * 1024)} MB nodig)")
+        name = original_name or src.name
+        final, copied_sha, copied_size = file_ops.copy_no_overwrite(src, folder / name, expected_sha256=sha, check=check)
+        original = str(src) if origin != "upload" else None
+        raw_id = state.insert_raw(db, source_id=connector.id, kind=kind, path=str(final), is_folder=0,
+                                  sha256=copied_sha, size=copied_size, origin=origin, original_path=original,
+                                  parser_version=connector.parser_version)
+        # The manifest only once the row exists: it never describes a copy DataVault does not know
+        _write_manifest(folder, {
+            "file": final.name, "sha256": copied_sha, "size": copied_size, "source": connector.id, "kind": kind,
+            "origin": origin, "original_path": original, "original_name": name,
+            "received_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "parser_version": connector.parser_version,
+        })
     return state.get_raw(db, raw_id), True
 
 

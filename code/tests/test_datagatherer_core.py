@@ -204,6 +204,39 @@ def test_an_export_is_copied_never_moved_and_never_stored_twice(app, config, tmp
     assert sorted(p.name for p in copy.parent.iterdir()) == ["datavault-import.json", src.name]
 
 
+def test_the_same_export_stored_at_the_same_time_is_copied_once(app, config, tmp_path):
+    """F-F2: three uploads of the same bytes at once give one copy, one manifest and one row."""
+    import threading
+    db = app.state.db
+    connector = registry.get("spotify")
+    src = _zip(tmp_path)
+    copies = []
+    for n in range(3):
+        copy = tmp_path / f"up{n}" / "race.zip"
+        copy.parent.mkdir()
+        copy.write_bytes(src.read_bytes())
+        copies.append(copy)
+    results, errors = [], []
+
+    def store(path):
+        try:
+            results.append(raw_store.archive_file(config, db, connector, "extended", path, "upload",
+                                                  original_name="race.zip"))
+        except Exception as e:  # pragma: no cover - the failure this test is about
+            errors.append(e)
+
+    threads = [threading.Thread(target=store, args=(c,)) for c in copies]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert sorted(created for _, created in results) == [False, False, True]
+    assert len({raw["id"] for raw, _ in results}) == 1
+    folder = Path(results[0][0]["path"]).parent
+    assert sorted(p.name for p in folder.iterdir()) == ["datavault-import.json", "race.zip"]
+
+
 def test_a_new_export_with_a_taken_name_never_overwrites(app, config, tmp_path):
     db = app.state.db
     connector = registry.get("spotify")
