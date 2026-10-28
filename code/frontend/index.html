@@ -676,11 +676,6 @@
                                     <div class="albums-kinds" id="albums-kinds" role="group" aria-label="Soort"></div>
                                     <select class="select select-sm" id="albums-when" aria-label="Wanneer"></select>
                                     <select class="select select-sm" id="albums-month" aria-label="Maand"></select>
-                                    <span class="albums-range" id="albums-range" hidden>
-                                        <input type="date" class="input input-sm" id="albums-from" aria-label="Van (datum)">
-                                        <span class="albums-range-dash" aria-hidden="true">–</span>
-                                        <input type="date" class="input input-sm" id="albums-to" aria-label="Tot en met (datum)">
-                                    </span>
                                     <button type="button" class="pill albums-folder-btn" id="albums-folder-btn" aria-haspopup="dialog">
                                         <i class="fas fa-folder" aria-hidden="true"></i> <span id="albums-folder-label">Hele archief</span>
                                     </button>
@@ -693,6 +688,14 @@
                                         <label class="albums-sort-label" for="albums-sort">Sorteren</label>
                                         <select class="select select-sm" id="albums-sort"></select>
                                     </span>
+                                </div>
+                                <!-- Van… tot…: op een eigen rij, zodat de rij erboven niet afbreekt -->
+                                <div class="albums-filter-row albums-range" id="albums-range" role="group" aria-label="Periode" hidden>
+                                    <label class="albums-range-label" for="albums-from">Van</label>
+                                    <input type="date" class="input input-sm" id="albums-from" aria-label="Van (datum)" aria-describedby="albums-range-error">
+                                    <label class="albums-range-label" for="albums-to">tot en met</label>
+                                    <input type="date" class="input input-sm" id="albums-to" aria-label="Tot en met (datum)" aria-describedby="albums-range-error">
+                                    <p class="albums-range-error" id="albums-range-error" role="alert" hidden></p>
                                 </div>
                                 <div class="albums-filter-row albums-more" id="albums-more" hidden>
                                     <select class="select select-sm" id="albums-camera" aria-label="Camera"></select>

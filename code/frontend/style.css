@@ -9172,13 +9172,53 @@ button.otd-settings-icon:hover {
 }
 
 .albums-range {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
 }
 
-.albums-range-dash {
-    color: var(--text-tertiary);
+.albums-range-label {
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.albums-range .input {
+    width: 150px;
+}
+
+/* Een begindatum na de einddatum: meteen hier gezegd, het raster blijft staan */
+.albums-range-error {
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--danger-text);
+}
+
+.albums-range-error[hidden],
+.albums-new-hint[hidden] {
+    display: none;
+}
+
+.albums-range .input[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
+/* '+ Nieuw slim album': de uitleg onder de filters, niet als melding over de knoppen heen */
+.albums-new-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+}
+
+.albums-new-hint > i {
+    color: var(--accent-text);
+}
+
+.albums-new-hint-text {
+    flex: 1;
 }
 
 .albums-folder-btn span {

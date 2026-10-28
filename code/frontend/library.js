@@ -44,6 +44,22 @@
         orientation: [['landscape', 'Liggend'], ['portrait', 'Staand'], ['square', 'Vierkant']],
         capture_date: [['known', 'Met opnamedatum'], ['missing', 'Zonder opnamedatum']],
     };
+    // Wat een waarde in het adres mag zijn; de rest wordt weggelaten (een oude of getypte bladwijzer)
+    const VALID = {
+        kind: (v) => KINDS.some(k => k[0] === v),
+        ext: (v) => /^\.?[a-z0-9]{1,10}$/i.test(v),
+        date_from: (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v)),
+        date_to: (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v)),
+        year: (v) => /^\d{4}$/.test(v),
+        month: (v) => /^\d{1,2}$/.test(v) && Number(v) >= 1 && Number(v) <= 12,
+        period: (v) => v in PERIODS,
+        min_rating: (v) => /^-?\d{1,10}$/.test(v),
+        has_gps: (v) => v === 'true' || v === 'false',
+        recursive: (v) => v === 'true' || v === 'false',
+        keurer: (v) => SELECTS.keurer.some(([x]) => x === v),
+        orientation: (v) => SELECTS.orientation.some(([x]) => x === v),
+        capture_date: (v) => SELECTS.capture_date.some(([x]) => x === v),
+    };
     const ICON_LABELS = {
         'fa-images': 'Foto\'s', 'fa-star': 'Ster', 'fa-video': 'Video', 'fa-calendar-xmark': 'Geen datum',
         'fa-location-dot': 'Locatie', 'fa-calendar-day': 'Kalender', 'fa-mobile-screen': 'Telefoon',
@@ -96,10 +112,15 @@
         return params;
     }
 
+    // Het filter uit een adres. Waarden die niet kunnen (year=abc) vallen weg, zodat een oude of
+    // verkeerd getypte bladwijzer toch iets laat zien; state.dropped telt ze voor een melding.
     function paramsToSpec(params) {
         const spec = {};
+        state.dropped = 0;
         for (const [key, value] of params) {
             if (!FILTER_KEYS.includes(key)) continue;
+            const valid = VALID[key] || ((v) => typeof v === 'string' && v.trim() !== '' && v.length <= 200);
+            if (!valid(value)) { state.dropped++; continue; }
             if (LIST_KEYS.includes(key)) (spec[key] = spec[key] || []).push(value);
             else if (['year', 'month', 'min_rating'].includes(key)) spec[key] = Number(value);
             else if (['has_gps', 'recursive'].includes(key)) spec[key] = value === 'true';
@@ -167,7 +188,11 @@
             return true;
         }
         state.mode = 'browse';
+        state.customRange = false;
         state.albumId = m[1] ? Number(m[1]) : null;
+        // Een bladwijzer naar een album dat er niet meer is: alles, met een melding (zodra de albums er zijn)
+        state.missingAlbum = state.albumId !== null && state.albumsLoaded && !currentAlbum() ? state.albumId : null;
+        if (state.missingAlbum !== null) state.albumId = null;
         const album = currentAlbum();
         const edited = [...params.keys()].some(k => FILTER_KEYS.includes(k) || k === 'sort');
         if (album && !edited) {
@@ -231,6 +256,19 @@
             reload(keepScroll);
         }
         writeHash();
+        hashNotices();
+    }
+
+    // Wat er in een bladwijzer niet meer klopte, één keer zeggen (het adres is dan al hersteld)
+    function hashNotices() {
+        if (state.missingAlbum !== null && state.missingAlbum !== undefined) {
+            showToast('Album niet gevonden', 'Dit album bestaat niet meer. Je ziet nu alles in het archief.', 'warning');
+            state.missingAlbum = null;
+        }
+        if (state.dropped) {
+            showToast('Adres aangepast', `${state.dropped === 1 ? 'Eén filter' : `${state.dropped} filters`} uit het adres kon${state.dropped === 1 ? '' : 'den'} niet gebruikt worden en ${state.dropped === 1 ? 'is' : 'zijn'} weggelaten.`, 'warning');
+            state.dropped = 0;
+        }
     }
 
     // Vanuit Home ('Alles bekijken' bij Foto op deze dag) of het menu
@@ -277,6 +315,7 @@
             state.allCount = data.all;
             state.icons = data.icons || [];
             state.albumsError = null;
+            state.albumsLoaded = true;
         } catch (e) {
             state.albumsError = e;
         }
@@ -417,8 +456,8 @@
         }, createEl('i', { class: `fas ${icon}`, 'aria-hidden': 'true' }), label)));
         $('albums-when').addEventListener('change', onWhenChange);
         $('albums-month').addEventListener('change', (e) => setKey('month', e.target.value ? Number(e.target.value) : null));
-        $('albums-from').addEventListener('change', (e) => setKey('date_from', e.target.value || null));
-        $('albums-to').addEventListener('change', (e) => setKey('date_to', e.target.value || null));
+        $('albums-from').addEventListener('change', (e) => setRangeDay('date_from', e.target.value));
+        $('albums-to').addEventListener('change', (e) => setRangeDay('date_to', e.target.value));
         $('albums-folder-btn').addEventListener('click', openFolderPicker);
         $('albums-more-btn').addEventListener('click', () => {
             state.moreOpen = !state.moreOpen;
@@ -471,6 +510,25 @@
         changed();
     }
 
+    // Van… tot…: een einddatum voor de begindatum kan niet; dat zegt de regel eronder meteen,
+    // in plaats van dat het hele raster een foutmelding wordt
+    function setRangeDay(key, value) {
+        const from = key === 'date_from' ? value : state.spec.date_from;
+        const to = key === 'date_to' ? value : state.spec.date_to;
+        const error = $('albums-range-error');
+        if (from && to && from > to) {
+            error.textContent = key === 'date_from' ? 'De begindatum ligt na de einddatum.' : 'De einddatum ligt voor de begindatum.';
+            error.hidden = false;
+            $(key === 'date_from' ? 'albums-from' : 'albums-to').setAttribute('aria-invalid', 'true');
+            return;
+        }
+        error.hidden = true;
+        error.textContent = '';
+        $('albums-from').removeAttribute('aria-invalid');
+        $('albums-to').removeAttribute('aria-invalid');
+        setKey(key, value || null);
+    }
+
     function onWhenChange(e) {
         const value = e.target.value;
         const spec = { ...state.spec };
@@ -492,10 +550,10 @@
     }
 
     function whenValue(spec) {
-        if (spec.date_from || spec.date_to || state.customRange) return 'range';
+        if (spec.date_from || spec.date_to) return 'range';
         if (spec.period) return spec.period;
         if (spec.year) return `y:${spec.year}`;
-        return '';
+        return state.customRange ? 'range' : '';
     }
 
     function renderFilters() {
@@ -519,11 +577,19 @@
         $('albums-range').hidden = !range;
         $('albums-from').value = spec.date_from || '';
         $('albums-to').value = spec.date_to || '';
+        // De ene datum begrenst de andere in de datumkiezer
+        $('albums-from').max = spec.date_to || '';
+        $('albums-to').min = spec.date_from || '';
+        if (!range) $('albums-range-error').hidden = true;
         const folderBtn = $('albums-folder-btn');
         const folderLabel = $('albums-folder-label');
-        folderLabel.textContent = spec.folder ? displayPath(folderAbs(spec.folder), 28) : 'Hele archief';
-        folderBtn.title = spec.folder ? `Map: ${folderAbs(spec.folder)}` : 'Een map kiezen';
-        folderBtn.classList.toggle('active', !!spec.folder);
+        const folders = spec.folders || [];
+        folderLabel.textContent = spec.folder ? displayPath(folderAbs(spec.folder), 28)
+            : folders.length === 1 ? displayPath(folderAbs(folders[0]), 28)
+                : folders.length ? `${folders.length} mappen` : 'Hele archief';
+        folderBtn.title = spec.folder ? `Map: ${folderAbs(spec.folder)}`
+            : folders.length ? `Mappen: ${folders.map(folderAbs).join(', ')}` : 'Een map kiezen';
+        folderBtn.classList.toggle('active', !!spec.folder || folders.length > 0);
         $('albums-sort').value = state.sort;
 
         // Meer filters
@@ -771,7 +837,8 @@
                 state.pages.delete(page);
                 if (page === 0) {
                     $('albums-loading').hidden = true;
-                    $('albums-state').replaceChildren(errorState(failTitle(e, 'Bibliotheek laden mislukt'), e, () => reload()));
+                    $('albums-state').replaceChildren(badFilter(e) ? badFilterState(e)
+                        : errorState(failTitle(e, 'Bibliotheek laden mislukt'), e, () => reload()));
                 } else {
                     toastFetchError('Laden mislukt', e);
                 }
@@ -780,6 +847,35 @@
         })();
         state.pages.set(page, promise);
         return promise;
+    }
+
+    // De server weigerde het filter zelf (400, of 403 voor een map buiten het archief): opnieuw
+    // proberen helpt dan niet, de filters wissen of het album terugzetten wel
+    function badFilter(e) {
+        return !!e && (e.status === 400 || e.status === 403 || e.status === 422);
+    }
+
+    function badFilterState(e) {
+        const album = currentAlbum();
+        const back = album && albumChanged();
+        return emptyState({
+            icon: 'fa-filter-circle-xmark', title: 'Filter klopt niet',
+            text: (e && e.message) || 'Dit filter kan niet gebruikt worden.',
+            action: back ? { label: 'Album terugzetten', onClick: () => albumsShow(album.id) }
+                : { label: 'Filters wissen', primary: true, onClick: () => { state.spec = {}; state.customRange = false; changed(); $('albums-title').focus(); } },
+        });
+    }
+
+    // Wat er (behalve soort en sortering) nog meer filtert
+    function narrowingKeys(spec) {
+        return Object.keys(spec).filter(k => k !== 'kind' && k !== 'recursive');
+    }
+
+    function kindWords(spec) {
+        const kinds = spec.kind || [];
+        if (kinds.length === 1) return { photo: 'foto\'s', video: 'video\'s', audio: 'audiobestanden' }[kinds[0]] || 'bestanden';
+        if (kinds.length === 2 && !kinds.includes('audio')) return 'foto\'s of video\'s';
+        return 'bestanden';
     }
 
     function showEmptyOrNotReady() {
