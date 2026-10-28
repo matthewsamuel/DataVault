@@ -84,8 +84,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   locatie in plaats van aan haar naam. Hetzelfde geldt voor een eigen map die `TRASH` heet
   ergens dieper in het archief.
 - De duplicatenscan kon een verborgen kopie (bijv. `.foto.jpg`) als "origineel" kiezen, waarna
-  alle zichtbare kopieën als duplicaat werden aangeboden. Verborgen bestanden doen nu niet meer
-  mee aan de scan.
+  alle zichtbare kopieën als duplicaat werden aangeboden. Bestanden met een punt voor hun naam
+  doen nu niet meer mee aan de scan. (Bestanden die alleen met het Finder-kenmerk "verborgen"
+  verborgen zijn, doen wel mee, maar blijven nooit staan in plaats van een zichtbare kopie; zie
+  Duplicaten.)
 
 - Herstarten via het DataVault-logo vraagt nu eerst om bevestiging. Het herstart alleen de
   eigen server: voorheen werd alles op poort 8000 hard afgesloten (ook andere programma's) en
@@ -259,7 +261,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   "verborgen") mag nooit blijven staan terwijl een zichtbare kopie wordt weggezet. De server
   weigert zo'n verzoek ("De kopie die blijft is verborgen"), en in het duplicatenscherm kun je
   zo'n kopie niet meer als blijvende kopie aanklikken: je krijgt dan meteen een melding, in
-  plaats van pas na het opruimen "0 verplaatst". Anders zou de enige overgebleven kopie er een zijn die Finder en de app niet tonen.
+  plaats van pas na het opruimen "0 verplaatst". Anders zou de enige overgebleven kopie er een
+  zijn die Finder en de app niet tonen.
 - Is de schijf met het archief losgekoppeld, dan antwoorden Herstellen, terugzetten en de
   andere onderdelen die de database gebruiken (zoals de Keurer-geschiedenis) nu met
   "Archief niet bereikbaar (schijf losgekoppeld?)" in plaats van een onduidelijke serverfout.
@@ -636,3 +639,16 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   `start.sh` geeft een oude server nu tot 10 seconden om open verzoeken af te ronden voordat hij
   hem hard stopt (was 1 seconde). De handleidingen raden niet meer `lsof -ti:8000 | xargs kill -9`
   aan, dat ook het Safari-tabblad met de app afsloot; ze verwijzen naar `./stop_datavault.sh`.
+
+### Nog open (voor fase 3)
+Bekend, maar bewust nog niet in fase 2 opgelost:
+- De tijdlijn stuurt alle foto's van de gekozen mappen in één antwoord (compact en bewaard, maar
+  zonder bladeren), en het scannen ervan is nog geen achtergrondtaak.
+- Het opslagoverzicht laat mappen kleiner dan ongeveer 5 MB weg, omdat het in hele GB's met twee
+  decimalen rekent (zo'n map wordt 0,00 GB).
+- Na het sluiten van een foto die vanuit de chat geopend werd, staat de cursor niet meteen weer
+  in het chatvak.
+- Start je een tweede server op hetzelfde archief (met de hand, op een andere poort), dan ziet
+  die bij het opstarten de lopende taken van de eerste als "onderbroken".
+- Twee oudere opdrachten (`/api/duplicates/delete_single` en `/api/duplicates/scan_folder`, niet
+  meer door het scherm gebruikt) nemen hun pad nog als URL-parameter in plaats van in de body.
