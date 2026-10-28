@@ -459,10 +459,10 @@ def test_shows_with_a_symlinked_vault_root(linked_client, vault):
     shows = c.get("/api/shows/stories").json()["shows"]
     reis = [s for s in shows if s["title"] == "Reis Italië"]
     assert len(reis) == 1
-    files = c.get("/api/shows/folder-content", params={"path": reis[0]["path"]}).json()
-    rome = [f for f in files if f["name"] == "rome.jpg"][0]
+    assert c.get("/api/shows/folder-content", params={"path": reis[0]["path"]}).status_code == 200
+    rome = os.path.join(reis[0]["path"], "rome.jpg")  # the path the slideshow plays it under
     for _ in range(3):
-        assert c.post("/api/shows/vote", json={"path": rome["path"], "vote": "up"}).status_code == 200
+        assert c.post("/api/shows/vote", json={"path": rome, "vote": "up"}).status_code == 200
     featured = c.get("/api/shows/stories").json()["featured"]["files"]
     assert [f["rating"] for f in featured if f["name"] == "rome.jpg"] == [1150]
     # Disabling the folder (by the path /stories gave, or by the link spelling) hides it
