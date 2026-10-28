@@ -458,6 +458,31 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 page.unroute("**/api/timeline/scan*")
                 expect(len(scans) == requests and page.query_selector(".tl-photo-card"),
                        f"timeline: {len(scans)} scan requests (expected {requests}) when the source switched")
+
+            # Home with the archive unplugged: the 'op deze dag' cards show a calm state (never text
+            # inside the spinning circle) and the storage tile shows '–', not a sentence
+            unplugged = vault.with_name("vault-unplugged")
+            vault.rename(unplugged)
+            try:
+                seen = len(problems)
+                page.reload()
+                page.wait_for_load_state("networkidle")
+                page.evaluate("switchMainView('home')")
+                page.wait_for_selector("#spotify-otd-content .empty-state", timeout=10000)
+                page.wait_for_selector("#photo-otd-content .empty-state", timeout=10000)
+                page.wait_for_timeout(500)
+                home = page.evaluate("""(() => ({
+                    spinners: [...document.querySelectorAll('#section-home .loading-spinner')]
+                        .filter(s => s.getClientRects().length || s.textContent.trim()).length,
+                    storage: document.getElementById('storage-used-text').textContent,
+                }))()""")
+                expect(home == {"spinners": 0, "storage": "–"}, f"home unplugged: {home}")
+                page.screenshot(path=str(shots / "home_unplugged.png"))
+                # (the 503s of an unplugged archive are expected here)
+                problems[seen:] = [p for p in problems[seen:] if "503" not in p and "Failed to load resource" not in p]
+                print(f"  {'ok' if len(problems) == seen else 'PROBLEM':7} home: archive unplugged")
+            finally:
+                unplugged.rename(vault)
             browser.close()
     finally:
         proc.terminate()

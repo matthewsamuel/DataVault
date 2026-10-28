@@ -1112,6 +1112,11 @@ textarea.input {
     color: var(--text-tertiary);
 }
 
+/* Een tegel zonder cijfer: de reden staat in de metaregel */
+.stat-tile-meta.stat-tile-error {
+    color: var(--danger-text);
+}
+
 /* ---------- Badges en avatars ---------- */
 
 .badge {
@@ -1552,6 +1557,18 @@ textarea.input {
 
 .empty-state-action {
     margin-top: var(--space-sm);
+}
+
+/* Kleinere variant voor in een kaart */
+.empty-state-compact {
+    padding: var(--space-xl) var(--space-lg);
+    gap: var(--space-xs);
+}
+
+.empty-state-compact .empty-state-icon {
+    width: 40px;
+    height: 40px;
+    font-size: var(--icon-md);
 }
 
 .empty-state-error .empty-state-icon {
@@ -5545,10 +5562,16 @@ a.breadcrumb-item:hover {
     padding-top: var(--space-xs);
 }
 
+.storage-stats {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
 .storage-bar-container {
     width: 100%;
     height: 4px;
-    margin: var(--space-sm) 0 var(--space-xs);
+    margin: var(--space-xs) 0 0;
     background: var(--surface-raised);
     border-radius: var(--radius-full);
     overflow: hidden;
@@ -5637,10 +5660,12 @@ a.breadcrumb-item:hover {
     min-height: 180px;
 }
 
+/* Beide kaarten even hoge koppen: ruimte voor de knop van 28px, ook zonder knop */
 .otd-header-flex {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    min-height: 28px;
     margin-bottom: var(--space-md);
 }
 
@@ -5740,18 +5765,12 @@ button.otd-settings-icon:hover {
     text-shadow: var(--media-text-shadow);
 }
 
-.otd-empty {
-    display: flex;
+/* Lege of mislukte staat in een 'op deze dag'-kaart (emptyState + .empty-state-compact) */
+.otd-state {
     height: 100%;
     min-height: 200px;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    color: var(--text-tertiary);
-    font-size: var(--fs-sm);
     border: 1px dashed var(--border-default);
     border-radius: var(--radius-thumb);
-    padding: var(--space-xl);
 }
 
 .otd-settings-panel {
@@ -6468,7 +6487,7 @@ button.otd-settings-icon:hover {
     }
 }
 
-.otd-large-container:has(.otd-empty) {
+.otd-large-container:has(.otd-state) {
     background: transparent;
     cursor: default;
     height: auto;

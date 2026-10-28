@@ -1770,39 +1770,21 @@ async function fetchHomeWidgets() {
     homeRenderGreeting();
     // 1. Storage
     try {
-        const data = await fetchJSON(`${API_BASE}/api/stats/storage`);
-        if (data.total_gb) {
-            document.querySelector('.storage-loading').style.display = 'none';
-            document.querySelector('.storage-stats').style.display = 'block';
-
-            document.getElementById('storage-used-text').textContent = `${data.used_gb} GB`;
-            document.getElementById('storage-total-text').textContent = `${data.total_gb} GB`;
-            document.getElementById('storage-free-text').textContent = `${data.free_gb} GB`;
-
-            const bar = document.getElementById('storage-bar-fill');
-            bar.style.width = `${data.percent_used}%`;
-            if (data.percent_used > 90) bar.classList.add('critical');
-            else if (data.percent_used > 75) bar.classList.add('warning');
-        }
+        homeRenderStorage(await fetchJSON(`${API_BASE}/api/stats/storage`), null);
     } catch (e) {
-        document.querySelector('.storage-loading').textContent = `Opslag laden mislukt: ${e.message}`;
+        homeRenderStorage(null, e);
     }
 
     // 2. Photo OTD
     loadPhotoOtdWidget();
 
     // 3. Spotify OTD
+    homeOtdLoading('spotify-otd-loading', 'spotify-otd-content');
     try {
         const data = await fetchJSON(`${API_BASE}/api/stats/spotify-on-this-day`);
-        const loading = document.getElementById('spotify-otd-loading');
-        const content = document.getElementById('spotify-otd-content');
-
-        loading.style.display = 'none';
-        content.style.display = 'block';
-
         if (data.track) {
             const t = data.track;
-            content.replaceChildren(
+            homeOtdShow('spotify-otd-loading', 'spotify-otd-content',
                 createEl('div', { class: 'otd-item', onClick: () => openSpotifySearch(`${t.track} ${t.artist}`) },
                     createEl('div', { class: 'otd-spotify-placeholder' }, createEl('i', { class: 'fab fa-spotify' })),
                     createEl('div', { class: 'otd-title', text: t.track }),
@@ -1811,11 +1793,68 @@ async function fetchHomeWidgets() {
             // Geen albumcover van buitenaf (zoals vroeger via iTunes): dat zou luistergeschiedenis
             // naar een externe dienst sturen. Het lokale Spotify-icoon blijft staan.
         } else {
-            content.innerHTML = '<div class="otd-empty">Op deze dag in eerdere jaren niets geluisterd.</div>';
+            homeOtdShow('spotify-otd-loading', 'spotify-otd-content', homeOtdState(emptyState({
+                icon: 'fa-music',
+                title: 'Niets geluisterd',
+                text: 'Op deze dag in eerdere jaren speelde er niets.',
+                action: { label: 'Naar Spotify', onClick: () => switchMainView('spotify') },
+            })));
         }
     } catch (e) {
-        document.getElementById('spotify-otd-loading').textContent = `Laden mislukt: ${e.message}`;
+        homeOtdShow('spotify-otd-loading', 'spotify-otd-content', homeOtdState(errorState('Laden mislukt', e)));
     }
+}
+
+// Opslagtegel: gebruikt, de balk en wat er vrij is; lukt het niet, dan '–' met de reden in de
+// metaregel, net als de andere tegels (nooit een lange zin als groot getal)
+function homeRenderStorage(data, error) {
+    const tile = document.getElementById('widget-storage');
+    if (!tile) return;
+    const used = document.getElementById('storage-used-text');
+    const meta = document.getElementById('storage-meta');
+    const barBox = tile.querySelector('.storage-bar-container');
+    const bar = document.getElementById('storage-bar-fill');
+    const gb = value => formatBytes(Number(value) * 1024 ** 3);
+    tile.querySelector('.storage-loading').style.display = 'none';
+    tile.querySelector('.storage-stats').style.display = '';
+    const ok = !error && data && data.total_gb;
+    used.classList.toggle('is-empty', !ok);
+    barBox.hidden = !ok;
+    // Rood alleen bij een echte fout; een losgekoppelde schijf meldt de banner al
+    meta.classList.toggle('stat-tile-error', Boolean(error) && error.code !== 'vault_unavailable');
+    if (!ok) {
+        used.textContent = '–';
+        meta.textContent = error && error.code === 'vault_unavailable' ? 'Archief niet bereikbaar' : 'Opslag niet bekend';
+        if (error) meta.title = error.message;
+        return;
+    }
+    meta.removeAttribute('title');
+    used.textContent = gb(data.used_gb);
+    meta.replaceChildren('van ', createEl('span', { text: gb(data.total_gb) }), ' · ',
+        createEl('span', { text: gb(data.free_gb) }), ' vrij');
+    bar.style.width = `${data.percent_used}%`;
+    bar.classList.toggle('critical', data.percent_used > 90);
+    bar.classList.toggle('warning', data.percent_used > 75 && data.percent_used <= 90);
+}
+
+// 'Op deze dag': eerst de draaier, daarna de inhoud of een lege of mislukte staat. Er komt
+// nooit tekst in de draaier zelf (die draait).
+function homeOtdLoading(loadingId, contentId) {
+    document.getElementById(loadingId).style.display = '';
+    document.getElementById(contentId).style.display = 'none';
+}
+
+function homeOtdShow(loadingId, contentId, ...nodes) {
+    const content = document.getElementById(contentId);
+    document.getElementById(loadingId).style.display = 'none';
+    content.style.display = 'block';
+    content.replaceChildren(...nodes);
+}
+
+// Een lege of mislukte staat, compact genoeg voor een kaart op Home
+function homeOtdState(node) {
+    node.classList.add('empty-state-compact', 'otd-state');
+    return node;
 }
 
 function openAndSearch(query) {
@@ -1863,12 +1902,10 @@ function homeOtdCycle(active) {
 
 async function loadPhotoOtdWidget() {
     try {
-        const loading = document.getElementById('photo-otd-loading');
         const content = document.getElementById('photo-otd-content');
 
-        // Show loading and clear interval
-        loading.style.display = 'flex';
-        content.style.display = 'none';
+        // Draaier tonen en het wisselen stoppen
+        homeOtdLoading('photo-otd-loading', 'photo-otd-content');
 
         otdCycleStep = null;
         homeOtdCycle(false);
@@ -1881,11 +1918,8 @@ async function loadPhotoOtdWidget() {
         const query = params.toString() ? `?${params}` : '';
         const data = await fetchJSON(`${API_BASE}/api/stats/photo-on-this-day${query}`);
 
-        loading.style.display = 'none';
-        content.style.display = 'block';
-
         if (data.photos && data.photos.length > 0) {
-            content.replaceChildren();
+            homeOtdShow('photo-otd-loading', 'photo-otd-content');
             data.photos.forEach((p, index) => {
                 const image = createEl('div', {
                     class: 'otd-large-image' + (index === 0 ? ' active' : ''),
@@ -1920,10 +1954,15 @@ async function loadPhotoOtdWidget() {
                 homeOtdCycle(!document.getElementById('section-home').classList.contains('hidden'));
             }
         } else {
-            content.innerHTML = '<div class="otd-empty">Geen foto\'s van deze dag in eerdere jaren.</div>';
+            homeOtdShow('photo-otd-loading', 'photo-otd-content', homeOtdState(emptyState({
+                icon: 'fa-camera-retro',
+                title: 'Nog geen herinnering',
+                text: 'Er zijn geen foto\'s van deze dag in eerdere jaren.',
+                action: { label: 'Mappen kiezen', onClick: e => toggleOtdSettings(e) },
+            })));
         }
     } catch (e) {
-        document.getElementById('photo-otd-loading').textContent = `Laden mislukt: ${e.message}`;
+        homeOtdShow('photo-otd-loading', 'photo-otd-content', homeOtdState(errorState('Laden mislukt', e)));
     }
 }
 
