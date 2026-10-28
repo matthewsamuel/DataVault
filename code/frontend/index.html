@@ -272,10 +272,10 @@
         <!-- DUPLICATES SECTION -->
         <div id="section-duplicates" class="section hidden">
             <div class="duplicates-container" id="duplicates-container">
-                <div class="duplicates-header">
+                <div class="page-header">
                     <div>
-                        <h1 class="duplicates-title"><i class="fas fa-clone" aria-hidden="true"></i> Duplicaten</h1>
-                        <div class="duplicates-subtitle">Kies een map, zoek byte voor byte identieke bestanden en
+                        <h1 class="page-title"><i class="fas fa-clone" aria-hidden="true"></i> Duplicaten</h1>
+                        <div class="page-subtitle">Kies een map, zoek byte voor byte identieke bestanden en
                             bepaal per groep welke kopie blijft. De andere kopieën gaan naar RAW_DUPLICATES: er wordt
                             niets gewist en elke actie is terug te zetten.</div>
                     </div>
@@ -384,7 +384,7 @@
         <div id="section-spotify" class="section hidden">
             <div class="spotify-header">
                 <div>
-                    <h1 class="spotify-title"><i class="fab fa-spotify" aria-hidden="true"></i> Jouw jaar in muziek</h1>
+                    <h1 class="page-title"><i class="fab fa-spotify" aria-hidden="true"></i> Jouw jaar in muziek</h1>
                     <p class="page-subtitle">Uit je eigen Spotify-export, alleen op deze Mac.</p>
                 </div>
                 <div class="year-selector">
@@ -514,23 +514,28 @@
         <!-- KEURER SECTION -->
         <div id="section-keurer" class="section hidden">
             <div class="keurer-layout">
+                <div class="page-header keurer-header">
+                    <div>
+                        <h1 class="page-title"><i class="fas fa-layer-group" aria-hidden="true"></i> Keurer</h1>
+                        <p class="page-subtitle">Eén foto per keer: houden, verplaatsen of naar de prullenmand.</p>
+                    </div>
+                    <!-- Map en teller -->
+                    <div class="keurer-folder-bar">
+                        <i class="fas fa-folder keurer-folder-icon" aria-hidden="true"></i>
+                        <div class="keurer-folder-text">
+                            <span class="keurer-folder-path" id="keurer-folder-display">Geen map gekozen</span>
+                            <span class="keurer-remaining" id="keurer-remaining"></span>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" onclick="keurerOpenFolderPicker()">
+                            <i class="fas fa-folder-open" aria-hidden="true"></i> Andere map
+                        </button>
+                    </div>
+                </div>
 
-                <!-- Stats bar -->
+                <!-- Reeks, vandaag, totaal -->
                 <div class="keurer-stats-bar">
                     <div id="keurer-stats-bar"><!-- gevuld door keurer.js --></div>
                 </div>
-
-                <!-- Map selector -->
-                <div class="keurer-folder-bar">
-                    <span class="keurer-folder-label">Map:</span>
-                    <span class="keurer-folder-path" id="keurer-folder-display">Geen map geselecteerd</span>
-                    <button class="btn btn-secondary btn-sm" onclick="keurerOpenFolderPicker()">
-                        <i class="fas fa-folder-open" aria-hidden="true"></i> Andere map
-                    </button>
-                </div>
-
-                <!-- Teller -->
-                <div class="keurer-remaining" id="keurer-remaining"></div>
 
                 <!-- Kaart -->
                 <div class="keurer-card-area" id="keurer-card-area">
@@ -577,9 +582,12 @@
             <div class="timeline-page">
                 <!-- Timeline Header -->
                 <div class="tl-header">
-                    <div class="tl-header-left">
-                        <h2 class="tl-title"><i class="fas fa-stream" aria-hidden="true"></i> Tijdlijn</h2>
-                        <span class="tl-current-date" id="timeline-current-date"></span>
+                    <div>
+                        <div class="tl-header-left">
+                            <h1 class="page-title"><i class="fas fa-stream" aria-hidden="true"></i> Tijdlijn</h1>
+                            <span class="tl-current-date" id="timeline-current-date"></span>
+                        </div>
+                        <p class="page-subtitle">Je foto's en video's op de dag dat ze gemaakt zijn.</p>
                     </div>
                     <div class="tl-header-right">
                         <button class="btn btn-secondary tl-folder-btn" onclick="timelineOpenFolderPicker()">

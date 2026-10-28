@@ -3407,35 +3407,8 @@ a.breadcrumb-item:hover {
     height: calc(100vh - var(--nav-h));
     overflow-y: auto;
     overflow-x: hidden;
-    /* Inhoud hooguit 1120 px breed, in het midden */
-    padding: var(--space-2xl) max(var(--page-gutter), calc((100% - 1120px) / 2)) var(--space-4xl);
-}
-
-.duplicates-header {
-    margin-bottom: var(--space-xl);
-}
-
-.duplicates-title {
-    font-size: var(--fs-2xl);
-    font-weight: var(--fw-bold);
-    letter-spacing: var(--tracking-tighter);
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-}
-
-.duplicates-title i {
-    color: var(--accent);
-    font-size: var(--icon-lg);
-}
-
-.duplicates-subtitle {
-    margin-top: var(--space-sm);
-    font-size: var(--fs-sm);
-    line-height: var(--lh-normal);
-    color: var(--text-secondary);
-    max-width: 720px;
+    /* Zelfde breedte en marges als .page (--page-max, in het midden) */
+    padding: var(--space-2xl) max(var(--page-gutter), calc((100% - var(--page-max)) / 2 + var(--page-gutter))) var(--space-4xl);
 }
 
 /* Panelen: dezelfde kaart als overal */
@@ -4059,25 +4032,15 @@ a.breadcrumb-item:hover {
     justify-content: space-between;
     align-items: flex-end;
     gap: var(--space-lg);
-    max-width: 1120px;
+    max-width: var(--page-max);
     width: 100%;
     margin: 0 auto;
-    padding: var(--space-2xl) var(--page-gutter) var(--space-lg);
+    padding: var(--space-2xl) var(--page-gutter) var(--space-xl);
 }
 
-.spotify-title {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-    font-size: var(--fs-2xl);
-    font-weight: var(--fw-bold);
-    letter-spacing: var(--tracking-tighter);
-    color: var(--text-primary);
-}
-
-.spotify-title i {
+/* Spotify houdt zijn eigen groen in de kop */
+.page-title .fa-spotify {
     color: var(--spotify);
-    font-size: var(--icon-xl);
 }
 
 .year-selector select {
@@ -4087,7 +4050,7 @@ a.breadcrumb-item:hover {
 .spotify-content {
     position: relative;
     z-index: 10;
-    max-width: 1120px;
+    max-width: var(--page-max);
     margin: 0 auto;
     padding: var(--space-sm) var(--page-gutter) var(--space-4xl);
 }
@@ -4754,7 +4717,7 @@ a.breadcrumb-item:hover {
 
 .shows-page {
     padding: var(--space-2xl) var(--page-gutter) var(--space-4xl);
-    max-width: 1280px;
+    max-width: var(--page-max);
     width: 100%;
     margin: 0 auto;
     color: var(--text-primary);
@@ -5464,9 +5427,9 @@ a.breadcrumb-item:hover {
 
 .home-inner {
     width: 100%;
-    max-width: 1080px;
+    max-width: var(--page-max);
     margin: 0 auto;
-    padding: var(--space-3xl) var(--page-gutter) var(--space-4xl);
+    padding: var(--space-2xl) var(--page-gutter) var(--space-4xl);
     display: flex;
     flex-direction: column;
     gap: var(--space-2xl);
@@ -6481,20 +6444,32 @@ button.otd-settings-icon:hover {
     min-height: 0;
 }
 
+/* Een pagina als de andere (kop links, --page-max breed), precies zo hoog als het venster:
+   de kaart krijgt wat overblijft, zodat knoppen en toetsen altijd zonder scrollen in beeld zijn */
 .keurer-layout {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--space-lg);
-    padding: var(--space-xl) var(--space-lg) var(--space-3xl);
-    min-height: 100%;
-    box-sizing: border-box;
+    gap: var(--space-md);
     width: 100%;
+    max-width: var(--page-max);
+    margin: 0 auto;
+    height: calc(100vh - var(--nav-h));
+    min-height: 540px;
+    /* onderaan ruimte voor de smalle balk van het takenpaneel, zodat die de toetsen niet bedekt */
+    padding: var(--space-2xl) var(--page-gutter) var(--space-4xl);
+}
+
+.keurer-header {
+    align-self: stretch;
+    align-items: center;
+    margin-bottom: 0;
 }
 
 /* ---- Cijfers: reeks, vandaag, totaal ---- */
 
 .keurer-stats-bar {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 0;
@@ -6603,23 +6578,28 @@ button.otd-settings-icon:hover {
     display: flex;
     align-items: center;
     gap: var(--space-md);
-    width: 100%;
-    max-width: 520px;
+    flex: 0 1 380px;
+    min-width: 0;
     background: var(--surface-card);
     border: 1px solid var(--card-border);
     border-radius: var(--radius-card);
     padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-lg);
-    box-sizing: border-box;
 }
 
-.keurer-folder-label {
-    font-size: var(--fs-xs);
+.keurer-folder-icon {
     color: var(--text-tertiary);
+    font-size: var(--icon-md);
     flex-shrink: 0;
 }
 
-.keurer-folder-path {
+.keurer-folder-text {
+    display: flex;
+    flex-direction: column;
     flex: 1;
+    min-width: 0;
+}
+
+.keurer-folder-path {
     font-size: var(--fs-sm);
     font-weight: var(--fw-medium);
     color: var(--text-primary);
@@ -6631,11 +6611,11 @@ button.otd-settings-icon:hover {
 .keurer-remaining {
     font-size: var(--fs-xs);
     color: var(--text-tertiary);
-    width: 100%;
-    max-width: 520px;
-    text-align: center;
-    min-height: 1em;
     font-variant-numeric: tabular-nums;
+}
+
+.keurer-remaining:empty {
+    display: none;
 }
 
 /* ---- Kaart ---- */
@@ -6646,7 +6626,8 @@ button.otd-settings-icon:hover {
     justify-content: center;
     width: 100%;
     max-width: 520px;
-    min-height: 420px;
+    flex: 1 1 0;
+    min-height: 220px;
     position: relative;
 }
 
@@ -6718,7 +6699,9 @@ button.otd-settings-icon:hover {
 /* Wrapper voor de veeranimatie van de kaart */
 .keurer-card-wrapper {
     width: 100%;
+    height: 100%;
     display: flex;
+    align-items: center;
     justify-content: center;
 }
 
@@ -6726,6 +6709,8 @@ button.otd-settings-icon:hover {
     position: relative;
     width: 100%;
     max-width: 480px;
+    height: 100%;
+    max-height: 600px;
     border-radius: var(--radius-xl);
     overflow: hidden;
     background: var(--media-bg);
@@ -6744,8 +6729,8 @@ button.otd-settings-icon:hover {
 .keurer-card-img {
     display: block;
     width: 100%;
-    /* Zo groot als het scherm toelaat, met de knoppen eronder nog in beeld */
-    height: clamp(280px, calc(100vh - 400px), 520px);
+    /* Zo hoog als de kaart: de rest van het venster onder de kop (zie .keurer-layout) */
+    height: 100%;
     object-fit: cover;
     pointer-events: none;
     background: var(--media-surface);
@@ -6753,7 +6738,7 @@ button.otd-settings-icon:hover {
 
 .keurer-card-fallback {
     width: 100%;
-    height: clamp(280px, calc(100vh - 400px), 520px);
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -6882,6 +6867,7 @@ button.otd-settings-icon:hover {
 /* ---- Actieknoppen ---- */
 
 .keurer-action-buttons {
+    flex-shrink: 0;
     display: flex;
     gap: var(--space-xl);
     align-items: center;
@@ -6938,6 +6924,7 @@ button.otd-settings-icon:hover {
 }
 
 .keurer-hint {
+    flex-shrink: 0;
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
@@ -7216,12 +7203,25 @@ button.otd-settings-icon:hover {
 
 /* ---- Kop ---- */
 
+/* Kop, mapchips, telling, schuifbalk en raster staan in dezelfde kolom als elke pagina
+   (--page-max breed, in het midden); alleen de scrollbalk loopt tot de rand */
+.tl-header,
+.tl-folder-chips-bar,
+.tl-info-bar,
+.tl-slider-wrap,
+.tl-virtual-content {
+    width: 100%;
+    max-width: var(--page-max);
+    margin-left: auto;
+    margin-right: auto;
+}
+
 .tl-header {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
     gap: var(--space-lg);
-    padding: var(--space-xl) var(--page-gutter) var(--space-md);
+    padding: var(--space-2xl) var(--page-gutter) var(--space-lg);
     flex-shrink: 0;
 }
 
@@ -7230,22 +7230,6 @@ button.otd-settings-icon:hover {
     align-items: center;
     gap: var(--space-md);
     min-width: 0;
-}
-
-.tl-title {
-    margin: 0;
-    font-size: var(--fs-2xl);
-    font-weight: var(--fw-bold);
-    letter-spacing: var(--tracking-tighter);
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-}
-
-.tl-title i {
-    color: var(--accent);
-    font-size: var(--icon-lg);
 }
 
 .tl-current-date {
@@ -7372,7 +7356,10 @@ button.otd-settings-icon:hover {
 .tl-slider-wrap {
     display: flex;
     flex-direction: column;
-    padding: var(--space-md) var(--page-gutter) var(--space-sm);
+    padding: var(--space-md) 0 var(--space-sm);
+    /* de lijn eronder net zo breed als de inhoud (binnen de paginamarges) */
+    width: calc(100% - 2 * var(--page-gutter));
+    max-width: calc(var(--page-max) - 2 * var(--page-gutter));
     flex-shrink: 0;
     border-bottom: 1px solid var(--border-hairline);
 }
@@ -8109,7 +8096,7 @@ button.otd-settings-icon:hover {
 .recovery-page,
 .settings-page {
     width: 100%;
-    max-width: 920px;
+    max-width: var(--page-max);
     margin: 0 auto;
     padding: var(--space-2xl) var(--page-gutter) var(--space-4xl);
 }

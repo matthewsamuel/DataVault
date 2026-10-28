@@ -31,7 +31,7 @@ function keurerInit() {
         if (display) {
             display.textContent = keurerFolder
                 ? keurerShortenPath(keurerFolder)
-                : 'Geen map geselecteerd';
+                : 'Geen map gekozen';
         }
 
         // Undo-stapel eerst van de server halen, zodat hij een herlaad overleeft
