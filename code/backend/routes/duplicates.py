@@ -15,6 +15,7 @@ import os
 import stat
 
 from backend.config import Config
+from backend.scanner import is_hidden
 from backend.paths import resolve_in_vault, is_in_vault, vault_folder_or_none
 from backend.file_ops import (
     safe_move_with_structure, move_no_overwrite, files_identical, is_inside, ARCHIVE_LOCK,
@@ -165,6 +166,15 @@ def _find_keeper(file_path: Path) -> Optional[str]:
     return None
 
 
+def _hidden(path: Path) -> bool:
+    """Hidden the way the scan sees it: a dot name below the vault root, or UF_HIDDEN."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return is_hidden(path, config.VAULT_ROOT, st)
+
+
 def _move_verified(src_path: Path, keeper: Optional[Path]) -> Tuple[Path, bool]:
     """
     Move src_path to RAW_DUPLICATES, only if keeper still exists and is byte-for-byte
@@ -196,6 +206,14 @@ def _move_verified(src_path: Path, keeper: Optional[Path]) -> Tuple[Path, bool]:
 
     if os.path.samefile(src_path, keeper):
         raise HTTPException(status_code=409, detail="File and original are the same file")
+
+    # A hidden copy (dot name or Finder flag) never stays in place of a visible one:
+    # the scan, the UI and Finder would no longer show the only copy left
+    if _hidden(keeper) and not _hidden(src_path):
+        raise HTTPException(
+            status_code=409,
+            detail="De kopie die blijft is verborgen; kies een zichtbare kopie. Er is niets verplaatst"
+        )
 
     if not files_identical(src_path, keeper):
         raise HTTPException(

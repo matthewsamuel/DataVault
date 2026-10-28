@@ -245,6 +245,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   elke verplaatsing of precies die kopie nog bestaat en byte voor byte gelijk is.
 - Lukt het vastleggen van een verplaatsing in de database niet, dan zet de app het bestand meteen
   terug, zodat er nooit een bestand in RAW_DUPLICATES belandt zonder dat het terug te zetten is.
+- Een verborgen kopie (naam met een punt ervoor, in een verborgen map, of met het Finder-kenmerk
+  "verborgen") mag nooit blijven staan terwijl een zichtbare kopie wordt weggezet. De app biedt
+  dat zelf al niet aan, maar nu weigert ook de server zo'n verzoek ("De kopie die blijft is
+  verborgen"). Anders zou de enige overgebleven kopie er een zijn die Finder en de app niet tonen.
 
 ### Duplicaten: nieuwe weergave
 - Het duplicatenscherm is vernieuwd en in het Nederlands. Per groep zie je één miniatuur (alle

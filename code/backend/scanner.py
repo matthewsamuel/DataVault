@@ -194,8 +194,8 @@ def exif_capture_time(file_path: Path):
         return None
 
 
-def _is_hidden(path: Path, top: Path, st: os.stat_result) -> bool:
-    """A dot name anywhere below the scanned folder, or the Finder 'hidden' flag."""
+def is_hidden(path: Path, top: Path, st: os.stat_result) -> bool:
+    """A dot name anywhere below top (the scanned folder), or the Finder 'hidden' flag."""
     try:
         parts = path.relative_to(top).parts
     except ValueError:
@@ -257,7 +257,7 @@ def _copy_info(path: Path, st: os.stat_result, top: Path, exif_ts) -> Dict[str, 
         "file_ts": file_ts,
         "file_ts_source": source,
         "mtime": float(st.st_mtime),
-        "hidden": _is_hidden(path, top, st),
+        "hidden": is_hidden(path, top, st),
         "path_len": len(str(path)),
         "name_rank": 0,
     }

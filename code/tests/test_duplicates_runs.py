@@ -2,6 +2,7 @@
 import hashlib
 import os
 import sqlite3
+import stat
 
 import pytest
 
@@ -196,6 +197,36 @@ def test_move_refuses_paths_outside_the_vault_and_protected_folders(client, vaul
     r = _move(client, [(keep, [outside, trash, vault / "RAW"]), (outside, [vault / STRAND_COPIES[0]])]).json()
     assert [f["status"] for f in r["failed"]] == [403, 400, 400, 403]
     assert r["moved"] == [] and trash.exists() and (vault / STRAND_COPIES[0]).exists()
+
+
+def test_a_hidden_copy_never_stays_in_place_of_a_visible_one(client, vault):
+    """The UI never offers a hidden keeper, but the server must refuse one too."""
+    hidden = vault / "RAW" / "misc" / ".hidden.jpg"
+    visible = vault / STRAND
+    assert hidden.read_bytes() == visible.read_bytes()
+    r = _move(client, [(hidden, [visible])])
+    assert r.status_code == 200 and r.json()["run_id"] is None and r.json()["moved"] == []
+    [failed] = r.json()["failed"]
+    assert failed["status"] == 409 and "verborgen" in failed["detail"]
+
+    in_dot_folder = vault / "RAW" / ".verstopt" / "kopie.jpg"
+    in_dot_folder.parent.mkdir()
+    in_dot_folder.write_bytes(visible.read_bytes())
+    assert _move(client, [(in_dot_folder, [visible])]).json()["failed"][0]["status"] == 409
+    assert client.post("/api/duplicates/delete_single", params={
+        "file_path": str(visible), "duplicate_of": str(hidden)}).status_code == 409
+    assert visible.exists() and _runs(client) == []
+
+    if hasattr(stat, "UF_HIDDEN") and hasattr(os, "chflags"):
+        flagged = vault / "RAW" / "misc" / "vlag.jpg"
+        flagged.write_bytes(visible.read_bytes())
+        os.chflags(flagged, stat.UF_HIDDEN)
+        assert _move(client, [(flagged, [visible])]).json()["failed"][0]["status"] == 409
+        assert visible.exists()
+
+    # The other way round is fine: a hidden copy may go while the visible one stays
+    r = _move(client, [(visible, [hidden])]).json()
+    assert len(r["moved"]) == 1 and visible.exists() and not hidden.exists()
 
 
 def test_a_failed_undo_record_puts_the_file_back(client, vault, monkeypatch):
