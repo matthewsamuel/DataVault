@@ -249,6 +249,49 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   scrolt in een laag venster binnen het venster, met de voetnoot altijd heel in beeld. In het
   themamenu zie je ook na openen met de muis welke keuze de pijltjes gemarkeerd hebben.
 
+### Back-ups van de database
+- Je scores, vergelijkingen, Keurer-keuzes, herstelgegevens en instellingen staan in de database
+  op de T7. Die wordt nu elke dag gekopieerd naar de schijf van deze Mac
+  (`~/Library/Application Support/DataVault/backups`), los van de T7: bij het starten als de
+  laatste back-up ouder is dan een dag, en daarna dagelijks zolang de app draait. Vóór elke
+  database-update blijft er ook een volledige kopie naast de database, zoals voorheen.
+- Een back-up is een momentopname terwijl de app gewoon doorwerkt (ook wat nog niet in het
+  hoofdbestand stond), wordt gecontroleerd (PRAGMA integrity_check) en pas daarna bewaard, en is
+  klein: wat de app zelf opnieuw kan opbouwen (hashes, datums, de mappenlijst van de index,
+  scanresultaten, later beeldvectoren) zit er niet in, en hij is gecomprimeerd. Een index van
+  100.000 foto's: ongeveer 7 MB in plaats van 109 MB, in een seconde.
+- Bewaard blijven de laatste back-up van elk van de laatste 7 dagen en van de laatste 4 weken;
+  oudere gaan weg. Alleen de eigen back-upbestanden worden ooit opgeruimd.
+- **Instellingen > Back-ups** toont de laatste back-up, wanneer de volgende komt, de map, hoeveel er
+  bewaard zijn en een mislukte poging. Met **Nu back-uppen** maak je er meteen een.
+- Terugzetten gaat met `restore_backup.py` in Terminal, met de app gestopt (draait hij nog, dan
+  weigert het script). Het bewaart eerst de huidige database helemaal als
+  "datavault-voor-herstel-…" en zet pas dan de back-up terug; er wordt nooit iets overschreven. De
+  stappen staan ook in Instellingen, met de opdrachten om te kopiëren.
+
+### Shows: "Welke is mooier?"
+- Nieuw bij Shows: **Welke is mooier?** Twee foto's naast elkaar, jij kiest de mooiste. Kies met
+  **←** of **1** (links) en **→** of **2** (rechts), sla over met **spatie** of **s**, en draai de
+  laatste keuze terug met **z** (dan staat datzelfde paar weer in beeld). Je kiest bovenin uit welke
+  collectie de foto's komen: de hele bibliotheek of één show.
+- De score is dezelfde als die van de duimpjes in de slideshow (1000 om te beginnen; een duim blijft
+  +50 of −50), dus hoe vaker je een foto kiest, hoe vaker hij in Shows en "Verras me" komt. Na een
+  keuze zie je kort hoeveel beide scores veranderden.
+- Hoe de score verandert (Elo, zoals bij schaken): wint een foto van een hoger gewaardeerde, dan
+  stijgt hij veel; wint hij van een lagere, dan weinig. Een foto met minder dan 30 vergelijkingen
+  beweegt maximaal 32 punten per keuze, daarna 16, zodat één verrassende keuze niet alles omgooit.
+  Geen score zakt onder de 100.
+- De paren zijn gekozen om snel een goede volgorde te krijgen: eerst foto's die nog weinig
+  vergeleken zijn, tegen foto's met een vergelijkbare score. Nooit twee keer achter elkaar hetzelfde
+  paar, en nooit twee foto's die (bijna) hetzelfde zijn: een kopie, of foto's uit dezelfde reeks
+  (binnen 2 seconden in dezelfde map genomen).
+- **Ranglijst** (tabblad in hetzelfde venster): de best gewaardeerde foto's van de collectie, met
+  hoeveel vergelijkingen ze wonnen.
+- Elke vergelijking wordt bewaard met beide scores ervoor en erna, dus terugdraaien zet beide scores
+  precies terug. Verplaats je een foto, dan gaan zijn score en vergelijkingen mee. Was een van de
+  twee foto's daarna nog veranderd (een duim, een latere keuze), dan zegt de app dat in plaats van
+  te gokken.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden

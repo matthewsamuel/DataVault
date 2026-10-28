@@ -64,6 +64,10 @@ Kopieer `code/config.example.json` naar `code/config.json` en stel de vault-pade
 }
 ```
 
+Optioneel voor de back-ups van de database (zie hieronder): `"backup_folder"` (standaard
+`~/Library/Application Support/DataVault/backups`), `"backup_keep_daily"` (7) en
+`"backup_keep_weekly"` (4).
+
 ## Installatie (eerste keer)
 
 ### Vereisten
@@ -182,6 +186,61 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - De rooktest bewaart van elk scherm een schermafbeelding in beide thema's (het pad staat in de
   uitvoer, of zet `DATAVAULT_SMOKE_SHOTS`).
 
+### Back-ups van de database
+- `backend/backup.py` kopieert de database naar de schijf van de Mac: bij het starten als de nieuwste
+  back-up ouder is dan 24 uur, daarna elk uur een controle (dus ongeveer dagelijks), en met
+  **Nu back-uppen** in Instellingen (`POST /api/backup/run`; `GET /api/backup/status` geeft de stand).
+  `DATAVAULT_AUTO_BACKUP=0` zet het automatische deel uit (de tests doen dat). De volledige kopie
+  vóór elke migratie (`db_backups/` naast de database) blijft daarnaast bestaan.
+- Zo wordt hij gemaakt: de SQLite backup API maakt één consistente momentopname (ook wat nog in het
+  WAL-bestand staat), de tabellen die de app zelf opnieuw opbouwt worden in de kopie leeggemaakt
+  (`file_hashes`, `media_dates`, `media_folders`, `job_results`, en elke tabel met `phash` of
+  `embedding` in de naam; een nieuwe cache meldt zich met `backup.register_rebuildable(naam)`), daarna
+  VACUUM, `PRAGMA integrity_check`, gzip (en teruglezen), en pas dan krijgt hij zijn naam
+  (`datavault-JJJJMMDD-UUMMSS[-handmatig].db.gz`), met een harde link zodat er nooit iets wordt
+  overschreven. De `media`-tabel zelf blijft erin: albums en andere gegevens wijzen naar `media.id`.
+  `gunzip -k` geeft een gewone SQLite-database.
+- Waarom compact: met een index van 100.000 foto's is de database 109 MB; de back-up is 62 MB zonder
+  de caches en 6,7 MB gecomprimeerd (gemeten: 1 s om te maken, 0,25 s om uit te pakken en te
+  controleren). Elf back-ups passen zo ruim op een volle interne schijf.
+- Rotatie: de nieuwste van elk van de laatste 7 dagen en van de laatste 4 ISO-weken blijven, plus de
+  5 nieuwste veiligheidskopieën van vóór een herstel. Alleen bestanden met precies die namen in de
+  back-upmap worden ooit verwijderd.
+- **Terugzetten** (met de app gestopt):
+  ```bash
+  cd code
+  venv/bin/python restore_backup.py                 # lijst van back-ups, nieuwste eerst
+  venv/bin/python restore_backup.py <naam of pad>   # vraagt 'ja'; --ja slaat dat over
+  ```
+  Het script controleert de back-up (integrity_check, bekend schema), weigert zolang er een
+  DataVault-server draait of de app de database open heeft (een gedeelde vergrendeling naast de
+  database), bewaart de huidige database helemaal als `datavault-voor-herstel-….db.gz` en zet pas
+  dan de back-up terug met de backup API (geen bestand wordt vervangen of weggegooid). Bij het
+  volgende starten vult de app de lege caches vanzelf weer.
+
+### Shows: Welke is mooier? (Elo)
+- Twee foto's naast elkaar (`frontend/elo.js`, knop in de kop van Shows); de keuze verandert beide
+  scores in `file_ratings`, dezelfde schaal als de duimpjes (start 1000, duim ±50, nooit onder 100).
+- Elo (`backend/elo.py`): verwachte score `E = 1 / (1 + 10^((Rb − Ra) / 400))`, nieuwe score
+  `R + round(K · (S − E))` met S = 1 of 0. K is 32 voor de eerste 30 vergelijkingen van een foto en
+  daarna 16, per foto. Bij gelijke K is de verandering symmetrisch; één keuze verandert een score
+  nooit meer dan K.
+- Beide scores en de geschiedenisregel worden in één transactie geschreven die eerst de
+  schrijfvergrendeling neemt (`BEGIN IMMEDIATE`), dus twee keuzes tegelijk (twee tabbladen) gaan na
+  elkaar. `elo_comparisons` (migratie 50) bewaart beide paden, de winnaar en beide scores en aantallen
+  vóór en na: `POST /api/shows/compare/undo` zet ze precies terug, of weigert (409) als een van de
+  foto's daarna nog veranderde. Het aantal vergelijkingen van een foto wordt uit die geschiedenis
+  geteld. Paden in de geschiedenis gaan mee bij verplaatsen (`media_index._carry_user_data`).
+- Paren (`elo.choose_pair`): de eerste foto met voorkeur voor weinig vergelijkingen (gewicht
+  1/(1+n)²), de tegenstander uit de 8 foto's met de dichtstbijzijnde score. Nooit het paar dat net in
+  beeld was of net vergeleken is, nooit dezelfde grootte (een kopie) of een reeks (zelfde map,
+  EXIF-tijd binnen 2 s); bijna-duplicaten op beeld meldt een latere stap met
+  `elo.register_near_duplicate_check(fn)`. RAW-bestanden doen niet mee (de browser toont ze niet).
+  De foto's komen uit de media-index als die klaar is, anders uit een wandeling (60 s bewaard).
+  Uitgeschakelde Shows-mappen doen niet mee.
+- Routes: `GET /api/shows/compare/pair?folder=&prev=&prev=`, `POST /api/shows/compare {a, b, winner,
+  folder}`, `POST /api/shows/compare/undo {id}` en `GET /api/shows/leaderboard?folder=&limit=`.
+
 ### Achtergrondtaken
 - Duplicaten zoeken, vooraf indexeren, miniaturen maken en de bibliotheek bijwerken lopen als taak op de achtergrond
 - Het takenpaneel rechtsonder toont voortgang en resterende tijd, met Pauzeren, Hervatten en Annuleren
@@ -198,9 +257,11 @@ python3 tests/ui/smoke_webkit.py chromium      # of in Chromium; --headed om mee
 
 De rooktest bouwt zelf een wegwerp-testkluis, start een eigen server op een vrije poort
 (`DATAVAULT_TESTING=1`), klikt door alle tabbladen (en viewer, verplaatsvenster, chat,
-thema's, Shows, sneltoetsen, Herstelcentrum, Instellingen, contrast in beide thema's) en faalt bij elke JavaScript-fout, consolefout of mislukte API-aanroep. Hij
+thema's, Shows en Welke is mooier?, sneltoetsen, Herstelcentrum, Instellingen met een back-up,
+contrast in beide thema's) en faalt bij elke JavaScript-fout, consolefout of mislukte API-aanroep. Hij
 heeft een Python met Playwright nodig (`pip install playwright && playwright install webkit`)
-en wordt niet door pytest meegenomen.
+en wordt niet door pytest meegenomen. Voor de server gebruikt hij `code/venv`, of de Python in
+`DATAVAULT_PYTHON` (handig in een git worktree zonder eigen venv).
 
 Geen enkele pytest-test praat met een echte Ollama: `tests/conftest.py` zet de chat voor elke
 test op een nep-Ollama (`FakeOllama` in `tests/helpers.py`), die je per test kunt laten
