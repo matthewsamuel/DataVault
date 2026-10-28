@@ -421,6 +421,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   je terugschakelt en blijven aanklikbaar. Een foto uit de chat opent boven de chat, en Escape
   sluit dan eerst alleen de foto.
 - Meldingen (toasts) staan nu altijd bovenop, ook boven de viewer en de slideshow.
+- Spotify: lukte het laden één keer niet (bijv. tijdens een herstart), dan bleef de pagina leeg
+  tot je de hele app herlaadde. Nu zie je een melding met de knop "Opnieuw proberen", en de
+  pagina werkt gewoon weer zodra het lukt.
 
 ### Shows
 - Een mapshow toont nu elke foto en video uit de map precies één keer, in een willekeurige

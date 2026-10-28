@@ -2539,12 +2539,15 @@ function startShow(story) {
 
 // ==================== SPOTIFY WRAPPED ====================
 
+let spotifyLoadSeq = 0; // alleen het antwoord op de laatste aanvraag telt (snel van jaar wisselen)
+
 async function loadSpotifyStats() {
+    const seq = ++spotifyLoadSeq;
     const loading = document.getElementById('spotify-loading');
     const content = document.getElementById('spotify-content');
     const yearSelect = document.getElementById('spotify-year-select');
     const year = yearSelect ? yearSelect.value : 'all';
-    const url = `${API_BASE}/api/spotify/stats?year=${year}`;
+    const url = `${API_BASE}/api/spotify/stats?year=${encodeURIComponent(year)}`;
 
     const populateYears = (data) => {
         if (yearSelect && yearSelect.options.length <= 1 && data.available_years) {
@@ -2556,37 +2559,69 @@ async function loadSpotifyStats() {
             });
         }
     };
+    const show = (data) => {
+        showSpotifyError(null);
+        if (loading) loading.style.display = 'none';
+        if (content) content.style.display = 'block';
+        renderSpotifyStats(data);
+        populateYears(data);
+    };
 
     // Gebruik cache als beschikbaar — instant render, geen spinner
     if (_prefetchCache[url]) {
         const data = await _prefetchCache[url];
-        if (data) {
-            if (loading) loading.style.display = 'none';
-            if (content) content.style.display = 'block';
-            renderSpotifyStats(data);
-            populateYears(data);
-            return;
-        }
+        if (seq !== spotifyLoadSeq) return;
+        if (data) { show(data); return; }
     }
 
     // Normale laadprocedure
+    showSpotifyError(null);
     if (loading) loading.style.display = 'flex';
     if (content) content.style.display = 'none';
 
     try {
         const res = await fetch(url);
-        if (!res.ok) throw new Error('Failed to load Spotify stats');
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `Serverfout (${res.status})`);
+        }
         const data = await res.json();
+        if (seq !== spotifyLoadSeq) return;
         _prefetchCache[url] = Promise.resolve(data);
-        renderSpotifyStats(data);
-        populateYears(data);
+        show(data);
     } catch (e) {
+        if (seq !== spotifyLoadSeq) return;
         console.error("Spotify load error:", e);
-        showToast('Error', 'Failed to load Spotify data', 'error');
-        if (content) content.innerHTML = '<div class="error-state">Failed to load data. Is the backend running?</div>';
-    } finally {
+        // De inhoud zelf blijft staan (alleen verborgen), zodat een nieuwe poging gewoon kan renderen
         if (loading) loading.style.display = 'none';
-        if (content) content.style.display = 'block';
+        if (content) content.style.display = 'none';
+        showSpotifyError(e.message);
+    }
+}
+
+// Foutmelding met een knop om het opnieuw te proberen; null verbergt hem
+function showSpotifyError(message) {
+    let box = document.getElementById('spotify-error');
+    if (!message) {
+        if (box) box.hidden = true;
+        return;
+    }
+    if (!box) {
+        box = createEl('div', { id: 'spotify-error', class: 'spotify-error', role: 'alert' });
+        document.getElementById('spotify-content').before(box);
+    }
+    box.replaceChildren(
+        createEl('i', { class: 'fas fa-exclamation-triangle' }),
+        createEl('p', { text: `Spotify-gegevens konden niet worden geladen: ${message}` }),
+        createEl('button', { class: 'btn btn-secondary', text: 'Opnieuw proberen', onClick: () => loadSpotifyStats() }));
+    box.hidden = false;
+}
+
+// De live klok bij "Op deze dag" tikt alleen terwijl de Spotify-weergave open is
+function stopSpotifyClock() {
+    if (window._otdClockInterval) {
+        clearInterval(window._otdClockInterval);
+        window._otdClockInterval = null;
     }
 }
 
@@ -2645,7 +2680,9 @@ function renderSpotifyStats(data) {
 
         // Discoveries
         const discoveriesContainer = document.getElementById('discoveries-container');
-        if (insights.discoveries && insights.discoveries.length > 0) {
+        if (!discoveriesContainer) {
+            // (pagina zonder ontdekkingen-blok)
+        } else if (insights.discoveries && insights.discoveries.length > 0) {
             discoveriesContainer.style.display = 'block';
             renderSpotifyList('discoveries-list', insights.discoveries, (item, i) => spotifyListItem({
                 rank: `#${i + 1}`, name: item.name,
@@ -2678,7 +2715,9 @@ function renderSpotifyStats(data) {
         tickClock();
         window._otdClockInterval = setInterval(tickClock, 1000);
     }
-    if (data.on_this_day && data.on_this_day.length > 0) {
+    if (!otdContainer || !otdList) {
+        // (pagina zonder "Op deze dag"-blok)
+    } else if (data.on_this_day && data.on_this_day.length > 0) {
         otdContainer.style.display = 'block';
         otdList.innerHTML = '';
 
