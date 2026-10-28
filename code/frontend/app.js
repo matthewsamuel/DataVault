@@ -177,7 +177,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== VIEW SWITCHING ====================
 
-const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings'];
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums'];
 
 function currentMainView() {
     return MAIN_VIEWS.find(v => {
@@ -220,6 +220,8 @@ function switchMainView(view) {
 
     if (view !== 'spotify') stopSpotifyClock();
     homeOtdCycle(view === 'home');
+    // Het adres (#albums?...) hoort alleen bij Albums
+    if (view !== 'albums' && typeof albumsLeave === 'function') albumsLeave();
 
     // Load data based on view
     if (view === 'spotify') {
@@ -241,6 +243,8 @@ function switchMainView(view) {
         if (typeof recoveryInit === 'function') recoveryInit();
     } else if (view === 'settings') {
         if (typeof settingsInit === 'function') settingsInit();
+    } else if (view === 'albums') {
+        if (typeof albumsInit === 'function') albumsInit();
     }
 }
 
@@ -1783,6 +1787,15 @@ function prevFile() {
     if (viewer.index > 0) {
         viewer.index--;
         renderViewerFile();
+    } else if (viewer.index === 0) {
+        viewerLoadMore(-1);
+    }
+}
+
+function nextFile() {
+    if (viewer.index >= 0 && viewer.index < viewer.items.length - 1) {
+        viewer.index++;
+        renderViewerFile();
     } else if (viewer.index >= 0) {
         viewerLoadMore(1);
     }
@@ -1811,15 +1824,6 @@ async function viewerLoadMore(step) {
         toastFetchError('Volgende bestanden laden mislukt', e);
     } finally {
         viewerMoreBusy = false;
-    }
-}
-
-function nextFile() {
-    if (viewer.index >= 0 && viewer.index < viewer.items.length - 1) {
-        viewer.index++;
-        renderViewerFile();
-    } else if (viewer.index === 0) {
-        viewerLoadMore(-1);
     }
 }
 
@@ -1967,6 +1971,7 @@ function reloadAfterVaultReturn() {
     else if (view === 'duplicates' && typeof duplicatesInit === 'function') duplicatesInit();
     else if (view === 'recovery' && typeof recoveryLoad === 'function') recoveryLoad();
     else if (view === 'settings' && typeof settingsRender === 'function') settingsRender();
+    else if (view === 'albums' && typeof albumsInit === 'function') albumsInit();
     if (typeof jobsLibraryRefresh === 'function') jobsLibraryRefresh();
     loadChatModels();
 }

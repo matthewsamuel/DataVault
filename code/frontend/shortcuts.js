@@ -29,6 +29,8 @@ const SHORTCUT_VIEWS = [
     { view: 'timeline', key: '7', g: 't', label: 'Tijdlijn' },
     { view: 'recovery', key: '8', g: 'r', label: 'Herstelcentrum' },
     { view: 'settings', key: '9', g: 'i', label: 'Instellingen' },
+    // Meer dan negen onderdelen: de rest alleen met g + letter
+    { view: 'albums', key: null, g: 'a', label: 'Albums' },
 ];
 
 const SHORTCUT_GROUPS = [
@@ -36,7 +38,7 @@ const SHORTCUT_GROUPS = [
         title: 'Overal',
         wide: true,     // over de hele breedte, in twee kolommen: de andere groepen staan eronder
         keys: [
-            [['1', '…', '9'], 'Naar een onderdeel (volgorde van het menu)'],
+            [['1', '…', '9'], 'Naar een onderdeel: ' + SHORTCUT_VIEWS.filter(v => v.key).map(v => `${v.key} ${v.label}`).join(', ')],
             [['g', 'letter'], 'Naar een onderdeel: ' + SHORTCUT_VIEWS.map(v => `${v.g} ${v.label}`).join(', ')],
             [['/'], 'Naar het zoekveld (zoekt in de geopende map)'],
             [['t'], 'Thema wisselen: Auto, Licht, Donker'],
@@ -48,7 +50,7 @@ const SHORTCUT_GROUPS = [
         ],
     },
     {
-        title: 'Bestanden en Tijdlijn',
+        title: 'Bestanden, Tijdlijn en Albums',
         keys: [
             [['←', '→', '↑', '↓'], 'Naar de volgende kaart'],
             [['Home', 'End'], 'Eerste of laatste kaart'],

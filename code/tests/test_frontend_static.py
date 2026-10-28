@@ -71,9 +71,12 @@ def test_every_main_view_has_a_section_a_menu_entry_and_a_shortcut():
     sources = _sources()
     views = re.search(r"const MAIN_VIEWS = \[([^\]]+)\]", sources["app.js"]).group(1)
     views = re.findall(r"'(\w+)'", views)
-    shortcuts = re.findall(r"\{ view: '(\w+)', key: '(\d)', g: '(\w)'", sources["shortcuts.js"])
+    shortcuts = re.findall(r"\{ view: '(\w+)', key: (?:'(\d)'|null), g: '(\w)'", sources["shortcuts.js"])
     assert [v for v, _, _ in shortcuts] == views
-    assert [k for _, k, _ in shortcuts] == [str(i) for i in range(1, len(views) + 1)]
+    # The first nine have a digit, in order; a view after those only has g + letter
+    digits = [k for _, k, _ in shortcuts]
+    assert digits[:9] == [str(i) for i in range(1, min(len(views), 9) + 1)]
+    assert all(k == "" for k in digits[9:]), "only nine views can have a digit"
     assert len({g for _, _, g in shortcuts}) == len(views), "two views share a g + letter shortcut"
     for view in views:
         assert f'id="section-{view}"' in sources["index.html"], view
@@ -84,7 +87,7 @@ def test_new_scripts_load_after_the_helpers_they_use():
     index = _sources()["index.html"]
     scripts = [s.split("?")[0] for s in re.findall(r'<script src="([^"]+)"', index)]
     assert scripts.index("ui.js") < scripts.index("app.js")
-    for late in ("recovery.js", "settings.js", "shortcuts.js"):
+    for late in ("recovery.js", "settings.js", "shortcuts.js", "library.js"):
         assert scripts.index(late) > scripts.index("jobs.js"), late
 
 
