@@ -445,6 +445,115 @@ def test_rows_of_removed_files_are_cleaned_up_with_the_index(client, vault, conf
     assert not _with(_series(client), Path(STRAND).name)
 
 
+# ---------- keep the best: move and undo ----------
+
+def _fingerprint(path: Path):
+    st = os.stat(path)
+    return _sha(path), st.st_mtime_ns, st.st_birthtime, st.st_size
+
+
+def test_keeping_the_best_moves_the_rest_as_one_undo_and_undo_restores_exactly(client, vault, config):
+    _index(client)
+    _run(client)
+    burst = _with(_series(client), "burst_00.jpg")[0]
+    by_name = {m["name"]: m for m in burst["members"]}
+    keep = [by_name["burst_02.jpg"]["id"], by_name["burst_04.jpg"]["id"]]
+    members = [m["id"] for m in burst["members"]]
+    before = {rel: _fingerprint(vault / rel) for rel in BURST}
+
+    r = client.post("/api/series/keep", json={"members": members, "keep": keep})
+    assert r.status_code == 200, r.text
+    result = r.json()
+    assert len(result["moved"]) == 3 and result["failed"] == []
+    holding = config.DUPLICATES_FOLDER / "near-duplicates"
+    assert result["destination"] == str(holding)
+    for item in result["moved"]:
+        src, dst = Path(item["path"]), Path(item["dst"])
+        assert not src.exists()
+        rel = src.relative_to(config.RAW_FOLDER)
+        assert dst.resolve() == (holding / rel).resolve()
+        assert _fingerprint(dst) == before[str(Path("RAW") / rel)]
+    for name in ("burst_02.jpg", "burst_04.jpg"):
+        assert (vault / "RAW/2022/bursts" / name).exists()
+
+    # The two that stay are not offered as a series again; the strand series is still there
+    listed = _series(client)
+    assert not _with(listed, "burst_00.jpg") and not _with(listed, "burst_02.jpg")
+    assert _with(listed, "strand klein.jpg")
+
+    # One entry in the recovery center, with every file
+    entries = client.get("/api/recovery").json()["entries"]
+    entry = next(e for e in entries if e["source"] == "near_dup")
+    assert entry["label"] == "Beste uit reeks" and entry["file_count"] == 3 and entry["restorable"] == 3
+    assert entry["undo"]["url"] == "/api/recovery/undo"
+    r = client.post(entry["undo"]["url"], json=entry["undo"]["body"])
+    assert r.status_code == 200 and r.json()["restored"] == 3, r.text
+    for rel, fingerprint in before.items():
+        assert _fingerprint(vault / rel) == fingerprint, rel
+    assert not any(holding.rglob("*.jpg"))
+    # Back in the index with the same ids, so the whole series is offered again
+    again = _with(_series(client), "burst_00.jpg")
+    assert len(again) == 1 and sorted(m["id"] for m in again[0]["members"]) == sorted(members)
+
+
+def test_keeping_the_small_copy_takes_the_exact_copies_of_the_original_along(client, vault, config):
+    _index(client)
+    _run(client)
+    series = _with(_series(client), "strand klein.jpg")[0]
+    klein = next(m for m in series["members"] if m["name"] == "strand klein.jpg")
+    original = next(m for m in series["members"] if m is not klein)
+    assert original["best"] and series["best"] == original["id"]     # bigger: the suggestion
+    r = client.post("/api/series/keep", json={"members": [m["id"] for m in series["members"]], "keep": [klein["id"]]})
+    assert r.status_code == 200, r.text
+    moved = r.json()["moved"]
+    assert len(moved) == 1 + len(original["copies"]) and sum(1 for m in moved if m["copy"]) == len(original["copies"])
+    assert (vault / KLEIN).exists()
+    assert not _with(_series(client, "ruim"), "strand klein.jpg")
+    entry = next(e for e in client.get("/api/recovery").json()["entries"] if e["source"] == "near_dup")
+    assert client.post("/api/recovery/undo", json=entry["undo"]["body"]).json()["restored"] == len(moved)
+    for item in moved:
+        assert Path(item["path"]).exists()
+
+
+def test_keep_requests_are_checked_before_anything_moves(client, vault, config):
+    _index(client)
+    _run(client)
+    burst = _with(_series(client), "burst_00.jpg")[0]
+    strand = _with(_series(client), "strand klein.jpg")[0]
+    ids = [m["id"] for m in burst["members"]]
+
+    def keep(members, kept):
+        return client.post("/api/series/keep", json={"members": members, "keep": kept})
+
+    assert keep(ids, []).status_code == 400
+    assert keep(ids, [strand["members"][0]["id"]]).status_code == 400              # not in the series
+    assert keep(ids[:1], ids[:1]).status_code == 400                               # one photo is no series
+    assert keep(ids + [strand["members"][0]["id"]], ids[:1]).status_code == 409    # two series in one
+    assert keep(["1", 2], [2]).status_code == 400
+    assert keep([True, 2], [2]).status_code == 400
+    assert client.post("/api/series/keep", json=[1, 2]).status_code == 400
+
+    # The photo that would stay was changed since the comparison: nothing moves
+    stays = vault / BURST[0]
+    stays.write_bytes(stays.read_bytes() + b"\0")
+    r = keep(ids, [burst["members"][0]["id"]])
+    assert r.status_code == 409, r.text
+    assert all((vault / rel).exists() for rel in BURST)
+    assert not any(e["source"] == "near_dup" for e in client.get("/api/recovery").json()["entries"])
+
+    # A photo that would move was changed: it stays and is reported; the rest moves
+    changed = vault / BURST[4]
+    changed.write_bytes(changed.read_bytes() + b"\0")
+    r = keep(ids, [burst["members"][1]["id"]])
+    assert r.status_code == 200, r.text
+    failed = r.json()["failed"]
+    # (burst_00, changed above, would move now: it stays too)
+    assert sorted(Path(f["path"]).name for f in failed) == ["burst_00.jpg", "burst_04.jpg"]
+    assert all("Veranderd" in f["reason"] for f in failed)
+    assert changed.exists() and stays.exists()
+    assert len(r.json()["moved"]) == 2
+
+
 def test_keep_all_hides_a_series_until_it_changes_and_reset_shows_it_again(client, vault):
     _index(client)
     _run(client)

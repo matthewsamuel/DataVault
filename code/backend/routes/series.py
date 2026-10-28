@@ -3,6 +3,8 @@ DataVault Dashboard - 'Beste uit reeks': near-duplicates and bursts (backend/nea
 
 GET  /api/series/status          how many photos are compared, and the 'phash' job if it runs
 GET  /api/series                 one page of series (strictness, sort, offset, limit)
+POST /api/series/keep            keep some photos of a series, move the others to
+                                 RAW_DUPLICATES/near-duplicates (one recovery action)
 POST /api/series/keep-all        keep every photo of a series: it is not shown again
 POST /api/series/reviews/reset   show the series decided on with keep-all again
 
@@ -13,7 +15,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from backend import media_index, near_dups
+from backend import media_index, near_dups, recovery
 from backend.config import Config
 from backend.jobs import ACTIVE
 
@@ -24,6 +26,8 @@ db = None
 manager = None
 
 MAX_PAGE = 50
+
+recovery.register_kind(near_dups.RECOVERY_KIND, "Beste uit reeks")
 
 
 def init_router(cfg: Config, database, job_manager=None):
@@ -98,6 +102,20 @@ def series_page(
         raise HTTPException(status_code=400, detail="Sorteer op size of recent")
     limit = max(1, min(limit, MAX_PAGE))
     return {"ready": media_index.usable(db), **near_dups.page(db, strictness, sort, offset, limit)}
+
+
+@router.post("/keep")
+def keep(body: Any = Body(...)) -> Dict[str, Any]:
+    """
+    {members: [ids], keep: [ids]}: keep these photos of the series, move the others (and
+    their exact copies) to RAW_DUPLICATES/near-duplicates as one recovery action.
+    Answers {action_id, moved, failed, kept, destination}.
+    """
+    members, kept = _ids(body, "members"), _ids(body, "keep")
+    try:
+        return near_dups.keep_best(db, config, members, kept)
+    except near_dups.KeepError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
 
 
 @router.post("/keep-all")
