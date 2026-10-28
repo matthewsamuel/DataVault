@@ -6916,6 +6916,13 @@ button.otd-settings-icon:hover {
     min-width: 0;
 }
 
+/* Een pad als label (displayPath in app.js): mono, op één regel, desnoods met '…' */
+.path-label {
+    font-family: var(--font-mono);
+    letter-spacing: normal;
+    overflow-wrap: anywhere;
+}
+
 .keurer-folder-path {
     font-size: var(--fs-sm);
     font-weight: var(--fw-medium);

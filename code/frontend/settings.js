@@ -210,12 +210,15 @@ registerSettingsSection({
     description: 'DataVault draait helemaal op deze Mac: geen cloud, geen tracking.',
     render(body) {
         const archive = createEl('span', { text: 'Laden…' });
+        const archivePathEl = createEl('span', { class: 'path-label' });
         const database = createEl('span', { text: '…' });
-        body.append(settingsRow('Archief', archive), settingsRow('Database', database));
+        body.append(settingsRow('Archief', archivePathEl, archive), settingsRow('Database', database));
         fetch(`${API_BASE}/api/health`, { cache: 'no-store' })
             .then(res => res.json())
             .then(health => {
-                archive.textContent = `${health.vault_path}${health.vault_available ? '' : ' (niet bereikbaar)'}`;
+                // Hier het volledige pad op de schijf: dit is wáár het archief staat
+                archivePathEl.textContent = health.vault_path || '';
+                archive.textContent = health.vault_available ? '' : ' (niet bereikbaar)';
                 database.textContent = health.database_ready ? 'Klaar' : 'Nog niet geopend';
             })
             .catch(() => { archive.textContent = 'Server niet bereikbaar'; database.textContent = '—'; });

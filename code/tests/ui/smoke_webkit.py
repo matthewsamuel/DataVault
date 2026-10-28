@@ -159,6 +159,13 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             if superseded != ["Archief", "", 0] or "RAW" not in grid_folders():
                 problems.append(f"files: a folder that finished loading after 'Archief' took the breadcrumb or tree back ({superseded})")
 
+            # One way to show a path everywhere (Keurer, Herstelcentrum): from the archive, long
+            # paths shortened in the middle
+            labels = page.evaluate(f"""[displayPath({json.dumps(str(vault))}), displayPath({json.dumps(str(vault / 'RAW' / '2019'))}),
+                displayPath({json.dumps(str(vault / 'RAW' / 'a' / 'b' / 'c' / 'een heel lange mapnaam' / 'nog een lange map'))}, 40)]""")
+            if labels[:2] != ["Archief", "RAW/2019"] or not (labels[2].startswith("RAW/…/") and len(labels[2]) <= 40):
+                problems.append(f"files: displayPath gives {labels}")
+
             # Files: a folder with a subfolder, open a file, browse, move dialog, close
             folder = str(vault / "RAW" / "misc")
             step("viewer: open folder", lambda: (page.click(".nav-tab[data-view='viewer']"),
@@ -436,6 +443,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 page.wait_for_selector("#keurer-card-area .keurer-state-card h3", timeout=10000)), 0.6)
             title = page.text_content("#keurer-card-area .keurer-state-card h3")
             expect(title == "Geen foto's of video's in deze map", f"keurer: a folder without photos says {title!r}")
+            chip = page.text_content("#keurer-folder-display")
+            expect(chip == "RAW", f"keurer: the folder chip shows {chip!r}, not the path from the archive")
 
             # Home: the 'op deze dag' photo opens with the keyboard
             step("home: 'op deze dag' photo", lambda: (

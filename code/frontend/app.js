@@ -563,6 +563,39 @@ function archivePath(path) {
     return path.slice(root.path.lastIndexOf('/') + 1);
 }
 
+// Hét padlabel van de app: vanaf het archief ('RAW/2019/zomer', 'TRASH/…', 'Archief' voor de
+// archiefmap zelf), en een lang pad ingekort in het midden ('RAW/…/zomer/dag 2'), zodat begin
+// en eind herkenbaar blijven. Toon het in mono (class path-label); het hele pad hoort in title.
+function displayPath(path, max = 48) {
+    const text = String(path || '');
+    const first = (folderTree || [])[0];
+    const vault = first ? first.path.slice(0, first.path.lastIndexOf('/')) : '';
+    let rel;
+    if (vault && text === vault) return 'Archief';
+    if (vault && text.startsWith(vault + '/')) rel = text.slice(vault.length + 1);
+    else if (!vault) {
+        // De mappen zijn nog niet geladen: dan in elk geval het eind van het pad
+        const parts = text.split('/').filter(Boolean);
+        rel = parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : parts.join('/');
+    } else rel = text;
+    return middleEllipsis(rel, max);
+}
+
+// Midden eruit: de bovenste map, '…' en zoveel mogelijk mappen van het eind
+function middleEllipsis(rel, max) {
+    if (rel.length <= max) return rel;
+    const parts = rel.split('/');
+    const head = parts[0];
+    let tail = parts[parts.length - 1];
+    for (let i = parts.length - 2; i > 0; i--) {
+        const next = `${parts[i]}/${tail}`;
+        if (head.length + 3 + next.length > max) break;
+        tail = next;
+    }
+    const out = parts.length > 1 ? `${head}/…/${tail}` : tail;
+    return out.length <= max ? out : `${out.slice(0, Math.ceil(max / 2) - 1)}…${out.slice(-Math.floor(max / 2))}`;
+}
+
 // Tekstknopen met een afbreekpunt na elke '/': een lang pad breekt tussen mappen, niet midden
 // in een naam
 function pathNodes(text) {

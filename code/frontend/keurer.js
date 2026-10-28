@@ -1157,14 +1157,17 @@ function keurerConfirmFolderSelection() {
 // De gekozen map in de kop, en de knop ernaast: 'Map kiezen' zolang er nog geen is
 function keurerShowFolder() {
     const display = document.getElementById('keurer-folder-display');
-    if (display) display.textContent = keurerFolder ? keurerShortenPath(keurerFolder) : 'Geen map gekozen';
+    if (display) {
+        display.textContent = keurerFolder ? keurerShortenPath(keurerFolder) : 'Geen map gekozen';
+        display.title = keurerFolder || '';
+        display.classList.toggle('path-label', !!keurerFolder);
+    }
     const label = document.getElementById('keurer-folder-button-label');
     if (label) label.textContent = keurerFolder ? 'Andere map' : 'Map kiezen';
 }
 
+// Paden zoals overal in de app: vanaf het archief, lang ingekort in het midden (displayPath)
 function keurerShortenPath(p) {
-    const parts = p.split('/').filter(Boolean);
-    if (parts.length <= 2) return '/' + parts.join('/');
-    return `.../${parts.slice(-2).join('/')}`;
+    return displayPath(p, 40);
 }
 

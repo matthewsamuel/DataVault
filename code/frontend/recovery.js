@@ -88,10 +88,10 @@ function recoveryWhen(seconds) {
     return date.toLocaleString('nl-NL', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-// Het laatste deel van een map: genoeg om te herkennen, het hele pad staat in de tooltip
+// Een map zoals overal in de app: vanaf het archief, lang ingekort in het midden (displayPath);
+// het hele pad staat in de tooltip
 function recoveryShortDir(dir) {
-    const parts = (dir || '').split('/').filter(Boolean);
-    return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : `/${parts.join('/')}`;
+    return displayPath(dir || '', 40);
 }
 
 // ... en de map waar een bestand in staat
@@ -157,7 +157,8 @@ function recoveryEntryCard(entry) {
                 createEl('div', { class: 'recovery-entry-meta' },
                     createEl('time', { text: recoveryWhen(entry.created_at),
                         datetime: entry.created_at ? new Date(entry.created_at * 1000).toISOString() : undefined }),
-                    entry.folder ? createEl('span', { text: ` · uit ${recoveryShortDir(entry.folder)}`, title: entry.folder }) : null)),
+                    entry.folder ? createEl('span', {}, ' · uit ',
+                        createEl('span', { class: 'path-label', text: recoveryShortDir(entry.folder), title: entry.folder })) : null)),
             button),
         status,
         fileBlock,
