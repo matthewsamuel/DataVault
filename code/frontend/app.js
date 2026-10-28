@@ -186,20 +186,14 @@ async function loadShows() {
     }
 
     // Normale laadprocedure
-    container.innerHTML = '<div class="loading-spinner"></div>';
+    container.replaceChildren(skeletonCards(8, 'skeleton-grid-shows'));
     try {
         const stories = await fetchJSON(url);
         _prefetchCache[url] = Promise.resolve(stories);
         renderShows(stories);
     } catch (e) {
         console.error('Error loading shows:', e);
-        container.innerHTML = html`
-            <div class="error-state">
-                <i class="fas fa-exclamation-triangle"></i>
-                <p>Shows laden mislukt: ${e.message}</p>
-                <button class="btn btn-secondary" onclick="loadShows()">Opnieuw proberen</button>
-            </div>
-        `;
+        container.replaceChildren(errorState('Shows laden mislukt', e, loadShows));
     }
 }
 
@@ -228,13 +222,11 @@ function renderShows(data) {
     const { featured, shows } = data || {};
 
     if (!data || (!featured && (!shows || shows.length === 0))) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-folder-open"></i>
-                <p>No folder shows found.</p>
-                <button class="btn btn-primary" onclick="openSettingsModal()">Manage Sources</button>
-            </div>
-        `;
+        container.replaceChildren(emptyState({
+            icon: 'fa-folder-open', title: 'Nog geen shows',
+            text: 'Shows komen uit de mappen in library. Zet er een paar aan bij Bronnen beheren.',
+            action: { label: 'Bronnen beheren', onClick: openSettingsModal, primary: true },
+        }));
         return;
     }
 
@@ -461,15 +453,32 @@ function updateBreadcrumb(path) {
 
 // ==================== MEDIA LOADING ====================
 
+let mediaLoadSeq = 0;   // alleen het antwoord van de laatst gekozen map telt
+
 async function loadMedia(folder) {
+    const seq = ++mediaLoadSeq;
+    const grid = document.getElementById('media-grid');
+    // Plaatshouders als het even duurt (een grote map, een trage schijf), niet bij elke klik
+    const slow = setTimeout(() => {
+        if (seq === mediaLoadSeq) grid.replaceChildren(skeletonCards(12));
+    }, 150);
     try {
         const data = await fetchJSON(`${API_BASE}/api/media?folder=${encodeURIComponent(folder)}`);
+        if (seq !== mediaLoadSeq) return;
         currentMedia = data.files;
         filteredMedia = [...currentMedia];
+        gridFocusIndex = 0;
 
         applySortAndRender();
     } catch (error) {
+        if (seq !== mediaLoadSeq) return;
+        currentMedia = [];
+        filteredMedia = [];
+        gridItems = [];
+        grid.replaceChildren(errorState('Deze map kon niet geladen worden', error, () => loadMedia(folder)));
         toastFetchError('Bestanden laden mislukt', error);
+    } finally {
+        clearTimeout(slow);
     }
 }
 
@@ -539,7 +548,12 @@ function renderMediaGrid(keepCount = false) {
 
     if (filteredMedia.length === 0) {
         gridItems = [];
-        grid.innerHTML = '<p class="text-center">No media files found.</p>';
+        const searching = document.getElementById('global-search').value.trim();
+        grid.replaceChildren(searching
+            ? emptyState({ icon: 'fa-search', title: 'Niets gevonden', text: `Geen bestand in deze map heeft "${searching}" in de naam.` })
+            : currentFolder
+                ? emptyState({ icon: 'fa-folder-open', title: 'Deze map is leeg', text: 'Er staan hier geen bestanden of submappen.' })
+                : emptyState({ icon: 'fa-folder-tree', title: 'Kies een map', text: 'Kies links een map om de bestanden te zien.' }));
         return;
     }
 
@@ -725,12 +739,15 @@ function createMediaCard(file) {
     return card;
 }
 
+// Grootte leesbaar en met een Nederlandse komma: 812 B, 4,7 KB, 38 MB, 1,25 GB. Nooit "0,00 GB"
+// voor iets dat wel ruimte inneemt: de eenheid schaalt mee.
 function formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 10) / 10 + ' ' + sizes[i];
+    if (typeof bytes !== 'number' || !isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+    const value = bytes / Math.pow(1024, i);
+    const digits = i === 0 ? 0 : value < 10 ? (i >= 3 ? 2 : 1) : value < 100 ? 1 : 0;
+    return `${value.toLocaleString('nl-NL', { maximumFractionDigits: digits })} ${units[i]}`;
 }
 
 // ==================== SEARCH/FILTER ====================
@@ -1410,31 +1427,39 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== TOAST NOTIFICATIONS ====================
 
+// Hoe lang een melding blijft staan: een fout of waarschuwing lang genoeg om te lezen
+const TOAST_MS = { error: 8000, warning: 6000, success: 3500, info: 3500 };
+
 function showToast(title, message, type = 'info') {
     const container = document.getElementById('toast-container');
+    const duration = TOAST_MS[type] || TOAST_MS.info;
     // Dezelfde melding nog in beeld (bijv. tien mislukte miniaturen): niet opstapelen, alleen langer tonen
     const same = [...container.children].find(t => t.dataset.title === String(title) && t.dataset.message === String(message));
     if (same) {
         same.style.opacity = '1';
         clearTimeout(same._hideTimer);
-        same._hideTimer = setTimeout(() => hideToast(same), 3000);
+        same._hideTimer = setTimeout(() => hideToast(same), duration);
         return;
     }
     const toast = document.createElement('div');
     toast.className = `toast ${type} toast-${type}`;
     toast.dataset.title = String(title);
     toast.dataset.message = String(message);
+    // Een fout wordt meteen voorgelezen; de rest zegt de container (aria-live polite)
+    if (type === 'error') toast.setAttribute('role', 'alert');
     // Titel en melding zijn tekst: ze bevatten vaak bestandsnamen of een foutmelding van de server
     toast.append(
         createEl('div', { class: 'toast-header' },
             createEl('strong', { text: title }),
-            createEl('button', { onClick: () => toast.remove() }, '\u00d7')),
+            createEl('button', { onClick: () => toast.remove(), 'aria-label': 'Melding sluiten', title: 'Sluiten' }, '\u00d7')),
         createEl('div', { class: 'toast-body', text: message }));
 
     container.appendChild(toast);
 
-    // Auto remove after 3s
-    toast._hideTimer = setTimeout(() => hideToast(toast), 3000);
+    // Met de muis erop blijft hij staan, zodat een lange melding uit te lezen is
+    toast._hideTimer = setTimeout(() => hideToast(toast), duration);
+    toast.addEventListener('mouseenter', () => { clearTimeout(toast._hideTimer); toast.style.opacity = '1'; });
+    toast.addEventListener('mouseleave', () => { toast._hideTimer = setTimeout(() => hideToast(toast), duration); });
 }
 
 function hideToast(toast) {
@@ -2077,7 +2102,7 @@ async function storageNavigateToPath(folderPath) {
         try {
             data = await fetchJSON(`${API_BASE}/api/stats/storage-breakdown-nested${params}`);
         } catch (err) {
-            list.replaceChildren(createEl('li', { text: `Fout bij laden: ${err.message}` }));
+            list.replaceChildren(errorState('Opslag laden mislukt', err, () => storageNavigateToPath(folderPath)));
             loading.style.display = 'none';
             content.style.display = 'block';
             return;
@@ -2086,8 +2111,11 @@ async function storageNavigateToPath(folderPath) {
         list.innerHTML = '';
         filesList.innerHTML = '';
 
-        const entries = Object.entries(data.breakdown || {}).sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]));
-        const total = entries.reduce((sum, [, gb]) => sum + parseFloat(gb), 0);
+        // Bytes per map (oudere servers gaven alleen GB met twee decimalen)
+        const sizes = data.sizes || Object.fromEntries(
+            Object.entries(data.breakdown || {}).map(([name, gb]) => [name, parseFloat(gb) * 2 ** 30]));
+        const entries = Object.entries(sizes).sort((a, b) => b[1] - a[1]);
+        const total = entries.reduce((sum, [, size]) => sum + size, 0);
 
         // Reset tab naar subfolders bij elke navigatie
         storageShowTab('subfolders');
@@ -2103,32 +2131,31 @@ async function storageNavigateToPath(folderPath) {
             summaryCard.style.display = 'block';
         }
 
-        totalDisplay.textContent = `${total.toFixed(2)} GB`;
-        if (entries.length > 0) {
-            largestDisplay.textContent = `${entries[0][0]} (${entries[0][1]} GB)`;
+        totalDisplay.textContent = formatBytes(total);
+        largestDisplay.textContent = entries.length > 0 ? `${entries[0][0]} (${formatBytes(entries[0][1])})` : '-';
+
+        if (entries.length === 0) {
+            list.replaceChildren(emptyState({ icon: 'fa-folder-open', title: 'Geen submappen',
+                text: folderPath ? 'Deze map heeft geen submappen.' : 'Het archief heeft nog geen mappen.' }));
         }
 
-        entries.forEach(([folder, gb]) => {
-            const percent = total > 0 ? (parseFloat(gb) / total * 100).toFixed(1) : 0;
-            const li = document.createElement('li');
-            li.className = 'storage-folder-item';
-            li.style.cursor = 'pointer';
-
-            const icon = getFolderIcon(folder);
+        entries.forEach(([folder, size]) => {
+            const percent = total > 0 ? (size / total * 100).toLocaleString('nl-NL', { maximumFractionDigits: 1 }) : '0';
             const newPath = folderPath ? `${folderPath}/${folder}` : folder;
-
+            const li = createEl('li', { class: 'storage-folder-item', tabindex: '0', role: 'button',
+                'aria-label': `${folder}, ${formatBytes(size)}: open`,
+                onClick: () => storageNavigateToPath(newPath),
+                onKeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); storageNavigateToPath(newPath); } } });
             li.innerHTML = html`
                 <div class="storage-folder-header">
-                    <span class="storage-folder-name"><i class="fas ${icon}"></i>${folder}</span>
-                    <span class="storage-folder-size">${gb} GB</span>
+                    <span class="storage-folder-name"><i class="fas ${getFolderIcon(folder)}"></i>${folder}</span>
+                    <span class="storage-folder-size">${formatBytes(size)}</span>
                 </div>
                 <div class="storage-progress-bar">
-                    <div class="storage-progress-fill" style="width: ${percent}%"></div>
+                    <div class="storage-progress-fill" style="width: ${total > 0 ? size / total * 100 : 0}%"></div>
                 </div>
-                <div class="storage-folder-percent">${percent}% van totale opslag</div>
+                <div class="storage-folder-percent">${percent}% van deze map</div>
             `;
-
-            li.onclick = () => storageNavigateToPath(newPath);
             list.appendChild(li);
         });
 
@@ -2151,7 +2178,7 @@ async function storageNavigateToPath(folderPath) {
                     else if (['pdf', 'doc', 'docx', 'txt'].includes(ext)) fileIcon = 'fa-file-text';
                     else if (['zip', 'rar', '7z'].includes(ext)) fileIcon = 'fa-file-archive';
 
-                    const displaySize = file.size_gb > 1 ? `${file.size_gb.toFixed(2)} GB` : `${file.size_mb.toFixed(2)} MB`;
+                    const displaySize = formatBytes(typeof file.size === 'number' ? file.size : file.size_mb * 2 ** 20);
 
                     li.innerHTML = html`
                         <div class="storage-file-header">
@@ -2171,7 +2198,7 @@ async function storageNavigateToPath(folderPath) {
     } catch (e) {
         console.error(e);
         loading.style.display = 'none';
-        list.innerHTML = '<li>Fout bij laden van storage data.</li>';
+        list.replaceChildren(errorState('Opslag laden mislukt', e, () => storageNavigateToPath(folderPath)));
         content.style.display = 'block';
     }
 }

@@ -139,8 +139,16 @@
         if (!modal || !tree) return;
 
         tree.innerHTML = '';
-        renderPickerTree(tree, tlFolderTree, 0);
+        if (tlFolderTree.length === 0) {
+            tree.appendChild(emptyState({ icon: 'fa-folder-open', title: 'Geen mappen gevonden',
+                text: tlFoldersFailed ? 'De mappen konden niet geladen worden. Is de schijf aangesloten?' : 'Het archief heeft nog geen mappen met foto\'s.' }));
+        } else {
+            renderPickerTree(tree, tlFolderTree, 0);
+        }
         modal.classList.add('active');
+        // De eerste map krijgt de focus: pijltjes en spatie werken meteen
+        const first = tree.querySelector('.tl-picker-row');
+        if (first) setTimeout(() => first.focus(), 0);
     };
 
     window.timelineCloseFolderPicker = function () {
@@ -275,12 +283,7 @@
         // Show loading
         if (contentEl) {
             contentEl.style.height = 'auto';
-            contentEl.innerHTML = `
-                <div class="tl-loading-state">
-                    <div class="tl-loading-spinner"></div>
-                    <p>Scanning folders…</p>
-                </div>
-            `;
+            contentEl.replaceChildren(skeletonCards(15, 'tl-skeleton'));
         }
 
         try {
@@ -332,7 +335,7 @@
         } catch (e) {
             console.error('Timeline scan error:', e);
             tlScanFailed = true;
-            renderEmptyState(`Scannen mislukt: ${e.message}`);
+            renderEmptyState(`Tijdlijn laden mislukt: ${e.message}`);
         }
 
         tlScanning = false;
@@ -907,16 +910,15 @@
 
         if (contentEl) {
             contentEl.style.height = 'auto';
-            contentEl.innerHTML = html`
-                <div class="tl-empty-state">
-                    <div class="tl-empty-icon">📷</div>
-                    <h3>${message || 'Select folders to explore your photo timeline'}</h3>
-                    <p>Choose one or more folders from your vault to see all photos organized chronologically.</p>
-                    <button class="btn btn-primary" onclick="timelineOpenFolderPicker()">
-                        <i class="fas fa-folder-plus"></i> Select Folders
-                    </button>
-                </div>
-            `;
+            const failed = message && tlScanFailed;
+            contentEl.replaceChildren(emptyState({
+                icon: failed ? 'fa-exclamation-triangle' : 'fa-images',
+                tone: failed ? 'error' : null,
+                title: message || 'Kies mappen voor je tijdlijn',
+                text: failed ? 'Probeer het opnieuw, of kies andere mappen.'
+                    : 'Kies een of meer mappen uit het archief; alle foto\'s en video\'s komen dan op datum onder elkaar.',
+                action: { label: 'Mappen kiezen', onClick: timelineOpenFolderPicker, primary: true },
+            }));
         }
     }
 

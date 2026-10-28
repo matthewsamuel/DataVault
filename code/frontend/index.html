@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=43">
+    <link rel="stylesheet" href="style.css?v=44">
 </head>
 
 <body>
@@ -157,18 +157,19 @@
 
                     <!-- Dynamic Home Widgets -->
                     <div class="home-dynamic-widgets">
-                        <div class="dynamic-widget" id="widget-storage" style="cursor: pointer;"
-                            onclick="openStorageModal()">
-                            <h4><i class="fas fa-server"></i> Vault Storage</h4>
+                        <div class="dynamic-widget" id="widget-storage" style="cursor: pointer;" role="button" tabindex="0"
+                            aria-label="Opslag per map bekijken" onclick="openStorageModal()"
+                            onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openStorageModal(); }">
+                            <h4><i class="fas fa-server" aria-hidden="true"></i> Opslag</h4>
                             <div class="widget-content">
-                                <div class="storage-loading">Calculating space...</div>
+                                <div class="storage-loading"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
                                 <div class="storage-stats" style="display: none;">
                                     <div class="storage-bar-container">
                                         <div class="storage-bar" id="storage-bar-fill"></div>
                                     </div>
                                     <div class="storage-text">
-                                        <span id="storage-used-text">0 GB</span> / <span id="storage-total-text">0
-                                            GB</span> used (<span id="storage-free-text">0 GB</span> free)
+                                        <span id="storage-used-text">0 GB</span> van <span id="storage-total-text">0
+                                            GB</span> gebruikt (<span id="storage-free-text">0 GB</span> vrij)
                                     </div>
                                 </div>
                             </div>
@@ -773,22 +774,22 @@
     <div class="modal" id="modal-storage-details">
         <div class="modal-container storage-modal-container">
             <div class="modal-header">
-                <h2 class="modal-title"><i class="fas fa-server"></i> Storage Breakdown</h2>
-                <button class="modal-close" onclick="closeStorageModal()" aria-label="Close">×</button>
+                <h2 class="modal-title"><i class="fas fa-server" aria-hidden="true"></i> Opslag per map</h2>
+                <button class="modal-close" onclick="closeStorageModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body" style="padding: 24px; max-height: 70vh; overflow-y: auto; display: flex; flex-direction: column;">
-                <div class="storage-breakdown-loading" id="storage-breakdown-loading">
-                    <div class="message-loading">
-                        <div class="dot"></div>
-                        <div class="dot"></div>
-                        <div class="dot"></div>
+                <div class="storage-breakdown-loading" id="storage-breakdown-loading" role="status" aria-label="Laden…">
+                    <div class="skeleton-list">
+                        <div class="skeleton-row"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
+                        <div class="skeleton-row"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
+                        <div class="skeleton-row"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
                     </div>
                 </div>
                 <div class="storage-breakdown-content" id="storage-breakdown-content" style="display: none;">
                     <!-- Breadcrumb Navigation -->
                     <div class="storage-breadcrumb" id="storage-breadcrumb" style="display: none; margin-bottom: 16px;">
                         <button class="storage-breadcrumb-btn" onclick="storageNavigateToRoot()" style="margin-right: 8px;">
-                            <i class="fas fa-home"></i> Root
+                            <i class="fas fa-home" aria-hidden="true"></i> Archief
                         </button>
                         <span id="storage-breadcrumb-path" style="color: var(--text-secondary); font-size: 0.85rem;"></span>
                     </div>
@@ -797,11 +798,11 @@
                     <div class="storage-summary-card" id="storage-summary" style="display: none; margin-bottom: 20px; padding: 16px; background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.1) 0%, rgba(var(--accent-rgb), 0.05) 100%); border: 1px solid var(--accent); border-radius: 8px;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <div>
-                                <div style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px;">Total Storage</div>
+                                <div style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px;">Totaal</div>
                                 <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent);" id="storage-total-display">0 GB</div>
                             </div>
                             <div style="text-align: right;">
-                                <div style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px;">Largest Folder</div>
+                                <div style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px;">Grootste map</div>
                                 <div style="font-size: 1rem; font-weight: 600; color: var(--text-primary);" id="storage-largest-display">-</div>
                             </div>
                         </div>
@@ -810,10 +811,10 @@
                     <!-- Tabs for switching between views -->
                     <div class="storage-tabs" id="storage-tabs" style="display: none; margin-bottom: 16px;">
                         <button class="storage-tab-btn active" data-tab="subfolders" onclick="storageShowTab('subfolders')">
-                            <i class="fas fa-folder"></i> Subfolders
+                            <i class="fas fa-folder" aria-hidden="true"></i> Submappen
                         </button>
                         <button class="storage-tab-btn" data-tab="largest-files" onclick="storageShowTab('largest-files')">
-                            <i class="fas fa-file"></i> Largest Files
+                            <i class="fas fa-file" aria-hidden="true"></i> Grootste bestanden
                         </button>
                     </div>
 
@@ -833,7 +834,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeStorageModal()">Close</button>
+                <button class="btn btn-secondary" onclick="closeStorageModal()">Sluiten</button>
             </div>
         </div>
     </div>
@@ -1024,7 +1025,7 @@
 
     <div class="job-dock" id="job-dock" role="region" aria-label="Achtergrondtaken" hidden></div>
 
-    <div class="toast-container" id="toast-container">
+    <div class="toast-container" id="toast-container" role="status" aria-live="polite">
         <!-- Toasts will be added here dynamically -->
     </div>
 
@@ -1060,9 +1061,10 @@
     <!-- api.js eerst: zet het sessietoken op elk wijzigend verzoek -->
     <script src="api.js?v=3"></script>
     <script src="dom.js?v=1"></script>
+    <script src="ui.js?v=1"></script>
     <script src="folder-tree.js?v=3"></script>
-    <script src="app.js?v=52"></script>
-    <script src="jobs.js?v=4"></script>
+    <script src="app.js?v=53"></script>
+    <script src="jobs.js?v=5"></script>
     <script src="duplicates.js?v=21"></script>
     <script src="keurer.js?v=14"></script>
     <script src="timeline.js?v=10"></script>
