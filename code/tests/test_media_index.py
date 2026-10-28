@@ -653,3 +653,41 @@ def test_library_media_route(client, config):
     assert client.get("/api/library/media", params={"orientation": "nope"}).status_code == 400
     assert client.get("/api/library/media", params={"date_from": "14-07-2019"}).status_code == 400
     assert client.get("/api/library/media", params={"kind": "doc"}).status_code == 400
+
+
+def test_an_automatic_pass_is_never_queued_twice_and_replaces_an_interrupted_one(client, config):
+    from backend import media_index
+    manager = _manager()
+    first = client.post("/api/jobs", json={"type": "index", "params": {"auto": True}}).json()["job"]
+    manager.wait(first["id"], timeout=60)
+    # A restart left an automatic pass 'interrupted'
+    with _sqlite3.connect(str(config.DB_PATH)) as conn:
+        conn.execute("UPDATE jobs SET status = 'interrupted' WHERE id = ?", (first["id"],))
+    auto = media_index.AutoIndexer(manager)
+    assert auto.start_pass() is True
+    jobs = manager.list(limit=10, job_type="index")
+    assert manager.get(first["id"])["status"] == "cancelled"
+    newest = jobs[0]
+    assert newest["id"] != first["id"] and newest["params"] == {"full": False, "auto": True}
+    # While that one is active, no second one
+    if newest["status"] in ("queued", "running"):
+        assert auto.start_pass() is False
+    manager.wait(newest["id"], timeout=60)
+    # A manual pass that was paused is left alone (the user resumes it)
+    paused = client.post("/api/jobs", json={"type": "index", "params": {"full": True}}).json()["job"]
+    manager.wait(paused["id"], timeout=60)
+    with _sqlite3.connect(str(config.DB_PATH)) as conn:
+        conn.execute("UPDATE jobs SET status = 'interrupted' WHERE id = ?", (paused["id"],))
+    assert auto.start_pass() is True
+    assert manager.get(paused["id"])["status"] == "interrupted"
+
+
+def test_a_pass_that_changes_nothing_keeps_the_timeline_version(client, config):
+    _index(client)
+    before = _scan(client, config.VAULT_ROOT, limit=5)["version"]
+    _index(client)
+    _index(client, full=True)
+    assert _scan(client, config.VAULT_ROOT, limit=5)["version"] == before
+    _photo(config.VAULT_ROOT / "library/Familie/extra.jpg", (5, 5, 5), "x", "2012:12:12 12:00:00")
+    _index(client)
+    assert _scan(client, config.VAULT_ROOT, limit=5)["version"] != before

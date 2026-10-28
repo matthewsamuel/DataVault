@@ -388,8 +388,8 @@ class _Pass:
                 "last_scanned = excluded.last_scanned",
                 [(path, parent, mtime_ns, now) for path, parent, mtime_ns in self.pending_folders])
         self.counts["missing"] += len(self.pending_missing)
-        if self.pending_missing or self.pending_folders or reads:
-            _bump()
+        if self.pending_missing or self.pending_present or reads:
+            _bump()   # rows changed (a folder row alone changes no answer)
         self.pending_missing, self.pending_present, self.pending_seen, self.pending_folders = [], [], [], []
         self.last_flush = time.monotonic()
 
@@ -441,7 +441,6 @@ def run_pass(ctx, config, db, full: bool, errors, read_errors, vault_unavailable
     if full:
         info["last_full_at"] = now
     db.set_setting(STATE_KEY, info)
-    _bump()
     counts = run.counts
     return {
         "full": full,
