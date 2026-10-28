@@ -21,6 +21,14 @@
     --danger: #ff0055;
     --warning: #ffaa00;
     --success: #00ff41;
+    --text-tertiary: #555555;
+    --border: #222222;
+
+    /* Namen die oudere regels gebruiken: verwijzen naar dezelfde kleuren */
+    --primary: var(--accent);
+    --color-primary: var(--accent);
+    --border-primary: var(--border-color);
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
 
     /* Spacing - Tighter for density */
     --space-xs: 2px;
@@ -63,6 +71,31 @@
     --border: #d0d0d0;
 }
 
+/* Auto (geen data-theme): volgt de systeeminstelling, ook live als die wisselt */
+@media (prefers-color-scheme: light) {
+    :root:not([data-theme]) {
+        /* Light Colors */
+        --bg-primary: #ffffff;
+        --bg-secondary: #f5f5f5;
+        --bg-tertiary: #e8e8e8;
+        --text-primary: #000000;
+        --text-secondary: #666666;
+        --text-tertiary: #999999;
+        --border-color: #d0d0d0;
+        --accent: #00aa2b;
+        /* Darker green for better contrast */
+        --accent-rgb: 0, 170, 43;
+        --accent-dim: #008822;
+        --accent-glow: rgba(0, 170, 43, 0.2);
+        --danger: #cc0044;
+        --warning: #cc8800;
+        --success: #00aa2b;
+
+        /* Border adjustments */
+        --border: #d0d0d0;
+    }
+}
+
 /* ==================== DARK THEME (explicit) ==================== */
 
 [data-theme="dark"] {
@@ -80,6 +113,7 @@
     --danger: #ff0055;
     --warning: #ffaa00;
     --success: #00ff41;
+    --text-tertiary: #555555;
 
     --border: #222222;
 }

@@ -441,6 +441,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   niet te lezen is laat niet meer alle volgende shows stilletjes verdwijnen.
 
 ### Thema en zuinigheid
+- Het thema "Auto" volgt nu echt de systeeminstelling van macOS (licht of donker), ook als die
+  wisselt terwijl de app open is. Voorheen was Auto altijd donker. Een paar kleuren, randen en
+  het lettertype die naar niet-bestaande instellingen verwezen, zijn gerepareerd.
 - De bewegende achtergrond (zijbalk en Spotify) draait alleen nog als hij in beeld is, staat
   stil als "Beperk beweging" in de systeeminstellingen aan staat, en tekent hoogstens zo'n 30
   beelden per seconde met veel minder lijnen. Voorheen liep hij altijd door, ook in een ander
