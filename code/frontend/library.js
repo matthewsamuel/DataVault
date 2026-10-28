@@ -309,7 +309,8 @@
                 title: 'Foto\'s en video\'s van vandaag in eerdere jaren',
             }));
         if (state.albumsError) {
-            list.replaceChildren(createEl('p', { class: 'albums-side-note', text: 'Albums laden mislukt.' }),
+            const gone = state.albumsError.code === 'vault_unavailable';
+            list.replaceChildren(createEl('p', { class: 'albums-side-note', text: gone ? 'Archief niet bereikbaar.' : 'Albums laden mislukt.' }),
                 createEl('button', { type: 'button', class: 'link-button albums-side-link', text: 'Opnieuw proberen', onClick: loadAlbums }));
             return;
         }
@@ -748,7 +749,7 @@
                 state.pages.delete(page);
                 if (page === 0) {
                     $('albums-loading').hidden = true;
-                    $('albums-state').replaceChildren(errorState('Bibliotheek laden mislukt', e, () => reload()));
+                    $('albums-state').replaceChildren(errorState(failTitle(e, 'Bibliotheek laden mislukt'), e, () => reload()));
                 } else {
                     toastFetchError('Laden mislukt', e);
                 }
@@ -770,6 +771,15 @@
                 icon: 'fa-hourglass-half', title: 'De bibliotheek wordt nog opgebouwd',
                 text: 'De app leest het archief één keer helemaal in. Dit vult zich vanzelf zodra dat klaar is.',
                 action: { label: 'Opnieuw kijken', onClick: () => reload() },
+            }));
+        } else if (currentAlbum() && !albumChanged()) {
+            const album = currentAlbum();
+            const rated = state.spec.min_rating !== undefined;
+            box.replaceChildren(emptyState({
+                icon: album.icon || 'fa-images', title: 'Dit album is nog leeg',
+                text: rated ? 'Geef in een Shows-diavoorstelling een hartje aan je mooiste foto\'s: wat hoog scoort, komt hier vanzelf bij.'
+                    : 'Nog niets in het archief past bij dit album. Het vult zich vanzelf zodra dat wel zo is.',
+                action: rated ? { label: 'Naar Shows', onClick: () => switchMainView('shows') } : null,
             }));
         } else if (Object.keys(state.spec).length) {
             box.replaceChildren(emptyState({
@@ -1212,7 +1222,7 @@
             renderOnThisDay(data);
         } catch (e) {
             if (seq !== state.otdSeq) return;
-            groups.replaceChildren(errorState('Op deze dag laden mislukt', e, loadOnThisDay));
+            groups.replaceChildren(errorState(failTitle(e, 'Op deze dag laden mislukt'), e, loadOnThisDay));
         }
     }
 
@@ -1304,6 +1314,10 @@
     }
 
     // ── Hulpjes ──────────────────────────────────────────
+
+    function failTitle(error, title) {
+        return error && error.code === 'vault_unavailable' ? 'Archief niet bereikbaar' : title;
+    }
 
     function debounce(fn, ms) {
         let timer = null;

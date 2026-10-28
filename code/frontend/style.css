@@ -9067,6 +9067,11 @@ button.otd-settings-icon:hover {
     font-size: var(--fs-xs);
 }
 
+.albums-side-list > .albums-side-link {
+    align-self: flex-start;
+    margin-left: var(--space-sm);
+}
+
 /* ---- Hoofdvlak ---- */
 
 .albums-main {
