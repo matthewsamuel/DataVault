@@ -31,6 +31,7 @@ is the track length (Spotify gives no ms_played there) and Last.fm has none at a
 plays are 'estimated' (ms_estimated = 1), which the coverage chip says.
 """
 import bisect
+import math
 import time
 import unicodedata
 from collections import defaultdict, deque
@@ -46,6 +47,7 @@ EXPORT_SOURCES = ("export_extended", "export_account")
 MATCH_SLACK_S = 120              # API vs extended (URI) and Last.fm vs API: slack around the track length
 LASTFM_DEFAULT_MS = 210_000      # Last.fm has no duration: an estimated 3,5 minutes
 MIN_MS = 1000                    # shorter plays are glitches (the dashboard's old rule)
+MAX_MS = 24 * 3600 * 1000        # one play longer than a day is a broken row, not listening
 BATCH = 2000
 
 PLAY_COLUMNS = ("play_key", "source", "ts_ms", "start_ms", "ms_played", "ms_estimated", "content", "track", "artist",
@@ -62,6 +64,14 @@ def norm(text: Optional[str]) -> str:
 
 def _str(value) -> Optional[str]:
     return value if isinstance(value, str) and value != "" else None
+
+
+def _ms(value) -> Optional[int]:
+    """Listening time in ms, or None for anything that is not a sane number (also Infinity and NaN,
+    which Python's json accepts)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+        return None
+    return int(value) if 0 <= value <= MAX_MS else None
 
 
 def _bool(value) -> Optional[int]:
@@ -82,10 +92,9 @@ def extended_row(play: Dict[str, Any], raw_id: Optional[int], now: float, video:
     if not isinstance(play, dict) or not isinstance(play.get("ts"), str):
         return None
     end = _iso_epoch(play["ts"])
-    ms = play.get("ms_played")
-    if end is None or not isinstance(ms, (int, float)) or isinstance(ms, bool) or ms < 0:
+    ms = _ms(play.get("ms_played"))
+    if end is None or ms is None:
         return None
-    ms = int(ms)
     track, artist = _str(play.get("master_metadata_track_name")), _str(play.get("master_metadata_album_artist_name"))
     episode, show = _str(play.get("episode_name")), _str(play.get("episode_show_name"))
     track_uri, episode_uri = _str(play.get("spotify_track_uri")), _str(play.get("spotify_episode_uri"))
@@ -124,10 +133,9 @@ def account_row(play: Dict[str, Any], raw_id: Optional[int], now: float) -> Opti
         end = datetime.strptime(play["endTime"], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp()
     except (ValueError, OverflowError):
         return None
-    ms = play.get("msPlayed")
-    if not isinstance(ms, (int, float)) or isinstance(ms, bool) or ms < 0:
+    ms = _ms(play.get("msPlayed"))
+    if ms is None:
         return None
-    ms = int(ms)
     track, artist = _str(play.get("trackName")), _str(play.get("artistName"))
     episode, show = _str(play.get("episodeName")), _str(play.get("podcastName"))
     content = "track" if track else ("episode" if episode else "unknown")
@@ -148,14 +156,14 @@ def lastfm_row(scrobble: Dict[str, Any], now: float) -> Optional[Dict[str, Any]]
         return None
     try:
         uts = int((scrobble.get("date") or {}).get("uts"))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, AttributeError):
         return None
     track = _str(scrobble.get("name"))
     artist_field = scrobble.get("artist")
     artist = _str(artist_field.get("#text") or artist_field.get("name")) if isinstance(artist_field, dict) else _str(artist_field)
     album_field = scrobble.get("album")
     album = _str(album_field.get("#text")) if isinstance(album_field, dict) else None
-    if not track or not artist or uts <= 0:
+    if not track or not artist or not 0 < uts < 2 ** 40:
         return None
     start_ms = uts * 1000
     return {
@@ -177,7 +185,7 @@ def api_row(item: Dict[str, Any], now: float) -> Optional[Dict[str, Any]]:
     uri = _str(track.get("uri"))
     if played is None or not uri or not isinstance(track, dict):
         return None
-    duration = track.get("duration_ms") if isinstance(track.get("duration_ms"), int) else None
+    duration = _ms(track.get("duration_ms")) if isinstance(track.get("duration_ms"), int) else None
     artists = [a.get("name") for a in track.get("artists") or [] if isinstance(a, dict) and _str(a.get("name"))]
     end_ms = int(round(played * 1000))
     return {

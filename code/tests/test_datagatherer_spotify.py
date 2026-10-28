@@ -137,6 +137,40 @@ def test_a_broken_export_is_marked_failed_and_the_rest_still_reads(client, app, 
     assert client.post("/api/datagatherer/sources/spotify/upload?name=x.zip", content=b"").status_code == 400
 
 
+def test_odd_numbers_skip_one_play_and_an_unexpected_error_fails_one_export(client, app, tmp_path, monkeypatch):
+    """F-F5: Infinity, NaN or an absurd ms_played skips that play; a crash in one export marks it
+    failed (never stuck in 'importing') and the job still finishes."""
+    import zipfile
+    odd = tmp_path / "odd" / "my_spotify_data.zip"
+    odd.parent.mkdir()
+    good = json.dumps(extended_play(T0, "Goed", "Band", uri="spotify:track:goed"))
+    with zipfile.ZipFile(odd, "w") as zf:
+        zf.writestr("x/Streaming_History_Audio_2023.json", "[" + ", ".join([
+            '{"ts": "2023-11-14T22:13:20Z", "ms_played": Infinity, "master_metadata_track_name": "Oneindig"}',
+            '{"ts": "2023-11-14T22:13:21Z", "ms_played": NaN, "master_metadata_track_name": "Geen getal"}',
+            '{"ts": "2023-11-14T22:13:22Z", "ms_played": 1e300, "master_metadata_track_name": "Te lang"}',
+            good]) + "]")
+        zf.writestr("x/StreamingHistory_music_0.json",
+                    '[{"endTime": "2023-11-14 22:13", "msPlayed": -Infinity, "trackName": "Min", "artistName": "B"}]')
+    done = _upload(client, app, odd)
+    assert done["import"]["status"] == "done" and done["import"]["summary"]["errors"] == 0
+    assert [r[2] for r in _plays(app)] == ["Goed"]
+    # An unexpected error while reading: that export is 'failed' with a Dutch reason
+    from backend.datagatherer.connectors import spotify as spotify_connector
+    other = write_export_zip(tmp_path / "other" / "my_spotify_data.zip",
+                             extended=[extended_play(T0 + 99, "Later", "Band", uri="spotify:track:l")])
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("stuk")
+
+    monkeypatch.setattr(spotify_connector.Spotify, "import_raw", boom)
+    done = _upload(client, app, other)
+    job = done["import"]
+    assert job["status"] == "done" and job["summary"]["errors"] == 1 and job["summary"]["complete"] is False
+    raw = state.get_raw(app.state.db, done["raw_import_id"])
+    assert raw["status"] == "failed" and "Onverwachte fout" in raw["error"]
+
+
 def test_a_loose_history_file_can_be_uploaded_and_the_upload_runs_as_a_job(client, app, tmp_path):
     """F-F3 and F-F7: a bare StreamingHistory*.json or Streaming_History_Audio_*.json is recognised
     by its real name; copying runs as a job; the staged copy in the cache folder is removed."""

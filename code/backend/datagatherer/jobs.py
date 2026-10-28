@@ -144,10 +144,15 @@ def run_import(config, db, connector, raw_ids: List[int], ctx: JobContext = None
             if isinstance(e, OSError) and not config.VAULT_ROOT.is_dir():
                 raise VaultUnavailable() from e
             message = str(e) if not isinstance(e, OSError) else f"Niet leesbaar: {e.strerror or e}"
-            state.update_raw(db, raw_id, status="failed", error=message)
-            totals["errors"] += 1
-            if len(totals["error_samples"]) < 5:
-                totals["error_samples"].append({"path": raw["path"], "error": message})
+            _import_failed(db, raw, message, totals)
+            continue
+        except (JobStopped, VaultUnavailable):
+            raise
+        except Exception as e:  # a bug or a very odd file: this export fails, the others still go on
+            import traceback
+            traceback.print_exc()
+            _import_failed(db, raw, f"Onverwachte fout bij het inlezen ({type(e).__name__}); "
+                                    "de andere exports zijn wel ingelezen", totals)
             continue
         state.update_raw(db, raw_id, status="imported", imported_at=time.time(), error=None,
                          records_added=stats.get("added", 0), records_seen=stats.get("seen", 0),
@@ -165,6 +170,13 @@ def run_import(config, db, connector, raw_ids: List[int], ctx: JobContext = None
         after(gctx)
     totals["complete"] = totals["errors"] == 0
     return totals
+
+
+def _import_failed(db, raw: Dict[str, Any], message: str, totals: Dict[str, Any]) -> None:
+    state.update_raw(db, raw["id"], status="failed", error=message)
+    totals["errors"] += 1
+    if len(totals["error_samples"]) < 5:
+        totals["error_samples"].append({"path": raw["path"], "error": message})
 
 
 def register_existing(config, db, connector, gctx) -> int:
