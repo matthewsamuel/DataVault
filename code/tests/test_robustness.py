@@ -77,7 +77,9 @@ def test_every_vault_endpoint_answers_503_while_the_disk_is_gone_and_recovers(cl
         for url, body in [("/api/keurer/decide", {"path": "x", "folder": "y", "decision": "keep"}),
                           ("/api/move-file", {"source_path": "a", "destination_folder": "b"}),
                           ("/api/shows/vote", {"path": "x", "vote": "up"}),
-                          ("/api/duplicates/undo", {"run_id": "x"})]:
+                          ("/api/duplicates/undo", {"run_id": "x"}),
+                          ("/api/jobs", {"type": "dup_scan", "params": {"folder": str(vault / "RAW")}}),
+                          ("/api/jobs", {"type": "thumbnails", "params": {}})]:
             assert _is_vault_503(client.post(url, json=body)), url
         health = client.get("/api/health").json()
         assert health["vault_available"] is False and health["vault_message"] == errors.VAULT_UNREACHABLE

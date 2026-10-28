@@ -9,9 +9,10 @@ POST /api/jobs/{id}/cancel | /pause | /resume
 """
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
+from backend.errors import require_vault
 from backend.jobs import JobError, JobManager
 
 router = APIRouter()
@@ -46,9 +47,14 @@ def _check_id(job_id: int) -> int:
     return job_id
 
 
-@router.post("/api/jobs")
+@router.post("/api/jobs", dependencies=[Depends(require_vault)])
 def start_job(body: Any = Body(...)):
-    """{type: 'dup_scan'|'hashing'|'thumbnails', params: {...}} -> {job, created} (201 when new)."""
+    """
+    {type: 'dup_scan'|'hashing'|'thumbnails', params: {...}} -> {job, created} (201 when new).
+    A new job needs the vault: 503 vault_unavailable while it is gone (not 'folder not
+    found'). The other job routes work without it, so the dock keeps showing, pausing
+    and cancelling jobs that wait for the disk.
+    """
     jobs = get_manager()
     if not isinstance(body, dict) or not isinstance(body.get("type"), str):
         raise HTTPException(status_code=400, detail="Geef type (en params) op")
