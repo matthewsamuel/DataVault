@@ -86,3 +86,53 @@ def test_new_scripts_load_after_the_helpers_they_use():
     assert scripts.index("ui.js") < scripts.index("app.js")
     for late in ("recovery.js", "settings.js", "shortcuts.js"):
         assert scripts.index(late) > scripts.index("jobs.js"), late
+
+
+# Colours come from the design tokens (style.css, between @tokens:start and @tokens:end),
+# never from a literal somewhere in a rule: one place to tune light and dark, and WCAG AA
+# checked once. A colour that is truly not a token goes here, with the reason.
+COLOUR_ALLOWLIST = set()
+COLOUR_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(", re.IGNORECASE)
+
+
+def _colours(text):
+    found = []
+    for number, line in enumerate(text.splitlines(), 1):
+        for m in COLOUR_RE.finditer(line):
+            if m.group(0).lower() not in COLOUR_ALLOWLIST:
+                found.append(f"{number}: {line.strip()[:90]}")
+    return found
+
+
+def test_no_hard_coded_colours_outside_the_design_tokens():
+    css = _sources()["style.css"]
+    start, end = css.index("/* @tokens:start */"), css.index("/* @tokens:end */")
+    assert start < end
+    # Line numbers stay those of style.css: comments and the token block become empty lines
+    blank = lambda m: "\n" * m.group(0).count("\n")
+    rules = css[:start] + re.sub(r"[^\n]", "", css[start:end]) + css[end:]
+    rules = re.sub(r"/\*.*?\*/", blank, rules, flags=re.S)
+    assert _colours(rules) == [], "hard-coded colours in style.css: use (or add) a token"
+
+    guide = (FRONTEND / "styleguide.css").read_text(encoding="utf-8")
+    assert _colours(re.sub(r"/\*.*?\*/", blank, guide, flags=re.S)) == [], "styleguide.css uses literal colours"
+
+
+def test_no_hard_coded_colours_in_inline_styles():
+    """style="..." in the page and in markup built by JS uses tokens too (var(--...))."""
+    offenders = []
+    for name, text in _sources().items():
+        if name == "style.css":
+            continue
+        for m in re.finditer(r"""style(?:\.cssText\s*=\s*|\s*[:=]\s*)(["'`])(.*?)\1""", text, re.S):
+            offenders += [f"{name}: {c}" for c in _colours(m.group(2))]
+    assert offenders == [], f"literal colours in inline styles: {offenders}"
+
+
+def test_both_themes_define_the_same_colour_tokens():
+    css = _sources()["style.css"]
+    block = lambda selector: re.search(re.escape(selector) + r"[^{]*\{(.*?)\n\s*\}", css, re.S).group(1)
+    dark = set(re.findall(r"(--[\w-]+)\s*:", block(":root,\n.theme-scope[data-theme=\"dark\"]")))
+    light = set(re.findall(r"(--[\w-]+)\s*:", block(":root[data-theme=\"light\"]")))
+    auto = set(re.findall(r"(--[\w-]+)\s*:", block(":root:not([data-theme])")))
+    assert dark and dark == light == auto, (dark ^ light, light ^ auto)
