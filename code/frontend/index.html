@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=34">
+    <link rel="stylesheet" href="style.css?v=35">
 </head>
 
 <body>
@@ -226,48 +226,72 @@
 
         <!-- DUPLICATES SECTION -->
         <div id="section-duplicates" class="section hidden">
-            <div class="duplicates-container">
+            <div class="duplicates-container" id="duplicates-container">
                 <div class="duplicates-header">
-                    <h1 class="duplicates-title">Duplicate Finder</h1>
-                    <div class="duplicates-subtitle">Select a folder to scan for duplicate files</div>
+                    <div>
+                        <h1 class="duplicates-title">Duplicaten</h1>
+                        <div class="duplicates-subtitle">Kies een map, zoek byte voor byte identieke bestanden en
+                            bepaal per groep welke kopie blijft. De andere kopieën gaan naar RAW_DUPLICATES: er wordt
+                            niets gewist en elke actie is terug te zetten.</div>
+                    </div>
                 </div>
 
                 <!-- Folder Selection -->
                 <div class="folder-selection-panel">
                     <div class="folder-selection-header">
-                        <span class="folder-selection-label">Selected Folder:</span>
-                        <span class="folder-selection-path" id="selected-folder-path">None</span>
+                        <span class="folder-selection-label">Gekozen map:</span>
+                        <span class="folder-selection-path" id="selected-folder-path">Geen</span>
                     </div>
                     <div class="folder-selection-actions">
                         <button class="btn btn-secondary" id="btn-select-folder" onclick="openFolderSelector()">
-                            Select Folder
+                            Kies map
                         </button>
                         <button class="btn btn-primary" id="btn-scan-folder" onclick="scanSelectedFolder()" disabled>
-                            Scan for Duplicates
+                            Zoek duplicaten
                         </button>
                         <button class="btn btn-secondary" id="btn-cancel-scan" onclick="cancelScan()"
                             style="display: none;">
-                            Cancel Scan
+                            Scan stoppen
                         </button>
                     </div>
+                </div>
+
+                <!-- Herstellen: recente opruimacties, elk in één keer terug te zetten -->
+                <div class="dup-restore-panel" id="dup-restore-panel">
+                    <div class="dup-restore-header">
+                        <span class="dup-restore-title">Herstellen</span>
+                        <span class="dup-restore-hint">Zet een opruimactie in één keer terug naar de oorspronkelijke
+                            plek. Er wordt nooit iets overschreven.</span>
+                    </div>
+                    <div class="dup-runs" id="dup-runs"></div>
                 </div>
 
                 <div class="status-panel" id="status-panel" style="display: none;">
                     <div class="status-grid">
                         <div class="status-item">
                             <div class="status-value" id="status-scanned">0</div>
-                            <div class="status-label">Files Scanned</div>
+                            <div class="status-label">Bestanden gescand</div>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-value" id="status-groups">0</div>
+                            <div class="status-label">Groepen</div>
                         </div>
                         <div class="status-item">
                             <div class="status-value" id="status-found">0</div>
-                            <div class="status-label">Duplicates Found</div>
+                            <div class="status-label">Te verplaatsen</div>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-value" id="status-bytes">0 B</div>
+                            <div class="status-label">Vrij te maken</div>
                         </div>
                         <div class="status-item">
                             <div class="status-value" id="status-timestamp">-</div>
-                            <div class="status-label">Last Scan</div>
+                            <div class="status-label">Laatste scan</div>
                         </div>
                     </div>
                 </div>
+
+                <div class="dup-warning" id="dup-scan-warning" hidden></div>
 
                 <div id="scan-progress-container" style="display: none;">
                     <div class="progress-container">
@@ -276,27 +300,33 @@
                     <div class="progress-text" id="progress-text"></div>
                 </div>
 
-                <div class="filter-bar" id="filter-bar" style="display: none;">
-                    <div style="display: flex; gap: var(--space-md);">
-                        <button class="filter-chip active" data-filter="all" onclick="filterDuplicates('all')">
-                            All
-                        </button>
-                        <button class="filter-chip" data-filter="photos" onclick="filterDuplicates('photos')">
-                            Photos Only
-                        </button>
-                        <button class="filter-chip" data-filter="videos" onclick="filterDuplicates('videos')">
-                            Videos Only
-                        </button>
+                <div class="dup-toolbar" id="filter-bar" style="display: none;">
+                    <div class="dup-filters" id="dup-filters">
+                        <button class="filter-chip active" data-filter="all" onclick="filterDuplicates('all')">Alles</button>
+                        <button class="filter-chip" data-filter="photo" onclick="filterDuplicates('photo')">Foto's</button>
+                        <button class="filter-chip" data-filter="video" onclick="filterDuplicates('video')">Video's</button>
+                        <button class="filter-chip" data-filter="audio" onclick="filterDuplicates('audio')">Audio</button>
                     </div>
-                    <button class="btn btn-danger" id="btn-remove-all" onclick="removeAllDuplicates()"
-                        style="margin-left: auto;">
-                        Remove All Duplicates
+                    <label class="dup-rule-label" for="dup-rule">Welke kopie blijft</label>
+                    <select class="toolbar-select" id="dup-rule" onchange="setKeepRule(this.value)">
+                        <option value="oldest">Oudste behouden</option>
+                        <option value="newest">Nieuwste behouden</option>
+                        <option value="shortest">Kortste pad</option>
+                        <option value="folder">Voorkeursmap…</option>
+                    </select>
+                    <select class="toolbar-select" id="dup-prefer-folder" onchange="setPreferFolder(this.value)"
+                        hidden></select>
+                    <span class="dup-override-info" id="dup-override-info" hidden></span>
+                    <button class="btn btn-danger" id="btn-remove-all" onclick="removeAllDuplicates()">
+                        Alles opruimen
                     </button>
                 </div>
+                <div class="dup-legend" id="dup-legend" style="display: none;"></div>
 
-                <div class="media-grid" id="duplicates-grid">
-                    <!-- Duplicates will be populated by JavaScript -->
+                <div class="dup-groups" id="duplicates-grid">
+                    <!-- Groepen worden door duplicates.js gevuld -->
                 </div>
+                <div class="dup-sentinel" id="dup-sentinel"></div>
             </div>
         </div>
         <!-- Spotify View -->
@@ -537,7 +567,7 @@
     <div class="modal" id="modal-folder-selector">
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
-                <h2 class="modal-title">Select Folder to Scan</h2>
+                <h2 class="modal-title">Kies een map om te scannen</h2>
                 <button class="modal-close" onclick="closeFolderSelector()" aria-label="Close">×</button>
             </div>
 
@@ -548,9 +578,9 @@
             </div>
 
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeFolderSelector()">Cancel</button>
+                <button class="btn btn-secondary" onclick="closeFolderSelector()">Annuleren</button>
                 <button class="btn btn-primary" id="btn-confirm-folder" onclick="confirmFolderSelection()" disabled>
-                    Select Folder
+                    Kies deze map
                 </button>
             </div>
         </div>
@@ -562,14 +592,14 @@
     <div class="modal" id="modal-comparison">
         <div class="modal-container comparison-container">
             <div class="modal-header">
-                <h2 class="modal-title">Delete Duplicate?</h2>
-                <button class="modal-close" onclick="closeComparisonModal()" aria-label="Close">×</button>
+                <h2 class="modal-title">Kopieën vergelijken</h2>
+                <button class="modal-close" onclick="closeComparisonModal()" aria-label="Sluiten">×</button>
             </div>
 
             <div class="modal-body comparison-body">
                 <div class="comparison-grid">
                     <div class="comparison-item">
-                        <div class="comparison-label">Original File</div>
+                        <div class="comparison-label keep-label">Blijft staan</div>
                         <div class="comparison-image-container">
                             <img id="comparison-original-img" class="comparison-image" />
                             <video id="comparison-original-video" class="comparison-image" controls
@@ -584,7 +614,7 @@
                     <div class="comparison-divider"></div>
 
                     <div class="comparison-item">
-                        <div class="comparison-label duplicate-label">Duplicate File (Will be deleted)</div>
+                        <div class="comparison-label duplicate-label">Gaat naar RAW_DUPLICATES</div>
                         <div class="comparison-image-container">
                             <img id="comparison-duplicate-img" class="comparison-image" />
                             <video id="comparison-duplicate-video" class="comparison-image" controls
@@ -599,10 +629,36 @@
             </div>
 
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeComparisonModal()">Cancel</button>
-                <button class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDelete()">
-                    Delete Duplicate
+                <button class="btn btn-secondary" onclick="closeComparisonModal()">Sluiten</button>
+                <button class="btn btn-secondary" id="btn-comparison-swap" onclick="keepComparedCopy()">
+                    Bewaar rechter kopie
                 </button>
+                <button class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDelete()">
+                    Ruim deze groep op
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bevestiging voor opruimen (één groep of alles) -->
+    <div class="modal" id="modal-dup-confirm">
+        <div class="modal-container dup-confirm-container">
+            <div class="modal-header">
+                <h2 class="modal-title" id="dup-confirm-title">Duplicaten opruimen?</h2>
+                <button class="modal-close" onclick="closeCleanupDialog()" aria-label="Sluiten">×</button>
+            </div>
+            <div class="modal-body dup-confirm-body">
+                <ul class="dup-confirm-list" id="dup-confirm-list"></ul>
+                <div class="dup-confirm-progress" id="dup-confirm-progress" hidden>
+                    <div class="progress-container">
+                        <div class="progress-bar" id="dup-confirm-bar" style="width: 0%;">0%</div>
+                    </div>
+                    <div class="progress-text" id="dup-confirm-text"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-dup-cancel" onclick="closeCleanupDialog()">Annuleren</button>
+                <button class="btn btn-danger" id="btn-dup-go" onclick="runCleanup()">Verplaatsen</button>
             </div>
         </div>
     </div>
@@ -978,8 +1034,8 @@
     <script src="api.js?v=1"></script>
     <script src="dom.js?v=1"></script>
     <script src="folder-tree.js?v=2"></script>
-    <script src="app.js?v=40"></script>
-    <script src="duplicates.js?v=13"></script>
+    <script src="app.js?v=41"></script>
+    <script src="duplicates.js?v=14"></script>
     <script src="keurer.js?v=11"></script>
     <script src="timeline.js?v=3"></script>
     <script src="wave-background.js?v=2"></script>

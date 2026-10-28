@@ -1750,6 +1750,355 @@ body::before {
     color: var(--bg-primary);
 }
 
+/* ==================== DUPLICATE GROUPS ==================== */
+
+.keep-label {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.btn-small {
+    padding: var(--space-xs) var(--space-md);
+    font-size: 10px;
+}
+
+.link-button {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.dup-restore-panel {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-lg);
+}
+
+.dup-restore-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+}
+
+.dup-restore-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.dup-restore-hint,
+.dup-runs-empty {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.dup-runs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.dup-run {
+    display: grid;
+    grid-template-columns: 160px 140px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--border-color);
+    font-size: 11px;
+}
+
+.dup-run-count {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.dup-run-folder {
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dup-run-note {
+    color: var(--warning);
+}
+
+.dup-warning {
+    border: 1px solid var(--warning);
+    color: var(--warning);
+    background-color: var(--bg-secondary);
+    padding: var(--space-md) var(--space-lg);
+    margin-bottom: var(--space-lg);
+    font-size: 11px;
+}
+
+.dup-warning ul {
+    margin: var(--space-sm) 0 0 var(--space-xl);
+    color: var(--text-secondary);
+    word-break: break-all;
+}
+
+.dup-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+}
+
+.dup-filters {
+    display: flex;
+    gap: var(--space-sm);
+    margin-right: var(--space-lg);
+}
+
+.dup-rule-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+#dup-prefer-folder {
+    max-width: 280px;
+}
+
+.dup-override-info {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+#btn-remove-all {
+    margin-left: auto;
+}
+
+.dup-legend {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-lg);
+    line-height: 1.6;
+}
+
+.dup-legend-keep,
+.dup-legend-move {
+    display: inline-block;
+    padding: 0 var(--space-sm);
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--bg-primary);
+}
+
+.dup-legend-keep,
+.dup-copy.keep .dup-copy-badge {
+    background-color: var(--accent);
+}
+
+.dup-legend-move,
+.dup-copy.move .dup-copy-badge {
+    background-color: var(--danger);
+}
+
+.dup-groups {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.dup-group {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr);
+    gap: var(--space-lg);
+    padding: var(--space-md);
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.dup-group.manual {
+    border-color: var(--accent-dim);
+}
+
+.dup-group-thumb-wrap {
+    width: 112px;
+    height: 112px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-tertiary);
+    cursor: zoom-in;
+    overflow: hidden;
+}
+
+.dup-group-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.dup-thumb-missing {
+    visibility: hidden;
+}
+
+.dup-group-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    min-width: 0;
+}
+
+.dup-group-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-md);
+    font-size: 11px;
+}
+
+.dup-group-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 40%;
+}
+
+.dup-group-meta {
+    color: var(--text-secondary);
+}
+
+.dup-group-override {
+    color: var(--accent);
+}
+
+.dup-group-actions {
+    display: flex;
+    gap: var(--space-sm);
+    margin-left: auto;
+}
+
+.dup-copies {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.dup-copy {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-md);
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--border-color);
+    border-left-width: 3px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--transition-fast);
+}
+
+.dup-copy:hover {
+    border-color: var(--accent-dim);
+}
+
+.dup-copy.keep {
+    border-left-color: var(--accent);
+}
+
+.dup-copy.move {
+    border-left-color: var(--danger);
+}
+
+.dup-copy.move .dup-copy-path {
+    color: var(--text-secondary);
+}
+
+.dup-copy-badge {
+    justify-self: start;
+    padding: 1px var(--space-sm);
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--bg-primary);
+    white-space: nowrap;
+}
+
+.dup-copy-path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dup-copy-date {
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.dup-copy-error {
+    grid-column: 1 / -1;
+    color: var(--danger);
+}
+
+.dup-copy-error:empty {
+    display: none;
+}
+
+.dup-sentinel {
+    height: 1px;
+}
+
+.dup-confirm-container {
+    width: 600px;
+    max-width: 92vw;
+}
+
+.dup-confirm-body {
+    padding: var(--space-lg);
+}
+
+.dup-confirm-list {
+    margin: 0 0 var(--space-lg) var(--space-xl);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-primary);
+}
+
+.dup-confirm-keep {
+    color: var(--accent);
+    word-break: break-all;
+}
+
+@media (max-width: 768px) {
+    .dup-group {
+        grid-template-columns: 1fr;
+    }
+
+    .dup-copy {
+        grid-template-columns: 1fr;
+    }
+
+    .dup-run {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
 /* ==================== RESPONSIVENESS ==================== */
 
 @media (max-width: 768px) {

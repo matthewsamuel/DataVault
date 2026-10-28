@@ -160,6 +160,8 @@ function switchMainView(view) {
         if (container.children.length === 0) {
             loadShows();
         }
+    } else if (view === 'duplicates') {
+        if (typeof duplicatesInit === 'function') duplicatesInit();
     } else if (view === 'keurer') {
         if (typeof keurerInit === 'function') keurerInit();
     } else if (view === 'timeline') {
@@ -2873,8 +2875,9 @@ function executeAIAction(actionData) {
         case 'scan_duplicates':
             switchMainView('duplicates');
             {
-                const scanBtn = document.querySelector('#section-duplicates .btn-primary');
-                if (scanBtn) scanBtn.click();
+                const scanBtn = document.getElementById('btn-scan-folder');
+                if (scanBtn && !scanBtn.disabled) scanBtn.click();
+                else showToast('Duplicaten', 'Kies eerst een map om te scannen', 'info');
             }
             break;
 

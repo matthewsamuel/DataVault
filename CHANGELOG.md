@@ -245,3 +245,32 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   elke verplaatsing of precies die kopie nog bestaat en byte voor byte gelijk is.
 - Lukt het vastleggen van een verplaatsing in de database niet, dan zet de app het bestand meteen
   terug, zodat er nooit een bestand in RAW_DUPLICATES belandt zonder dat het terug te zetten is.
+
+### Duplicaten: nieuwe weergave
+- Het duplicatenscherm is vernieuwd en in het Nederlands. Per groep zie je één miniatuur (alle
+  kopieën zijn gelijk) en daaronder elke kopie met haar map en datum, met duidelijk
+  **Blijft** (groen) of **Naar RAW_DUPLICATES** (rood).
+- Kies zelf welke kopie blijft met "Welke kopie blijft": Oudste behouden (standaard), Nieuwste
+  behouden, Kortste pad of Voorkeursmap (kies een map uit de gevonden mappen). Alle groepen
+  passen zich meteen aan, zonder opnieuw te scannen. Je keuze wordt onthouden.
+- Klik op een kopie om juist die te bewaren; zo'n groep is gemarkeerd als "zelf gekozen" en
+  met één klik terug te zetten naar de regel.
+- "Vergelijk" toont de kopie die blijft en een kopie die verplaatst wordt naast elkaar, met
+  "Bewaar rechter kopie" en "Ruim deze groep op".
+- "Alles opruimen" en "Ruim op" per groep vragen eerst om bevestiging in een venster dat
+  vertelt hoeveel bestanden er verplaatst worden, hoeveel ruimte dat is en welke regel geldt.
+  Tijdens het opruimen zie je de voortgang en kun je stoppen; wat al verplaatst is, blijft één
+  terug te zetten actie. Wat de server weigert (bijv. omdat de kopie die blijft intussen
+  veranderd is), blijft staan met de reden erbij.
+- Nieuw onderdeel **Herstellen**: de recente opruimacties met tijd, aantal bestanden en map,
+  elk met een knop "Terugzetten".
+- Grote resultaten blijven vlot: groepen worden per 30 getoond terwijl je scrolt, en
+  miniaturen laden pas als ze in beeld komen (voorheen werden duizenden miniaturen tegelijk
+  opgevraagd).
+- De filters Foto's, Video's en Audio gebruiken nu het bestandstype van de server, dus ook
+  RAW-foto's (`.cr2`, `.nef`, `.dng`, ...) en video's als `.mts` of `.3gp` vallen in het juiste
+  filter. Elk filter toont hoeveel groepen het bevat.
+- Een scan met leesfouten toont een waarschuwing met de eerste paden die niet gelezen konden
+  worden.
+- De chatopdracht "zoek duplicaten" start de scan van de gekozen map (of vraagt eerst een map te
+  kiezen) in plaats van op een willekeurige knop te klikken.
