@@ -393,6 +393,35 @@ def _m012_recovery_actions(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_recovery_actions_created ON recovery_actions(created_at)")
 
 
+def _m040_semantic_embeddings(conn: sqlite3.Connection):
+    """
+    'Slim zoeken' (backend/semantic.py): one image embedding per photo or video per search
+    model, keyed on media.id (stable across moves, so a moved photo keeps its embedding).
+    size and mtime_ns are the file's when it was embedded: a file that changed since is
+    embedded again. vector is the L2-normalised embedding as float16 (dim values), or
+    NULL with status 'undecodable' for a file that could not be read as an image, so it
+    is not tried again until it changes. Rows whose media row is gone are ignored by
+    every query and removed by the next embedding run. Only a new table: no existing
+    row is touched. (Version 40: the numbers below it are left to the steps built
+    alongside this one; migrations run in list order.)
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS semantic_embeddings (
+            media_id INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            dim INTEGER NOT NULL,
+            vector BLOB,
+            status TEXT NOT NULL DEFAULT 'ok',
+            size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            source TEXT,
+            created_at REAL NOT NULL,
+            PRIMARY KEY (media_id, model)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_semantic_model ON semantic_embeddings(model)")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -407,6 +436,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (10, "app_settings", _m010_app_settings),
     (11, "media_index", _m011_media_index),
     (12, "recovery_actions", _m012_recovery_actions),
+    (40, "semantic_embeddings", _m040_semantic_embeddings),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
