@@ -932,6 +932,71 @@ def test_an_automatic_pass_is_never_queued_twice_and_replaces_an_interrupted_one
     assert manager.get(paused["id"])["status"] == "interrupted"
 
 
+def test_pausing_or_cancelling_an_automatic_pass_holds_them_until_the_vault_returns(client, config, monkeypatch):
+    import threading
+    from backend import media_index
+    manager = _manager()
+    auto = media_index.AutoIndexer(manager)
+    gate = threading.Event()
+    original = media_index.read_file
+
+    def read(path, st):
+        gate.wait(10)
+        return original(path, st)
+
+    monkeypatch.setattr(media_index, "read_file", read)
+
+    def newest():
+        return manager.list(limit=1, job_type="index")[0]
+
+    # Paused: no new automatic pass (the timeline's request, the half-hour tick)
+    assert auto.start_pass() is True
+    first = newest()
+    manager.pause(first["id"])
+    gate.set()
+    assert manager.wait(first["id"], statuses=("queued", "running"), timeout=60)["status"] == "paused"
+    assert auto.start_pass() is False and newest()["id"] == first["id"]
+    # Resumed by the user and finished: automatic passes go on
+    manager.resume(first["id"])
+    assert manager.wait(first["id"], timeout=60)["status"] == "done"
+    assert auto.start_pass() is True
+    second = newest()
+    manager.wait(second["id"], timeout=60)
+
+    # Cancelled: held too, until the vault comes back (or the app starts again)
+    gate.clear()
+    _photo(config.VAULT_ROOT / "library/third.jpg", (4, 4, 4), "x", "2015:05:05 05:05:05")   # a file to read
+    assert auto.start_pass() is True
+    third = newest()
+    manager.cancel(third["id"])
+    gate.set()
+    assert manager.wait(third["id"], statuses=("queued", "running"), timeout=60)["status"] == "cancelled"
+    assert auto.start_pass() is False
+    auto.request()
+    assert auto.start_pass() is False and newest()["id"] == third["id"]
+    auto.vault_returned()
+    assert auto.start_pass() is True
+    manager.wait(newest()["id"], timeout=60)
+
+    # A pass paused before the vault came back is superseded by the next automatic one
+    gate.clear()
+    _photo(config.VAULT_ROOT / "library/fourth.jpg", (4, 4, 4), "x", "2015:05:05 05:05:05")   # a file to read
+    assert auto.start_pass() is True
+    fourth = newest()
+    manager.pause(fourth["id"])
+    gate.set()
+    manager.wait(fourth["id"], statuses=("queued", "running"), timeout=60)
+    assert auto.start_pass() is False
+    auto.vault_returned()
+    assert auto.start_pass() is True
+    assert manager.get(fourth["id"])["status"] == "cancelled"
+    fifth = newest()
+    assert manager.wait(fifth["id"], timeout=60)["status"] == "done"
+    # ...and the cancel it did itself holds nothing
+    assert auto.start_pass() is True
+    manager.wait(newest()["id"], timeout=60)
+
+
 def test_a_pass_that_changes_nothing_keeps_the_timeline_version(client, config):
     _index(client)
     before = _scan(client, config.VAULT_ROOT, limit=5)["version"]

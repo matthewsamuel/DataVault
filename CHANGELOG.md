@@ -21,8 +21,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Het takenpaneel rechtsonder laat altijd zien hoeveel bestanden de bibliotheek kent en wanneer hij
   bijgewerkt is, met de knop **Bibliotheek bijwerken**. Die controleert alle mappen en bestanden,
   ook een foto die op zijn plek bewerkt is. Pauzeren, hervatten en annuleren werken zoals bij elke
-  taak; wat al gelezen was, wordt bij hervatten overgeslagen. Wordt de schijf losgekoppeld, dan
-  wacht de ronde en gaat hij vanzelf verder als de schijf terug is.
+  taak; wat al gelezen was, wordt bij hervatten overgeslagen. Pauzeer of annuleer je een ronde, dan
+  begint de app er zelf geen nieuwe tot je hem opnieuw start of de schijf opnieuw aansluit (of tot
+  je zelf op **Bibliotheek bijwerken** klikt). Wordt de schijf losgekoppeld, dan wacht de ronde en
+  gaat hij vanzelf verder als de schijf terug is.
 - Wordt een ronde onderbroken (app afgesloten, geannuleerd, gepauzeerd of schijf losgekoppeld), dan
   maakt de volgende ronde hem af: een map telt pas als bijgewerkt als alles eronder gelezen is. Een
   map die even niet te lezen was, wordt de volgende keer opnieuw geprobeerd, en tot dan gebruikt de

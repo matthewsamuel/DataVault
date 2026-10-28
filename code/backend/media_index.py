@@ -927,6 +927,10 @@ class AutoIndexer:
     vault there, when the vault comes back after it was gone, every
     AUTO_INTERVAL_SECONDS, and when request() is called (the timeline found the index
     behind the disk). Never two at once: a running pass of any kind is left alone.
+
+    What the user does with a pass sticks: after they paused or cancelled the latest
+    one, no automatic pass starts until the app starts again or the vault comes back
+    (a paused pass is theirs to resume; a manual pass they start ends the hold).
     """
 
     def __init__(self, manager, poll: float = AUTO_POLL_SECONDS, interval: float = AUTO_INTERVAL_SECONDS):
@@ -937,6 +941,8 @@ class AutoIndexer:
         self._wake = threading.Event()
         self._requested = False
         self._thread: Optional[threading.Thread] = None
+        self._since = time.time()        # the app's start or the vault's latest return
+        self._superseded = set()         # passes this indexer cancelled itself
 
     def start(self) -> None:
         if self._thread is None:
@@ -959,6 +965,8 @@ class AutoIndexer:
         try:
             while not self._stop.is_set():
                 available = self.manager.vault_available()
+                if available and not was_available:
+                    self.vault_returned()
                 due = available and (not was_available or self._requested or last_start is None
                                      or time.monotonic() - last_start >= self.interval)
                 if due:
@@ -976,17 +984,39 @@ class AutoIndexer:
             except Exception:
                 pass
 
+    def vault_returned(self) -> None:
+        """The app started or the vault came back: a pause or cancel from before no longer holds."""
+        self._since = time.time()
+
+    def held(self, jobs: List[Dict[str, Any]]) -> bool:
+        """True when the user paused or cancelled the latest pass since the app start or vault return."""
+        from backend.jobs import CANCELLED, PAUSED
+        latest = next((job for job in jobs if job["id"] not in self._superseded), None)
+        if latest is None:
+            return False
+        if latest["status"] == PAUSED:
+            return (latest.get("updated_at") or 0) >= self._since
+        if latest["status"] == CANCELLED:
+            return (latest.get("finished_at") or 0) >= self._since
+        return False
+
     def start_pass(self) -> bool:
-        """Queue an automatic pass unless one (of any kind) is active. True when one was queued."""
-        from backend.jobs import ACTIVE, INTERRUPTED, JobError
+        """
+        Queue an automatic pass unless one (of any kind) is active or the user holds
+        them (held()). True when one was queued.
+        """
+        from backend.jobs import ACTIVE, INTERRUPTED, PAUSED, JobError
         try:
-            jobs = self.manager.list(limit=100, job_type=INDEX_JOB)
-            if any(job["status"] in ACTIVE for job in jobs):
+            jobs = self.manager.list(limit=100, job_type=INDEX_JOB)   # newest first
+            if any(job["status"] in ACTIVE for job in jobs) or self.held(jobs):
                 return False
             self.manager.start(INDEX_JOB, {"auto": True}, exclusive=True)
-            # An automatic pass that a restart interrupted is superseded by this one
+            # An automatic pass that a restart interrupted, or that was paused before
+            # the app started or the vault came back, is superseded by this one
+            # (the new pass finishes what it left: see run_pass)
             for job in jobs:
-                if job["status"] == INTERRUPTED and (job.get("params") or {}).get("auto"):
+                if (job.get("params") or {}).get("auto") and job["status"] in (INTERRUPTED, PAUSED):
+                    self._superseded.add(job["id"])
                     try:
                         self.manager.cancel(job["id"])
                     except JobError:
