@@ -110,10 +110,12 @@ function seriesOnShow() {
 
 // ==================== STAND EN VERGELIJKEN ====================
 
+// Bij elk bezoek opnieuw (iets kan in het Herstelcentrum teruggezet zijn); wat je per reeks
+// koos, blijft staan zolang de reeks dezelfde is
 function seriesInit() {
     seriesSyncControls();
     seriesLoadStatus();
-    if (!seriesState.loaded && !seriesState.loading) seriesLoad(true);
+    seriesLoad(true);
 }
 
 function seriesSyncControls() {
@@ -268,8 +270,7 @@ async function seriesLoad(reset) {
     if (reset) {
         seriesState.items = [];
         seriesState.nextOffset = 0;
-        seriesState.keep.clear();
-        list.replaceChildren(skeletonRows(3));
+        if (!seriesState.loaded) list.replaceChildren(skeletonRows(3));
     }
     if (seriesState.nextOffset === null) return;
     seriesState.loading = true;
@@ -282,7 +283,11 @@ async function seriesLoad(reset) {
         if (seq !== seriesState.seq) return;
         const fresh = data.items.filter(s => !seriesState.skipped.has(s.key)
             && !seriesState.items.some(t => t.key === s.key));
-        fresh.forEach(s => seriesState.keep.set(s.key, new Set([s.best])));
+        fresh.forEach(s => {
+            const chosen = seriesState.keep.get(s.key);
+            const still = chosen && [...chosen].every(id => s.members.some(m => m.id === id));
+            if (!still) seriesState.keep.set(s.key, new Set([s.best]));
+        });
         seriesState.items.push(...fresh);
         seriesState.nextOffset = data.next_offset;
         seriesState.total = data.total;

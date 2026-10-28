@@ -703,6 +703,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.remove_listener("dialog", accept)
             expect(klein.exists() and not (holding / "2022" / "bursts" / "strand klein.jpg").exists(),
                    "series: the Herstelcentrum did not put the resized photo back")
+            step("series: back on the tab", lambda: page.click(".top-nav [data-view='duplicates']"), 1.0)
+            back = page.evaluate("[...document.querySelectorAll('.series-photo-name')].map(n => n.textContent)")
+            # (the burst was skipped: that holds for this session)
+            expect("strand klein.jpg" in back and "burst_00.jpg" not in back,
+                   f"series: after the undo the series did not come back on the tab, or the skipped one did ({back})")
 
             # Timeline of the whole vault from the index: only what is in view is drawn
             page.evaluate(f"localStorage.setItem('timeline_folders', JSON.stringify([{json.dumps(str(vault))}]))")
