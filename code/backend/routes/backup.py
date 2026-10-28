@@ -34,7 +34,12 @@ def _require_config():
 def backup_status() -> Dict[str, Any]:
     """Works without the archive: the backups are on the Mac's own disk."""
     _require_config()
-    return backup.status(config, auto_enabled=auto is not None)
+    return _status()
+
+
+def _status() -> Dict[str, Any]:
+    return backup.status(config, auto_enabled=auto is not None,
+                         next_check_at=getattr(auto, "next_check_at", None))
 
 
 @router.post("/run")
@@ -47,4 +52,4 @@ def backup_run() -> Dict[str, Any]:
                                     keep_weekly=config.BACKUP_KEEP_WEEKLY)
     except backup.BackupError as e:
         raise HTTPException(status_code=e.status, detail=str(e))
-    return {"backup": result, "status": backup.status(config, auto_enabled=auto is not None)}
+    return {"backup": result, "status": _status()}

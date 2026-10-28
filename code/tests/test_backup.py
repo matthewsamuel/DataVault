@@ -8,6 +8,7 @@ Automatic database backups and the way back (backend/backup.py, restore_backup.p
   7 days and per week for 4 weeks, and only ever removes our own backup files.
 - Restore only with the app stopped, and only after the live database was saved in full.
 """
+import errno
 import os
 import sqlite3
 import threading
@@ -214,7 +215,7 @@ def test_failures_leave_nothing_behind_and_are_reported(client, app, config, mon
     time.sleep(1.05)
     monkeypatch.setattr(backup, "_integrity", lambda path: "*** in database main *** Page 3: corrupt")
     r = client.post("/api/backup/run")
-    assert r.status_code == 500 and "integrity_check" in r.json()["error"]["message"]
+    assert r.status_code == 500 and "niet bewaard" in r.json()["error"]["message"]
     monkeypatch.undo()
     monkeypatch.setattr(backup, "running_servers", lambda: [])
 
@@ -229,6 +230,90 @@ def test_failures_leave_nothing_behind_and_are_reported(client, app, config, mon
 
     with backup._lock:
         assert client.post("/api/backup/run").status_code == 409
+
+
+def test_a_backup_folder_without_hard_links_gets_an_exclusive_copy(client, app, config, monkeypatch):
+    # exFAT or FAT (a USB stick): os.link answers 'Operation not supported'
+    def no_links(src, dst, *a, **k):
+        raise OSError(errno.ENOTSUP, "Operation not supported")
+    monkeypatch.setattr(backup.os, "link", no_links)
+    _fill(app.state.db)
+    made = backup.make_backup(config, manual=True)
+    path = Path(made["path"])
+    assert path.is_file() and backup.check_backup_file(path) == migrations.LATEST_VERSION
+    assert sorted(p.name for p in config.BACKUP_FOLDER.iterdir()) == [path.name]   # no partial files left
+    # The exclusive copy never overwrites: a name that is taken stays as it was
+    other = config.BACKUP_FOLDER / "bezet.bin"
+    other.write_bytes(b"van iemand anders")
+    source = config.BACKUP_FOLDER / "bron.bin"
+    source.write_bytes(b"nieuw")
+    with pytest.raises(FileExistsError):
+        backup._copy_new(source, other)
+    assert other.read_bytes() == b"van iemand anders"
+    # A copy that does not read back the same is removed again and reported
+    real = backup._sha256
+    calls = []
+    monkeypatch.setattr(backup, "_sha256", lambda stream: calls.append(1) or (real(stream) + ("x" if len(calls) == 2 else "")))
+    with pytest.raises(backup.BackupError, match="klopt niet"):
+        backup._copy_new(source, config.BACKUP_FOLDER / "kopie.bin")
+    assert not (config.BACKUP_FOLDER / "kopie.bin").exists()
+
+
+def test_backups_made_by_hand_are_kept_apart_from_the_daily_rotation(client, app, config, tmp_path):
+    folder = tmp_path / "backups"
+    folder.mkdir()
+    day = datetime(2026, 10, 28, 9, 0, 0)
+    auto = _touch(folder, day - timedelta(hours=1))
+    manual = [_touch(folder, day + timedelta(minutes=i), "-handmatig") for i in range(7)]
+    backup.rotate(folder, keep_daily=7, keep_weekly=4)
+    assert {p.name for p in folder.iterdir()} == set(manual[2:])   # the newest 5 by hand
+    # Through the API: two backups by hand on one day both stay
+    first = client.post("/api/backup/run").json()["backup"]["name"]
+    time.sleep(1.05)
+    second = client.post("/api/backup/run").json()["backup"]["name"]
+    assert {b["name"] for b in backup.list_backups(config.BACKUP_FOLDER)} == {first, second}
+    assert client.get("/api/backup/status").json()["keep_manual"] == backup.KEEP_MANUAL
+
+
+def test_a_backup_folder_that_cannot_be_written_says_so_in_dutch(client, app, config):
+    config.BACKUP_FOLDER.mkdir(parents=True, exist_ok=True)
+    os.chmod(config.BACKUP_FOLDER, 0o555)
+    try:
+        r = client.post("/api/backup/run")
+    finally:
+        os.chmod(config.BACKUP_FOLDER, 0o755)
+    message = r.json()["error"]["message"]
+    assert r.status_code == 500
+    assert message.startswith(f"De back-upmap {config.BACKUP_FOLDER} is niet schrijfbaar")
+    assert "backup_folder" in message and "mislukt" not in message and "unable" not in message
+    assert client.get("/api/backup/status").json()["last_error"]["message"] == message
+    # sqlite and OS errors become Dutch too
+    assert "bezet" in str(backup._reason(sqlite3.OperationalError("database is locked"), config.BACKUP_FOLDER))
+    assert "vol" in str(backup._reason(OSError(errno.ENOSPC, "No space left on device"), config.BACKUP_FOLDER))
+    assert "schrijfbaar" in str(backup._reason(OSError(errno.EACCES, "Permission denied"), config.BACKUP_FOLDER))
+
+
+def test_the_restore_command_names_the_config_the_app_runs_with(client, app, config, monkeypatch):
+    command = client.get("/api/backup/status").json()["restore_command"]
+    assert command.endswith(f"restore_backup.py --config {config.config_path.resolve()}") or \
+        command.endswith(f"restore_backup.py --config '{config.config_path.resolve()}'")
+    assert f"--config" in command and "cd " in command
+    # With code/config.json itself the option is left out
+    monkeypatch.setattr(backup, "DEFAULT_CONFIG_PATH", Path(config.config_path))
+    assert backup.restore_command(config).endswith("venv/bin/python restore_backup.py")
+
+
+def test_the_status_says_when_the_running_app_checks_next(app, config):
+    auto = backup.AutoBackup(config, app.state.db, interval=3600, first_delay=600)
+    assert backup.status(config, auto_enabled=True)["next_check_at"] is None
+    auto.start()
+    try:
+        status = backup.status(config, auto_enabled=True, next_check_at=auto.next_check_at)
+        assert abs(status["next_check_at"] - (time.time() + 600)) < 5
+        assert status["check_interval_minutes"] == 60 and status["next_due_at"] is None
+    finally:
+        auto.stop()
+    assert backup.status(config, auto_enabled=False, next_check_at=1.0)["next_check_at"] is None
 
 
 def test_with_the_vault_unplugged_the_status_still_answers(client, app, config, vault):

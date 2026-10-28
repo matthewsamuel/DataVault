@@ -30,11 +30,16 @@ How a backup is made (make_backup):
    gzip-compressed (a database of 100,000 photos goes from about 60 MB to under 10 MB),
    the compressed file is read back and compared, and it gets its final name
    (datavault-YYYYMMDD-HHMMSS.db.gz, or ...-handmatig.db.gz), linked into place so
-   nothing is ever overwritten. A failed copy is removed and the error is reported.
-   'gunzip -k <file>' gives a normal SQLite database to look into.
+   nothing is ever overwritten. A file system without hard links (exFAT or FAT on a USB
+   stick, some network shares) gets an exclusively created new file instead (O_EXCL:
+   it fails if the name exists), synced and compared again. A failed copy is removed and
+   the error is reported in Dutch. 'gunzip -k <file>' gives a normal SQLite database to
+   look into.
 4. Rotation: the newest backup of each of the last KEEP_DAILY days that have one, plus
-   the newest of each of the last KEEP_WEEKLY weeks; the others go. Only files in the
-   backup folder with exactly these names are ever removed, never anything else.
+   the newest of each of the last KEEP_WEEKLY weeks, plus the newest KEEP_MANUAL made
+   with 'Nu back-uppen' (a backup made by hand just before something risky must not go
+   because a second one was made the same day); the others go. Only files in the backup
+   folder with exactly these names are ever removed, never anything else.
 
 The backup folder is ~/Library/Application Support/DataVault/backups unless config.json
 says otherwise ("backup_folder", "backup_keep_daily", "backup_keep_weekly"). With
@@ -48,11 +53,13 @@ the backup copied INTO the live database with the backup API (no file is replace
 deleted). See code/restore_backup.py and the README.
 """
 import contextlib
+import errno
 import fcntl
 import gzip
 import hashlib
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -64,12 +71,14 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set
 
 from backend import migrations
+from backend.config import DEFAULT_CONFIG_PATH
 
 MAX_AGE = 24 * 3600              # a backup older than this is due
 CHECK_INTERVAL = 3600            # how often the running app checks whether one is due
 FIRST_CHECK_DELAY = 20           # seconds after start (the database and index start first)
 KEEP_DAILY = 7
 KEEP_WEEKLY = 4
+KEEP_MANUAL = 5                  # backups made with 'Nu back-uppen' that are kept apart
 KEEP_BEFORE_RESTORE = 5
 FREE_SPACE_MARGIN = 64 * 1024 * 1024
 
@@ -81,6 +90,9 @@ REBUILDABLE_TABLES: Set[str] = {"file_hashes", "media_dates", "media_folders", "
 REBUILDABLE_NAME_PARTS = ("phash", "embedding")
 
 LOCK_NAME = "datavault.app.lock"
+
+# What os.link raises on a file system without hard links (exFAT, FAT, some shares)
+NO_HARD_LINKS = {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EMLINK, errno.ENOSYS}
 
 
 class BackupError(Exception):
@@ -167,12 +179,13 @@ def is_due(config, now: Optional[float] = None, max_age: float = MAX_AGE) -> boo
 
 
 def rotate(folder: Path, keep_daily: int = KEEP_DAILY, keep_weekly: int = KEEP_WEEKLY,
-           keep_before_restore: int = KEEP_BEFORE_RESTORE) -> List[str]:
+           keep_before_restore: int = KEEP_BEFORE_RESTORE, keep_manual: int = KEEP_MANUAL) -> List[str]:
     """
     Keep the newest backup of each of the newest keep_daily days, and of each of the newest
-    keep_weekly ISO weeks (always at least the newest backup); remove the rest. Safety
-    copies made before a restore are kept apart: the newest keep_before_restore stay.
-    Returns the names removed. Only regular files with our exact names are touched.
+    keep_weekly ISO weeks (always at least the newest backup); remove the rest. Kept apart:
+    the newest keep_manual backups made by hand ('Nu back-uppen') and the newest
+    keep_before_restore safety copies made before a restore. Returns the names removed.
+    Only regular files with our exact names are touched.
     """
     backups = list_backups(folder)
     regular = [b for b in backups if b["kind"] != "voor-herstel"]
@@ -191,6 +204,7 @@ def rotate(folder: Path, keep_daily: int = KEEP_DAILY, keep_weekly: int = KEEP_W
             keep.add(item["name"])
     if regular:
         keep.add(regular[0]["name"])
+    keep.update(b["name"] for b in [b for b in regular if b["kind"] == "handmatig"][:keep_manual])
     keep.update(b["name"] for b in [b for b in backups if b["kind"] == "voor-herstel"][:keep_before_restore])
     removed = []
     for item in backups:
@@ -220,6 +234,46 @@ def running() -> bool:
 
 def last_error() -> Optional[Dict[str, Any]]:
     return _last_error
+
+
+def _not_writable(folder: Path) -> BackupError:
+    return BackupError(f"De back-upmap {folder} is niet schrijfbaar. Maak hem schrijfbaar, of kies een "
+                       "andere map in config.json (backup_folder).", 500)
+
+
+def _writable(folder: Path) -> bool:
+    return os.access(folder, os.W_OK | os.X_OK)
+
+
+def _reason(e: BaseException, folder: Path) -> BackupError:
+    """A Dutch message for what went wrong while copying (OSError or sqlite3.Error); the
+    technical text only in parentheses when there is no better description."""
+    if isinstance(e, OSError):
+        code = e.errno
+        if code in (errno.EACCES, errno.EPERM, errno.EROFS):
+            return _not_writable(folder)
+        if code in (errno.ENOSPC, errno.EDQUOT):
+            return BackupError(f"De schijf met de back-upmap {folder} is vol.", 507)
+        if code == errno.EIO:
+            return BackupError("Lees- of schrijffout op de schijf. Probeer het later nog eens.", 500)
+        if code == errno.ENOENT:
+            return BackupError("Een bestand of map verdween tijdens de back-up. Is de schijf nog aangesloten?", 503)
+        return BackupError(f"Er ging iets onverwachts mis ({e.strerror or e}).", 500)
+    text = str(e).lower()
+    if "unable to open" in text:
+        if not _writable(folder):
+            return _not_writable(folder)
+        return BackupError(f"Het back-upbestand kon niet worden aangemaakt in {folder}.", 500)
+    if "locked" in text or "busy" in text:
+        return BackupError("De database is even bezet. Probeer het zo nog eens.", 409)
+    if "full" in text:
+        return BackupError(f"De schijf met de back-upmap {folder} is vol.", 507)
+    if "i/o" in text:
+        return BackupError("Lees- of schrijffout op de schijf. Probeer het later nog eens.", 500)
+    if "malformed" in text or "not a database" in text:
+        return BackupError("De database is beschadigd en kon niet gekopieerd worden. "
+                           "Zet een eerdere back-up terug (zie 'Een back-up terugzetten').", 500)
+    return BackupError(f"Er ging iets onverwachts mis met de database ({e}).", 500)
 
 
 def _rebuildable(conn: sqlite3.Connection) -> List[str]:
@@ -321,11 +375,39 @@ def _compress(plain: Path, packed: Path) -> None:
 
 def _place(tmp: Path, final: Path) -> None:
     """Give the finished copy its name without ever overwriting a file (a hard link fails if
-    the name is taken), then drop the temporary name."""
+    the name is taken), then drop the temporary name. Without hard links (exFAT): an
+    exclusive copy (_copy_new)."""
     with open(tmp, "rb") as handle:
         os.fsync(handle.fileno())
-    os.link(tmp, final)
+    try:
+        os.link(tmp, final)
+    except OSError as e:
+        if e.errno not in NO_HARD_LINKS:
+            raise
+        _copy_new(tmp, final)
     tmp.unlink()
+
+
+def _copy_new(src: Path, final: Path) -> None:
+    """Copy src to final, a file that must not exist yet (O_EXCL: never overwrites), synced
+    to the disk and compared byte for byte (sha256). A copy that does not match is removed
+    (it is our own file, made just now) and BackupError is raised."""
+    fd = os.open(final, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        with os.fdopen(fd, "wb") as dst, open(src, "rb") as source:
+            shutil.copyfileobj(source, dst, 1024 * 1024)
+            dst.flush()
+            os.fsync(dst.fileno())
+        with open(src, "rb") as a, open(final, "rb") as b:
+            same = _sha256(a) == _sha256(b)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            final.unlink()   # our own half-written copy
+        raise
+    if not same:
+        with contextlib.suppress(OSError):
+            final.unlink()   # our own copy that does not match
+        raise BackupError("De kopie in de back-upmap klopt niet met het origineel; hij is niet bewaard.", 500)
 
 
 def _check_space(folder: Path, needed: int) -> None:
@@ -357,7 +439,12 @@ def make_backup(config, manual: bool = False, compact: bool = True, keep_daily: 
         try:
             folder.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            raise BackupError(f"De back-upmap {folder} kon niet gemaakt worden: {e.strerror or e}", 500)
+            if e.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+                raise BackupError(f"De back-upmap {folder} kon niet worden aangemaakt: geen schrijfrechten. "
+                                  "Kies een andere map in config.json (backup_folder).", 500)
+            raise _reason(e, folder)
+        if not _writable(folder):
+            raise _not_writable(folder)
         live_size = _live_size(db_path)
         _check_space(folder, live_size + live_size // 2)
         stamp = _stamp(started)
@@ -371,22 +458,20 @@ def make_backup(config, manual: bool = False, compact: bool = True, keep_daily: 
         try:
             _snapshot(db_path, tmp)
             emptied = _compact(tmp) if compact else {}
-        except sqlite3.Error as e:
+        except (sqlite3.Error, OSError) as e:
             if not db_path.is_file():
                 raise BackupError("De database is niet bereikbaar. Is de schijf aangesloten?", 503)
-            raise BackupError(f"Back-up mislukt: {e}", 500)
-        except OSError as e:
-            raise BackupError(f"Back-up mislukt: {e.strerror or e}", 500)
+            raise _reason(e, folder)
         integrity = _integrity(tmp)
         if integrity != "ok":
-            raise BackupError(f"De back-up is niet in orde (integrity_check: {integrity}); hij is niet bewaard.", 500)
+            raise BackupError(f"De controle vond fouten in de kopie, dus hij is niet bewaard ({integrity}).", 500)
         version = _schema_version(tmp)
         size = tmp.stat().st_size
         try:
             _compress(tmp, packed)
             _place(packed, final)
         except OSError as e:
-            raise BackupError(f"Back-up mislukt: {e.strerror or e}", 500)
+            raise _reason(e, folder)
         removed = rotate(folder, KEEP_DAILY if keep_daily is None else keep_daily,
                          KEEP_WEEKLY if keep_weekly is None else keep_weekly)
         result = {
@@ -410,8 +495,9 @@ def make_backup(config, manual: bool = False, compact: bool = True, keep_daily: 
         _lock.release()
 
 
-def status(config, auto_enabled: bool = False) -> Dict[str, Any]:
-    """What Instellingen shows: where, how many, the newest, when the next one is due."""
+def status(config, auto_enabled: bool = False, next_check_at: Optional[float] = None) -> Dict[str, Any]:
+    """What Instellingen shows: where, how many, the newest, when the next one is due and
+    when the running app checks next (next_check_at; None when it does not check)."""
     folder = folder_of(config)
     backups = list_backups(folder)
     regular = [b for b in backups if b["kind"] != "voor-herstel"]
@@ -425,19 +511,31 @@ def status(config, auto_enabled: bool = False) -> Dict[str, Any]:
         "keep_weekly": getattr(config, "BACKUP_KEEP_WEEKLY", KEEP_WEEKLY),
         "last": last,
         "next_due_at": (last["created_at"] + MAX_AGE) if last else None,
+        "next_check_at": next_check_at if auto_enabled else None,
+        "check_interval_minutes": CHECK_INTERVAL // 60,
+        "keep_manual": KEEP_MANUAL,
         "backups": backups,
         "count": len(regular),
         "total_size": sum(b["size"] for b in backups),
         "running": running(),
         "last_error": _last_error,
         "rebuildable": sorted(REBUILDABLE_TABLES),
-        "restore_command": restore_command(),
+        "restore_command": restore_command(config),
     }
 
 
-def restore_command() -> str:
+def restore_command(config=None) -> str:
+    """The Terminal command that lists (and, with a name after it, restores) the backups of
+    THIS app: with --config when it runs with another config than code/config.json, so the
+    command never reaches a different database."""
     code_dir = Path(__file__).resolve().parent.parent
-    return f"cd \"{code_dir}\" && venv/bin/python restore_backup.py"
+    command = f"cd {shlex.quote(str(code_dir))} && venv/bin/python restore_backup.py"
+    config_path = getattr(config, "config_path", None)
+    if config_path is not None:
+        config_path = Path(os.path.abspath(config_path))
+        if config_path.resolve() != DEFAULT_CONFIG_PATH.resolve():
+            command += f" --config {shlex.quote(str(config_path))}"
+    return command
 
 
 # ==================== AUTOMATIC ====================
@@ -456,10 +554,12 @@ class AutoBackup:
         self.first_delay = first_delay
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self.next_check_at: Optional[float] = None   # when the thread checks next (Instellingen)
 
     def start(self) -> None:
         if self._thread is not None:
             return
+        self.next_check_at = time.time() + self.first_delay
         self._thread = threading.Thread(target=self._run, name="auto-backup", daemon=True)
         self._thread.start()
 
@@ -492,6 +592,7 @@ class AutoBackup:
                 self.check()
             except Exception as e:   # never let the thread die
                 _say(f"Automatische back-up mislukt: {e}")
+            self.next_check_at = time.time() + self.interval
             if self._stop.wait(self.interval):
                 return
 

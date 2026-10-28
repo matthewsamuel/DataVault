@@ -54,7 +54,7 @@ def _show_list(config) -> None:
     for item in items:
         when = datetime.fromtimestamp(item["created_at"]).strftime("%d-%m-%Y %H:%M:%S")
         print(f"  {item['name']:<44} {when}  {_size(item['size']):>9}  {item['kind']}")
-    print("\nTerugzetten: venv/bin/python restore_backup.py <naam>   (met de app gestopt)")
+    print(f"\nTerugzetten: {backup.restore_command(config)} <naam>   (met de app gestopt)")
 
 
 def _find(config, name: str) -> Path:
