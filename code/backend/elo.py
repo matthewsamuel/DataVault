@@ -232,6 +232,62 @@ def ratings_below(db, folder: str) -> Dict[str, Tuple[int, int, int]]:
     return {path: (int(rating), games.get(path, 0), int(votes or 0)) for path, rating, votes in rows}
 
 
+def ratings_of(db, paths: Sequence[str]) -> Dict[str, Tuple[int, int, int]]:
+    """{path: (rating, games, votes)} for the judged files among paths (a collection that is
+    not one folder, e.g. an album)."""
+    out: Dict[str, Tuple[int, int, int]] = {}
+    with db._connect() as conn:
+        for start in range(0, len(paths), 400):
+            chunk = list(paths[start:start + 400])
+            marks = ",".join("?" * len(chunk))
+            games: Dict[str, int] = {}
+            for column in ("path_a", "path_b"):
+                for path, count in conn.execute(
+                        f"SELECT {column}, COUNT(*) FROM elo_comparisons WHERE {column} IN ({marks}) "
+                        f"GROUP BY {column}", chunk):
+                    games[path] = games.get(path, 0) + count
+            for path, rating, votes in conn.execute(
+                    f"SELECT path, rating, votes FROM file_ratings WHERE path IN ({marks})", chunk):
+                out[path] = (int(rating), games.get(path, 0), int(votes or 0))
+    return out
+
+
+# ==================== COLLECTIONS OTHER THAN A FOLDER ====================
+#
+# A comparison round runs in a scope. A folder (a show, the whole library, any folder in
+# the vault) is built in. Other kinds of collection (albums, smart albums) plug in here
+# without changing this module or the routes: register_scope('album', resolve), where
+# resolve(value) answers {"title": str, "paths": [absolute file paths]} or None when that
+# collection does not exist. The routes then accept ?scope=album:<value> (pair, leaderboard)
+# and {"scope": "album:<value>"} (compare, undo), and the history row keeps 'album:<value>'
+# as its scope. Folder scopes are stored as the folder path (always starts with '/').
+
+_scopes: Dict[str, Callable[[str], Optional[Dict[str, Any]]]] = {}
+
+
+def register_scope(kind: str, resolve: Callable[[str], Optional[Dict[str, Any]]]) -> None:
+    if not kind or not kind.isidentifier():
+        raise ValueError("a scope kind is a plain word, like 'album'")
+    _scopes[kind] = resolve
+
+
+def scope_kinds() -> List[str]:
+    return sorted(_scopes)
+
+
+def resolve_scope(key: str) -> Optional[Dict[str, Any]]:
+    """{'key', 'kind', 'value', 'title', 'paths'} for a registered 'kind:value', else None
+    (an unknown kind, or a collection that does not exist)."""
+    kind, sep, value = (key or "").partition(":")
+    if not sep or kind not in _scopes:
+        return None
+    found = _scopes[kind](value)
+    if not found:
+        return None
+    return {"key": f"{kind}:{value}", "kind": kind, "value": value,
+            "title": str(found.get("title") or value), "paths": list(found.get("paths") or [])}
+
+
 def comparisons_in_scope(db, scope: str) -> int:
     with db._connect() as conn:
         return conn.execute("SELECT COUNT(*) FROM elo_comparisons WHERE scope = ?", (scope,)).fetchone()[0]

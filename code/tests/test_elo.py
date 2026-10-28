@@ -211,6 +211,10 @@ def test_undo_restores_both_ratings_exactly(client, app, vault):
     assert client.post("/api/shows/compare/undo", json={}).status_code == 404
     assert client.post("/api/shows/compare/undo", json={"id": first["id"]}).status_code == 404
     assert client.post("/api/shows/compare/undo", json={"id": "1"}).status_code == 400
+    # Ids that cannot be a row: refused, never a 500 (sqlite cannot take a number this big)
+    for bad in (99999999999999999999999, 2 ** 63, 0, -1, True):
+        r = client.post("/api/shows/compare/undo", json={"id": bad})
+        assert r.status_code == 400 and r.json()["detail"] == "Ongeldige vergelijking", (bad, r.text)
 
 
 def test_undo_is_refused_when_a_photo_changed_since(client, app, vault):
@@ -353,6 +357,40 @@ def test_with_equal_ratings_the_opponents_come_from_the_whole_list():
     assert max(per_folder.values()) < 600 * 3 / 20, per_folder    # under 3x the fair share
 
 
+def test_a_registered_collection_is_a_scope_of_its_own(client, app, vault, monkeypatch):
+    lib = (vault / "library").resolve()
+    rome, venice, opa = str(lib / "Reis Italië/rome.jpg"), str(lib / "Reis Italië/venetië.jpg"), str(lib / "Familie/opa.jpg")
+    monkeypatch.setattr(elo, "_scopes", {})
+    albums = {"7": {"title": "Mooiste", "paths": [rome, opa, "/etc/passwd", str(lib / "Familie")]}}
+    elo.register_scope("album", lambda value: albums.get(value))
+    assert elo.scope_kinds() == ["album"]
+    with pytest.raises(ValueError):
+        elo.register_scope("al bum", lambda value: None)
+
+    body = client.get("/api/shows/compare/pair", params={"scope": "album:7"}).json()
+    assert body["scope"] == {"key": "album:7", "path": None, "title": "Mooiste"}
+    assert body["stats"] == {"photos": 2, "compared": 0, "comparisons": 0}
+    assert {p["path"] for p in body["pair"]} == {rome, opa}
+    r = client.post("/api/shows/compare", json={"a": rome, "b": opa, "winner": "b", "scope": "album:7"})
+    assert r.status_code == 200 and r.json()["scope"] == "album:7"
+    board = client.get("/api/shows/leaderboard", params={"scope": "album:7"}).json()
+    assert [i["path"] for i in board["items"]] == [opa, rome] and board["scope"]["key"] == "album:7"
+    client.post("/api/shows/compare", json={"a": venice, "b": str(lib / "xss <img src=x onerror=window.__xss=1>.jpg"),
+                                            "winner": "a"})   # in the library, newer
+    undone = client.post("/api/shows/compare/undo", json={"scope": "album:7"}).json()
+    assert undone["scope"] == "album:7" and undone["stats"] == {"photos": 2, "compared": 0, "comparisons": 0}
+    for bad, status in (("album:8", 404), ("map:1", 404), ("album", 400)):
+        assert client.get("/api/shows/compare/pair", params={"scope": bad}).status_code == status, bad
+
+
+def test_the_undo_answers_the_progress_of_its_scope(client, app, vault):
+    italy = (vault / "library/Reis Italië").resolve()
+    rome, venice = str(italy / "rome.jpg"), str(italy / "venetië.jpg")
+    comp = client.post("/api/shows/compare", json={"a": rome, "b": venice, "winner": "a", "folder": str(italy)}).json()
+    undone = client.post("/api/shows/compare/undo", json={"id": comp["id"]}).json()
+    assert undone["stats"] == {"photos": 2, "compared": 0, "comparisons": 0}
+
+
 def test_the_frames_of_a_burst_are_never_shown_side_by_side(client, app, vault):
     from test_media_index import _index
     from fixtures.vault_builder import BURST
@@ -383,7 +421,7 @@ def test_pair_api_stays_in_the_scope_and_skips_the_last_pair(client, app, vault)
     r = client.get("/api/shows/compare/pair", params={"folder": str(italy)})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["scope"] == {"path": str(italy), "title": "Reis Italië"}
+    assert body["scope"] == {"key": str(italy), "path": str(italy), "title": "Reis Italië"}
     assert {p["name"] for p in body["pair"]} == {"rome.jpg", "venetië.jpg"}
     assert body["pair"][0]["rating"] == 1000 and body["stats"] == {"photos": 2, "compared": 0, "comparisons": 0}
     a, b = (p["path"] for p in body["pair"])
