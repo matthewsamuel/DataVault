@@ -9407,6 +9407,11 @@ button.otd-settings-icon:hover {
     line-height: var(--lh-snug);
 }
 
+.dg-settings-note {
+    max-width: 640px;
+    margin: var(--space-xs) 0 var(--space-sm);
+}
+
 .dg-connect-status {
     min-height: 1.4em;
     font-size: var(--fs-sm);

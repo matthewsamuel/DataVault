@@ -854,7 +854,7 @@ registerSettingsSection({
     render(body) {
         const status = createEl('span', { text: 'Laden…' });
         const button = createEl('button', { type: 'button', class: 'btn btn-secondary', id: 'settings-dg-launchd', disabled: true, text: '…' });
-        const explain = createEl('p', { class: 'settings-section-text', text: 'Sommige bronnen geven alleen je laatste gegevens terug. '
+        const explain = createEl('p', { class: 'dg-field-help dg-settings-note', text: 'Sommige bronnen geven alleen je laatste gegevens terug. '
             + 'Met deze achtergrondtaak (launchd, elke 30 minuten) haalt DataVault ze ook op als de app dicht is, voor bronnen '
             + 'waarvan het schema aan staat. Zonder de T7 doet hij niets.' });
         body.append(

@@ -43,7 +43,7 @@ STATUS = {
     "niet_ingesteld": ("Niet ingesteld", "neutral"),
 }
 DOWNLOADS_NOTICE_DAYS = 14
-EXISTING_CACHE_SECONDS = 30
+EXISTING_CACHE_SECONDS = 120     # finding existing exports walks data/: not on every card load
 
 _existing_lock = threading.Lock()
 _existing_cache: Dict[str, tuple] = {}
