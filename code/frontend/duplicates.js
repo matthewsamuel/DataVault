@@ -104,6 +104,8 @@ function setSelectedFolder(folder) {
     selectedFolder = folder;
     const shown = document.getElementById('selected-folder-path');
     shown.replaceChildren(...(folder ? pathNodes(archivePath(folder)) : ['Geen']));
+    // Een pad in mono, het woord 'Geen' in de gewone letter
+    shown.classList.toggle('is-empty', !folder);
     shown.title = folder || '';
     document.getElementById('btn-scan-folder').disabled = !folder;
     document.getElementById('btn-index-folder').disabled = !folder;

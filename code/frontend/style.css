@@ -3534,6 +3534,12 @@ a.breadcrumb-item:hover {
     overflow-wrap: anywhere;
 }
 
+.folder-selection-path.is-empty {
+    font-family: var(--font-sans);
+    font-size: var(--fs-sm);
+    color: var(--text-tertiary);
+}
+
 .folder-selection-actions {
     display: flex;
     flex-wrap: wrap;
@@ -6429,7 +6435,12 @@ button.otd-settings-icon:hover {
 .storage-folder-percent {
     color: var(--text-tertiary);
     font-size: var(--fs-xs);
+}
+
+/* Alleen het getal in mono, de zin eromheen in de gewone letter */
+.storage-folder-percent-value {
     font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
 }
 
 .storage-progress-bar {

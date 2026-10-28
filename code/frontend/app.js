@@ -2520,7 +2520,7 @@ async function storageNavigateToPath(folderPath) {
                 <div class="storage-progress-bar">
                     <div class="storage-progress-fill" style="width: ${total > 0 ? size / total * 100 : 0}%"></div>
                 </div>
-                <div class="storage-folder-percent">${percent}% van deze map</div>
+                <div class="storage-folder-percent"><span class="storage-folder-percent-value">${percent}%</span> van deze map</div>
             `;
             list.appendChild(li);
         });
