@@ -59,7 +59,7 @@ def search_status() -> Dict[str, Any]:
         "model": model,
         "ready": semantic.model_ready(config),
         "library_ready": media_index.usable(db),
-        **semantic.counts(db),
+        **semantic.counts(db, fresh=True),
         "device": info.get("device"),
         "per_second": info.get("per_second"),
         "last_run_at": info.get("last_run_at"),

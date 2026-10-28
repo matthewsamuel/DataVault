@@ -80,7 +80,7 @@ FLUSH_SECONDS = 2.0
 PROGRESS_SECONDS = 0.5
 LOAD_WORKERS = 3                  # thumbnails read (or made) in parallel
 CPU_THREADS = 4                   # onnxruntime threads on the CPU: leave room for the page
-COREML_MIN_PENDING = 300          # below this, Core ML's start-up costs more than it saves
+COREML_MIN_PENDING = 1000         # below this the CPU is done before Core ML has loaded (about 70 s; 4 min the first time)
 TEXT_IDLE_SECONDS = 900.0         # the text model (about 1.7 GB in memory) is let go after this
 QUERY_CACHE = 128                 # text queries whose vector is kept
 RANKING_CACHE = 16                # rankings kept for paging
@@ -539,9 +539,27 @@ _PENDING_SQL = """
 """
 
 
-def counts(db, spec: Optional[ModelSpec] = None) -> Dict[str, int]:
-    """How far the library is: photos and videos, how many have an embedding, how many wait."""
+_counts_cache: Dict[str, Any] = {}
+COUNTS_SECONDS = 2.0
+
+
+def counts(db, spec: Optional[ModelSpec] = None, fresh: bool = False) -> Dict[str, int]:
+    """
+    How far the library is: photos and videos, how many have an embedding, how many wait.
+    (A scan of the index: cached for COUNTS_SECONDS while nothing changed, for the
+    answers of the search routes; fresh=True always counts.)
+    """
     spec = spec or current_model()
+    key = (spec.id, _generation, media_index.generation(), id(db))
+    cached = _counts_cache.get("value")
+    if not fresh and cached and _counts_cache.get("key") == key and time.monotonic() - _counts_cache["at"] < COUNTS_SECONDS:
+        return dict(cached)
+    value = _count(db, spec)
+    _counts_cache.update(key=key, value=value, at=time.monotonic())
+    return dict(value)
+
+
+def _count(db, spec: ModelSpec) -> Dict[str, int]:
     with db._connect() as conn:
         total = conn.execute("SELECT COUNT(*) FROM media WHERE missing = 0 AND kind IN ('photo', 'video')").fetchone()[0]
         pending = conn.execute(f"SELECT COUNT(*) {_PENDING_SQL}", (spec.id,)).fetchone()[0]
@@ -637,6 +655,7 @@ def run_embedding(ctx, config, db, errors, vault_check: Callable[[], None]) -> D
                      else "Zoekmodel voorbereiden (de eerste keer duurt dit een paar minuten)...")
         device = encoder.load_image("auto" if total >= COREML_MIN_PENDING else "cpu")
         ctx.check()
+        loaded = time.monotonic()      # the speed is counted from here: loading is not recognising
         config.ensure_cache_dirs()
         buffer: List[Tuple] = []
         last_flush = last_progress = time.monotonic()
@@ -667,7 +686,7 @@ def run_embedding(ctx, config, db, errors, vault_check: Callable[[], None]) -> D
                     last_flush = now
                 if now - last_progress >= PROGRESS_SECONDS or processed == total:
                     last_progress = now
-                    rate = counts_["embedded"] / max(0.001, now - started)
+                    rate = counts_["embedded"] / max(0.001, now - loaded)
                     ctx.progress(processed, total, f"Foto's herkennen... {_n(processed)}/{_n(total)} "
                                                    f"({rate:.0f} per seconde)")
                 ctx.check()
@@ -677,6 +696,7 @@ def run_embedding(ctx, config, db, errors, vault_check: Callable[[], None]) -> D
                 encoder.unload_image()   # the image model is only needed by this job
         vault_check()
     seconds = round(time.monotonic() - started, 2)
+    working = time.monotonic() - loaded if total else 0.0
     result = {
         "model": spec.id,
         "files": total,
@@ -690,7 +710,8 @@ def run_embedding(ctx, config, db, errors, vault_check: Callable[[], None]) -> D
         "complete": errors.count == 0,
         "device": device,
         "seconds": seconds,
-        "per_second": round(counts_["embedded"] / seconds, 1) if seconds and counts_["embedded"] else None,
+        "load_seconds": round(loaded - started, 2) if total else 0.0,
+        "per_second": round(counts_["embedded"] / working, 1) if working and counts_["embedded"] else None,
     }
     info = {**state(db), "model": spec.id, "last_run_at": time.time(), "device": device,
             "per_second": result["per_second"], "last_seconds": seconds}
@@ -771,7 +792,16 @@ class VectorIndex:
             self._generation = seen
 
     def _add(self, rows, dim: int) -> None:
-        need = self.count + len(rows)
+        width = dim * 2
+        good = [(media_id, blob) for _, media_id, blob in rows if blob is not None and len(blob) == width]
+        for _, media_id, blob in rows:      # turned undecodable: blank its old row
+            if (blob is None or len(blob) != width) and media_id in self._row_of:
+                row = self._row_of[media_id]
+                self.ids[row] = -1
+                self.vectors[row] = 0
+        if not good:
+            return
+        need = self.count + len(good)
         if need > len(self.ids):
             size = max(need, len(self.ids) * 2)
             ids = np.zeros(size, dtype=np.int64)
@@ -779,19 +809,17 @@ class VectorIndex:
             vectors = np.zeros((size, dim), dtype=np.float16)
             vectors[:self.count] = self.vectors[:self.count]
             self.ids, self.vectors = ids, vectors
-        for _, media_id, blob in rows:
+        # One copy for the whole chunk: a row per media id (a known id keeps its row)
+        block = np.frombuffer(b"".join(blob for _, blob in good), dtype=np.float16).reshape(len(good), dim)
+        rows_at = np.empty(len(good), dtype=np.int64)
+        for k, (media_id, _) in enumerate(good):
             row = self._row_of.get(media_id)
-            if blob is None or len(blob) != dim * 2:
-                if row is not None:
-                    self.ids[row] = -1
-                    self.vectors[row] = 0
-                continue
             if row is None:
-                row = self.count
+                row = self._row_of[media_id] = self.count
                 self.count += 1
-                self._row_of[media_id] = row
-            self.ids[row] = media_id
-            self.vectors[row] = np.frombuffer(blob, dtype=np.float16)
+            rows_at[k] = row
+        self.ids[rows_at] = [media_id for media_id, _ in good]
+        self.vectors[rows_at] = block
 
     def vector_of(self, media_id: int) -> Optional[np.ndarray]:
         with self._lock:
@@ -849,11 +877,26 @@ def warm_up(config) -> bool:
     return True
 
 
+_allowed_cache: "OrderedDict[Tuple, np.ndarray]" = OrderedDict()
+_allowed_lock = threading.Lock()
+
+
 def _allowed_ids(db, filters: Dict[str, Any]) -> np.ndarray:
+    """The media ids the filters allow (sorted), cached until the index changes."""
+    key = (_filters_key(filters), media_index.generation())
+    with _allowed_lock:
+        if key in _allowed_cache:
+            _allowed_cache.move_to_end(key)
+            return _allowed_cache[key]
     where, args = media_index._where({"kind": ["photo", "video"], **filters})
     with db._connect() as conn:
         rows = conn.execute(f"SELECT m.id FROM media m WHERE {where}", args).fetchall()
-    return np.fromiter((r[0] for r in rows), dtype=np.int64, count=len(rows))
+    ids = np.sort(np.fromiter((r[0] for r in rows), dtype=np.int64, count=len(rows)))
+    with _allowed_lock:
+        _allowed_cache[key] = ids
+        while len(_allowed_cache) > RANKING_CACHE:
+            _allowed_cache.popitem(last=False)
+    return ids
 
 
 def _filters_key(filters: Dict[str, Any]) -> str:
@@ -878,7 +921,7 @@ def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: D
     ids, scores = _index.scores(query)
     keep = ids >= 0
     allowed = _allowed_ids(db, filters)
-    keep &= np.isin(ids, allowed, assume_unique=False)
+    keep &= np.isin(ids, allowed)
     if exclude is not None:
         keep &= ids != exclude
     ids, scores = ids[keep], scores[keep]
@@ -1073,7 +1116,7 @@ class SemanticAuto:
         jobs = self.manager.list(limit=10, job_type=EMBED_JOB)
         if any(job["status"] in ACTIVE for job in jobs) or self.held(jobs):
             return False
-        if counts(self.db)["pending"] == 0:
+        if counts(self.db, fresh=True)["pending"] == 0:
             return False
         from backend.jobs import INTERRUPTED, PAUSED, JobError
         try:
