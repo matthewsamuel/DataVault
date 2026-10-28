@@ -1583,6 +1583,11 @@ async function restartServer() {
         const res = await fetch(`${API_BASE}/api/restart`, { method: 'POST' });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
+            if (res.status === 409 && err.detail === 'Herstart is al bezig') {
+                // Al herstart vanuit een ander tabblad: gewoon meewachten op de nieuwe server
+                showRestartOverlay(oldInstance);
+                return;
+            }
             setBrandRestarting(false);
             showToast('Herstarten mislukt', err.detail || `Serverfout (${res.status})`, 'error');
             return;

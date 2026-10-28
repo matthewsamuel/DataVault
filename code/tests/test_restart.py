@@ -26,6 +26,7 @@ def no_real_restart(monkeypatch):
     calls = {"spawn": [], "exit": []}
     monkeypatch.setattr(restart, "_spawn_helper", lambda pid, argv, cwd: calls["spawn"].append((pid, argv, cwd)))
     monkeypatch.setattr(restart, "_exit_soon", lambda pid: calls["exit"].append(pid))
+    monkeypatch.setattr(restart, "_restart_scheduled", False)
     return calls
 
 
@@ -41,6 +42,42 @@ def test_restart_relaunches_this_process_only(client, no_real_restart, monkeypat
                     "--host", "127.0.0.1", "--port", "8123"]
     assert cwd == os.getcwd()
     assert no_real_restart["exit"] == [os.getpid()]
+
+
+def test_concurrent_restarts_spawn_one_helper(client, no_real_restart, monkeypatch):
+    """R-2.1b-2: a second request (another tab) gets 409 instead of a second relaunch."""
+    import threading
+    monkeypatch.setattr(sys, "orig_argv", ["python", "-m", "uvicorn", "--factory", "backend.main:create_app"])
+    spawned = threading.Event()
+
+    def slow_spawn(pid, argv, cwd):
+        time.sleep(0.2)  # both requests are inside schedule_restart at the same time
+        no_real_restart["spawn"].append((pid, argv, cwd))
+        spawned.set()
+    monkeypatch.setattr(restart, "_spawn_helper", slow_spawn)
+    codes = []
+    threads = [threading.Thread(target=lambda: codes.append(client.post("/api/restart").status_code))
+               for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(codes) == [200, 409]
+    assert len(no_real_restart["spawn"]) == 1 and no_real_restart["exit"] == [os.getpid()]
+    r = client.post("/api/restart")
+    assert r.status_code == 409 and r.json()["detail"] == "Herstart is al bezig"
+    assert len(no_real_restart["spawn"]) == 1
+
+
+def test_failed_spawn_can_be_retried(client, no_real_restart, monkeypatch):
+    monkeypatch.setattr(sys, "orig_argv", ["python", "-m", "uvicorn", "--factory", "backend.main:create_app"])
+
+    def broken(pid, argv, cwd):
+        raise OSError("no fork")
+    monkeypatch.setattr(restart, "_spawn_helper", broken)
+    with pytest.raises(OSError):
+        client.post("/api/restart")
+    assert restart._restart_scheduled is False and no_real_restart["exit"] == []
 
 
 def test_restart_needs_the_session_token(anon_client, no_real_restart):

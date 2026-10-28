@@ -132,7 +132,7 @@ def restart_server():
     """
     try:
         return restart.schedule_restart()
-    except restart.RestartNotPossible as e:
+    except (restart.RestartNotPossible, restart.RestartInProgress) as e:
         raise HTTPException(status_code=409, detail=str(e))
 
 

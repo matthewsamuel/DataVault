@@ -80,6 +80,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   eigen server: voorheen werd alles op poort 8000 hard afgesloten (ook andere programma's) en
   altijd op poort 8000 opnieuw gestart. Nu wacht een hulpproces tot de server gestopt is en
   start hem met precies dezelfde instellingen opnieuw.
+- Twee herstartverzoeken tegelijk (bijv. vanuit twee tabbladen) starten nog maar één nieuwe
+  server. Voorheen startten er twee, die allebei tegelijk de database klaarzetten voordat één
+  van beide afhaakte. Het tweede tabblad wacht nu gewoon mee op de herstarte server.
 - Het wachtscherm tijdens herstarten herkent de nieuwe server (en niet de oude die nog even
   antwoordt), stopt met controleren zodra hij terug is en toont na 30 seconden een melding
   met een knop om het scherm te sluiten, in plaats van eindeloos te blijven wachten.

@@ -53,6 +53,16 @@ class RestartNotPossible(Exception):
     pass
 
 
+class RestartInProgress(Exception):
+    pass
+
+
+# One restart per process: a second request (another tab, a script) must not start a
+# second relaunch that would run the database setup next to the first one.
+_restart_lock = threading.Lock()
+_restart_scheduled = False
+
+
 def relaunch_command() -> List[str]:
     """The command line that started this process, with the same interpreter."""
     args = list(getattr(sys, "orig_argv", []) or [sys.executable, *sys.argv])
@@ -84,9 +94,17 @@ def _exit_soon(pid: int) -> None:
 
 
 def schedule_restart(cwd: Optional[str] = None) -> dict:
-    """Spawn the helper for this PID and stop this process shortly after."""
-    pid = os.getpid()
-    argv = relaunch_command()
-    _spawn_helper(pid, argv, cwd or os.getcwd())
+    """
+    Spawn the helper for this PID and stop this process shortly after.
+    Raises RestartInProgress if a restart of this process was already scheduled.
+    """
+    global _restart_scheduled
+    with _restart_lock:
+        if _restart_scheduled:
+            raise RestartInProgress("Herstart is al bezig")
+        pid = os.getpid()
+        argv = relaunch_command()
+        _spawn_helper(pid, argv, cwd or os.getcwd())
+        _restart_scheduled = True  # only once a helper really runs (a failed spawn may be retried)
     _exit_soon(pid)
     return {"status": "restarting", "pid": pid}
