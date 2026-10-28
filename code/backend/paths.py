@@ -76,6 +76,12 @@ def locate(user_path: Any, config, folder: bool = False) -> Optional[Path]:
         return None
     if not entry.is_relative_to(root) or not target.is_relative_to(root):
         return None
+    try:
+        os.lstat(entry)
+    except (FileNotFoundError, NotADirectoryError):
+        pass  # may not exist yet (a destination); routes check existence themselves
+    except (OSError, ValueError):
+        return None  # e.g. a name too long for the filesystem: not a usable path
     return target if folder else entry
 
 

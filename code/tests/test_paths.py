@@ -321,3 +321,12 @@ def test_keurer_speaks_one_spelling_of_a_folder(client, vault):
     assert r.status_code == 200, r.text
     again = client.get("/api/keurer/files", params={"folder": str(real)}).json()
     assert photo["name"] not in {f["name"] for f in again["files"]} and again["decided"] == 1
+
+
+def test_symlink_loops_and_overlong_names_are_refused_not_500(client, config, vault):
+    loop = vault / "RAW" / "lus"
+    os.symlink(loop, loop)
+    assert locate(str(loop / "x.jpg"), config) is None
+    assert _get_raw(client, "/api/file", "path", str(loop / "x.jpg")).status_code == 403
+    r = _get_raw(client, "/api/file", "path", str(vault / ("a" * 5000)))
+    assert r.status_code in (403, 404)
