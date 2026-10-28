@@ -5929,6 +5929,16 @@ button.otd-settings-icon:hover {
     transform: scale(1.03);
 }
 
+/* De container knipt af (overflow: hidden), dus de focusring staat op de container zelf */
+.otd-large-image:focus-visible {
+    outline: none;
+}
+
+.otd-large-container:has(.otd-large-image:focus-visible) {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
 .otd-large-overlay {
     position: absolute;
     bottom: 0;

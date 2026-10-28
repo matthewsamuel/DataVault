@@ -2131,6 +2131,9 @@ async function loadPhotoOtdWidget() {
                     onClick: () => openPhotoOTD(p.path),
                 });
                 image.style.backgroundImage = cssUrl(vaultFileUrl('thumb', p.path));
+                // Ook met het toetsenbord te openen; alleen de foto die je ziet is een tabstop
+                makeActivatable(image, `${p.name} openen`);
+                image.tabIndex = index === 0 ? 0 : -1;
                 const overlay = createEl('div', { class: 'otd-large-overlay', style: `display: ${index === 0 ? 'flex' : 'none'};` },
                     createEl('div', { class: 'otd-large-title', text: p.name }),
                     createEl('div', { class: 'otd-large-subtitle', text: p.year }));
@@ -2147,12 +2150,17 @@ async function loadPhotoOtdWidget() {
                         otdCycleStep = null;
                         return;
                     }
+                    // Staat de focus op de foto, dan blijft die staan (anders wijst de focus
+                    // naar een foto die je niet meer ziet)
+                    if (content.contains(document.activeElement)) return;
                     images[currentOtd].classList.remove('active');
+                    images[currentOtd].tabIndex = -1;
                     overlays[currentOtd].style.display = 'none';
 
                     currentOtd = (currentOtd + 1) % images.length;
 
                     images[currentOtd].classList.add('active');
+                    images[currentOtd].tabIndex = 0;
                     overlays[currentOtd].style.display = 'flex';
                 };
                 homeOtdCycle(!document.getElementById('section-home').classList.contains('hidden'));
