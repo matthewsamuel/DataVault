@@ -338,7 +338,7 @@ def test_thumbnail_job_makes_missing_thumbnails_once(client, vault, config):
     (folder / "lied.mp3").write_bytes(b"ID3")
     job = _wait(client, _start(client, "thumbnails", folder=str(folder))["id"])
     assert job["status"] == "done" and job["summary"] == {
-        "folder": str(folder), "files": 5, "made": 5, "errors": 0, "complete": True}
+        "folder": str(folder), "files": 5, "made": 5, "undecodable": 0, "errors": 0, "complete": True}
     thumbs = sorted(p.name for p in config.THUMB_CACHE_PATH.iterdir())
     assert len(thumbs) == 5 and not any(name.startswith(".") for name in thumbs)  # no temporary files left
     again = _wait(client, _start(client, "thumbnails", folder=str(folder))["id"])
@@ -385,11 +385,13 @@ def test_an_unreadable_photo_is_an_error_and_never_gets_a_placeholder(client, va
         job = _wait(client, _start(client, "thumbnails", folder=str(folder))["id"])
     finally:
         os.chmod(locked, 0o644)
+    # ruis.jpg reads fine but is no picture: counted apart, not as a failure (R23-2)
     assert job["status"] == "done" and job["summary"] == {
-        "folder": str(folder), "files": 5, "made": 3, "errors": 2, "complete": False}
-    assert "2 mislukt" in job["message"]
+        "folder": str(folder), "files": 5, "made": 3, "undecodable": 1, "errors": 1, "complete": False}
+    assert "1 mislukt" in job["message"] and "1 onleesbaar" in job["message"]
     result = client.get(f"/api/jobs/{job['id']}/result").json()["result"]
-    assert sorted(Path(e["path"]).name for e in result["error_samples"]) == ["op_slot.jpg", "ruis.jpg"]
+    assert [Path(e["path"]).name for e in result["error_samples"]] == ["op_slot.jpg"]
+    assert [Path(e["path"]).name for e in result["undecodable_samples"]] == ["ruis.jpg"]
     assert _placeholders(good, config.THUMB_CACHE_PATH) == []
     for bad in (folder / "ruis.jpg", locked):
         assert not thumbnail.get_thumbnail_cache_path(bad, config.THUMB_CACHE_PATH).exists()
@@ -455,7 +457,7 @@ def test_thumbnail_job_with_the_cache_outside_the_vault_waits_out_an_unplug(tmp_
         assert job["status"] == "done", job
         # Counted over both runs: what the first run made is not 'already there'
         assert job["summary"] == {"folder": str(root / "Los"), "files": 24, "made": 24,
-                                  "errors": 0, "complete": True}
+                                  "undecodable": 0, "errors": 0, "complete": True}
         assert job["message"] == "Klaar: 24 nieuw, 0 waren er al"
         assert _placeholders(photos, config.THUMB_CACHE_PATH) == []
         assert all(thumbnail.get_thumbnail_cache_path(p, config.THUMB_CACHE_PATH).exists() for p in photos)
@@ -733,3 +735,59 @@ def test_thumbnails_made_twice_after_a_pause_are_counted_once(client, vault, con
     assert result["made"] + result["cached"] == 12
     assert job["message"] == "Klaar: 12 nieuw, 0 waren er al"
 
+
+def _short_clip(path, seconds):
+    import subprocess
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    f"testsrc=duration={seconds}:size=64x48:rate=10", "-pix_fmt", "yuv420p", str(path)],
+                   check=True, stdin=subprocess.DEVNULL)
+    return path
+
+
+@pytest.mark.skipif(not __import__("shutil").which("ffmpeg"), reason="ffmpeg ontbreekt")
+def test_a_video_shorter_than_a_second_gets_its_first_frame(tmp_path):
+    """R23-2: no frame at 1 s means the first frame, not a failure."""
+    from backend import thumbnail
+    clip = _short_clip(tmp_path / "kort.mp4", 0.5)
+    out = tmp_path / "thumbs" / "kort.jpg"
+    out.parent.mkdir()
+    thumbnail.render_video_thumbnail(clip, out)
+    with Image.open(out) as img:
+        assert img.size[0] > 0
+    assert not thumbnail.is_placeholder(out)
+
+
+def test_undecodable_files_are_counted_apart_and_do_not_make_a_run_incomplete(client, vault, config):
+    """R23-2: a corrupt photo is not 'mislukt' on every run; a read error still is."""
+    import shutil
+    folder = vault / "Gemengd"
+    good = _photos(folder, 2)
+    (folder / "ruis.jpg").write_bytes(os.urandom(3000))
+    (folder / "leeg.jpg").write_bytes(b"")
+    (folder / "nep.heic").write_bytes(b"not a heic")
+    expected_bad = 3
+    if shutil.which("ffmpeg"):
+        _short_clip(folder / "kort.mp4", 0.5)
+        (folder / "kapot.mp4").write_bytes(b"\x00" * 4096)
+        expected_bad += 1
+    files = len(list(folder.iterdir()))
+    for run in range(2):
+        job = _wait(client, _start(client, "thumbnails", folder=str(folder))["id"])
+        assert job["status"] == "done", job
+        assert job["summary"]["errors"] == 0 and job["summary"]["complete"] is True, job
+        assert job["summary"]["undecodable"] == expected_bad, job
+        assert f"{expected_bad} onleesbaar" in job["message"] and "mislukt" not in job["message"]
+        result = client.get(f"/api/jobs/{job['id']}/result").json()["result"]
+        assert result["made"] + result["cached"] + result["undecodable"] == files
+        names = sorted(Path(e["path"]).name for e in result["undecodable_samples"])
+        assert "ruis.jpg" in names and "kort.mp4" not in names
+    # A file that cannot be read at all stays an error
+    locked = folder / "op_slot.jpg"
+    Image.new("RGB", (30, 30), (1, 2, 3)).save(locked)
+    os.chmod(locked, 0)
+    try:
+        job = _wait(client, _start(client, "thumbnails", folder=str(folder))["id"])
+    finally:
+        os.chmod(locked, 0o644)
+    assert job["summary"]["errors"] == 1 and job["summary"]["complete"] is False
+    assert "1 mislukt" in job["message"]

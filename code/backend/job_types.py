@@ -263,13 +263,16 @@ def thumbnails_type(config: Config) -> JobType:
     newer than its photo is skipped with two stats, so a resumed (or repeated) run
     only makes what is still missing, including for files added in the meantime.
 
-    A photo or video that cannot be read or decoded is an error, never 'made': the
-    job does not put a placeholder in its place (one would be newer than the photo
-    and stand in for it for good). Placeholders a request or an older version left
-    for a photo are made again. If the vault goes away during a run, nothing new is
-    started and the run is done again once the disk is back.
+    A photo or video that cannot be read is an error, never 'made': the job does not
+    put a placeholder in its place (one would be newer than the photo and stand in
+    for it for good). One that reads fine but cannot be decoded (corrupt, empty, an
+    unknown format, a video without a frame) is counted apart as 'undecodable': it
+    gives the same answer on every run, so it does not make a run incomplete.
+    Placeholders a request or an older version left for a photo are made again. If
+    the vault goes away during a run, nothing new is started and the run is done
+    again once the disk is back.
     """
-    from backend.thumbnail import (get_thumbnail_cache_path, have_ffmpeg, is_placeholder,
+    from backend.thumbnail import (Undecodable, get_thumbnail_cache_path, have_ffmpeg, is_placeholder,
                                    is_thumbnail_valid, render_photo_thumbnail, render_video_thumbnail)
 
     def prepare(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -300,6 +303,7 @@ def thumbnails_type(config: Config) -> JobType:
         # unplugged) count as made: this run finds them 'already there'
         before = ctx.checkpoint.get("made_before", 0)
         errors = _JobErrors(config)
+        undecodable = scanner._ErrorLog()
         counts = {"made": 0, "cached": 0, "no_ffmpeg": 0}
         try:
             ctx.progress(0, None, "Bestanden zoeken...")
@@ -313,7 +317,9 @@ def thumbnails_type(config: Config) -> JobType:
             for path, outcome, error in bounded_map(lambda p: make(p, ffmpeg), paths,
                                                     workers=THUMB_WORKERS, stop=stop):
                 processed += 1
-                if error is not None:
+                if isinstance(error, Undecodable) and not errors.vault_lost and config.VAULT_ROOT.is_dir():
+                    undecodable(path, error)
+                elif error is not None:
                     errors(path, error)
                 else:
                     counts[outcome] += 1
@@ -338,6 +344,8 @@ def thumbnails_type(config: Config) -> JobType:
         ctx.progress(message=f"Klaar: {made} nieuw, {cached} waren er al"
                              + (f", {counts['no_ffmpeg']} video('s) zonder miniatuur (ffmpeg ontbreekt)"
                                 if counts["no_ffmpeg"] else "")
+                             + (f", {undecodable.count} onleesbaar (kapot of onbekend formaat)"
+                                if undecodable.count else "")
                              + (f", {errors.count} mislukt" if errors.count else ""))
         return {
             "folder": str(folder),
@@ -345,13 +353,16 @@ def thumbnails_type(config: Config) -> JobType:
             "made": made,
             "cached": cached,
             "no_ffmpeg": counts["no_ffmpeg"],
+            "undecodable": undecodable.count,
+            "undecodable_samples": undecodable.samples,
             "errors": errors.count,
             "error_samples": errors.samples,
             "complete": errors.count == 0,
         }
 
     return JobType("thumbnails", "Miniaturen maken", prepare, run,
-                   summarize=lambda r: {k: r[k] for k in ("folder", "files", "made", "errors", "complete")},
+                   summarize=lambda r: {k: r.get(k, 0) for k in ("folder", "files", "made", "undecodable",
+                                                                  "errors", "complete")},
                    results_to_keep=3, describe=_describe(config))
 
 

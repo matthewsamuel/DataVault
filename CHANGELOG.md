@@ -374,6 +374,14 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   wachten, en de map terug hernoemen lukte niet meer. Nu maakt de app nooit meer de mappen
   boven de miniaturenmap aan: de taak wacht netjes tot het archief terug is en gaat dan
   verder. Ook telt de eindmelding nooit meer "nieuw" dan er bestanden zijn.
+- Video's korter dan een seconde krijgen nu een echte miniatuur (het eerste beeld). Voorheen
+  zocht de app alleen het beeld op 1 seconde, zodat zo'n korte clip een blauwgrijs vak kreeg en
+  bij Miniaturen maken elke keer als "mislukt" telde.
+- Miniaturen maken: bestanden die wel te lezen zijn maar waar geen beeld uit te halen is (een
+  kapotte of lege foto, een onbekend formaat, een video zonder beeld) tellen nu apart als
+  "onleesbaar" en niet meer als "mislukt". Zo eindigt een herhaalde ronde over je hele archief
+  niet elke keer als onvolledig door dezelfde paar kapotte bestanden. Bestanden die de app echt
+  niet kan lezen (geen toegang, leesfout, schijf weg) blijven "mislukt".
 - Takenpaneel: een taak die je hervatte op het moment dat hij net gepauzeerd werd, liep soms
   verder zonder dat de app hem nog volgde (niet meer te annuleren, en een tweede taak van
   dezelfde soort kon tegelijk starten). Annuleren in datzelfde moment liet de taak op

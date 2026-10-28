@@ -58,8 +58,22 @@ def _atomic_output(output_path: Path) -> Iterator[Path]:
             pass
 
 
-class _NoFrame(OSError):
+class Undecodable(Exception):
+    """
+    The file reads fine, but no picture can be made from it: a corrupt or empty
+    photo, a format Pillow does not know, a video ffmpeg gets no frame from. Unlike
+    a read error (no permission, I/O error, disk gone) trying again gives the same
+    answer, so the thumbnail job counts these apart instead of as failures.
+    """
+
+
+class _NoFrame(Undecodable):
     """ffmpeg wrote no frame: nothing is put in place."""
+
+
+def _is_read_error(e: BaseException, file_path: Path) -> bool:
+    """An OS error with an errno, or a file that cannot be read now: not the file's content."""
+    return (isinstance(e, OSError) and bool(e.errno)) or not _readable(file_path)
 
 
 def is_thumbnail_valid(thumb_path: Path, original_path: Path) -> bool:
@@ -80,30 +94,36 @@ def is_thumbnail_valid(thumb_path: Path, original_path: Path) -> bool:
 
 def render_photo_thumbnail(file_path: Path, output_path: Path) -> None:
     """
-    Make the thumbnail of a photo, or raise: an unreadable or undecodable photo
-    is an error here, never a placeholder in its place (see generate_photo_thumbnail).
+    Make the thumbnail of a photo, or raise: an unreadable photo is an OSError, a
+    photo that reads fine but cannot be decoded is Undecodable. Never puts a
+    placeholder in its place (see generate_photo_thumbnail).
     """
-    with Image.open(file_path) as img:
-        # Roteer volgens EXIF-oriëntatie zodat thumbnails altijd rechtop staan
-        img = ImageOps.exif_transpose(img)
+    try:
+        with Image.open(file_path) as img:
+            # Roteer volgens EXIF-oriëntatie zodat thumbnails altijd rechtop staan
+            img = ImageOps.exif_transpose(img)
 
-        # Convert RGBA to RGB if needed
-        if img.mode in ('RGBA', 'LA', 'P'):
-            # Create white background
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            if img.mode == 'P':
-                img = img.convert('RGBA')
-            background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-            img = background
-        elif img.mode != 'RGB':
-            img = img.convert('RGB')
+            # Convert RGBA to RGB if needed
+            if img.mode in ('RGBA', 'LA', 'P'):
+                # Create white background
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
 
-        # Create thumbnail
-        img.thumbnail(THUMB_SIZE, Image.Resampling.LANCZOS)
+            # Create thumbnail (a loaded copy: it outlives the opened file)
+            img.thumbnail(THUMB_SIZE, Image.Resampling.LANCZOS)
+    except Exception as e:
+        if _is_read_error(e, file_path):
+            raise
+        raise Undecodable(f"geen beeld te maken van dit bestand ({e})") from e
 
-        # Save
-        with _atomic_output(output_path) as tmp:
-            img.save(tmp, 'JPEG', quality=THUMB_QUALITY, optimize=True)
+    # Save (errors here are about the cache, never about the photo)
+    with _atomic_output(output_path) as tmp:
+        img.save(tmp, 'JPEG', quality=THUMB_QUALITY, optimize=True)
 
 
 def generate_photo_thumbnail(file_path: Path, output_path: Path) -> bool:
@@ -134,9 +154,11 @@ def have_ffmpeg() -> bool:
 
 def render_video_thumbnail(file_path: Path, output_path: Path) -> None:
     """
-    Make the thumbnail of a video from a frame at 1 s (or the first frame), or
-    raise: NoFfmpeg without ffmpeg, OSError when the video cannot be read or
-    ffmpeg writes no frame. Never puts a placeholder in place.
+    Make the thumbnail of a video from its frame at 1 s, or from its first frame
+    when there is none at 1 s (a clip shorter than a second), or raise: NoFfmpeg
+    without ffmpeg, OSError when the video cannot be read (or ffmpeg takes too
+    long), Undecodable when the video reads fine but ffmpeg gets no frame from it.
+    Never puts a placeholder in place.
     """
     import subprocess
     import shutil
@@ -148,30 +170,37 @@ def render_video_thumbnail(file_path: Path, output_path: Path) -> None:
         f.read(1)
 
     with _atomic_output(output_path) as tmp:
-        # Extract frame at 1 second (or first frame if shorter)
-        cmd = [
-            ffmpeg_path,
-            '-i', str(file_path),
-            '-ss', '00:00:01',
-            '-vframes', '1',
-            '-vf', f'scale={THUMB_SIZE[0]}:{THUMB_SIZE[1]}:force_original_aspect_ratio=decrease',
-            '-y',  # Overwrite (the temporary file only)
-            str(tmp)
-        ]
-        try:
-            result = subprocess.run(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=10
-            )
-        except subprocess.TimeoutExpired:
-            raise OSError(0, "ffmpeg deed er te lang over")
+        # The frame at 1 second; a clip shorter than that has none, so then the first frame
+        for seek in (['-ss', '00:00:01'], []):
+            cmd = [
+                ffmpeg_path,
+                '-i', str(file_path),
+                *seek,
+                '-vframes', '1',
+                '-vf', f'scale={THUMB_SIZE[0]}:{THUMB_SIZE[1]}:force_original_aspect_ratio=decrease',
+                '-y',  # Overwrite (the temporary file only)
+                str(tmp)
+            ]
+            try:
+                result = subprocess.run(
+                    cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=10
+                )
+            except subprocess.TimeoutExpired:
+                raise OSError(0, "ffmpeg deed er te lang over")
 
-        # Only a frame that ffmpeg really wrote is put in place
-        if result.returncode != 0 or not tmp.exists():
-            raise _NoFrame(0, "ffmpeg kon geen beeld uit de video halen")
+            # Only a frame that ffmpeg really wrote is put in place
+            try:
+                if result.returncode == 0 and tmp.stat().st_size > 0:
+                    return
+            except FileNotFoundError:
+                pass
+        if not _readable(file_path):
+            raise OSError(0, "de video kon niet gelezen worden")
+        raise _NoFrame("ffmpeg kon geen beeld uit de video halen")
 
 
 def generate_video_thumbnail(file_path: Path, output_path: Path) -> bool:
