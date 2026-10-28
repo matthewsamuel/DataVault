@@ -567,3 +567,7 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Ontbreekt er iets op deze Mac (ffmpeg voor video-miniaturen, HEIC-ondersteuning, Ollama of het
   gekozen chatmodel), dan staat er linksonder een rustige melding met hoe je het oplost. Die kun
   je wegklikken.
+- Naast `qwen2.5:3b` is ook `qwen2.5:1.5b` (1 GB) geïnstalleerd, zodat je in de keuzelijst kunt
+  kiezen tussen een snel en een nog sneller model. Gemeten op deze Mac: een kort antwoord duurt
+  0,1 tot 0,3 seconde zodra het model geladen is; het eerste antwoord na een modelwissel duurt
+  enkele seconden langer (laden).

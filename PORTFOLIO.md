@@ -163,65 +163,28 @@ frontend/
 
 **Solution Architecture:**
 
-1. **Date-Based Metadata Extraction**
-   - Extracts creation/taken date from file metadata using platform-specific methods
-   - On macOS: Uses `st_birthtime` (file creation date, typically preserved from original)
-   - Fallback: Uses `st_mtime` (modification time) if creation date unavailable
-   - Handles gracefully for photos without EXIF data
-   
+1. **Capture Dates, One Rule Everywhere** (`backend/media_dates.py`)
+   - EXIF DateTimeOriginal (then DateTimeDigitized, DateTime) for photos, the QuickTime `mvhd`
+     creation time for mp4/mov/m4v/3gp (read from the box headers, no ffprobe call)
+   - Fallback: `st_birthtime`, then `st_mtime`
+   - The timeline, "on this day" and photos-by-date all use it, so one photo has one date everywhere
+   - Cached in SQLite (`media_dates`, migration 9) per path with the size and mtime_ns it was read
+     at; missing dates are read with 4 threads
+
    ```python
-   def _get_creation_date(file_path: Path) -> float:
-       """Get best available creation/taken date for media file"""
-       try:
-           s = file_path.stat()
-           # macOS: st_birthtime is the real creation date
-           birthtime = getattr(s, 'st_birthtime', None)
-           if birthtime and birthtime > 0:
-               return birthtime  # Preferred: file creation date
-           return s.st_mtime  # Fallback: modification time
-       except (OSError, PermissionError):
-           return 0.0
+   def capture_date(path: Path, st: os.stat_result) -> Tuple[float, str]:
+       ts, source = embedded_date(path)          # ('exif' | 'video') or (None, None)
+       if ts is not None:
+           return ts, source
+       return file_date(st)                      # ('birthtime' | 'mtime')
    ```
 
-2. **Efficient Recursive Scanning**
-   - Recursively scans selected folders for all photos and videos
-   - Excludes system folders (cache, duplicates, trash, dotfiles)
-   - Returns flat list sorted chronologically (oldest first)
-   - Lightweight metadata only (path, timestamp, size, type)
-   
-   ```python
-   def _scan_folder_recursive(folder_path: Path, photo_only: bool = False) -> List[Dict]:
-       """Recursively scan folder for media files with timestamps"""
-       results = []
-       extensions = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
-       
-       # walk_archive: os.walk without the cache, TRASH, RAW_DUPLICATES, the app folder
-       # (matched by inode, not by name), hidden/'._' files and symlinks
-       for root, dirs, files in walk_archive(folder_path, config):
-           dirs.sort()  # Deterministic order
-           
-           for filename in sorted(files):
-               file_path = Path(root) / filename
-               if file_path.suffix.lower() not in extensions:
-                   continue
-               
-               try:
-                   s = file_path.stat()
-                   birthtime = getattr(s, 'st_birthtime', None)
-                   ts = birthtime if birthtime > 0 else s.st_mtime
-                   
-                   results.append({
-                       "path": str(file_path),
-                       "name": filename,
-                       "timestamp": ts,
-                       "size": s.st_size,
-                       "type": "video" if file_path.suffix.lower() in VIDEO_EXTENSIONS else "photo"
-                   })
-               except (OSError, PermissionError):
-                   continue
-       
-       return results
-   ```
+2. **Efficient Recursive Scanning, Compact and Cached**
+   - `walk_archive` over the selected folders (no cache, duplicates, trash, dotfiles or symlinks)
+   - One `folders` query parameter per folder (names may contain commas); a folder inside another
+     selected folder is dropped, so no photo appears twice; unknown folders come back in `skipped`
+   - The answer is one short row per file, `[timestamp, path relative to the vault, size, 'p'|'v',
+     date source]`, cached per selection until the mtime of any folder below it changes
 
 3. **Multi-Folder Selection**
    - Users select one or more folders via tree picker
@@ -287,7 +250,7 @@ frontend/
 - Date index enables O(1) year-based jumping on large timelines
 - Virtual scrolling handles 10,000+ photo timelines smoothly
 - Multi-folder selection for cross-directory temporal views
-- Platform-aware date extraction (macOS st_birthtime vs. fallback)
+- Capture dates from EXIF and QuickTime headers, cached per file, with birthtime/mtime fallback
 - Zero data loss: preserves original file organization
 
 ---
@@ -570,7 +533,7 @@ frontend/
 
 **Technical Achievements:**
 - Lazy loading prevents memory bloat with large collections
-- Thumbnail caching with mtime validation reduces regeneration
+- Thumbnails decoded small (JPEG draft) then turned upright; cached under path, size, mtime and inode; placeholders never stored
 - Format-agnostic viewer supports RAW, HEIF, and legacy formats
 - Responsive layout using CSS Flexbox
 
@@ -634,7 +597,8 @@ frontend/
 1. **Local LLM Integration**
    - Connects to Ollama (local LLM server) for privacy
    - Supports streaming responses for real-time feedback
-   - Model-agnostic (supports phi3.5, llama2, mistral, etc.)
+   - Model chosen in the UI from the models Ollama has installed (default `qwen2.5:3b`), stored in `app_settings`
+   - Every failure (Ollama down, model missing, timeout, error halfway) ends the stream with a coded Dutch error
    
    ```python
    async def stream_ollama(ollama_messages: list, model: str) -> AsyncGenerator[str, None]:
@@ -1011,6 +975,12 @@ CREATE TABLE jobs (
 CREATE INDEX idx_jobs_status ON jobs(status);
 CREATE INDEX idx_jobs_type ON jobs(type, id);
 CREATE TABLE job_results (job_id INTEGER PRIMARY KEY REFERENCES jobs(id), encoding TEXT NOT NULL, data BLOB NOT NULL)
+
+-- Capture dates (migration 9) and UI settings such as the chat model (migration 10)
+CREATE TABLE media_dates (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
+                          taken REAL NOT NULL, source TEXT NOT NULL, updated_at REAL NOT NULL)
+CREATE INDEX idx_media_dates_taken ON media_dates(taken)
+CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at REAL NOT NULL)
 
 -- Folder visibility settings
 CREATE TABLE show_settings (

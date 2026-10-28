@@ -610,7 +610,27 @@ CREATE TABLE job_results (
     encoding TEXT NOT NULL,             -- 'json+zlib'
     data BLOB NOT NULL
 );
+-- Capture dates (migration 9, backend/media_dates.py): trusted while size and mtime_ns match
+CREATE TABLE media_dates (
+    path TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    taken REAL NOT NULL,                -- EXIF/video date, else birthtime, else mtime
+    source TEXT NOT NULL,               -- 'exif', 'video', 'birthtime', 'mtime'
+    updated_at REAL NOT NULL
+);
+CREATE INDEX idx_media_dates_taken ON media_dates(taken);
+-- Settings chosen in the UI (migration 10), JSON values; for now 'chat_model'
+CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
 ```
+
+The database opens lazily when the vault is not there at startup (`Database(prepare=...)`): the first
+request after the disk appears makes the cache folder, migrates and opens it, and `when_ready` callbacks
+(job recovery, thumbnail cache cleanup) run then.
 
 The database runs in WAL mode (readers never wait for the writer) with `busy_timeout` 10 s and one
 connection per thread; every method runs inside `with self._connect()`, which commits or rolls back, so a
