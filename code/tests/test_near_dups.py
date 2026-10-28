@@ -180,6 +180,41 @@ def test_hash_index_scales_without_comparing_every_pair():
     assert len(i) < 2000      # chance pairs of random hashes (C(63,11) / 2**63 * 5e9: a few hundred)
 
 
+def _brute_pairs(hashes, radius):
+    d = near_dups.popcount(hashes[:, None] ^ hashes[None, :]).astype(np.int64)
+    i, j = np.nonzero(np.triu(d <= radius, k=1))
+    return set(zip(i.tolist(), j.tolist(), d[i, j].tolist()))
+
+
+def test_hash_index_slices_crowded_buckets_and_still_finds_every_pair(monkeypatch):
+    # Real photos are not random: documents and screenshots fill a few buckets with
+    # thousands of hashes. The candidates are then checked a slice at a time (tiny here)
+    monkeypatch.setattr(near_dups, "CANDIDATE_BUDGET", 97)
+    rng = np.random.default_rng(11)
+    n = 1500
+    crowded = np.uint64(0xBEEF)                                  # one 16-bit part shared by most
+    sparse = np.zeros(n, dtype=np.uint64)
+    for bit in range(16, 64):                                    # few set bits in the rest: many close pairs
+        sparse |= (rng.random(n) < 0.08).astype(np.uint64) << np.uint64(bit)
+    hashes = np.where(rng.random(n) < 0.8, sparse | crowded, rng.integers(0, 2 ** 63, n, dtype=np.uint64))
+    brute = _brute_pairs(hashes, near_dups.PAIR_RADIUS)
+    i, j, d = near_dups.HashIndex(hashes).pairs(near_dups.PAIR_RADIUS)
+    assert set(zip(i.tolist(), j.tolist(), d.tolist())) == brute
+    assert len(brute) > 10_000
+    queries = np.arange(0, n, 5)
+    i, j, d = near_dups.HashIndex(hashes).pairs(near_dups.PAIR_RADIUS, queries)
+    assert set(zip(i.tolist(), j.tolist(), d.tolist())) == {p for p in brute if p[0] % 5 == 0 or p[1] % 5 == 0}
+
+
+def test_bit_counting_works_without_numpy_2():
+    rng = np.random.default_rng(3)
+    values = np.concatenate((rng.integers(0, 2 ** 63, 500, dtype=np.uint64) * np.uint64(2),
+                             np.array([0, 2 ** 64 - 1], dtype=np.uint64)))
+    expected = [bin(int(v)).count("1") for v in values]
+    assert near_dups._popcount_fallback(values).tolist() == expected
+    assert int(near_dups._popcount_fallback(np.uint64(2 ** 64 - 1))) == 64
+
+
 # ---------- the job and the thresholds on the test vault ----------
 
 def test_the_test_vault_gives_the_burst_and_the_resized_copy_and_nothing_else(client, vault):

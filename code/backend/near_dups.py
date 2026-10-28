@@ -176,6 +176,41 @@ def _flip_masks(bits: int, radius: int) -> np.ndarray:
     return np.array(masks, dtype=np.int64)
 
 
+def _popcount_fallback(values: np.ndarray) -> np.ndarray:
+    """Set bits per uint64 (numpy before 2.0 has no bitwise_count)."""
+    as_bytes = np.ascontiguousarray(values, dtype=np.uint64).view(np.uint8).reshape(-1, 8)
+    return np.unpackbits(as_bytes, axis=1).sum(axis=1).astype(np.uint8).reshape(np.shape(values))
+
+
+popcount = getattr(np, "bitwise_count", None) or _popcount_fallback
+
+CANDIDATE_BUDGET = 1 << 21    # candidates checked per step: bounds memory whatever the hashes look like
+
+
+class _PairSet:
+    """Pairs as i * n + j. The same pair turns up from several parts and masks: the
+    duplicates are dropped whenever the list has doubled, so it never grows far past
+    the number of distinct pairs."""
+
+    def __init__(self):
+        self.chunks: List[np.ndarray] = []
+        self.size = 0
+        self.limit = CANDIDATE_BUDGET
+
+    def add(self, keys: np.ndarray) -> None:
+        self.chunks.append(keys)
+        self.size += len(keys)
+        if self.size > self.limit:
+            self.chunks = [np.unique(np.concatenate(self.chunks))]
+            self.size = len(self.chunks[0])
+            self.limit = max(CANDIDATE_BUDGET, 2 * self.size)
+
+    def result(self) -> np.ndarray:
+        if not self.chunks:
+            return np.zeros(0, dtype=np.int64)
+        return np.unique(np.concatenate(self.chunks))
+
+
 class HashIndex:
     """
     Finds every pair of 64-bit hashes within `radius` bits, without comparing all pairs.
@@ -184,6 +219,11 @@ class HashIndex:
     the hashes are bucketed by that part's value (a counting sort: one array of offsets
     per 65536 values); a query looks up every value within that many bits of its own part
     and checks the full distance only for what it finds there.
+
+    The work grows with how full the buckets are: about 2 s for 100k uniformly random
+    hashes, but real photos share bit patterns (documents and screenshots fill a few
+    buckets with thousands of hashes), measured at 8-10 s for 100k such hashes. Memory
+    stays bounded either way: candidates are checked CANDIDATE_BUDGET at a time.
     """
 
     def __init__(self, hashes: np.ndarray):
@@ -212,7 +252,7 @@ class HashIndex:
         if queries is not None:
             is_query = np.zeros(self.n, dtype=bool)
             is_query[q] = True
-        found = []
+        found = _PairSet()
         for keys, order, counts, starts in self.parts:
             qkeys = keys[q]
             for mask in masks:
@@ -223,29 +263,37 @@ class HashIndex:
                 hit = cnt > 0
                 if not hit.any():
                     continue
-                cnt = cnt[hit]
-                total = int(cnt.sum())
-                qi = np.repeat(q[hit], cnt)
-                first = np.repeat(starts[look[hit]], cnt)
-                offset = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(cnt) - cnt, cnt)
-                cj = order[first + offset]
-                # Each unordered pair once: from its lower position, or from the query side
-                if is_query is None:
-                    keep = qi < cj
-                else:
-                    keep = (qi != cj) & ((qi < cj) | ~is_query[cj])
-                qi, cj = qi[keep], cj[keep]
-                dist = np.bitwise_count(self.hashes[qi] ^ self.hashes[cj])
-                close = dist <= radius
-                if close.any():
-                    a, b = qi[close], cj[close]
-                    found.append(np.stack((np.minimum(a, b), np.maximum(a, b))))
-        if not found:
-            empty = np.zeros(0, dtype=np.int64)
-            return empty, empty, empty
-        both = np.unique(np.concatenate(found, axis=1), axis=1)
-        i, j = both[0], both[1]
-        return i, j, np.bitwise_count(self.hashes[i] ^ self.hashes[j]).astype(np.int64)
+                hq, hlook, hcnt = q[hit], look[hit], cnt[hit]
+                # In slices of at most CANDIDATE_BUDGET candidates (one query's bucket at least)
+                ends = np.cumsum(hcnt)
+                begin = 0
+                while begin < len(hq):
+                    base = int(ends[begin - 1]) if begin else 0
+                    end = max(begin + 1, int(np.searchsorted(ends, base + CANDIDATE_BUDGET, side="right")))
+                    self._check_slice(hq[begin:end], starts[hlook[begin:end]], hcnt[begin:end],
+                                      order, is_query, radius, found)
+                    begin = end
+                    if check is not None and begin < len(hq):
+                        check()
+        both = found.result()
+        i, j = both // self.n, both % self.n
+        return i, j, popcount(self.hashes[i] ^ self.hashes[j]).astype(np.int64)
+
+    def _check_slice(self, qs, firsts, cnt, order, is_query, radius, found) -> None:
+        total = int(cnt.sum())
+        qi = np.repeat(qs, cnt)
+        offset = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+        cj = order[np.repeat(firsts, cnt) + offset]
+        # Each unordered pair once: from its lower position, or from the query side
+        if is_query is None:
+            keep = qi < cj
+        else:
+            keep = (qi != cj) & ((qi < cj) | ~is_query[cj])
+        qi, cj = qi[keep], cj[keep]
+        close = popcount(self.hashes[qi] ^ self.hashes[cj]) <= radius
+        if close.any():
+            a, b = qi[close], cj[close]
+            found.add(np.minimum(a, b) * self.n + np.maximum(a, b))
 
 
 # ---------- strictness ----------
@@ -571,7 +619,7 @@ def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]
     flat = np.array([(rows[i][11] or 0.0) < FLAT_CONTRAST for i in firsts], dtype=bool)
     loose_p, loose_d, loose_c = STRICTNESS[LOOSEST]["near"]
     i, j, pd = HashIndex(phashes).pairs(PAIR_RADIUS, None, check)
-    dd = np.bitwise_count(dhashes[i] ^ dhashes[j]).astype(np.int64)
+    dd = popcount(dhashes[i] ^ dhashes[j]).astype(np.int64)
     cd = np.abs(colors[i] - colors[j]).mean(axis=1)
     fl = flat[i] | flat[j]
     keep = (dd <= loose_d) & (cd <= np.where(fl, min(loose_c, FLAT_COLOR), loose_c))
@@ -627,8 +675,8 @@ def _burst_pairs(rows, phashes, dhashes, colors, flat) -> List[Tuple]:
             if (rb[9], rb[10]) != (ra[9], ra[10]) or rb[7] - rp[7] > BURST_GAP:
                 break
             prev = b
-            p = int(np.bitwise_count(phashes[a] ^ phashes[b]))
-            d = int(np.bitwise_count(dhashes[a] ^ dhashes[b]))
+            p = int(popcount(phashes[a] ^ phashes[b]))
+            d = int(popcount(dhashes[a] ^ dhashes[b]))
             c = float(np.abs(colors[a] - colors[b]).mean())
             f = bool(flat[a] or flat[b])
             if p <= loose_p and d <= loose_d and c <= (min(loose_c, FLAT_COLOR) if f else loose_c):

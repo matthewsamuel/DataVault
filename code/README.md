@@ -132,8 +132,12 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Snelheid (M3 Pro, 4 threads): 12 MP JPEG ~130 foto's/s; 4.000 foto's van 2 MP via de server in
   10 s (390/s; `/api/health` p95 12 ms tijdens de taak), een tweede ronde zonder nieuwe foto's
   0,2 s. HEIC wordt volledig gedecodeerd (36 MP: ~0,7 s per foto per thread, ~5 per seconde met
-  4 threads). Paren en bursts voor 100.000 foto's: ~5 s, alleen als er iets nieuw of veranderd is;
-  een pagina reeksen daarna in enkele ms.
+  4 threads). Paren en bursts voor 100.000 foto's: ~5 s bij willekeurige hashes, 7-10 s als veel
+  foto's op elkaar lijkende hashes hebben (scans, screenshots; gemeten met 100.000 gemaakte hashes),
+  alleen als er iets nieuw of veranderd is; een pagina reeksen daarna in enkele ms. Het geheugen
+  blijft begrensd: de kandidaten worden per ~2 miljoen gecontroleerd (`CANDIDATE_BUDGET`), dubbele
+  paren tussendoor weggegooid (piek ~0,5-0,8 GB in dat scheve geval, was 1,7-2,4 GB). Werkt ook met
+  numpy ouder dan 2.0 (eigen bittelling als `np.bitwise_count` ontbreekt).
 
 ### Bibliotheek (media-index)
 - De app houdt een index bij van elke foto, video en audiobestand in het archief (datum, afmetingen,
