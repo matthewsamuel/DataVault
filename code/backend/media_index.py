@@ -64,6 +64,7 @@ FAILED_FOLDERS_KEPT = 200
 # folder row written before its subfolders were visited) gets one pass that lists
 # every folder, as a full pass does, before unchanged folders are trusted again.
 WALK_VERSION = 2
+UNTRUSTED = -1    # media_folders.mtime_ns of a row the next pass must list again
 
 # Every column of a media row that comes from the file (media_meta.read_metadata)
 META_COLUMNS = ("kind", "ext", "size", "mtime_ns", "inode", "birthtime", "taken", "taken_source",
@@ -462,6 +463,23 @@ class _Pass:
         self.vault_unavailable()
         self.counts["removed"] = purge_missing(self.db, self._under_failed)
 
+    def distrust_unlisted(self) -> None:
+        """
+        After a pass that listed every folder (full, or the first under WALK_VERSION):
+        the rows it could not write (a folder that failed, and every folder above it)
+        and the rows below a folder it could not list are older than this pass, maybe
+        written under older rules. They get mtime UNTRUSTED, so the next pass lists
+        those folders again instead of trusting them, and the rest of the vault is
+        trusted from now on even though this pass was not complete.
+        """
+        with self.db._connect() as conn:
+            conn.executemany("UPDATE media_folders SET mtime_ns = ? WHERE path = ?",
+                             [(UNTRUSTED, path) for path in self.tainted])
+            for folder in set(self.failed):
+                low, high = _prefix_range(folder)
+                conn.execute("UPDATE media_folders SET mtime_ns = ? WHERE path >= ? AND path < ? "
+                             "AND last_scanned < ?", (UNTRUSTED, low, high, self.full_started))
+
 
 def run_pass(ctx, config, db, full: bool, errors, read_errors, vault_unavailable) -> Dict[str, Any]:
     """
@@ -474,6 +492,8 @@ def run_pass(ctx, config, db, full: bool, errors, read_errors, vault_unavailable
     ctx.progress(0, None, "Mappen nalopen...")
     run.walk()
     run.finish()
+    if run.relist:
+        run.distrust_unlisted()
     complete = errors.count == 0
     now = time.time()
     with db._connect() as conn:
@@ -485,9 +505,9 @@ def run_pass(ctx, config, db, full: bool, errors, read_errors, vault_unavailable
             "last_seconds": round(time.monotonic() - started, 3)}
     if complete:
         info["last_complete_at"] = now
-    if run.relist and complete:
-        # Every folder was listed under the current rules (a failed one would leave
-        # an older row above it that the next pass could trust)
+    if run.relist:
+        # Every folder was listed under the current rules, or its row is distrusted
+        # (one folder that keeps failing must not make every later pass list them all)
         info["walk_version"] = WALK_VERSION
     if full:
         info["last_full_at"] = now

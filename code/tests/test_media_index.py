@@ -592,6 +592,37 @@ def test_an_index_from_the_older_walk_is_listed_once_in_full(client, config):
     _assert_index_matches_disk(client, config, set())
 
 
+def test_one_unlistable_folder_does_not_make_every_later_pass_list_every_folder(client, config):
+    # An index from the older walk meets a folder that cannot be listed: that pass is
+    # incomplete, but later passes must not list the whole vault again and again
+    from backend import media_index
+    from backend.routes.library import db
+    _index(client)
+    # An older pass wrote 'bursts' before it visited a new subfolder below it
+    bursts = config.VAULT_ROOT / "RAW/2022/bursts"
+    _photo(bursts / "nieuw/a.jpg", (3, 3, 3), "a", "2018:08:08 08:08:08")
+    with _sqlite3.connect(str(config.DB_PATH)) as conn:
+        conn.execute("UPDATE media_folders SET mtime_ns = ? WHERE path = ?", (os.stat(bursts).st_mtime_ns, str(bursts)))
+    info = media_index.state(db)
+    info.pop("walk_version")
+    db.set_setting(media_index.STATE_KEY, info)
+    locked = config.VAULT_ROOT / "RAW/2022"
+    os.chmod(locked, 0)
+    try:
+        first = _index(client)
+        assert first["complete"] is False and first["folders_unchanged"] == 0
+        assert media_index.state(db)["walk_version"] == media_index.WALK_VERSION
+        again = _index(client)
+        assert again["complete"] is False and again["folders_listed"] <= 3, again
+    finally:
+        os.chmod(locked, 0o755)
+    result = _index(client)
+    assert result["complete"] is True and result["new"] == 1
+    assert "RAW/2022/bursts/nieuw/a.jpg" in _paths(config)
+    assert _index(client)["folders_listed"] == 0
+    _assert_index_matches_disk(client, config, {"RAW/2022/bursts/nieuw/a.jpg"})
+
+
 def test_automatic_passes_keep_only_their_last_five_jobs(client, config):
     dup = client.post("/api/jobs", json={"type": "hashing", "params": {"folder": str(config.VAULT_ROOT / "library")}})
     _manager().wait(dup.json()["job"]["id"], timeout=60)
