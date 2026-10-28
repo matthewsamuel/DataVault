@@ -588,6 +588,81 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("isViewerOpen() && viewer.index === 1 && viewer.items.length") == sum(n for _, n in otd["api"]),
                    "albums: a photo of op deze dag did not open in the viewer with all its photos")
             step("albums: close the photo", lambda: page.keyboard.press("Escape"), 0.4)
+            # PageDown/PageUp in op deze dag (as in the grid): never off to the page
+            step("albums: PageDown in op deze dag", lambda: (
+                page.focus(".albums-otd-year .albums-tile[tabindex='0']"), page.keyboard.press("End"),
+                page.keyboard.press("PageUp"), page.wait_for_timeout(200)), 0.2)
+            expect(page.evaluate("document.activeElement.classList.contains('albums-tile') && document.activeElement.dataset.index") == "0",
+                   f"albums: PageUp in op deze dag left the focus on {page.evaluate('document.activeElement.outerHTML.slice(0, 80)')}")
+            # 'Alle N bekijken' opens exactly the N of that year: the page asks for one photo per
+            # year here, so the button shows, and the grid must then count the year's total
+            page.route("**/api/library/on-this-day*", lambda route: route.continue_(
+                url=route.request.url.replace("per_year=60", "per_year=1")))
+            try:
+                step("albums: 'Alle N bekijken'", lambda: (
+                    page.evaluate("albumsOtdShift(0)"),
+                    page.wait_for_selector(".albums-otd-year-head .btn", timeout=5000),
+                    page.click(".albums-otd-year-head .btn"),
+                    page.wait_for_selector("#albums-count .albums-count-number", timeout=5000),
+                    page.wait_for_timeout(600)), 0.2)
+            except PlaywrightError as e:
+                problems.append(f"albums: 'Alle N bekijken' did not show or open: {str(e).splitlines()[0]}")
+            page.unroute("**/api/library/on-this-day*")
+            all_n = page.evaluate("""[location.hash, (document.querySelector('#albums-count .albums-count-number') || {}).textContent,
+                                      document.activeElement.id]""")
+            year_total = sum(n for y, n in otd["api"] if y == 2019)
+            expect(all_n[0].startswith("#albums?") and "capture_date=known" in all_n[0] and all_n[1] == str(year_total)
+                   and all_n[2] == "albums-title", f"albums: 'Alle {year_total} bekijken' opened {all_n}")
+
+            # Review fixes: bad bookmarks, an inline date check, the iPhone camera, three header
+            # buttons on one row at 1024, the short search text, focus after removing a chip
+            step("albums: a bookmark with year=abc", lambda: (
+                page.evaluate("location.hash = '#albums?kind=photo&year=abc'"), page.wait_for_timeout(900)), 0.2)
+            bad = page.evaluate("""[location.hash, !!document.querySelector('#albums-state .empty-state-error'),
+                                    [...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Adres aangepast'))]""")
+            expect(bad == ["#albums?kind=photo", False, True], f"albums: year=abc gave {bad}")
+            step("albums: an end date before the start", lambda: (
+                page.select_option("#albums-when", "range"),
+                page.evaluate("""(() => { const set = (id, v) => { const el = document.getElementById(id); el.value = v;
+                                  el.dispatchEvent(new Event('change')); };
+                                  set('albums-from', '2020-01-01'); set('albums-to', '2019-01-01'); })()"""),
+                page.wait_for_timeout(600)), 0.2)
+            rng = page.evaluate("""[document.getElementById('albums-range-error').hidden, location.hash,
+                                    !!document.querySelector('#albums-state .empty-state-error'),
+                                    document.querySelector('#albums-when').getBoundingClientRect().top
+                                    === document.querySelector('#albums-sort').getBoundingClientRect().top]""")
+            expect(rng == [False, "#albums?kind=photo&date_from=2020-01-01", False, True],
+                   f"albums: a reversed date range gave {rng}")
+            step("albums: remove a chip with the keyboard", lambda: (
+                page.focus("#albums-chips .chip-remove"), page.keyboard.press("Enter"), page.wait_for_timeout(500)), 0.2)
+            expect(page.evaluate("document.activeElement !== document.body && !!document.activeElement.closest('#albums-browse')"),
+                   f"albums: focus fell to {page.evaluate('document.activeElement.tagName')} after removing a chip")
+            iphone = page.evaluate("""(async () => (await fetchJSON(`${API_BASE}/api/library/albums`))
+                                          .albums.find(a => a.builtin === 'iphone').id)()""")
+            step("albums: the iPhone album", lambda: (
+                page.evaluate(f"location.hash = '#albums/album/{iphone}'"), page.wait_for_timeout(800)), 0.2)
+            expect(page.evaluate("document.getElementById('albums-camera').selectedOptions[0].textContent") == "Bevat 'iPhone'",
+                   "albums: the camera list does not show the iPhone filter")
+            side_names = "[...document.querySelectorAll('#albums-side-albums .albums-side-name')].map(e => e.textContent)"
+            try:
+                step("albums: hide the iPhone album", lambda: (
+                    page.click("#albums-edit"), page.click("#album-hidden-row"), page.click("#album-save"),
+                    page.wait_for_selector(".toast .toast-action", timeout=5000)), 0.3)
+            except PlaywrightError as e:
+                problems.append(f"albums: hiding showed no toast with an action: {str(e).splitlines()[0]}")
+            expect("iPhone" not in page.evaluate(side_names) and page.evaluate("document.activeElement.id") == "albums-title",
+                   f"albums: hiding left {page.evaluate(side_names)} with focus on {page.evaluate('document.activeElement.id')}")
+            step("albums: undo hiding from the toast", lambda: (
+                page.click(".toast .toast-action"), page.wait_for_timeout(800)), 0.2)
+            expect("iPhone" in page.evaluate(side_names), f"albums: 'Ongedaan maken' left {page.evaluate(side_names)}")
+            page.set_viewport_size({"width": 1024, "height": 768})
+            step("albums: a changed album at 1024", lambda: (
+                page.click("#albums-kinds [data-kind='photo']"), page.wait_for_timeout(600)), 0.2)
+            head = page.evaluate("""[[...document.querySelectorAll('#albums-header-actions button')].map(b => Math.round(b.getBoundingClientRect().top)),
+                                     document.getElementById('global-search').placeholder]""")
+            expect(len(head[0]) == 3 and len(set(head[0])) == 1 and head[1] == "Zoeken…",
+                   f"albums: at 1024 the header buttons sit at {head[0]}, search says {head[1]!r}")
+            page.set_viewport_size({"width": 1400, "height": 900})
             page.evaluate("albumsShow(null, {}, '-taken')")
 
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
