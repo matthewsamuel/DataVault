@@ -112,6 +112,29 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   gehaald. De index leest alleen; hij verplaatst of wist nooit een bestand.
 - `DATAVAULT_AUTO_INDEX=0` zet het automatisch bijwerken uit (de tests doen dat).
 
+### Albums: filters, slimme albums en op deze dag
+- Tabblad **Albums** (sneltoets `g a`, `frontend/library.js`) toont de bibliotheek: alles, met filters
+  op soort, datum (jaar, maand, periode of van/tot), map, camera, bestandstype, locatie,
+  Shows-waardering, Keurer (gehouden of nog niet gekeurd), oriëntatie en opnamedatum, en sorteren op
+  datum, naam, grootte of waardering. Het raster is gevirtualiseerd en haalt 200 bestanden per keer op
+  als ze in beeld komen. Het adres volgt wat je ziet (`#albums?kind=photo&year=2019`,
+  `#albums/album/3`, `#albums/op-deze-dag/07-14`), dus een weergave is te bewaren als bladwijzer.
+- Eén filtervorm voor het adres, de server en de opgeslagen albums: `backend/library_filters.py`
+  (`clean()` controleert en normaliseert, `to_query()` maakt er `media_index`-filters van). Datums
+  zijn lokale dagen, net als de opnamedatums in de index en de tijdlijn.
+- Een slim album is een opgeslagen filter met naam, sortering en icoon (`backend/smart_albums.py`,
+  migratie 20). Het is altijd actueel en verplaatst of kopieert nooit een bestand. De zes
+  standaardalbums komen er één keer bij; verborgen of verwijderde komen terug met
+  **Standaardalbums terugzetten**.
+- **Op deze dag** toont per jaar (nieuwste eerst) de foto's en video's van een dag in eerdere jaren,
+  met vorige/volgende dag en de mappen die op Home gekozen zijn. 29 februari is altijd te kiezen; in
+  een jaar zonder 29 februari laat 28 februari die foto's ook zien.
+- API onder `/api/library`: `browse` (filters als queryparameters of `album=id`, met `offset`,
+  `limit` tot 1000, `sort`; het antwoord heeft `version` zodat een lijst die doorbladert ziet dat de
+  selectie veranderde), `facets`, `on-this-day?date=MM-DD`, en `albums` (GET/POST,
+  `albums/{id}` GET/PATCH/DELETE, `albums/defaults` POST). De tellingen in de zijbalk worden per
+  album bewaard tot de index verandert (hooguit 30 s).
+
 ### Herstelcentrum
 - Eén lijst (tab **Herstel**, sneltoets 8) van alles wat de app in het archief verplaatste: Keurer
   (prullenmand, verplaatsen), duplicaten opruimen en Verplaatsen in de viewer, nieuwste eerst, met per
@@ -129,7 +152,7 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   bestanden per actie bouwt zijn regel met `recovery.list_files` en `recovery.FolderChecks`.
 
 ### Toetsenbord, instellingen en thema's
-- `1`–`9` of `g` + letter wisselt van tabblad, `/` gaat naar het zoekveld, `t` wisselt het thema, `?`
+- `1`–`9` of `g` + letter wisselt van tabblad (Albums heeft alleen `g a`), `/` gaat naar het zoekveld, `t` wisselt het thema, `?`
   toont alle sneltoetsen. Pijltjes, Home/End en PageUp/PageDown bewegen door het raster van Bestanden en
   de tijdlijn; Enter of spatie opent. Geen sneltoets werkt terwijl je typt.
 - In Safari gaat Tab op de pagina zelf niet langs knoppen (zoals **Terugzetten** in het Herstelcentrum);
