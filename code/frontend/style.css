@@ -64,6 +64,9 @@
     --control-h: 34px;
     --control-h-lg: 40px;
 
+    /* Kleine vierkante miniaturen in lijsten (ranglijst) */
+    --thumb-sm: 56px;
+
     /* Rondingen */
     --radius-xs: 4px;
     --radius-sm: 6px;
@@ -9041,8 +9044,9 @@ button.otd-settings-icon:hover {
     box-shadow: 0 0 0 3px var(--accent), var(--shadow-lg);
 }
 
-.elo-choice.is-passed .elo-frame {
-    opacity: 0.45;
+/* Alleen de foto zelf dooft uit: het donkere vlak eromheen en de −N blijven goed leesbaar */
+.elo-choice.is-passed .elo-img.is-loaded {
+    opacity: 0.4;
 }
 
 .elo-check {
@@ -9052,8 +9056,8 @@ button.otd-settings-icon:hover {
     display: none;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: var(--icon-2xl);
+    height: var(--icon-2xl);
     border-radius: var(--radius-full);
     background-color: var(--accent);
     color: var(--text-on-accent);
@@ -9072,7 +9076,7 @@ button.otd-settings-icon:hover {
     left: var(--space-md);
     top: var(--space-md);
     display: none;
-    padding: 2px var(--space-sm);
+    padding: var(--space-2xs) var(--space-sm);
     border-radius: var(--radius-full);
     background-color: var(--media-scrim);
     color: var(--on-media);
@@ -9087,6 +9091,12 @@ button.otd-settings-icon:hover {
     animation: dv-fade-in var(--duration-base) var(--ease-out);
 }
 
+/* De winnaar in het groen van het vinkje; de ander blijft rustig op het donkere vlak */
+.elo-delta.is-up {
+    background-color: var(--accent);
+    color: var(--text-on-accent);
+}
+
 .elo-vs {
     position: absolute;
     left: 50%;
@@ -9095,8 +9105,8 @@ button.otd-settings-icon:hover {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
+    width: var(--control-h-lg);
+    height: var(--control-h-lg);
     border-radius: var(--radius-full);
     background-color: var(--surface-overlay);
     border: 1px solid var(--border-hairline);
@@ -9189,6 +9199,27 @@ button.otd-settings-icon:hover {
     font-weight: var(--fw-medium);
 }
 
+.elo-notice {
+    color: var(--text-primary);
+    font-weight: var(--fw-medium);
+}
+
+.elo-notice i {
+    color: var(--accent-text);
+}
+
+.elo-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+
+.elo-empty-actions .empty-state-action {
+    margin-top: 0;
+}
+
 .elo-actions {
     flex: none;
     display: flex;
@@ -9246,8 +9277,8 @@ button.otd-settings-icon:hover {
 
 .elo-rank {
     flex: none;
-    width: 28px;
-    height: 28px;
+    width: var(--control-h-sm);
+    height: var(--control-h-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -9265,8 +9296,8 @@ button.otd-settings-icon:hover {
 
 .elo-board-thumb {
     flex: none;
-    width: 56px;
-    height: 56px;
+    width: var(--thumb-sm);
+    height: var(--thumb-sm);
     border-radius: var(--radius-thumb);
     overflow: hidden;
     background-color: var(--thumb-bg);
@@ -9284,7 +9315,7 @@ button.otd-settings-icon:hover {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-2xs);
 }
 
 .elo-board-name {
@@ -9306,7 +9337,7 @@ button.otd-settings-icon:hover {
 
 .elo-board-score {
     flex: none;
-    min-width: 64px;
+    min-width: var(--space-4xl);
     text-align: right;
     font-family: var(--font-mono);
     font-size: var(--fs-md);

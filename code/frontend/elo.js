@@ -16,12 +16,15 @@
 
 const ELO_PICK_PAUSE_MS = 420;      // zo lang blijft de keuze zichtbaar voor het volgende paar komt
 const ELO_BOARD_LIMIT = 50;
+const ELO_SCOPE_CHARS = 30;         // langere namen in de keuzelijst eindigen op '…' (WebKit kort een select niet netjes af)
 
 const elo = {
     scope: '',          // pad van de collectie ('' = hele bibliotheek), of 'soort:waarde' (album)
     scopeTitle: 'Hele bibliotheek',
     tab: 'compare',     // 'compare' of 'board'
-    pair: null,         // [a, b] zoals de server ze gaf
+    pair: null,         // [a, b] zoals de server ze gaf; null zodra er voor dit paar gekozen is
+    last: null,         // het laatst getoonde paar, zodat het niet meteen terugkomt
+    notice: '',         // korte melding vooraan in de voortgangsregel (na Terugdraaien)
     stats: null,
     undo: [],           // ids van vergelijkingen in deze ronde, nieuwste laatst
     round: 0,           // vergeleken sinds het venster openging
@@ -90,9 +93,9 @@ function eloBuild() {
 function eloFillScopes() {
     const select = document.getElementById('elo-scope');
     const shows = (typeof _lastShowsData !== 'undefined' && _lastShowsData && _lastShowsData.shows) || [];
-    const options = [createEl('option', { value: '', text: 'Hele bibliotheek' })];
+    const options = [eloOption('', 'Hele bibliotheek')];
     [...shows].sort((a, b) => a.title.localeCompare(b.title, 'nl')).forEach(show => {
-        options.push(createEl('option', { value: show.path, text: show.title }));
+        options.push(eloOption(show.path, show.title));
     });
     const known = new Set(options.map(o => o.value));
     eloScopeProviders.forEach(({ label, list }) => {
@@ -101,21 +104,31 @@ function eloFillScopes() {
         if (!items.length) return;
         items.forEach(item => known.add(item.value));
         options.push(createEl('optgroup', { label },
-            ...items.map(item => createEl('option', { value: item.value, text: item.text }))));
+            ...items.map(item => eloOption(item.value, item.text))));
     });
     if (elo.scope && !known.has(elo.scope)) {
-        options.push(createEl('option', { value: elo.scope, text: elo.scopeTitle }));
+        options.push(eloOption(elo.scope, elo.scopeTitle));
     }
     select.replaceChildren(...options);
     select.value = elo.scope;
     eloScopeTitle();
 }
 
-// De volledige naam als tooltip: de keuzelijst kort lange namen af
+// Een keuze in de lijst: een lange naam eindigt op '…' (de volledige naam staat in data-full en
+// als tooltip)
+function eloOption(value, title) {
+    const short = title.length > ELO_SCOPE_CHARS ? `${title.slice(0, ELO_SCOPE_CHARS - 1).trimEnd()}…` : title;
+    return createEl('option', { value, text: short, title, dataset: { full: title } });
+}
+
+function eloOptionTitle(option) {
+    return option ? (option.dataset.full || option.textContent) : '';
+}
+
+// De volledige naam als tooltip
 function eloScopeTitle() {
     const select = document.getElementById('elo-scope');
-    const option = select && select.selectedOptions[0];
-    if (select) select.title = option ? option.textContent : '';
+    if (select) select.title = eloOptionTitle(select.selectedOptions[0]);
 }
 
 function openElo(scope = '', title = '') {
@@ -125,6 +138,8 @@ function openElo(scope = '', title = '') {
     elo.undo = [];
     elo.round = 0;
     elo.pair = null;
+    elo.last = null;
+    elo.notice = '';
     eloFillScopes();
     // Geopend met het toetsenbord: dan meteen een zichtbare focusring
     const opener = document.activeElement;
@@ -151,10 +166,11 @@ function eloSetScope(value) {
     elo.scope = value;
     const select = document.getElementById('elo-scope');
     const option = select && select.selectedOptions[0];
-    elo.scopeTitle = option ? option.textContent : 'Hele bibliotheek';
+    elo.scopeTitle = option ? eloOptionTitle(option) : 'Hele bibliotheek';
     elo.undo = [];
     elo.round = 0;      // de teller hoort bij de collectie, net als Terugdraaien
     elo.pair = null;
+    elo.notice = '';
     eloScopeTitle();
     eloUpdateActions();
     if (elo.tab === 'board') eloLoadBoard(); else eloLoadPair();
@@ -170,7 +186,12 @@ function eloShowTab(tab) {
     document.getElementById('elo-footer').hidden = tab !== 'compare';
     if (tab === 'board') eloLoadBoard();
     else if (elo.pair) eloRenderPair();
-    else eloLoadPair();
+    else eloLoadPair(elo.last);
+}
+
+function eloIsOpen() {
+    const overlay = document.getElementById('elo-overlay');
+    return !!overlay && overlay.classList.contains('active');
 }
 
 // Een map gaat als folder=, een andere collectie ('album:7') als scope=
@@ -239,14 +260,17 @@ function eloSkeleton() {
     return createEl('div', { class: 'elo-stage', role: 'status', 'aria-label': 'Laden…' }, frame(), frame());
 }
 
-async function eloLoadPair(prev) {
+// keep: het gekozen paar blijft staan (met zijn +N/−N) tot het nieuwe er is, zonder skelet ertussen
+async function eloLoadPair(prev, keep = false) {
     const seq = ++elo.seq;
-    if (!elo.pair) eloSetBody(eloSkeleton());
+    if (!elo.pair && !keep) eloSetBody(eloSkeleton());
     const params = [eloScopeParam(), ...(prev || []).map(p => `prev=${encodeURIComponent(p.path)}`)].filter(Boolean);
     try {
         const data = await fetchJSON(`${API_BASE}/api/shows/compare/pair?${params.join('&')}`);
-        if (seq !== elo.seq) return;
+        // Intussen naar de ranglijst, een andere collectie of dicht: dit paar hoort er niet meer bij
+        if (seq !== elo.seq || elo.tab !== 'compare') return;
         elo.pair = data.pair;
+        if (data.pair) elo.last = data.pair;
         elo.stats = data.stats;
         elo.scopeTitle = data.scope.title;
         if (!data.pair) {
@@ -255,7 +279,7 @@ async function eloLoadPair(prev) {
             eloRenderPair();
         }
     } catch (err) {
-        if (seq !== elo.seq) return;
+        if (seq !== elo.seq || elo.tab !== 'compare') return;
         elo.pair = null;
         eloSetBody(errorState('Geen foto\'s geladen', err, () => eloLoadPair()));
     }
@@ -265,14 +289,25 @@ async function eloLoadPair(prev) {
 
 function eloRenderEmpty(reason) {
     const few = reason === 'too_few';
-    eloSetBody(emptyState({
+    const toLibrary = { label: 'Hele bibliotheek', onClick: () => { document.getElementById('elo-scope').value = ''; eloSetScope(''); } };
+    const toBoard = { label: 'Ranglijst bekijken', onClick: () => eloShowTab('board') };
+    const state = emptyState({
         icon: few ? 'fa-images' : 'fa-check',
         title: few ? 'Te weinig foto\'s in deze collectie' : 'Geen nieuw paar',
         text: few ? 'Er zijn minstens twee foto\'s nodig. Kies een andere collectie of de hele bibliotheek.'
-            : 'Alle foto\'s hier zijn net met elkaar vergeleken. Kies een andere collectie, of bekijk de ranglijst.',
-        action: elo.scope ? { label: 'Hele bibliotheek', onClick: () => { document.getElementById('elo-scope').value = ''; eloSetScope(''); } }
-            : { label: 'Ranglijst bekijken', onClick: () => eloShowTab('board') },
-    }));
+            : `Alle foto's hier zijn net met elkaar vergeleken. ${elo.scope ? 'Kies de hele bibliotheek' : 'Kies een andere collectie'}, of bekijk de ranglijst.`,
+        action: elo.scope ? toLibrary : toBoard,
+    });
+    // Een collectie zonder nieuw paar: allebei de wegen die de tekst noemt
+    if (!few && elo.scope) {
+        const first = state.querySelector('.empty-state-action');
+        const second = createEl('button', { type: 'button', class: 'btn btn-ghost btn-small empty-state-action',
+            onClick: toBoard.onClick, text: toBoard.label });
+        const actions = createEl('div', { class: 'elo-empty-actions' });
+        first.replaceWith(actions);
+        actions.append(first, second);
+    }
+    eloSetBody(state);
 }
 
 function eloChoice(photo, side) {
@@ -317,10 +352,15 @@ function eloUpdateProgress() {
     const parts = [];
     if (elo.round) parts.push(`${formatNumberNl(elo.round)} vergeleken in deze ronde`);
     if (elo.stats) {
-        parts.push(`${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} foto's beoordeeld`);
+        const photos = elo.stats.photos === 1 ? 'foto' : 'foto\'s';
+        parts.push(`${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} beoordeeld`);
     }
-    box.replaceChildren(createEl('span', { class: 'elo-scope-name', text: elo.scopeTitle }),
-        parts.length ? createEl('span', { text: ` · ${parts.join(' · ')}` }) : null);
+    // Na Terugdraaien zegt de regel het zelf (een melding rechtsboven zou over de foto vallen)
+    const notice = elo.notice ? createEl('span', { class: 'elo-notice' },
+        eloIcon('fa-rotate-left'), `\u00a0${elo.notice}`) : null;
+    box.replaceChildren(...[notice, notice ? ' · ' : null,
+        createEl('span', { class: 'elo-scope-name', text: elo.scopeTitle }),
+        parts.length ? createEl('span', { text: ` · ${parts.join(' · ')}` }) : null].filter(Boolean));
     box.title = box.textContent;
 }
 
@@ -344,6 +384,10 @@ async function eloPick(side) {
     const [a, b] = elo.pair;
     const choices = document.querySelectorAll('#elo-body .elo-choice');
     choices.forEach((el, i) => el.classList.add(i === side ? 'is-chosen' : 'is-passed'));
+    if (elo.notice) {
+        elo.notice = '';
+        eloUpdateProgress();
+    }
     let saved = false;
     try {
         const result = await fetchJSON(`${API_BASE}/api/shows/compare`, {
@@ -352,6 +396,9 @@ async function eloPick(side) {
             body: JSON.stringify({ a: a.path, b: b.path, winner: side === 0 ? 'a' : 'b', ...eloScopeBody() }),
         });
         saved = true;
+        // Voor dit paar is gekozen: het komt niet terug, ook niet via de tabbladen
+        elo.pair = null;
+        const seq = elo.seq;
         elo.undo.push(result.id);
         elo.round++;
         [result.a, result.b].forEach((change, i) => {
@@ -362,7 +409,10 @@ async function eloPick(side) {
             }
         });
         await new Promise(resolve => setTimeout(resolve, ELO_PICK_PAUSE_MS));
-        await eloLoadPair([a, b]);
+        // Alleen als er intussen niets anders gebeurde: wie tijdens de pauze naar de ranglijst
+        // ging, een andere collectie koos of het venster sloot, krijgt hier geen paar overheen
+        // (bij Vergelijken komt dan vanzelf een nieuw paar)
+        if (seq === elo.seq && eloIsOpen() && elo.tab === 'compare') await eloLoadPair([a, b], true);
     } catch (err) {
         if (!saved) {
             choices.forEach(el => el.classList.remove('is-chosen', 'is-passed'));
@@ -376,6 +426,7 @@ async function eloPick(side) {
 async function eloSkip() {
     if (elo.busy || !elo.pair || elo.tab !== 'compare') return;
     elo.busy = true;
+    elo.notice = '';
     eloUpdateActions();
     try {
         await eloLoadPair(elo.pair);
@@ -389,22 +440,28 @@ async function eloUndo() {
     if (elo.busy || !elo.undo.length || elo.tab !== 'compare') return;
     elo.busy = true;
     eloUpdateActions();
-    const id = elo.undo.pop();
+    const id = elo.undo[elo.undo.length - 1];
     try {
         const result = await fetchJSON(`${API_BASE}/api/shows/compare/undo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id }),
         });
+        elo.undo.pop();
         elo.round = Math.max(0, elo.round - 1);
         if (result.stats) elo.stats = result.stats;
         // Hetzelfde paar weer in beeld, met de scores van vóór die keuze
         const name = p => p.path.slice(p.path.lastIndexOf('/') + 1);
         elo.pair = [result.a, result.b].map(p => ({ ...p, name: name(p), votes: 0 }));
+        elo.last = elo.pair;
         elo.seq++;
+        elo.notice = 'Teruggedraaid, kies opnieuw';
         eloRenderPair();
-        showToast('Teruggedraaid', 'Beide scores staan weer zoals ze waren. Kies opnieuw.', 'info');
     } catch (err) {
+        // Kan deze vergelijking echt niet meer terug (al teruggedraaid, of een foto veranderde
+        // sindsdien), dan gaat hij van de stapel; bij een netwerk- of serverfout blijft hij,
+        // zodat z het straks nog eens probeert
+        if (err && [400, 404, 409].includes(err.status)) elo.undo.pop();
         toastFetchError('Terugdraaien lukte niet', err);
     }
     elo.busy = false;

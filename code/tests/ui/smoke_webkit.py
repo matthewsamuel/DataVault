@@ -671,6 +671,47 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("elo: 1 after Enter", lambda: page.keyboard.press("1"), 1.4)
             expect(comparisons() == count + 2, "elo: after Tab + Enter the key 1 did nothing")
 
+            # Ranglijst right after a pick (during the short pause before the next pair): the board
+            # stays, no dead pair is drawn over it, and Vergelijken then shows a new pair
+            page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=5000)
+            picked = shown_pair()
+            page.focus("#elo-overlay")
+            page.keyboard.press("1")
+            page.click("#elo-tab-board")
+            page.wait_for_timeout(1400)
+            race = page.evaluate("""({tab: elo.tab, rows: document.querySelectorAll('#elo-body .elo-board-row').length,
+                choices: document.querySelectorAll('#elo-body .elo-choice').length})""")
+            expect(race["tab"] == "board" and race["rows"] > 0 and race["choices"] == 0,
+                   f"elo: Ranglijst right after a pick showed a pair instead of the board ({race})")
+            step("elo: back to Vergelijken", lambda: (page.click("#elo-tab-compare"),
+                 page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=5000)), 0.3)
+            expect(len(shown_pair()) == 2 and set(shown_pair()) != set(picked),
+                   f"elo: after the board the pair just compared came back ({picked})")
+
+            # z says so in the footer (no toast over the photos); an undo that fails on the way (no
+            # connection) keeps the comparison, so z can try again
+            page.evaluate("""(() => { window.__realFetchJSON = fetchJSON;
+                fetchJSON = async (url, options) => {
+                    if (url.endsWith('/api/shows/compare/undo')) throw new TypeError('Load failed');
+                    return window.__realFetchJSON(url, options);
+                }; })()""")
+            undo_before = page.evaluate("elo.undo.length")
+            page.focus("#elo-overlay")
+            seen = len(problems)
+            page.keyboard.press("z")
+            page.wait_for_timeout(400)
+            # (the console error of that failed undo is expected here)
+            problems[seen:] = [p for p in problems[seen:] if "Terugdraaien lukte niet" not in p]
+            expect(undo_before > 0 and page.evaluate("elo.undo.length") == undo_before,
+                   f"elo: a failed undo dropped the comparison ({undo_before} -> {page.evaluate('elo.undo.length')})")
+            page.evaluate("() => { fetchJSON = window.__realFetchJSON; document.querySelectorAll('.toast').forEach(t => t.remove()); }")
+            page.focus("#elo-overlay")
+            step("elo: z again", lambda: page.keyboard.press("z"), 1.0)
+            expect(page.evaluate("elo.undo.length") == undo_before - 1, "elo: z after a failed undo did nothing")
+            expect("Teruggedraaid" in (page.text_content("#elo-progress") or "")
+                   and not page.query_selector(".toast"), f"elo: the undo is not told in the footer, or a toast covers the photos "
+                   f"({page.text_content('#elo-progress')})")
+
             # A collection with too few photos: Overslaan is off and the round counter starts again
             familie = str((vault / "library" / "Familie").resolve())
             step("elo: Familie", lambda: page.select_option("#elo-scope", familie), 1.0)
@@ -698,6 +739,13 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("elo: Escape closes", lambda: page.keyboard.press("Escape"), 0.5)
             expect(not page.is_visible("#elo-overlay") and page.evaluate("document.activeElement.id") == "btn-elo",
                    f"elo: Escape did not close the window and return to its button ({page.evaluate('document.activeElement.id')})")
+            # Without any show the header (and 'Welke is mooier?') stays above the empty state
+            empty_shows = page.evaluate("""(() => { const before = _lastShowsData; renderShows({featured: null, shows: []});
+                const r = {elo: !!document.getElementById('btn-elo'), empty: !!document.querySelector('#shows-container .empty-state'),
+                           shuffle: !!document.getElementById('btn-shuffle-shows')};
+                renderShows(before); return r; })()""")
+            expect(empty_shows == {"elo": True, "empty": True, "shuffle": False},
+                   f"shows: without shows 'Welke is mooier?' cannot be reached ({empty_shows})")
 
             # Spotify: both top lists show everything the export has (never cut to the shorter one),
             # the shorter one ends with a quiet closing line, and the stat labels in a row line up
