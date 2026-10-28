@@ -606,3 +606,24 @@ def test_unknown_sources_and_bad_settings_are_refused(client):
 def test_the_routes_need_the_session_token(anon_client):
     assert anon_client.post("/api/datagatherer/sources/spotify/sync").status_code == 403
     assert anon_client.put("/api/datagatherer/sources/lastfm/secrets", json={"api_key": "x"}).status_code == 403
+
+
+def test_a_failed_sync_says_why_on_the_card_and_dates_read_dutch(client, app):
+    """UX-5 and UX-8: the reason of a failed sync is in the next step; dates and waiting times read Dutch."""
+    db = app.state.db
+    keychain.set("lastfm", "api_key", "sleutel")
+    client.put("/api/datagatherer/sources/lastfm/settings", json={"settings": {"username": "iemand"}})
+    now = time.time()
+    state.update(db, "lastfm", last_sync_at=now, last_success_at=now - 60,
+                 last_error="De API-sleutel klopt niet: controleer hem bij Instellingen")
+    cards = {c["id"]: c for c in client.get("/api/datagatherer/sources").json()["sources"]}
+    lastfm = cards["lastfm"]
+    assert lastfm["status"] == "fout" and lastfm["last_error"].startswith("De API-sleutel klopt niet")
+    assert lastfm["next_step"].startswith("Bijwerken mislukte: De API-sleutel klopt niet")
+    assert lastfm["primary"]["action"] == "sync"
+    from backend.datagatherer.cards import _date, _expected
+    assert _date(1_695_081_600) == "19 sep 2023"
+    assert _expected(0, 2) == "meestal binnen 2 dagen" and _expected(1, 30) == "meestal binnen 1 tot 30 dagen"
+    client.post("/api/datagatherer/sources/google_takeout/request-export", json={})
+    google = next(c for c in client.get("/api/datagatherer/sources").json()["sources"] if c["id"] == "google_takeout")
+    assert "meestal binnen 2 dagen klaar" in google["next_step"] and "0 tot" not in google["next_step"]

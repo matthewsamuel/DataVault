@@ -470,12 +470,12 @@ def get_coverage():
         from backend.datagatherer import spotify_store
         c = spotify_store.coverage(db)
         return {"mode": "database", "last": c["last"], "first": c["first"], "estimated_since": c["estimated_since"],
-                "export_until": c["export_until"], "plays": c["plays"],
+                "export_until": c["export_until"], "plays": c["plays"], "holes": c["holes"],
                 "sources": {k: v["plays"] for k, v in c["by_source"].items()}}
     _, plays = load_plays()
     return {"mode": "files", "waiting_for_import": waiting_for_import(), "last": plays[-1].utc.timestamp() if plays else None,
             "first": plays[0].utc.timestamp() if plays else None, "estimated_since": None,
-            "export_until": plays[-1].utc.timestamp() if plays else None, "plays": len(plays),
+            "export_until": plays[-1].utc.timestamp() if plays else None, "plays": len(plays), "holes": [],
             "sources": {"export": len(plays)} if plays else {}}
 
 

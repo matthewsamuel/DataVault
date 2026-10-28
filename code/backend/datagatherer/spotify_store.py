@@ -375,40 +375,66 @@ def dashboard_plays(db, include_api: bool = True) -> List[Tuple[int, str, str, i
                             f"AND ms_played >= ?{where}", (MIN_MS,)).fetchall()
 
 
+HOLE_DAYS = 3                    # no plays for longer than this between two covered spans: a hole in the data
+
+
+def _spans(points: List[Tuple[float, float]]) -> List[List[float]]:
+    """Merge (from, until) spans that overlap or lie less than HOLE_DAYS apart."""
+    merged: List[List[float]] = []
+    for lo, hi in sorted(points):
+        if merged and lo - merged[-1][1] <= HOLE_DAYS * 86400:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    return merged
+
+
 def coverage(db) -> Dict[str, Any]:
-    """What the merged plays cover, per source, and since when listening time is estimated."""
+    """
+    What the merged plays cover, per source: the spans the exports cover (complete, real
+    listening time), the spans of API and Last.fm plays after them (estimated listening time),
+    and the holes between them where there is no data at all (for example the years between
+    an old export and the API's last 50 plays). estimated_since is the first estimated play
+    after the newest export.
+    """
     with db._connect() as conn:
         rows = conn.execute("SELECT source, COUNT(*), MIN(ts_ms), MAX(ts_ms), SUM(ms_estimated) FROM spotify_plays_merged "
                             "WHERE content = 'track' GROUP BY source").fetchall()
         superseded = conn.execute("SELECT (SELECT COUNT(*) FROM spotify_plays WHERE superseded = 1) + "
                                   "(SELECT COUNT(*) FROM spotify_api_plays WHERE superseded = 1)").fetchone()[0]
+        estimated_ts = [r[0] / 1000 for r in conn.execute(
+            "SELECT ts_ms FROM spotify_plays_merged WHERE source IN ('api', 'lastfm') AND content = 'track' "
+            "ORDER BY ts_ms")]
     by_source = {s: {"plays": n, "first": lo / 1000, "last": hi / 1000} for s, n, lo, hi, _ in rows}
     if not by_source:
         return {"plays": 0, "first": None, "last": None, "export_until": None, "estimated_since": None,
-                "by_source": {}, "superseded": superseded, "segments": []}
+                "by_source": {}, "superseded": superseded, "segments": [], "holes": []}
     first = min(v["first"] for v in by_source.values())
     last = max(v["last"] for v in by_source.values())
     exports = [by_source[s] for s in EXPORT_SOURCES if s in by_source]
     windows = export_windows(db)
     export_until = max([w[1] / 1000 for w in windows] + [e["last"] for e in exports]) if (windows or exports) else None
-    estimated = [by_source[s] for s in ("api", "lastfm") if s in by_source]
-    # The watermark: after the newest export, listening time comes from the API or Last.fm
+    # Exports: their periods (a period an export covers is complete), merged
+    export_spans = _spans([(w[0] / 1000, w[1] / 1000) for w in windows] + [(e["first"], e["last"]) for e in exports])
+    # API and Last.fm: plays close together form a span; a long silence between them is a hole
+    estimated_spans = _spans([(t, t) for t in estimated_ts])
     estimated_since = None
-    if estimated:
-        if export_until is None:
-            estimated_since = min(e["first"] for e in estimated)
-        elif max(e["last"] for e in estimated) > export_until:
-            estimated_since = export_until
-    segments = []
-    if exports:
-        segments.append({"from": min(e["first"] for e in exports), "until": export_until, "estimated": False})
-    if estimated_since is not None:
-        segments.append({"from": estimated_since, "until": last, "estimated": True})
-    if not segments:
-        segments.append({"from": first, "until": last, "estimated": bool(estimated)})
+    if estimated_spans:
+        after = [lo for lo, hi in estimated_spans if export_until is None or hi > export_until]
+        if after:
+            estimated_since = max(after[0], export_until) if export_until is not None else after[0]
+    segments = sorted([{"from": lo, "until": hi, "estimated": False} for lo, hi in export_spans]
+                      + [{"from": lo, "until": hi, "estimated": True} for lo, hi in estimated_spans],
+                      key=lambda seg: seg["from"])
+    holes = []
+    reach = None
+    for seg in segments:
+        if reach is not None and seg["from"] - reach > HOLE_DAYS * 86400:
+            holes.append({"from": reach, "until": seg["from"]})
+        reach = seg["until"] if reach is None else max(reach, seg["until"])
     return {"plays": sum(v["plays"] for v in by_source.values()), "first": first, "last": last,
             "export_until": export_until, "estimated_since": estimated_since, "by_source": by_source,
-            "superseded": superseded, "segments": segments}
+            "superseded": superseded, "segments": segments, "holes": holes}
 
 
 def last_api_play(db) -> Optional[int]:

@@ -22,9 +22,9 @@ PAGE_PAUSE = 0.25          # Last.fm asks for at most a few requests per second
 STREAM = "scrobbles"
 ERRORS = {
     6: "Last.fm kent deze gebruikersnaam niet",
-    10: "De API key klopt niet: controleer hem bij Instellingen",
+    10: "De API-sleutel klopt niet: controleer hem bij Instellingen",
     17: "Je Last.fm-profiel toont je geschiedenis niet: zet 'recent beluisterd' op zichtbaar",
-    26: "De API key is uitgeschakeld door Last.fm",
+    26: "De API-sleutel is uitgeschakeld door Last.fm",
 }
 
 
@@ -43,7 +43,7 @@ class LastFm(Connector):
     launchd = True
     settings = (
         SettingField("username", "Gebruikersnaam", kind="text", required=True, placeholder="je Last.fm-naam"),
-        SettingField("api_key", "API key", kind="secret", required=True,
+        SettingField("api_key", "API-sleutel", kind="secret", required=True,
                      help="Van last.fm/api/account/create; het 'shared secret' is niet nodig",
                      placeholder="32 tekens"),
     )
@@ -54,11 +54,11 @@ class LastFm(Connector):
             "Ga in Last.fm naar Instellingen > Applicaties en klik bij 'Spotify Scrobbling' op Verbinden.",
             "Vraag een API-account aan: vul een naam in (bijvoorbeeld DataVault), laat de callback leeg en kopieer de "
             "'API key'. Het 'shared secret' heb je niet nodig.",
-            "Vul hieronder je gebruikersnaam en de API key in en klik op Opslaan. Daarna haalt Bijwerken je scrobbles op.",
+            "Vul hieronder je gebruikersnaam en de API-sleutel in en klik op Opslaan. Daarna haalt Bijwerken je scrobbles op.",
             "Laat je 'recent beluisterd' zichtbaar in je Last.fm-privacy-instellingen; anders geeft Last.fm niets terug.",
         ),
         fields=("username", "api_key"),
-        note="De API key gaat alleen in de Sleutelhanger van macOS. Een wachtwoord is niet nodig.",
+        note="De API-sleutel gaat alleen in de Sleutelhanger van macOS. Een wachtwoord is niet nodig.",
         links=(("API-account aanvragen", "https://www.last.fm/api/account/create"),
                ("Last.fm-applicaties", "https://www.last.fm/settings/applications")),
     )
@@ -71,7 +71,7 @@ class LastFm(Connector):
         HelpOption(
             title="Last.fm koppelen", effort="gemiddeld",
             steps=("Maak een Last.fm-account en koppel Spotify-scrobbling.",
-                   "Vraag een API key aan en vul hem in bij Verbinden."),
+                   "Vraag een API-sleutel aan en vul hem in bij Verbinden."),
             note="Last.fm kent alleen nummers van na het koppelen."),
     )
 

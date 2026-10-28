@@ -37,6 +37,7 @@ STATUS = {
     "fout": ("Bijwerken mislukt", "danger"),
     "export_binnen": ("Klaar om in te lezen", "info"),
     "wacht_op_export": ("Wacht op export", "info"),
+    "gat": ("Gat in de gegevens", "warning"),
     "actueel": ("Actueel", "success"),
     "achter": ("Achter", "warning"),
     "geregistreerd": ("In het archief", "neutral"),
@@ -55,8 +56,20 @@ def _days(n: int) -> str:
     return "1 dag" if n == 1 else f"{n:,} dagen".replace(",", ".")
 
 
+MONTHS = ("jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec")
+
+
 def _date(ts: Optional[float]) -> Optional[str]:
-    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else None
+    """A date as the cards show it (nl-NL): '19 sep 2023'."""
+    if not ts:
+        return None
+    day = datetime.fromtimestamp(ts)
+    return f"{day.day} {MONTHS[day.month - 1]} {day.year}"
+
+
+def _expected(lo: int, hi: int) -> str:
+    """'meestal binnen 2 dagen' or 'meestal binnen 1 tot 5 dagen'."""
+    return f"meestal binnen {_days(hi)}" if lo <= 0 or lo == hi else f"meestal binnen {lo} tot {_days(hi)}"
 
 
 def unread_existing(connector: Connector, gctx: GatherContext) -> List[Path]:
@@ -104,6 +117,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     requests = state.open_requests(db, connector.id)
     request = requests[-1] if requests else None
     gap_days = int((now - cov.last) // 86400) if cov.last else None
+    hole = max(cov.holes, key=lambda h: h[1] - h[0]) if cov.holes else None
+    hole_days = int((hole[1] - hole[0]) // 86400) if hole else None
     sync_failed = bool(st["last_error"]) and (not st["last_success_at"] or (st["last_sync_at"] or 0) > st["last_success_at"])
 
     # ---- status ----
@@ -119,6 +134,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         status = "niet_ingesteld"
     elif not cov.records:
         status = "geregistreerd"
+    elif hole:
+        status = "gat"
     elif gap_days is not None and gap_days <= connector.stale_days:
         status = "actueel"
     else:
@@ -126,6 +143,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     status_label, tone = STATUS[status]
     if status == "achter" and gap_days is not None:
         status_label = f"{_days(gap_days)} achter"
+    elif status == "gat":
+        status_label = f"Gat van {_days(hole_days)}"
 
     # ---- the one primary action and the sentence ----
     name = connector.name
@@ -139,7 +158,19 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         step = f"Er staat {what} in het archief die nog niet is ingelezen. Klik op Inlezen."
     elif configured:
         primary = "sync"
-        if status == "actueel":
+        hole_text = f"tussen {_date(hole[0])} en {_date(hole[1])}" if hole else ""
+        if sync_failed:
+            step = (f"Bijwerken mislukte: {st['last_error'].rstrip('.')}. Probeer het opnieuw, of kijk bij Instellingen "
+                    "of alles klopt.")
+        elif hole and request:
+            step = f"Je export is aangevraagd: die vult het gat {hole_text}. Bijwerken houdt je intussen bij."
+        elif hole and connector.has("export_request"):
+            primary = "request_export"
+            step = (f"Er ontbreken gegevens {hole_text}: Bijwerken haalt alleen je nieuwste op. Vraag een nieuwe "
+                    "export aan om het gat te vullen.")
+        elif hole:
+            step = f"Er ontbreken gegevens {hole_text}. Bijwerken haalt alleen je nieuwste op."
+        elif status == "actueel":
             step = "Je gegevens zijn bij. Bijwerken haalt de nieuwste op."
         else:
             step = "Klik op Bijwerken om de nieuwste gegevens op te halen."
@@ -150,11 +181,14 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         days = int((now - request["requested_at"]) // 86400)
         lo, hi = request_kind.expected_days if request_kind else (1, 30)
         ago = "vandaag" if days == 0 else f"{_days(days)} geleden"
-        step = (f"Export aangevraagd ({ago}); meestal binnen {lo} tot {hi} dagen klaar. DataVault kijkt elke 30 seconden "
+        step = (f"Export aangevraagd ({ago}); {_expected(lo, hi)} klaar. DataVault kijkt elke 30 seconden "
                 f"in Downloads en leest hem dan vanzelf in.")
     elif not cov.records and not raws and connector.has("export_request"):
         primary = "request_export"
         step = f"Nog geen gegevens. Vraag een export aan: {name} maakt hem voor je klaar, DataVault leest hem in."
+    elif api and sync_failed:
+        primary = "connect"
+        step = f"Bijwerken mislukte: {st['last_error'].rstrip('.')}. Controleer de instellingen en verbind opnieuw."
     elif api:
         primary = "connect"
         step = (f"Verbind {name} om bij te blijven tot gisteren." if cov.records
@@ -213,6 +247,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         "coverage": {
             "first": cov.first, "last": cov.last, "estimated_since": cov.estimated_since,
             "segments": [{"from": a, "until": b, "estimated": e} for a, b, e in cov.segments],
+            "holes": [{"from": a, "until": b} for a, b in cov.holes],
         },
         "next_step": step,
         "primary": {"action": primary, "label": ACTIONS[primary][0], "icon": ACTIONS[primary][1]},

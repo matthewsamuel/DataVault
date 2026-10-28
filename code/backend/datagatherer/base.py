@@ -88,13 +88,15 @@ class Coverage:
     """
     What the data covers: from/until (epoch seconds) and the parts that are estimated
     (listening time from the API or Last.fm, not from an export). segments are
-    (from, until, estimated) for the coverage bar on the card.
+    (from, until, estimated) for the coverage bar on the card; holes are (from, until)
+    spans between first and last without any data (the card then says so).
     """
     records: int = 0
     first: Optional[float] = None
     last: Optional[float] = None
     estimated_since: Optional[float] = None
     segments: List[Tuple[float, float, bool]] = field(default_factory=list)
+    holes: List[Tuple[float, float]] = field(default_factory=list)
 
 
 class ConnectorError(Exception):

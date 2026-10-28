@@ -265,15 +265,29 @@ def test_the_coverage_chip_says_since_when_listening_time_is_estimated(client, a
     assert _sync(client, app)["status"] == "done"
     cov = client.get("/api/spotify/coverage").json()
     assert cov["mode"] == "database" and cov["sources"] == {"export_extended": 10, "api": 3}
-    assert cov["estimated_since"] == pytest.approx(T0 + 9 * 600)
+    # Estimated from the first API play on; the 20 days between the export and it are a hole (UX-2)
+    assert cov["estimated_since"] == pytest.approx(after_export + 0.123)
     assert cov["last"] == pytest.approx(after_export + 400 + 0.123)
+    assert [(h["from"], h["until"]) for h in cov["holes"]] == [
+        (pytest.approx(T0 + 9 * 600), pytest.approx(after_export + 0.123))]
     card = next(c for c in client.get("/api/datagatherer/sources").json()["sources"] if c["id"] == "spotify")
     assert [s["estimated"] for s in card["coverage"]["segments"]] == [False, True]
+    assert card["coverage"]["segments"][1]["from"] == pytest.approx(after_export + 0.123)
     assert card["data_until"] == pytest.approx(cov["last"])
+    assert card["status"] == "gat" and card["status_label"] == "Gat van 19 dagen" and card["tone"] == "warning"
+    assert card["primary"]["action"] == "request_export" and "ontbreken gegevens tussen" in card["next_step"]
+    # API plays that follow the export closely leave no hole: the card is current again
+    fake_spotify.items = [track_item(T0 + 9 * 600 + 86400 * k, f"spotify:track:b{k}", f"Brug {k}", "B")
+                          for k in range(1, 20, 2)]
+    assert _sync(client, app)["status"] == "done"
+    cov = client.get("/api/spotify/coverage").json()
+    assert cov["holes"] == [] and cov["estimated_since"] == pytest.approx(T0 + 9 * 600 + 86400 + 0.123)
+    card = next(c for c in client.get("/api/datagatherer/sources").json()["sources"] if c["id"] == "spotify")
+    assert card["status"] != "gat" and card["primary"]["action"] == "sync"
     # The chat (Pasha) never gets the API plays
     from backend.routes import spotify
     assert spotify.parse_spotify_data(for_assistant=True)["total_plays"] == 10
-    assert spotify.parse_spotify_data()["total_plays"] == 13
+    assert spotify.parse_spotify_data()["total_plays"] == 23
 
 
 def test_the_dashboard_keeps_the_files_until_every_export_file_is_read(client, app, tmp_path, vault, fake_spotify):
@@ -552,7 +566,7 @@ def test_lastfm_errors_are_explained(client, app, fake_lastfm):
     job = _lastfm_sync(client, app)
     assert job["status"] == "failed" and "zichtbaar" in job["error"]
     fake_lastfm.error = 10
-    assert "API key" in _lastfm_sync(client, app)["error"]
+    assert "API-sleutel" in _lastfm_sync(client, app)["error"]
     assert state.get_state(app.state.db, "lastfm")["needs_reconnect"] == 1
 
 

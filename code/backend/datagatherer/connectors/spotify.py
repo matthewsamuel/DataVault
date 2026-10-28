@@ -56,7 +56,7 @@ class Spotify(Connector):
     icon = "fab fa-spotify"
     category = "Muziek"
     order = 10
-    record_label = ("play", "plays")
+    record_label = ("luisterbeurt", "luisterbeurten")
     description = "Alles wat je beluisterde: je volledige export, aangevuld met je laatste nummers via de API."
     capabilities = frozenset({"api_sync", "export_request", "export_watch", "import"})
     allowed_hosts = ("accounts.spotify.com", "api.spotify.com")
@@ -210,7 +210,7 @@ class Spotify(Connector):
             seen += n_seen
             kinds[kind] += n_seen
             ctx.progress(message=f"Spotify inlezen: {files} {'bestand' if files == 1 else 'bestanden'}, "
-                                 f"{seen:,} plays".replace(",", "."))
+                                 f"{seen:,} luisterbeurten".replace(",", "."))
         if not files:
             raise ConnectorError("Geen Spotify-luistergeschiedenis gevonden in deze export")
         return {"added": added, "seen": seen, "files": files, "kinds": kinds, "covers_from": lo, "covers_until": hi}
@@ -339,7 +339,8 @@ class Spotify(Connector):
     def coverage(self, ctx: GatherContext) -> Coverage:
         c = spotify_store.coverage(ctx.db)
         return Coverage(records=c["plays"], first=c["first"], last=c["last"], estimated_since=c["estimated_since"],
-                        segments=[(s["from"], s["until"], s["estimated"]) for s in c["segments"]])
+                        segments=[(s["from"], s["until"], s["estimated"]) for s in c["segments"]],
+                        holes=[(h["from"], h["until"]) for h in c["holes"]])
 
     def consent_expires(self, ctx: GatherContext) -> Optional[float]:
         """When the 6-month consent ends; None when unknown (also when the Keychain cannot be read)."""
