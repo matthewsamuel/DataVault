@@ -178,3 +178,62 @@ def test_hash_index_scales_without_comparing_every_pair():
     i, _j, _d = near_dups.HashIndex(hashes).pairs(near_dups.PAIR_RADIUS)
     assert time.monotonic() - started < 20     # ~2 s on an M3; all pairs would be 5e9 comparisons
     assert len(i) < 2000      # chance pairs of random hashes (C(63,11) / 2**63 * 5e9: a few hundred)
+
+
+# ---------- migration ----------
+
+def test_migration_30_adds_the_tables_and_keeps_every_user_row(tmp_path, monkeypatch):
+    from backend import migrations
+    from backend.database import Database
+    from test_duplicates_runs import _migrate_to
+    from test_foundation import _make_legacy_db
+    db_path = tmp_path / "datavault.db"
+    _make_legacy_db(db_path)
+    _migrate_to(db_path, 12, monkeypatch)
+    now = time.time()
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("INSERT INTO keurer_decisions (path, folder, decision, dest_path, dest_ino, dest_size) "
+                     "VALUES ('/v/RAW/weg.jpg', '/v/RAW', 'delete', '/v/TRASH/weg.jpg', 77, 1234)")
+        conn.execute("INSERT INTO app_settings VALUES ('chat_model', '\"qwen2.5:3b\"', 5.0)")
+        conn.execute("INSERT INTO jobs (type, params, status, processed, created_at, updated_at, checkpoint) "
+                     "VALUES ('index', '{\"full\": true}', 'paused', 12, ?, ?, '{\"folder\": 3}')", (now, now))
+        conn.execute("INSERT INTO media (path, folder, name, kind, ext, size, mtime_ns, added_at, indexed_at, seen_at) "
+                     "VALUES ('/v/RAW/a.jpg', '/v/RAW', 'a.jpg', 'photo', '.jpg', 10, 1, 1, 1, 1)")
+        conn.execute("INSERT INTO media_folders VALUES ('/v/RAW', '/v', 1, 1.0)")
+        conn.execute("INSERT INTO recovery_actions (kind, title, folder, details, created_at) "
+                     "VALUES ('viewer_move', 'x', '/v/RAW', NULL, 1.0)")
+        conn.execute("INSERT INTO recovery_moves (action_id, src_path, dst_path, dst_ino, dst_size, moved_at) "
+                     "VALUES (1, '/v/RAW/b.jpg', '/v/RAW/c/b.jpg', 5, 6, 1.0)")
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'schema_version'")]
+        before = {t: conn.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in tables}
+    assert before["sqlite_sequence"] and before["recovery_moves"] and before["media"]
+
+    db = Database(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 30
+        for table, rows in before.items():
+            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+        assert {r[1] for r in conn.execute("PRAGMA table_info(media_phash)")} >= {
+            "media_id", "algo", "version", "size", "mtime_ns", "status", "dhash", "phash", "colors",
+            "sharpness", "clip_low", "clip_high", "contrast", "paired"}
+        assert {r[1] for r in conn.execute("PRAGMA table_info(near_dup_pairs)")} >= {
+            "a", "b", "kind", "phash_d", "dhash_d", "color_d", "gap", "flat", "same_bytes"}
+        assert {r[1] for r in conn.execute("PRAGMA table_info(near_dup_reviews)")} == {
+            "key", "media_ids", "decision", "decided_at"}
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert len(list((tmp_path / migrations.BACKUP_DIR_NAME).glob("datavault-v12-*.db"))) == 1
+    assert db.get_rating("/v/RAW/a.jpg") == 1150
+    assert db.get_keurer_stats()["streak"] == 3
+    assert db.get_delete_operations("run-1")[0]["dst_path"] == "/v/RAW_DUPLICATES/b.jpg"
+    assert db.get_recent_keurer_decisions(1)[0]["dest_ino"] == 77
+    assert db.get_setting("chat_model") == "qwen2.5:3b"
+    assert db.get_recovery_moves(1)[0]["dst_path"] == "/v/RAW/c/b.jpg"
+    # Hashes as big as 64 bits fit (stored signed)
+    with db._connect() as conn:
+        conn.execute("INSERT INTO media_phash (media_id, algo, version, size, mtime_ns, status, dhash, phash, "
+                     "computed_at) VALUES (1, 'x', 1, 10, 1, 'ok', ?, ?, 1.0)",
+                     (near_dups.to_signed(2 ** 64 - 1), near_dups.to_signed(2 ** 63)))
+        row = conn.execute("SELECT dhash, phash FROM media_phash").fetchone()
+    assert [near_dups.to_unsigned(v) for v in row] == [2 ** 64 - 1, 2 ** 63]
+    db.close_all()

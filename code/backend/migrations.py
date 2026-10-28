@@ -393,6 +393,69 @@ def _m012_recovery_actions(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_recovery_actions_created ON recovery_actions(created_at)")
 
 
+def _m030_near_duplicates(conn: sqlite3.Connection):
+    """
+    Near-duplicates and bursts (backend/near_dups.py), keyed on media.id, which stays the
+    same when a file is moved (in the app or in Finder).
+    media_phash: per photo its perceptual hashes (dhash, phash: 64 bits, stored signed),
+    the mean colours of its four quarters, its contrast, and the quality figures
+    (sharpness, clipped shadows and highlights, brightness), with the algorithm and version they were made
+    with and the size and mtime_ns of the file at that moment (a changed file is analysed
+    again). paired = 0 marks a photo whose pairs still have to be looked up.
+    near_dup_pairs: photos that look alike ('near') or were shot as a burst ('burst'),
+    with their distances (flat: one of the two is nearly flat, so its colours must match
+    closely), so a stricter or looser setting only filters these rows.
+    near_dup_reviews: series the user decided on ('alles behouden', or what was kept),
+    by the set of photos in it; a series that changes shows up again.
+    Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media_phash (
+            media_id INTEGER PRIMARY KEY,
+            algo TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            dhash INTEGER,
+            phash INTEGER,
+            colors BLOB,
+            sharpness REAL,
+            clip_low REAL,
+            clip_high REAL,
+            brightness REAL,
+            contrast REAL,
+            error TEXT,
+            paired INTEGER NOT NULL DEFAULT 0,
+            computed_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_phash_unpaired ON media_phash(paired) WHERE paired = 0")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS near_dup_pairs (
+            a INTEGER NOT NULL,
+            b INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            phash_d INTEGER NOT NULL,
+            dhash_d INTEGER NOT NULL,
+            color_d REAL NOT NULL,
+            gap REAL,
+            flat INTEGER NOT NULL DEFAULT 0,
+            same_bytes INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (a, b, kind)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_near_dup_pairs_b ON near_dup_pairs(b)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS near_dup_reviews (
+            key TEXT PRIMARY KEY,
+            media_ids TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            decided_at REAL NOT NULL
+        )
+    """)
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -407,6 +470,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (10, "app_settings", _m010_app_settings),
     (11, "media_index", _m011_media_index),
     (12, "recovery_actions", _m012_recovery_actions),
+    (30, "near_duplicates", _m030_near_duplicates),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
