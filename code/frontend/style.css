@@ -2624,6 +2624,34 @@ a.breadcrumb-item:hover {
     pointer-events: none;
 }
 
+/* Foto's en video's in het raster: de naam in een donkere strook onderaan, bij aanwijzen of
+   toetsenbordfocus (zo zijn bijna gelijke burstfoto's uit elkaar te houden) */
+.media-grid.grid-view .thumb-tile:not(.audio-card):not(.other-card):not(.folder-card) .media-card-name {
+    display: block;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: var(--space-xl) calc(2 * var(--space-sm) + 22px) var(--space-sm) var(--space-sm);
+    background: linear-gradient(to top, var(--media-scrim-strong), transparent);
+    color: var(--on-media);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    text-shadow: var(--media-text-shadow);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out);
+    pointer-events: none;
+    z-index: 5;
+}
+
+.media-grid.grid-view .thumb-tile:not(.audio-card):not(.other-card):not(.folder-card):hover .media-card-name,
+.media-grid.grid-view .thumb-tile:not(.audio-card):not(.other-card):not(.folder-card):focus-visible .media-card-name {
+    opacity: 1;
+}
+
 .other-card-icon {
     aspect-ratio: 1 / 1;
     display: flex;
@@ -2754,15 +2782,24 @@ a.breadcrumb-item:hover {
     box-shadow: none;
 }
 
+/* Mappen krijgen in de lijst hetzelfde 64x48-vlak als andere bestanden, zodat icoon, naam,
+   soort, grootte en datum voor elke rij op dezelfde lijn staan */
 .media-grid.list-view .folder-card-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 64px;
-    font-size: var(--icon-xl);
-    text-align: center;
+    height: 48px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    background-color: var(--thumb-bg);
+    font-size: var(--icon-lg);
 }
 
 .media-grid.list-view .folder-card-name {
     flex: 1;
     min-width: 0;
+    padding: 0;
     text-align: left;
     display: block;
     white-space: nowrap;

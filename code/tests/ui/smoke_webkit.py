@@ -163,6 +163,20 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             folder = str(vault / "RAW" / "misc")
             step("viewer: open folder", lambda: (page.click(".nav-tab[data-view='viewer']"),
                                                  page.evaluate(f"selectFolder({json.dumps(folder)})")))
+            # A photo tile shows its name on hover (burst shots look alike); list rows line up
+            step("files: hover a photo", lambda: page.hover("#media-grid .media-card:not(.folder-card):not(.other-card)"), 0.4)
+            hovered = page.evaluate("getComputedStyle(document.querySelector('#media-grid .media-card:hover .media-card-name')).opacity")
+            if hovered != "1":
+                problems.append(f"files: a photo tile shows no name on hover (opacity {hovered})")
+            page.evaluate("toggleView('list')")
+            page.wait_for_timeout(300)
+            columns = page.evaluate("""[...document.querySelectorAll('#media-grid .media-card')].map(c => {
+                const icon = c.querySelector('.folder-card-icon, .media-thumbnail, .other-card-icon');
+                const name = c.querySelector('.folder-card-name, .media-card-name');
+                return Math.round(icon.getBoundingClientRect().left) + '/' + Math.round(name.getBoundingClientRect().left); })""")
+            if len(set(columns)) != 1:
+                problems.append(f"files: list rows do not line up (icon/name x: {sorted(set(columns))})")
+            page.evaluate("toggleView('grid')")
             step("viewer: open file", lambda: page.click("#media-grid .media-card:not(.folder-card)"))
             step("viewer: next file", lambda: page.keyboard.press("ArrowRight"), 0.5)
             step("viewer: move dialog", lambda: page.click("#btn-move-file"), 0.5)
