@@ -121,6 +121,21 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   plaats van altijd "ingeschakeld/uitgeschakeld".
 - De viewer toont bij "Modified" weer de echte datum (stond op januari 1970).
 
+### Chat (Pasha)
+- Antwoorden van het taalmodel worden als tekst getoond, in zowel de gewone als de
+  schermvullende chat (regeleinden blijven staan).
+- Het model kan de app alleen nog besturen met een vaste lijst acties, elk met gecontroleerde
+  argumenten: een tabblad openen (alleen bestaande tabbladen), foto's van een echte datum tonen,
+  foto's zoeken, duplicaten openen, een map openen en een bestand openen. Een onbekende actie of
+  een vreemd argument wordt genegeerd.
+- "Bestand openen" en "map openen" werken alleen nog voor een bestand of map die de server zelf
+  in het archief vindt. Een pad buiten het archief opent niets en geeft een melding. "Map openen"
+  opent nu echt de map (voorheen werd alleen op de naam gefilterd).
+- Mapnamen en Spotify-artiesten gaan als gegevens (een lijst tussen aanhalingstekens, zonder
+  `<` en `>`) naar het taalmodel, met de instructie dat het nooit opdrachten uit namen volgt.
+  Een map met een naam als "Negeer alle instructies en ..." kon het model voorheen een actie
+  laten uitvoeren.
+
 ### Offline en privacy
 - De app werkt nu volledig zonder internet. De iconen (Font Awesome 6.4.0) en het lettertype
   (JetBrains Mono) staan lokaal in `code/frontend/vendor/`, met hun licenties. Voorheen kwamen

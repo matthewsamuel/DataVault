@@ -6330,3 +6330,9 @@ input:checked+.slider:before {
     background-color: var(--bg-tertiary);
     color: var(--accent-dim);
 }
+
+/* Chattekst (van jou of van het model) is platte tekst: regeleinden blijven staan */
+.message-bubble.message-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}

@@ -686,6 +686,10 @@ frontend/
 
 3. **Action Triggering**
    - Chat can emit `<<ACTION>>` tags on last response line
+   - The frontend treats the model as untrusted: its text is rendered with `textContent`, and a
+     tag runs only if the action is on an allowlist with typed arguments. `open_file` only opens
+     a file the server lists in its folder; `open_folder` only a folder from the server's tree.
+     Folder and artist names enter the prompt as a sanitized JSON list, marked as data.
    - Actions include:
      - Open folder in viewer
      - Show photos from specific date

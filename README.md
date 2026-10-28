@@ -100,13 +100,16 @@ backend/
 ```
 frontend/
 ├── index.html                 # 6 main sections: home, viewer, duplicates, spotify, shows, keurer, timeline
+├── api.js                     # Adds the session token to every write (loaded first)
+├── dom.js                     # Safe DOM helpers: createEl, html`...`, setHTML (loaded second)
 ├── app.js                     # Core state management, view switching, prefetch caching
 ├── style.css                  # Responsive design (Flexbox/Grid), theme system, animations
 ├── keurer.js                  # Photo curator UI, swipe detection, undo history
 ├── duplicates.js              # Duplicate browser, folder selection, progress polling
 ├── timeline.js                # Timeline UI, virtual scrolling, slider navigation
 ├── wave-background.js         # Animated background effect
-└── resizable-sidebar.js       # Interactive folder tree sidebar
+├── resizable-sidebar.js       # Interactive folder tree sidebar
+└── vendor/                    # Font Awesome 6.4.0 and JetBrains Mono, with licenses (no CDN)
 ```
 
 **Frontend Techniques:**
@@ -310,7 +313,15 @@ if (distance > 50) {
   Top Spotify artists + total listening time
   ```
 - **Multi-Modal Interaction:** Chat text + action tags
-  - `open_folder`, `show_photos`, `open_file`, `open_tab`, `scan_duplicates`
+  - `open_folder`, `show_photos`, `search_photos`, `open_file`, `open_tab`, `scan_duplicates`
+  - Model output is untrusted: it is shown with `textContent`, and an action runs only if it is
+    on an allowlist with typed arguments (`open_tab` only for a known view, `show_photos` only
+    for a real `YYYY-MM-DD` date). `open_file` opens a file only if the server lists it in its
+    folder (`/api/media`, so inside the vault); `open_folder` only opens a folder from the
+    server's folder tree.
+  - Folder names and Spotify artists go into the system prompt as a JSON list without `<`, `>`
+    or control characters (`chat.as_prompt_data`), and the prompt says they are data, not
+    instructions.
 - **Streaming Responses:** SSE (Server-Sent Events) for real-time chat
 - **Think Block Filtering:** Removes `<think>` tags from reasoning models
 
@@ -418,6 +429,17 @@ folder_path = resolve_in_vault(folder, config, folder=True)   # 400 non-string, 
 if not folder_path.is_dir():
     raise HTTPException(status_code=404, detail="Folder not found")
 ```
+
+**Rendering** (`frontend/dom.js`): file and folder names, paths, EXIF values, Spotify titles and
+chat output are data, never HTML (`xss <img src=x onerror=...>.jpg` is a valid file name). The
+frontend builds HTML only with `createEl` (text nodes, `addEventListener`), the ``html`...` ``
+template tag (escapes every interpolated value) or `setHTML` (accepts only that markup), and no inline
+handler carries data. `tests/test_frontend_safety.py` fails on any other `innerHTML` use.
+
+**Offline**: Font Awesome and the JetBrains Mono font are served from `frontend/vendor/`; the
+frontend contacts no other host. `tests/test_frontend_offline.py` fails on any external URL in
+the frontend (the allowlist is at the top of that file; only click-to-open Spotify search links
+are listed separately).
 
 **Exclusions**: every walk over the archive (folder tree, viewer, timeline, stats, Shows,
 duplicates scan, Keurer, chat context, Spotify files) uses `ArchiveFilter` / `walk_archive()`,
@@ -647,13 +669,16 @@ DataVault/
 │   │
 │   └── frontend/
 │       ├── index.html                 # Main template
+│       ├── api.js                     # Session token for writes
+│       ├── dom.js                     # Safe DOM helpers
 │       ├── app.js                     # Core logic
 │       ├── style.css                  # Styling
 │       ├── keurer.js                  # Photo curator UI
 │       ├── duplicates.js              # Duplicate browser
 │       ├── timeline.js                # Timeline UI
 │       ├── wave-background.js         # Background animation
-│       └── resizable-sidebar.js       # Sidebar interaction
+│       ├── resizable-sidebar.js       # Sidebar interaction
+│       └── vendor/                    # Font Awesome, JetBrains Mono (local copies)
 │
 ├── README.md                          # This file
 ├── PORTFOLIO.md                       # Detailed technical documentation

@@ -2711,20 +2711,202 @@ function renderSimpleChart(id, data, labels) {
 
 // ==================== DA VAI OLLAMA CHATBOT ====================
 
-// Open een enkel bestand direct in de modal viewer
-function openFileInViewer(path) {
-    const ext = path.split('.').pop().toLowerCase();
-    const videoExts = ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'wmv', 'flv', 'webm', '3gp', 'mpg', 'mpeg', 'mts', 'm2ts'];
-    const audioExts = ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'wma'];
-    let type = 'photo';
-    if (videoExts.includes(ext)) type = 'video';
-    else if (audioExts.includes(ext)) type = 'audio';
+const CHAT_MODEL = 'phi3.5:latest';
 
-    filteredMedia = [{ path, name: path.split('/').pop(), type, size: 0, modified: 0, rating: 0 }];
-    const modal = document.getElementById('modal-viewer');
-    if (modal) {
+// Open een enkel bestand uit het archief in de modal viewer. Het pad (van het taalmodel of
+// uit een zoekresultaat) wordt nooit zelf getoond: de server moet het bestand in de lijst
+// van zijn map teruggeven (die controleert dat de map in het archief ligt), en alleen dat
+// bestandsobject van de server wordt geopend.
+async function openFileInViewer(path) {
+    const cut = typeof path === 'string' ? path.lastIndexOf('/') : -1;
+    const notFound = () => showToast('Niet geopend', 'Dit bestand staat niet in het archief', 'warning');
+    if (cut < 0 || cut === path.length - 1) { notFound(); return; }
+    const folder = path.slice(0, cut) || '/';
+    const name = path.slice(cut + 1).normalize('NFC');
+    try {
+        const res = await fetch(`${API_BASE}/api/media?folder=${encodeURIComponent(folder)}`);
+        if (!res.ok) { notFound(); return; }
+        const data = await res.json();
+        const file = (data.files || []).find(f =>
+            ['photo', 'video', 'audio'].includes(f.type) && f.name.normalize('NFC') === name);
+        if (!file) { notFound(); return; }
+        filteredMedia = [file];
         openMediaModal(0);
-        modal.style.display = 'flex';
+    } catch (e) {
+        console.error('Bestand openen mislukt:', e);
+        notFound();
+    }
+}
+
+// Foto's in een chat-antwoord openen; via delegatie, zodat het ook werkt na het kopiëren
+// van de berichten tussen de gewone en de schermvullende chat
+document.addEventListener('click', (e) => {
+    const img = e.target.closest('.chat-messages img[data-path]');
+    if (img) openFileInViewer(img.dataset.path);
+});
+
+// ==================== CHAT-ACTIES ====================
+// Het taalmodel bestuurt de app met <<ACTION: {...}>> in zijn antwoord. Die tekst is niet te
+// vertrouwen: mapnamen en Spotify-titels in de context kunnen instructies bevatten. Daarom
+// wordt alleen een actie uit deze lijst uitgevoerd, met precies deze argumenten en types.
+
+const CHAT_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline'];
+
+function isChatText(value, maxLength) {
+    return typeof value === 'string' && value.trim() !== '' && value.length <= maxLength
+        && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function isChatDate(value) {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const d = new Date(`${value}T00:00:00Z`);
+    return !isNaN(d) && d.toISOString().slice(0, 10) === value;
+}
+
+const CHAT_ACTIONS = {
+    open_tab: { target: v => CHAT_VIEWS.includes(v) },
+    scan_duplicates: {},
+    open_folder: { target: v => isChatText(v, 255) },
+    show_photos: { date: isChatDate },
+    search_photos: { query: v => isChatText(v, 100) },
+    open_file: { path: v => isChatText(v, 4096) },
+};
+
+// JSON uit één ACTION-tag -> { action, ...argumenten } of null als iets niet klopt
+function validateChatAction(json) {
+    let data;
+    try { data = JSON.parse(json); } catch (_) { return null; }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+    const spec = Object.prototype.hasOwnProperty.call(CHAT_ACTIONS, data.action) ? CHAT_ACTIONS[data.action] : null;
+    if (!spec) return null;
+    const action = { action: data.action };
+    for (const [key, isValid] of Object.entries(spec)) {
+        if (!isValid(data[key])) return null;
+        action[key] = data[key];
+    }
+    return action;
+}
+
+const CHAT_ACTION_TAG = /<<ACTION:\s*(\{[\s\S]*?\})\s*>>/g;
+
+// Haalt de ACTION-tags uit het antwoord. Alleen de eerste geldige actie wordt uitgevoerd.
+function parseChatReply(text) {
+    let action = null;
+    const clean = text.replace(CHAT_ACTION_TAG, (_, json) => {
+        const parsed = validateChatAction(json);
+        if (parsed && !action) action = parsed;
+        else if (!parsed) console.warn('Chat-actie genegeerd:', json.slice(0, 200));
+        return '';
+    }).replace(/<<ACTION[\s\S]*$/, '').trim();
+    return { text: clean, action };
+}
+
+// Zoekt een map uit de mappenboom van de server (dus binnen het archief) op naam of pad
+function findFolderInTree(target) {
+    const wanted = target.normalize('NFC').toLowerCase();
+    let byName = null;
+    const walk = (nodes) => {
+        for (const node of nodes || []) {
+            if (node.path.normalize('NFC') === target.normalize('NFC')) return node;
+            if (!byName && node.name.normalize('NFC').toLowerCase() === wanted) byName = node;
+            const found = walk(node.children);
+            if (found) return found;
+        }
+        return null;
+    };
+    return walk(folderTree) || byName;
+}
+
+function chatBubble(content) {
+    const bubble = createEl('div', { class: 'message-bubble' }, content);
+    return createEl('div', { class: 'chat-message ai-message' }, bubble);
+}
+
+function chatLoadingBubble() {
+    return chatBubble(html`<div class="message-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`);
+}
+
+function chatPhotoGrid(photos, size, titleOf) {
+    const grid = createEl('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px;' });
+    photos.forEach(p => grid.appendChild(createEl('img', {
+        src: vaultFileUrl('thumb', p.path),
+        style: `width: ${size}px; height: ${size}px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.1);`,
+        title: titleOf(p),
+        dataset: { path: p.path },
+    })));
+    const message = chatBubble(grid);
+    message.firstChild.style.cssText = 'background: transparent; border: none; padding: 0;';
+    return message;
+}
+
+// Toont foto's van de server in de chat (show_photos en search_photos)
+function chatShowPhotos(url, size, titleOf, emptyText, limit) {
+    const chatMessages = document.getElementById('chat-messages');
+    const loading = chatLoadingBubble();
+    chatMessages.appendChild(loading);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    fetch(url)
+        .then(res => res.json())
+        .then(data => {
+            loading.remove();
+            const photos = (data.photos || []).slice(0, limit);
+            chatMessages.appendChild(photos.length > 0
+                ? chatPhotoGrid(photos, size, titleOf)
+                : chatBubble(emptyText));
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        })
+        .catch(err => {
+            loading.remove();
+            console.error('Error fetching photos:', err);
+        });
+}
+
+function executeAIAction(actionData) {
+    if (!actionData || !actionData.action) return;
+
+    switch (actionData.action) {
+        case 'open_tab':
+            switchMainView(actionData.target);
+            break;
+
+        case 'scan_duplicates':
+            switchMainView('duplicates');
+            {
+                const scanBtn = document.querySelector('#section-duplicates .btn-primary');
+                if (scanBtn) scanBtn.click();
+            }
+            break;
+
+        case 'open_folder': {
+            const folder = findFolderInTree(actionData.target);
+            if (!folder) {
+                showToast('Map niet gevonden', actionData.target, 'warning');
+                break;
+            }
+            switchMainView('viewer');
+            selectFolder(folder.path);
+            break;
+        }
+
+        case 'show_photos':
+            chatShowPhotos(`${API_BASE}/api/stats/photos-by-date?date=${encodeURIComponent(actionData.date)}`,
+                100, p => p.path.split('/').pop(),
+                "Ik kon helaas geen foto's vinden uit mijn archief voor deze exacte datum.", 10);
+            break;
+
+        case 'search_photos':
+            chatShowPhotos(`${API_BASE}/api/stats/search-photos?query=${encodeURIComponent(actionData.query)}&limit=5`,
+                120, p => p.name,
+                `Ik kon geen foto's vinden met de naam "${actionData.query}".`, 5);
+            break;
+
+        case 'open_file':
+            openFileInViewer(actionData.path);
+            break;
+
+        default:
+            console.warn('Unknown AI action:', actionData.action);
     }
 }
 
@@ -2736,24 +2918,46 @@ function handleChatKeyPress(e) {
     }
 }
 
-async function sendChatMessage() {
-    const inputEl = document.getElementById('chat-input');
-    const message = inputEl.value.trim();
+function handleChatKeyPressFullscreen(e) {
+    if (e.key === 'Enter') {
+        sendChatMessageFullscreen();
+    }
+}
 
+function sendChatMessage() {
+    return sendChat({
+        inputEl: document.getElementById('chat-input'),
+        btn: document.querySelector('.chat-send-btn'),
+        messagesContainer: document.getElementById('chat-messages'),
+        mirrorContainer: null,
+    });
+}
+
+function sendChatMessageFullscreen() {
+    return sendChat({
+        inputEl: document.getElementById('chat-input-fullscreen'),
+        btn: document.querySelector('.chat-fullscreen-modal .chat-send-btn'),
+        messagesContainer: document.getElementById('chat-messages-fullscreen'),
+        mirrorContainer: document.getElementById('chat-messages'),
+    });
+}
+
+// Stuurt het bericht en toont het antwoord terwijl het binnenkomt. Alles wat het model
+// schrijft komt als tekst (textContent) op het scherm, nooit als HTML. Met een
+// mirrorContainer (schermvullende chat) wordt het gesprek ook in de gewone chat bijgewerkt.
+async function sendChat({ inputEl, btn, messagesContainer, mirrorContainer }) {
+    const message = inputEl.value.trim();
     if (!message) return;
 
     inputEl.value = '';
     inputEl.disabled = true;
-    const btn = document.querySelector('.chat-send-btn');
     if (btn) btn.disabled = true;
 
-    const messagesContainer = document.getElementById('chat-messages');
-
-    // Gebruikersbericht toevoegen
-    const userMsg = document.createElement('div');
-    userMsg.className = 'chat-message user-message';
-    userMsg.innerHTML = `<div class="message-bubble">${escapeHTML(message)}</div>`;
+    const userMsg = createEl('div', { class: 'chat-message user-message' },
+        createEl('div', { class: 'message-bubble message-text', text: message }));
     messagesContainer.appendChild(userMsg);
+    if (mirrorContainer) mirrorContainer.appendChild(userMsg.cloneNode(true));
+
     window.chatHistory.push({ role: 'user', content: message });
     // Houd context klein: max 10 berichten (5 user + 5 assistant)
     if (window.chatHistory.length > 10) {
@@ -2762,23 +2966,33 @@ async function sendChatMessage() {
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
     // AI bubble met loading dots — wordt live gevuld via streaming
-    const aiMsg = document.createElement('div');
-    aiMsg.className = 'chat-message ai-message';
-    const bubble = document.createElement('div');
-    bubble.className = 'message-bubble';
-    bubble.innerHTML = `<div class="message-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
-    aiMsg.appendChild(bubble);
+    const aiMsg = chatLoadingBubble();
+    const bubble = aiMsg.firstChild;
     messagesContainer.appendChild(aiMsg);
+    const mirrorMsg = mirrorContainer ? aiMsg.cloneNode(true) : null;
+    if (mirrorMsg) mirrorContainer.appendChild(mirrorMsg);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
+    const showText = (text) => {
+        for (const b of [bubble, mirrorMsg && mirrorMsg.firstChild]) {
+            if (!b) continue;
+            b.classList.add('message-text');
+            b.textContent = text;
+        }
+    };
+    const showError = (text) => {
+        for (const b of [bubble, mirrorMsg && mirrorMsg.firstChild]) {
+            if (b) b.replaceChildren(createEl('span', { style: 'color: var(--danger)', text }));
+        }
+    };
+
     let fullText = '';
-    let firstToken = true;
 
     try {
         const response = await fetch(`${API_BASE}/api/chat/stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: window.chatHistory, model: 'phi3.5:latest' })
+            body: JSON.stringify({ messages: window.chatHistory, model: CHAT_MODEL })
         });
 
         if (!response.ok) throw new Error(`Server returned ${response.status}`);
@@ -2797,200 +3011,39 @@ async function sendChatMessage() {
 
             for (const line of lines) {
                 if (!line.startsWith('data: ')) continue;
-                try {
-                    const event = JSON.parse(line.slice(6));
+                let event;
+                try { event = JSON.parse(line.slice(6)); } catch (_) { continue; } // ongeldige JSON negeren
 
-                    if (event.error) {
-                        bubble.innerHTML = `<span style="color: var(--danger)">${escapeHTML(event.error)}</span>`;
-                        return;
-                    }
+                if (event.error) {
+                    showError(String(event.error));
+                    return;
+                }
 
-                    if (event.token) {
-                        if (firstToken) {
-                            bubble.innerHTML = '';
-                            firstToken = false;
-                        }
-                        fullText += event.token;
-                        bubble.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    }
+                if (typeof event.token === 'string' && event.token) {
+                    fullText += event.token;
+                    // Een half binnengekomen ACTION-tag niet laten zien
+                    showText(fullText.replace(/<<ACTION[\s\S]*$/, '').trimEnd());
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
 
-                    if (event.done) {
-                        // ACTION tags detecteren en uitvoeren
-                        const actionMatch = fullText.match(/<<ACTION:\s*({.*?})\s*>>/s);
-                        if (actionMatch) {
-                            try {
-                                const actionData = JSON.parse(actionMatch[1]);
-                                setTimeout(() => executeAIAction(actionData), 1000);
-                            } catch (parseErr) {
-                                console.error('Action parse error:', parseErr);
-                            }
-                            fullText = fullText.replace(/<<ACTION:[\s\S]*?>>/, '').trim();
-                            bubble.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
-                        }
-                        window.chatHistory.push({ role: 'assistant', content: fullText });
-                    }
-                } catch (_) { /* ongeldige JSON negeren */ }
+                if (event.done) {
+                    const reply = parseChatReply(fullText);
+                    fullText = reply.text;
+                    showText(fullText);
+                    if (reply.action) setTimeout(() => executeAIAction(reply.action), 1000);
+                    window.chatHistory.push({ role: 'assistant', content: fullText });
+                }
             }
         }
 
     } catch (e) {
         console.error('Chat error:', e);
-        bubble.innerHTML = `<span style="color: var(--danger)">Fout: Kan Ollama niet bereiken. Draait de server en Ollama?</span>`;
+        showError('Fout: Kan Ollama niet bereiken. Draait de server en Ollama?');
     } finally {
         inputEl.disabled = false;
         if (btn) btn.disabled = false;
         inputEl.focus();
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-}
-
-function executeAIAction(actionData) {
-    if (!actionData || !actionData.action) return;
-
-    switch (actionData.action) {
-        case 'open_tab':
-            if (actionData.target) {
-                switchMainView(actionData.target);
-            }
-            break;
-
-        case 'scan_duplicates':
-            switchMainView('duplicates');
-            // Check if the scan function exists and call it
-            if (typeof findDuplicates === 'function') {
-                findDuplicates();
-            } else {
-                const scanBtn = document.querySelector('#section-duplicates .btn-primary');
-                if (scanBtn) scanBtn.click();
-            }
-            break;
-
-        case 'open_folder':
-            switchMainView('viewer');
-            if (actionData.target) {
-                const searchInput = document.getElementById('global-search');
-                if (searchInput) {
-                    searchInput.value = actionData.target;
-                    // Trigger the existing search function
-                    if (typeof handleGlobalSearch === 'function') {
-                        handleGlobalSearch(actionData.target);
-                    }
-                }
-            }
-            break;
-
-        case 'show_photos':
-            if (actionData.date) {
-                // Fetch photos
-                const chatMessages = document.getElementById('chat-messages');
-
-                // Add loading bubble
-                const loadingBubble = document.createElement('div');
-                loadingBubble.className = 'chat-message ai-message';
-                loadingBubble.innerHTML = `<div class="message-bubble"><div class="message-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>`;
-                chatMessages.appendChild(loadingBubble);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-
-                fetch(`${API_BASE}/api/stats/photos-by-date?date=${actionData.date}`)
-                    .then(res => res.json())
-                    .then(data => {
-                        loadingBubble.remove();
-                        if (data.photos && data.photos.length > 0) {
-                            const container = document.createElement('div');
-                            container.className = 'chat-message ai-message';
-                            const bubble = document.createElement('div');
-                            bubble.className = 'message-bubble';
-                            bubble.style.cssText = 'background: transparent; border: none; padding: 0;';
-
-                            const grid = document.createElement('div');
-                            grid.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px;';
-
-                            data.photos.slice(0, 10).forEach(p => {
-                                const img = document.createElement('img');
-                                img.src = `${API_BASE}/api/thumb?path=${encodeURIComponent(p.path)}`;
-                                img.style.cssText = 'width: 100px; height: 100px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.1);';
-                                img.title = p.path.split('/').pop();
-                                img.dataset.path = p.path;
-                                img.addEventListener('click', () => openFileInViewer(img.dataset.path));
-                                grid.appendChild(img);
-                            });
-
-                            bubble.appendChild(grid);
-                            container.appendChild(bubble);
-                            chatMessages.appendChild(container);
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
-                        } else {
-                            const errorBubble = document.createElement('div');
-                            errorBubble.className = 'chat-message ai-message';
-                            errorBubble.innerHTML = `<div class="message-bubble">Ik kon helaas geen foto's vinden uit mijn archief voor deze exacte datum.</div>`;
-                            chatMessages.appendChild(errorBubble);
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
-                        }
-                    })
-                    .catch(err => {
-                        loadingBubble.remove();
-                        console.error('Error fetching photos:', err);
-                    });
-            }
-            break;
-
-        case 'open_file':
-            if (actionData.path) {
-                openFileInViewer(actionData.path);
-            }
-            break;
-
-        case 'search_photos':
-            if (actionData.query) {
-                const chatMessages = document.getElementById('chat-messages');
-                const loadingBubble = document.createElement('div');
-                loadingBubble.className = 'chat-message ai-message';
-                loadingBubble.innerHTML = `<div class="message-bubble"><div class="message-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div></div>`;
-                chatMessages.appendChild(loadingBubble);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-
-                fetch(`${API_BASE}/api/stats/search-photos?query=${encodeURIComponent(actionData.query)}&limit=5`)
-                    .then(res => res.json())
-                    .then(data => {
-                        loadingBubble.remove();
-                        if (data.photos && data.photos.length > 0) {
-                            const container = document.createElement('div');
-                            container.className = 'chat-message ai-message';
-                            const bubble = document.createElement('div');
-                            bubble.className = 'message-bubble';
-                            bubble.style.cssText = 'background: transparent; border: none; padding: 0;';
-                            const grid = document.createElement('div');
-                            grid.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px;';
-
-                            data.photos.forEach(p => {
-                                const img = document.createElement('img');
-                                img.src = `${API_BASE}/api/thumb?path=${encodeURIComponent(p.path)}`;
-                                img.style.cssText = 'width: 120px; height: 120px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1);';
-                                img.title = p.name;
-                                img.dataset.path = p.path;
-                                img.addEventListener('click', () => openFileInViewer(img.dataset.path));
-                                grid.appendChild(img);
-                            });
-
-                            bubble.appendChild(grid);
-                            container.appendChild(bubble);
-                            chatMessages.appendChild(container);
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
-                        } else {
-                            const errorBubble = document.createElement('div');
-                            errorBubble.className = 'chat-message ai-message';
-                            errorBubble.innerHTML = `<div class="message-bubble">Ik kon geen foto's vinden met de naam "${escapeHTML(actionData.query)}".</div>`;
-                            chatMessages.appendChild(errorBubble);
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
-                        }
-                    })
-                    .catch(() => loadingBubble.remove());
-            }
-            break;
-
-        default:
-            console.warn("Unknown AI action:", actionData.action);
     }
 }
 
@@ -3022,139 +3075,14 @@ function handleFullscreenEscape(e) {
     }
 }
 
+// Kopieert de berichten als DOM-knopen (niet via innerHTML, dat tekst opnieuw als HTML zou lezen)
 function syncChatMessages(direction) {
     const homeContainer = document.getElementById('chat-messages');
     const fullscreenContainer = document.getElementById('chat-messages-fullscreen');
+    if (!homeContainer || !fullscreenContainer) return;
 
-    if (direction === 'to-fullscreen' && homeContainer && fullscreenContainer) {
-        fullscreenContainer.innerHTML = homeContainer.innerHTML;
-    } else if (direction === 'to-home' && homeContainer && fullscreenContainer) {
-        homeContainer.innerHTML = fullscreenContainer.innerHTML;
-    }
-}
-
-function handleChatKeyPressFullscreen(e) {
-    if (e.key === 'Enter') {
-        sendChatMessageFullscreen();
-    }
-}
-
-async function sendChatMessageFullscreen() {
-    const inputEl = document.getElementById('chat-input-fullscreen');
-    const message = inputEl.value.trim();
-
-    if (!message) return;
-
-    inputEl.value = '';
-    inputEl.disabled = true;
-    const btn = document.querySelector('.chat-fullscreen-modal .chat-send-btn');
-    if (btn) btn.disabled = true;
-
-    const messagesContainer = document.getElementById('chat-messages-fullscreen');
-    const homeContainer = document.getElementById('chat-messages');
-
-    // Add user message
-    const userMsg = document.createElement('div');
-    userMsg.className = 'chat-message user-message';
-    userMsg.innerHTML = `<div class="message-bubble">${escapeHTML(message)}</div>`;
-    messagesContainer.appendChild(userMsg);
-    if (homeContainer) homeContainer.appendChild(userMsg.cloneNode(true));
-
-    window.chatHistory.push({ role: 'user', content: message });
-    if (window.chatHistory.length > 10) {
-        window.chatHistory.shift();
-    }
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-    // AI bubble with loading dots
-    const aiMsg = document.createElement('div');
-    aiMsg.className = 'chat-message ai-message';
-    const bubble = document.createElement('div');
-    bubble.className = 'message-bubble';
-    bubble.innerHTML = `<div class="message-loading"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
-    aiMsg.appendChild(bubble);
-    messagesContainer.appendChild(aiMsg);
-    if (homeContainer) homeContainer.appendChild(aiMsg.cloneNode(true));
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-    let fullText = '';
-    let firstToken = true;
-
-    try {
-        const response = await fetch(`${API_BASE}/api/chat/stream`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: window.chatHistory, model: 'phi3.5:latest' })
-        });
-
-        if (!response.ok) throw new Error(`Server returned ${response.status}`);
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let sseBuffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            sseBuffer += decoder.decode(value, { stream: true });
-            const lines = sseBuffer.split('\n');
-            sseBuffer = lines.pop();
-
-            for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                try {
-                    const event = JSON.parse(line.slice(6));
-
-                    if (event.error) {
-                        bubble.innerHTML = `<span style="color: var(--danger)">${escapeHTML(event.error)}</span>`;
-                        return;
-                    }
-
-                    if (event.token) {
-                        if (firstToken) {
-                            bubble.innerHTML = '';
-                            firstToken = false;
-                        }
-                        fullText += event.token;
-                        bubble.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-                        if (homeContainer) {
-                            const lastHomeMsg = homeContainer.querySelector('.ai-message:last-child .message-bubble');
-                            if (lastHomeMsg) lastHomeMsg.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
-                        }
-                    }
-
-                    if (event.done) {
-                        const actionMatch = fullText.match(/<<ACTION:\s*({.*?})\s*>>/s);
-                        if (actionMatch) {
-                            try {
-                                const actionData = JSON.parse(actionMatch[1]);
-                                setTimeout(() => executeAIAction(actionData), 1000);
-                            } catch (parseErr) {
-                                console.error('Action parse error:', parseErr);
-                            }
-                            fullText = fullText.replace(/<<ACTION:[\s\S]*?>>/, '').trim();
-                            bubble.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
-                            if (homeContainer) {
-                                const lastHomeMsg = homeContainer.querySelector('.ai-message:last-child .message-bubble');
-                                if (lastHomeMsg) lastHomeMsg.innerHTML = escapeHTML(fullText).replace(/\n/g, '<br>');
-                            }
-                        }
-                        window.chatHistory.push({ role: 'assistant', content: fullText });
-                    }
-                } catch (_) { }
-            }
-        }
-
-    } catch (e) {
-        console.error('Chat error:', e);
-        bubble.innerHTML = `<span style="color: var(--danger)">Fout: Kan Ollama niet bereiken. Draait de server en Ollama?</span>`;
-    } finally {
-        inputEl.disabled = false;
-        if (btn) btn.disabled = false;
-        inputEl.focus();
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
+    const [from, to] = direction === 'to-fullscreen'
+        ? [homeContainer, fullscreenContainer]
+        : [fullscreenContainer, homeContainer];
+    to.replaceChildren(...[...from.childNodes].map(node => node.cloneNode(true)));
 }
