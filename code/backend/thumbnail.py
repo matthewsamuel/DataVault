@@ -38,7 +38,9 @@ THUMB_VERSION = 2
 # Pillow refuses images above 2x MAX_IMAGE_PIXELS (default ~179 MP) as a 'decompression
 # bomb'. These are the user's own photos (panoramas, scans), and a JPEG is decoded at
 # reduced size (draft), so allow up to 2 x 300 MP; very large non-JPEG images are
-# decoded one at a time (_BIG_DECODE) so memory stays bounded.
+# decoded one at a time (_BIG_DECODE) so memory stays bounded. A JPEG above even that
+# (a gigapixel panorama) is still made: the limit then applies to its drafted size
+# (1/8 per side), see _open_photo.
 Image.MAX_IMAGE_PIXELS = 300_000_000
 warnings.simplefilter("ignore", Image.DecompressionBombWarning)
 BIG_IMAGE_PIXELS = 50_000_000
@@ -222,9 +224,26 @@ def render_photo_thumbnail(file_path: Path, output_path: Path) -> None:
             img.save(tmp, 'JPEG', quality=THUMB_QUALITY, optimize=True)
 
 
+def _open_photo(file_path: Path) -> Image.Image:
+    """
+    Image.open, except that a JPEG above Pillow's bomb limit is opened anyway: draft()
+    decodes it at 1/8 per side, so _decode_small checks the limit on that size instead.
+    """
+    try:
+        return Image.open(file_path)
+    except Image.DecompressionBombError:
+        with open(file_path, 'rb') as f:
+            if f.read(3) != b'\xff\xd8\xff':
+                raise
+        from PIL import JpegImagePlugin
+        return JpegImagePlugin.JpegImageFile(file_path)  # the same opener, without the size check
+
+
 def _decode_small(file_path: Path) -> Image.Image:
-    with Image.open(file_path) as img:
+    with _open_photo(file_path) as img:
         img.draft('RGB', (THUMB_SIZE[0] * 2, THUMB_SIZE[1] * 2))  # JPEG only; a no-op otherwise
+        if Image.MAX_IMAGE_PIXELS and img.size[0] * img.size[1] > 2 * Image.MAX_IMAGE_PIXELS:
+            raise Image.DecompressionBombError(f"te groot, ook verkleind: {img.size[0]}x{img.size[1]}")
         big = img.size[0] * img.size[1] > BIG_IMAGE_PIXELS
         with (_BIG_DECODE if big else _no_lock()):
             # In place, so the EXIF orientation stays with it; a loaded copy that

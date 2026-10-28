@@ -498,6 +498,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - HEIC-foto's van de iPhone krijgen een echte miniatuur. RAW-foto's die de app zelf niet kan
   lezen, gaan via het ingebouwde macOS-programma `sips`.
 - Panorama's en scans boven 179 megapixel krijgen een echte miniatuur in plaats van een grijs vlak.
+  Dat geldt nu ook voor JPEG-panorama's boven 600 megapixel: die worden op 1/8 van hun grootte
+  ingelezen (een panorama van 624 megapixel kost zo ~35 MB geheugen).
 - Video's: ffmpeg zoekt direct naar seconde 1 in plaats van vanaf het begin te decoderen, en kan
   de Terminal waarin de server draait niet meer uitlezen. Clips korter dan een seconde krijgen
   hun eerste beeld.

@@ -82,6 +82,28 @@ def test_a_photo_above_pillows_bomb_limit_gets_a_real_thumbnail(tmp_path):
     assert not thumbnail.is_placeholder(out)
 
 
+def test_a_jpeg_above_twice_the_bomb_limit_is_drafted_instead_of_refused(tmp_path, monkeypatch):
+    # The same situation as a 624 MP panorama with the real limit (2 x 300 MP), made small
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1_000_000)
+    src = tmp_path / "gigapano.jpg"
+    Image.new("L", (6000, 5000), 120).save(src, quality=60)   # 30 MP > 2 x 1 MP
+    with pytest.raises(Image.DecompressionBombError):
+        Image.open(src)
+    out = tmp_path / "t.jpg"
+    thumbnail.render_photo_thumbnail(src, out)
+    assert Image.open(out).size == (300, 250) and not thumbnail.is_placeholder(out)
+    # Not a JPEG: no draft, so the limit still holds
+    png = tmp_path / "groot.png"
+    Image.new("L", (6000, 5000), 120).save(png)
+    with pytest.raises(thumbnail.Undecodable):
+        thumbnail.render_photo_thumbnail(png, tmp_path / "p.jpg")
+    # Still too large after draft (1/8 per side: 750x625 = 468750 px > 2 x 200000)
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 200_000)
+    with pytest.raises(thumbnail.Undecodable):
+        thumbnail.render_photo_thumbnail(src, tmp_path / "x.jpg")
+    assert not (tmp_path / "x.jpg").exists()
+
+
 @pytest.mark.parametrize("name", ["corrupt.jpg", "empty.jpg", "fake.heic"])
 def test_a_broken_photo_gets_a_placeholder_that_is_never_stored(client, vault, config, monkeypatch, name):
     calls = []
