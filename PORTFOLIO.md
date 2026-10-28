@@ -170,6 +170,11 @@ frontend/
    - The timeline, "on this day" and photos-by-date all use it, so one photo has one date everywhere
    - Cached in SQLite (`media_dates`, migration 9) per path with the size and mtime_ns it was read
      at; missing dates are read with 4 threads
+   - Since migration 11 the media index (`backend/media_index.py`) holds the date with the rest of a
+     file's metadata. The timeline answers from it (paged, `offset`/`limit`) whenever every folder of
+     the selection still has the mtime it was indexed with; otherwise it walks as above and asks for
+     an incremental index pass. On a 100k-file vault: 0.17 s for the first page from the index, versus
+     11.7 s (cold) / 0.8 s (warm date cache) for the walk.
 
    ```python
    def capture_date(path: Path, st: os.stat_result) -> Tuple[float, str]:
@@ -982,6 +987,19 @@ CREATE TABLE media_dates (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns
                           taken REAL NOT NULL, source TEXT NOT NULL, updated_at REAL NOT NULL)
 CREATE INDEX idx_media_dates_taken ON media_dates(taken)
 CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at REAL NOT NULL)
+
+-- Media index (migration 11): one row per photo/video/audio file; id survives moves
+CREATE TABLE media (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, folder TEXT NOT NULL,
+                    name TEXT NOT NULL, kind TEXT NOT NULL, ext TEXT NOT NULL, size INTEGER NOT NULL,
+                    mtime_ns INTEGER NOT NULL, inode INTEGER, birthtime REAL, taken REAL, taken_source TEXT,
+                    width INTEGER, height INTEGER, orientation INTEGER, camera_make TEXT, camera_model TEXT,
+                    lens TEXT, lat REAL, lon REAL, altitude REAL, duration REAL, meta_status TEXT,
+                    added_at REAL NOT NULL, indexed_at REAL NOT NULL, seen_at REAL NOT NULL,
+                    missing INTEGER NOT NULL DEFAULT 0)
+-- idx_media_taken, idx_media_folder, idx_media_latlon (partial), idx_media_camera, idx_media_inode,
+-- idx_media_missing (partial)
+CREATE TABLE media_folders (path TEXT PRIMARY KEY, parent TEXT, mtime_ns INTEGER NOT NULL,
+                            last_scanned REAL NOT NULL)
 
 -- Folder visibility settings
 CREATE TABLE show_settings (

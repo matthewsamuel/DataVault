@@ -2,6 +2,53 @@
 
 Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 
+## Fase 3 – Nieuwe functies
+
+### Bibliotheek: één index van het hele archief
+- De app houdt nu een bibliotheek bij: van elke foto, video en elk audiobestand weet hij de
+  opnamedatum, de afmetingen, de camera en lens, de GPS-positie en (bij video en m4a) de duur. Dat
+  wordt gelezen uit de kop van het bestand en de EXIF-gegevens, zonder de foto zelf te openen
+  (ook HEIC; RAW waar dat kan, anders alleen grootte en datum). Volgende functies (filters, slimme
+  albums, kaart, exporteren, de assistent) bouwen hierop.
+- De eerste keer leest de app het archief één keer helemaal in, op de achtergrond (in de test met
+  100.000 kleine bestanden: 14 seconden; de app bleef gewoon reageren). Daarna gaat bijwerken
+  razendsnel: alleen mappen die veranderd zijn worden opnieuw gelezen, en daarin alleen nieuwe of
+  gewijzigde bestanden. Een ongewijzigd archief van 100.000 bestanden is in 0,03 seconde
+  gecontroleerd.
+- Bijwerken gebeurt vanzelf: bij het starten van de app, als de schijf weer aangesloten wordt, elk
+  half uur, en als de tijdlijn ziet dat er iets veranderd is. Zo'n automatische ronde staat alleen in
+  het takenpaneel zolang hij loopt en geeft geen melding als alles goed ging.
+- Het takenpaneel rechtsonder laat altijd zien hoeveel bestanden de bibliotheek kent en wanneer hij
+  bijgewerkt is, met de knop **Bibliotheek bijwerken**. Die controleert alle mappen en bestanden,
+  ook een foto die op zijn plek bewerkt is. Pauzeren, hervatten en annuleren werken zoals bij elke
+  taak; wat al gelezen was, wordt bij hervatten overgeslagen. Wordt de schijf losgekoppeld, dan
+  wacht de ronde en gaat hij vanzelf verder als de schijf terug is.
+- Verplaatst de app een bestand (Verplaatsen in de viewer, Keurer, duplicaten, en het terugzetten
+  daarvan), dan gaan de bibliotheek, de Shows-waardering en een Keurer-"houden" meteen mee naar de
+  nieuwe plek. Een waardering raakt dus niet meer kwijt door een verplaatsing.
+- Verplaats je een bestand buiten de app (bijv. in Finder), dan herkent de volgende ronde het aan
+  zijn kenmerken (hetzelfde bestand op schijf, of dezelfde inhoud als die al bekend was) en gaat de
+  waardering ook mee. Bij twijfel wordt niets gekoppeld.
+- Een bestand dat van de schijf verdwenen is, wordt eerst alleen verborgen en pas aan het eind van
+  een volledige ronde uit de bibliotheek gehaald, en nooit als een map niet gelezen kon worden. De
+  bibliotheek leest alleen: hij verplaatst of wist nooit een bestand. Waarderingen en
+  Keurer-beslissingen blijven altijd bewaard.
+
+### Tijdlijn, "op deze dag" en foto's per datum
+- De tijdlijn haalt zijn foto's nu uit de bibliotheek als die bij is met de schijf: geen wachten meer
+  op het doorlopen van alle mappen (100.000 foto's: de eerste foto's staan er binnen een seconde, in plaats
+  van na 12 s bij de eerste keer). Is er nog geen bibliotheek, of is er iets veranderd, dan werkt hij zoals voorheen en
+  wordt de bibliotheek op de achtergrond bijgewerkt.
+- De tijdlijn laadt per pagina: de eerste 3000 foto's staan er meteen, de rest komt erachteraan
+  ("… van … geladen"). Het aantal en de jaren kloppen meteen voor de hele selectie; klik je op een
+  jaar dat nog niet geladen is, dan springt hij erheen zodra het er is.
+- De tijdlijn tekende bij veel foto's toch elke foto tegelijk (een lijst van 100.000 foto's maakte
+  alle 100.000 kaartjes aan, waardoor de pagina minutenlang vastliep). Nu tekent hij alleen wat in
+  beeld is.
+- "Op deze dag" en "foto's van deze datum" (ook in de chat) zoeken nu in de bibliotheek in plaats van
+  een deel van het archief af te lopen, en vinden dus altijd alles. Elke treffer wordt eerst nog op
+  de schijf gecontroleerd.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden
@@ -643,7 +690,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 ### Nog open (voor fase 3)
 Bekend, maar bewust nog niet in fase 2 opgelost:
 - De tijdlijn stuurt alle foto's van de gekozen mappen in één antwoord (compact en bewaard, maar
-  zonder bladeren), en het scannen ervan is nog geen achtergrondtaak.
+  zonder bladeren), en het scannen ervan is nog geen achtergrondtaak. *(Opgelost in fase 3: de
+  tijdlijn leest uit de bibliotheek en laadt per pagina.)*
 - Het opslagoverzicht laat mappen kleiner dan ongeveer 5 MB weg, omdat het in hele GB's met twee
   decimalen rekent (zo'n map wordt 0,00 GB).
 - Na het sluiten van een foto die vanuit de chat geopend werd, staat de cursor niet meteen weer

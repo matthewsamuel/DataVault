@@ -97,8 +97,23 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Duplicaten verplaatsen naar RAW_DUPLICATES (structuur behouden), nooit wissen
 - Elke opruimactie is in één keer terug te zetten (Herstellen)
 
+### Bibliotheek (media-index)
+- De app houdt een index bij van elke foto, video en audiobestand in het archief (datum, afmetingen,
+  camera, GPS, duur), in de database (`backend/media_index.py`, migratie 11). Tijdlijn, "op deze dag"
+  en foto's per datum lezen daaruit in plaats van de schijf af te lopen.
+- Bijwerken gaat vanzelf: bij het starten, als de schijf terug is, elk half uur, en als de tijdlijn
+  ziet dat een map veranderd is. Alleen mappen waarvan de wijzigingsdatum veranderde worden opnieuw
+  gelezen (100.000 ongewijzigde bestanden: ~0,03 s). 'Bibliotheek bijwerken' in het takenpaneel
+  controleert alles, ook bestanden die op hun plek bewerkt zijn.
+- Verplaatst de app een bestand, dan gaan de indexregel, de Shows-waardering en een Keurer-'houden'
+  meteen mee. Verplaats je het in Finder, dan herkent de volgende ronde dat aan inode, grootte en
+  aanmaakdatum (of aan de inhoud als die al bekend was), en gaat de waardering ook mee.
+- Een bestand dat weg is, wordt eerst verborgen en pas aan het eind van een ronde uit de index
+  gehaald. De index leest alleen; hij verplaatst of wist nooit een bestand.
+- `DATAVAULT_AUTO_INDEX=0` zet het automatisch bijwerken uit (de tests doen dat).
+
 ### Achtergrondtaken
-- Duplicaten zoeken, vooraf indexeren en miniaturen maken lopen als taak op de achtergrond
+- Duplicaten zoeken, vooraf indexeren, miniaturen maken en de bibliotheek bijwerken lopen als taak op de achtergrond
 - Het takenpaneel rechtsonder toont voortgang en resterende tijd, met Pauzeren, Hervatten en Annuleren
 - Blijft bewaard na herladen of herstarten ("onderbroken", hervatbaar); bij een losgekoppelde schijf wacht een taak tot de schijf terug is
 
