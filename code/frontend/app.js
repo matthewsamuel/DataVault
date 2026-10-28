@@ -310,7 +310,7 @@ function renderShows(data) {
                 <p class="page-subtitle">Diavoorstellingen van je mappen, met je mooiste foto's vaker in beeld.</p>
             </div>
             <div class="shows-header-actions">
-            <button class="btn btn-primary" id="btn-elo" onclick="openElo()">
+            <button class="btn btn-secondary" id="btn-elo" onclick="openElo()">
                 <i class="fas fa-scale-balanced" aria-hidden="true"></i> Welke is mooier?
             </button>
             <button class="btn btn-secondary" id="btn-shuffle-shows" onclick="shuffleShows()">

@@ -594,6 +594,9 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("elo: z takes it back", lambda: page.keyboard.press("z"), 1.0)
             expect(board() == before_board, "elo: z did not put both scores back exactly")
             expect(shown_pair() == first, "elo: after z the same pair is not shown again")
+            server_stats = page.evaluate("(async () => (await fetchJSON(`${API_BASE}/api/shows/compare/pair`)).stats)()")
+            expect(page.evaluate("elo.stats && elo.stats.compared") == server_stats["compared"],
+                   f"elo: after z the progress line still counts the undone comparison ({page.text_content('#elo-progress')})")
             step("elo: 2 picks the right photo", lambda: page.keyboard.press("2"), 1.4)
             scores = {path: rating for path, rating, _ in board()}
             expect(scores.get(first[1], 0) > 1000, f"elo: 2 did not make the right photo win ({scores})")
@@ -604,6 +607,67 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.keyboard.press("1")
             page.wait_for_timeout(400)
             expect(comparisons() == count, "elo: a key in the collection list picked a photo")
+
+            # A second key while the next pair loads (slowed down here), and a held key, pick nothing more
+            page.evaluate("""(() => { window.__eloPosts = 0; window.__realFetchJSON = fetchJSON;
+                fetchJSON = async (url, options) => {
+                    if (url.includes('/api/shows/compare/pair')) await new Promise(r => setTimeout(r, 900));
+                    if (url.endsWith('/api/shows/compare') && options && options.method === 'POST') window.__eloPosts++;
+                    return window.__realFetchJSON(url, options);
+                }; })()""")
+            page.focus("#elo-overlay")
+            page.keyboard.press("1")
+            for _ in range(10):
+                page.wait_for_timeout(80)
+                page.keyboard.press("1")
+            page.keyboard.down("2")
+            page.keyboard.down("2")      # a repeat, as when the key is held
+            page.keyboard.up("2")
+            page.wait_for_timeout(1600)
+            expect(page.evaluate("window.__eloPosts") == 1,
+                   f"elo: a second key while the next pair loaded made {page.evaluate('window.__eloPosts')} comparisons")
+            page.evaluate("() => { fetchJSON = window.__realFetchJSON; }")
+
+            # Tab to a photo, Enter picks it, and the keys still work after that (focus stays on a photo);
+            # everything Tab reaches in the window shows a focus ring
+            ring = """(() => { const a = document.activeElement; if (!a || a === document.body) return 'none';
+                const probe = document.createElement('i'); probe.style.color = 'var(--focus-ring)';
+                document.body.appendChild(probe); const colour = getComputedStyle(probe).color; probe.remove();
+                const rgb = colour.slice(colour.indexOf('(') + 1, colour.indexOf(')'));
+                const el = a.classList.contains('elo-choice') ? a.querySelector('.elo-frame') : a;
+                const cs = getComputedStyle(el);
+                const ok = (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 && cs.outlineColor === colour)
+                    || cs.boxShadow.includes(rgb);
+                return ok ? 'ok' : (a.id || a.className || a.tagName); })()"""
+            page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=5000)
+            page.focus("#elo-overlay")
+            missing_rings = []
+            for _ in range(8):
+                page.keyboard.press("Tab")
+                page.wait_for_timeout(300)      # the ring fades in (--duration-base)
+                at = page.evaluate(ring)
+                if at != "ok":
+                    missing_rings.append(at)
+            expect(not missing_rings, f"elo: no visible focus ring on {missing_rings}")
+            for _ in range(8):
+                if page.evaluate("!!document.activeElement.closest('.elo-choice')"):
+                    break
+                page.keyboard.press("Tab")
+            count = comparisons()
+            step("elo: Enter on a photo", lambda: page.keyboard.press("Enter"), 1.4)
+            expect(comparisons() == count + 1, "elo: Enter on a photo did not pick it")
+            expect(page.evaluate("!!document.activeElement.closest('.elo-choice')"),
+                   f"elo: after Enter the focus fell to {page.evaluate('document.activeElement.tagName')}")
+            step("elo: 1 after Enter", lambda: page.keyboard.press("1"), 1.4)
+            expect(comparisons() == count + 2, "elo: after Tab + Enter the key 1 did nothing")
+
+            # A collection with too few photos: Overslaan is off and the round counter starts again
+            familie = str((vault / "library" / "Familie").resolve())
+            step("elo: Familie", lambda: page.select_option("#elo-scope", familie), 1.0)
+            expect(page.is_disabled("#elo-skip"), "elo: Overslaan looks usable without a pair")
+            expect("in deze ronde" not in (page.text_content("#elo-progress") or ""),
+                   f"elo: the round counter of another collection is shown ({page.text_content('#elo-progress')})")
+            step("elo: back to the library", lambda: page.select_option("#elo-scope", ""), 1.0)
             page.focus("#elo-overlay")
             expect_focus_trapped("elo-overlay", "elo: window")
             step("elo: Ranglijst", lambda: page.click("#elo-tab-board"), 1.0)

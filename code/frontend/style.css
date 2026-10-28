@@ -8938,6 +8938,9 @@ button.otd-settings-icon:hover {
 
 .elo-scope {
     max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .elo-body {
@@ -9012,8 +9015,26 @@ button.otd-settings-icon:hover {
     outline: none;
 }
 
-.elo-choice:focus-visible .elo-frame {
+.elo-choice:focus-visible .elo-frame,
+.elo-overlay.is-keyboard .elo-choice:focus .elo-frame {
     box-shadow: 0 0 0 2px var(--focus-ring), var(--shadow-md);
+}
+
+.elo-choice:focus {
+    outline: none;
+}
+
+/* WebKit geeft :focus-visible hier niet altijd (de focus wordt met de hand verplaatst); na Tab of
+   Enter krijgt het venster .is-keyboard, en dan heeft wat de focus heeft altijd een ring */
+.elo-overlay.is-keyboard .btn:focus {
+    outline: none;
+    box-shadow: var(--focus-shadow);
+    border-color: var(--focus-ring);
+}
+
+.elo-overlay.is-keyboard :is(button, select):not(.btn):not(.elo-choice):focus {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
 }
 
 .elo-choice.is-chosen .elo-frame {
@@ -9154,6 +9175,11 @@ button.otd-settings-icon:hover {
 }
 
 .elo-progress {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-secondary);
     font-size: var(--fs-sm);
 }
@@ -9164,8 +9190,10 @@ button.otd-settings-icon:hover {
 }
 
 .elo-actions {
+    flex: none;
     display: flex;
     gap: var(--space-sm);
+    margin-left: auto;
 }
 
 .elo-actions kbd {
