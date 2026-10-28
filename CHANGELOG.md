@@ -624,3 +624,15 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   kiezen tussen een snel en een nog sneller model. Gemeten op deze Mac: een kort antwoord duurt
   0,1 tot 0,3 seconde zodra het model geladen is; het eerste antwoord na een modelwissel duurt
   enkele seconden langer (laden).
+
+### Installeren en starten
+- De installatie-instructies in `README.md` en `code/README.md` werken weer zoals ze er staan:
+  alles gebeurt vanuit de map `code` (daar staan `requirements.txt` en `config.json`), de venv
+  wordt met Python 3.12 gemaakt (de vastgezette versies werken niet op de Python 3.9 van macOS),
+  en de server start met `uvicorn --factory backend.main:create_app` of gewoon `./start.sh`.
+  Het oude commando `uvicorn backend.main:app` gaf de fout "Attribute app not found".
+- `start.sh` en `stop_datavault.sh` stoppen alleen nog een DataVault-server op poort 8000. Draait
+  daar een ander programma, dan laten ze het met rust en zeggen ze welk programma het is.
+  `start.sh` geeft een oude server nu tot 10 seconden om open verzoeken af te ronden voordat hij
+  hem hard stopt (was 1 seconde). De handleidingen raden niet meer `lsof -ti:8000 | xargs kill -9`
+  aan, dat ook het Safari-tabblad met de app afsloot; ze verwijzen naar `./stop_datavault.sh`.

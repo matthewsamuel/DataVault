@@ -671,7 +671,7 @@ a fresh connection.
 ## 🔧 Technologies & Skills Demonstrated
 
 ### Languages & Frameworks
-- **Python 3.8+** — FastAPI, pathlib, asyncio, concurrent.futures
+- **Python 3.12** — FastAPI, pathlib, asyncio, concurrent.futures
 - **JavaScript (ES6)** — Vanilla JS (no frameworks), async/await, Fetch API
 - **SQL** — SQLite3, schema design, indexing, transactions
 - **HTML/CSS3** — Semantic markup, Flexbox/Grid, responsive design, CSS variables
@@ -712,7 +712,8 @@ a fresh connection.
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.12 (the pinned requirements, e.g. Pillow 13 and Starlette 1.10, need it; the
+  Python 3.9 that ships with macOS is too old): `brew install python@3.12`
 - SQLite3 (included with Python)
 - Modern web browser
 - ffmpeg (for video thumbnails)
@@ -725,33 +726,28 @@ a fresh connection.
 git clone https://github.com/matthewsamuel/DataVault.git
 cd DataVault
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+# Everything runs from code/ (requirements.txt and config.json live there)
+cd code
 
-# Install dependencies
-pip install -r requirements.txt
+# Create the virtual environment and install the pinned dependencies
+python3.12 -m venv venv
+venv/bin/pip install -r requirements.txt
 
-# Create config.json with vault paths
-cat > config.json << EOF
-{
-  "vault_root": "/path/to/vault",
-  "raw_folder": "/path/to/vault/RAW",
-  "cache_folder": "/path/to/cache",
-  "duplicates_folder": "/path/to/vault/RAW_DUPLICATES"
-}
-EOF
+# Create config.json with your vault paths (see Configuration below)
+cp config.example.json config.json
 
-# Start backend server
-python -m uvicorn code.backend.main:app --reload --host 127.0.0.1 --port 8000
+# Start the server (the app is built by a factory; there is no module-level `app`)
+venv/bin/python -m uvicorn --factory backend.main:create_app --host 127.0.0.1 --port 8000
+# or: ./start.sh  (creates the venv on first run, stops an earlier DataVault server on
+#                  port 8000 and opens the browser); stop it with ./stop_datavault.sh
 
 # Open browser
-# http://localhost:8000
+# http://127.0.0.1:8000
 ```
 
 ### Configuration
 
-Create `config.json` in project root:
+Create `code/config.json` (copy `code/config.example.json`; it is not in git):
 ```json
 {
   "vault_root": "/Volumes/T7",
@@ -789,6 +785,11 @@ DataVault/
 │   │       ├── stats.py
 │   │       └── timeline.py
 │   │
+│   ├── requirements.txt               # Python dependencies (pinned, Python 3.12)
+│   ├── config.example.json            # Copy to config.json and edit the paths
+│   ├── config.json                    # Configuration (user-created, not in git)
+│   ├── start.sh / stop_datavault.sh   # Start and stop the server on port 8000
+│   │
 │   └── frontend/
 │       ├── index.html                 # Main template
 │       ├── api.js                     # Session token for writes
@@ -804,8 +805,7 @@ DataVault/
 │
 ├── README.md                          # This file
 ├── PORTFOLIO.md                       # Detailed technical documentation
-├── requirements.txt                   # Python dependencies
-├── config.json                        # Configuration (user-created)
+├── CHANGELOG.md                       # What changed, per phase (Dutch)
 └── .gitignore                         # Git configuration
 ```
 

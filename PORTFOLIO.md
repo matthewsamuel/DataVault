@@ -18,7 +18,7 @@
 
 ### Technology Stack
 
-- **Backend:** FastAPI, Python 3.8+, SQLite3
+- **Backend:** FastAPI, Python 3.12, SQLite3
 - **Frontend:** Vanilla JavaScript (ES6), CSS3 (Flexbox/Grid), no external frameworks
 - **Media Processing:** Pillow (PIL), ffmpeg, xxHash3
 - **AI Integration:** Ollama (local LLM)
@@ -1324,7 +1324,7 @@ return {
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Backend** | FastAPI | RESTful API, routing, middleware |
-| **Backend** | Python 3.8+ | Core business logic |
+| **Backend** | Python 3.12 | Core business logic |
 | **Backend** | SQLite | Local data persistence (hashes, ratings, decisions) |
 | **Backend** | Pillow (PIL) | Image processing, thumbnail generation |
 | **Backend** | ffmpeg | Video frame extraction |

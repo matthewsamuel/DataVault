@@ -31,24 +31,28 @@ Een lokale media viewer en RAW duplicaten opruimtool voor macOS. Draait op exter
 
 **Gewone manier:** Dubbelklik op `DataVault.app`
 
-**Via terminal:**
-```bash
-cd /Volumes/T7/datavault_dashboard_dev/code
-source venv/bin/activate
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
-```
-
-Of gebruik het startscript:
+**Via terminal (aanbevolen):** het startscript maakt bij de eerste keer de venv aan, stopt een
+eerder gestarte DataVault-server op poort 8000 en opent de browser:
 ```bash
 cd /Volumes/T7/datavault_dashboard_dev/code
 ./start.sh
 ```
 
+Of met de hand (de app wordt door een *factory* gebouwd; een module-level `app` bestaat niet):
+```bash
+cd /Volumes/T7/datavault_dashboard_dev/code
+venv/bin/python -m uvicorn --factory backend.main:create_app --host 127.0.0.1 --port 8000
+```
+
+Stoppen: `Ctrl+C` in de Terminal, of `./stop_datavault.sh` (nodig na een herstart vanuit de app,
+zie RESTART.md).
+
 Open daarna: **http://127.0.0.1:8000**
 
 ## Configuratie
 
-Bewerk `code/config.json` om de vault paden in te stellen:
+Kopieer `code/config.example.json` naar `code/config.json` en stel de vault-paden in
+(`config.json` staat niet in git):
 
 ```json
 {
@@ -64,17 +68,19 @@ Bewerk `code/config.json` om de vault paden in te stellen:
 
 ### Vereisten
 - macOS (Apple Silicon of Intel)
-- Python 3.9+
+- Python 3.12 (de vastgepinde versies in `requirements.txt`, zoals Pillow 13 en Starlette 1.10,
+  werken niet op de Python 3.9 van macOS zelf): `brew install python@3.12`
 - Externe schijf T7 gemonteerd op `/Volumes/T7`
 - ffmpeg (optioneel, voor video thumbnails): `brew install ffmpeg`
 
 ### Setup
 ```bash
 cd /Volumes/T7/datavault_dashboard_dev/code
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+python3.12 -m venv venv
+venv/bin/pip install -r requirements.txt
+cp config.example.json config.json   # en daarna de paden aanpassen
 ```
+`./start.sh` doet de eerste twee stappen ook zelf als er nog geen `venv` is.
 
 ## Functies
 
@@ -131,8 +137,13 @@ een echte HEIC-foto (als pillow_heif hem kan schrijven) en een gedraaide JPEG (E
 
 **Poort 8000 al in gebruik:**
 ```bash
-lsof -ti:8000 | xargs kill -9
+./stop_datavault.sh
 ```
+Dit stopt alleen een DataVault-server die op poort 8000 luistert. Gebruik geen
+`lsof -ti:8000 | xargs kill -9`: dat stopt ook elk programma dat *verbonden* is met poort 8000,
+zoals het Safari-tabblad met de app, en `kill -9` kan de server midden in een taak afbreken.
+Draait er een ander programma op poort 8000, dan stoppen `start.sh` en `stop_datavault.sh` het
+niet; ze melden welk programma het is.
 
 **Geen video thumbnails** — Installeer ffmpeg: `brew install ffmpeg`, herstart server
 
