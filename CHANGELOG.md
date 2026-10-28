@@ -500,6 +500,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Panorama's en scans boven 179 megapixel krijgen een echte miniatuur in plaats van een grijs vlak.
   Dat geldt nu ook voor JPEG-panorama's boven 600 megapixel: die worden op 1/8 van hun grootte
   ingelezen (een panorama van 624 megapixel kost zo ~35 MB geheugen).
+- De map met miniaturen groeit niet meer eindeloos. Wordt hij groter dan 4 GB (ongeveer 200.000
+  miniaturen), dan ruimt de app bij het opstarten de miniaturen op die het langst niet getoond zijn,
+  zoals die van bewerkte of verwijderde foto's. Alleen de eigen cache van de app; foto's zelf
+  worden nooit aangeraakt.
 - Video's: ffmpeg zoekt direct naar seconde 1 in plaats van vanaf het begin te decoderen, en kan
   de Terminal waarin de server draait niet meer uitlezen. Clips korter dan een seconde krijgen
   hun eerste beeld.

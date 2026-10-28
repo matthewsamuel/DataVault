@@ -78,16 +78,28 @@ def get_thumbnail_cache_path(file_path: Path, thumb_cache_dir: Path) -> Path:
 
 _CURRENT_NAME = re.compile(rf"^v{THUMB_VERSION}_[0-9a-f]{{32}}\.jpg$")
 
+# The thumbnail cache never grows past this: above it, the least recently shown
+# thumbnails are removed at startup until it is back at THUMB_CACHE_TRIM_TO of the limit.
+# A thumbnail of an edited, replaced or deleted file is never shown again, so it goes
+# first (MEDIA-THUMBS-TIMELINE-21). ~4 GB is about 200,000 thumbnails.
+THUMB_CACHE_MAX_BYTES = 4 * 1024 ** 3
+THUMB_CACHE_TRIM_TO = 0.8
 
-def prune_thumbnail_cache(thumb_cache_dir: Path, max_tmp_age: float = 3600.0) -> int:
+
+def prune_thumbnail_cache(thumb_cache_dir: Path, max_tmp_age: float = 3600.0,
+                          max_bytes: int = None) -> int:
     """
     Remove what an older version of the app left in the thumbnail cache: thumbnails
     named the old way (path-only key, made before EXIF rotation), the per-file and shared
-    placeholders it stored, and temporary files older than max_tmp_age. Only ever touches
-    files directly in the app's own thumbnail folder. Returns how many were removed.
+    placeholders it stored, and temporary files older than max_tmp_age. Then, when the
+    current thumbnails take more than max_bytes (THUMB_CACHE_MAX_BYTES), remove the least
+    recently used ones (last read, by atime) until they fit in THUMB_CACHE_TRIM_TO of it.
+    Only ever touches files directly in the app's own thumbnail folder. Returns how many
+    were removed.
     """
     removed = 0
     now = time.time()
+    current = []  # (last used, size, path)
     try:
         entries = list(os.scandir(thumb_cache_dir))
     except OSError:
@@ -95,7 +107,11 @@ def prune_thumbnail_cache(thumb_cache_dir: Path, max_tmp_age: float = 3600.0) ->
     for entry in entries:
         name = entry.name
         try:
-            if not entry.is_file(follow_symlinks=False) or _CURRENT_NAME.match(name):
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            if _CURRENT_NAME.match(name):
+                st = entry.stat(follow_symlinks=False)
+                current.append((max(st.st_atime, st.st_mtime), st.st_size, entry.path))
                 continue
             if name.endswith(".tmp.jpg"):
                 if now - entry.stat(follow_symlinks=False).st_mtime < max_tmp_age:
@@ -106,6 +122,25 @@ def prune_thumbnail_cache(thumb_cache_dir: Path, max_tmp_age: float = 3600.0) ->
             removed += 1
         except OSError:
             continue
+    return removed + _trim(current, THUMB_CACHE_MAX_BYTES if max_bytes is None else max_bytes)
+
+
+def _trim(current, max_bytes: int) -> int:
+    """Remove the least recently used of current [(last used, size, path)] until they fit."""
+    total = sum(size for _, size, _ in current)
+    if total <= max_bytes:
+        return 0
+    target = max_bytes * THUMB_CACHE_TRIM_TO
+    removed = 0
+    for _, size, path in sorted(current):
+        if total <= target:
+            break
+        try:
+            os.unlink(path)  # a thumbnail in the app's own cache, made again when it is shown
+        except OSError:
+            continue
+        total -= size
+        removed += 1
     return removed
 
 

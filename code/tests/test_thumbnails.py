@@ -208,6 +208,26 @@ def test_old_style_thumbnails_are_never_used_and_get_cleaned_up(client, vault, c
     assert _cache_files(config) == [current.name]
 
 
+def test_the_cache_is_trimmed_to_its_limit_least_recently_used_first(tmp_path):
+    cache = tmp_path / "thumbs"
+    cache.mkdir()
+    now = time.time()
+    names = []
+    for i in range(10):
+        f = cache / f"v{thumbnail.THUMB_VERSION}_{i:032x}.jpg"
+        f.write_bytes(b"j" * 1000)
+        os.utime(f, (now - 86400 * (10 - i), now - 86400 * 20))  # 0 used longest ago, 9 last
+        names.append(f.name)
+    other = cache / "notes.txt"
+    other.write_bytes(b"x" * 5000)  # not a thumbnail: never touched, never counted
+    assert thumbnail.prune_thumbnail_cache(cache, max_bytes=20_000) == 0
+    assert len(list(cache.glob("v*.jpg"))) == 10
+    # 10 kB over a 6 kB limit: trimmed to 80 % (4.8 kB), so the 4 most recently used stay
+    assert thumbnail.prune_thumbnail_cache(cache, max_bytes=6_000) == 6
+    assert sorted(p.name for p in cache.glob("v*.jpg")) == names[6:]
+    assert other.exists()
+
+
 def test_many_requests_for_one_new_thumbnail_make_it_once_and_all_get_a_whole_jpeg(client, vault, monkeypatch):
     photo = vault / STRAND
     calls = []
