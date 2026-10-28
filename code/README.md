@@ -196,7 +196,14 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Optionele configuratie in `config.json`: `"data_owner": "Matthew"` (de map onder `data/`, standaard
   de eerste) en `"datagatherer_watch_folders": ["/Users/…/Dropbox/Exports"]` (extra mappen naast `~/Downloads`).
 - Migraties 60 (DataGatherer) en 61 (samengevoegde Spotify-plays). Het Spotify-scherm leest
-  `spotify_plays_merged` zodra er iets is ingelezen, anders de exportbestanden zoals vroeger.
+  `spotify_plays_merged` pas als elk exportbestand onder `data/` in een ingelezen export ligt
+  (`dg_raw_imports.status = 'imported'`, ingelezen na de laatste wijziging van het bestand);
+  anders de exportbestanden zoals vroeger (`/api/spotify/coverage` zegt dan `waiting_for_import`).
+- Bestand kiezen (`POST /sources/<id>/upload?name=`) zet het bestand onder zijn echte naam in een
+  eigen map in `<cache>/datagatherer-upload/` en start een `datagatherer.watch`-taak
+  (`{source, upload, name}`) die het naar het archief kopieert en inleest; daarna is de tijdelijke
+  kopie weg. `raw_store.archive_file` slaat één export tegelijk op (sha256-controle, kopie en rij
+  onder één slot).
 - Tests: `DATAVAULT_GATHER_DAEMON=0` (de tests tikken de watcher zelf), een sleutelhanger in het
   geheugen, een netwerkbewaker die alles weigert (`net.set_transport_factory` voor een
   `httpx.MockTransport`), en een LaunchAgents-map in de tijdelijke map.

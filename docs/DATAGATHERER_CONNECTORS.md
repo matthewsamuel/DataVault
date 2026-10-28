@@ -74,8 +74,13 @@ Implementeer wat je `capabilities` beloven:
 - `sync(ctx)`: `api_sync` of `local_import`. Haal op wat nieuw is. Bewaar een cursor in dezelfde
   transactie als de records (`state.set_cursor(conn, ...)`), zodat hij nooit voorloopt.
 - `is_configured(ctx)`, `authorize_url(...)`, `finish_authorization(...)`: voor een API-bron.
-- `coverage(ctx)`: wat de opgeslagen gegevens dekken (`Coverage`: aantal, eerste, laatste, en vanaf
-  wanneer het een schatting is). Dat wordt de datum, de achterstand en de dekkingsbalk op de kaart.
+- `coverage(ctx)`: wat de opgeslagen gegevens dekken (`Coverage`: aantal, eerste, laatste, vanaf
+  wanneer het een schatting is, `segments` (van, tot, geschat) en `holes` (van, tot) waar niets is).
+  Dat wordt de datum, de achterstand en de dekkingsbalk op de kaart; een gat geeft de status
+  "Gat van N dagen". Een gat is een stuk tussen eerste en laatste zonder enig gegeven.
+- `detect(path, names)`: herken je export aan de inhoud (`names`: de bestanden in een zip, of `None`).
+  `path.name` is altijd de echte bestandsnaam, ook bij Bestand kiezen. De watcher onthoudt het
+  antwoord per bron.
 - `notes(ctx)`: extra regels op de kaart, bijvoorbeeld "de koppeling verloopt over 7 dagen".
 - `forget(ctx)`: "Vergeet dit account". Standaard verwijdert dit elke geheime instelling (plus
   `extra_secret_keys`) uit de Sleutelhanger. Gegevens en exports blijven in het archief.

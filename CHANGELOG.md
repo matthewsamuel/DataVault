@@ -287,6 +287,28 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   gekopieerd, en je bestaande Takeouts in RAW_google worden geregistreerd. De inhoud wordt in een
   volgende versie ingelezen.
 - Een nieuwe bron is één Python-bestand; zie `docs/DATAGATHERER_CONNECTORS.md`.
+- **Je statistieken krimpen nooit meer.** Het Spotify-scherm las de samengevoegde gegevens al zodra
+  er iets in stond: na één upload, de eerste keer Bijwerken of een afgebroken eerste inleesbeurt
+  zag je maar een deel van je geschiedenis. Nu blijft het je exportbestanden lezen tot elk
+  exportbestand ook echt ingelezen is; het label zegt dan "je nieuwste gegevens zijn nog niet
+  ingelezen", met een knop Inlezen.
+- **Gaten zie je.** Ligt er tijd tussen je laatste export en je nieuwste nummers van de API, dan
+  zegt de kaart "Gat van … dagen", noemt de periode en raadt een nieuwe export aan. De balk laat die
+  periode leeg, en het Spotify-scherm zegt "schatting vanaf …" en "geen gegevens van … tot …".
+- **Bestand kiezen** werkt nu ook met een losse `StreamingHistory*.json` of
+  `Streaming_History_Audio_*.json`. Kopiëren naar het archief loopt als taak, met voortgang en
+  Annuleren. Hetzelfde bestand twee keer tegelijk kiezen geeft nooit meer een extra kopie.
+- **In Downloads zoeken** vindt elke export bij de juiste bron, ook als er een Spotify-zip en een
+  Takeout-zip tegelijk in Downloads staan.
+- Een vergrendelde Sleutelhanger (of "Weigeren" bij de vraag van macOS) laat de tab niet meer
+  vastlopen: de kaart zegt wat er is. Een export met een vreemd getal erin slaat die ene regel over;
+  een export die echt niet te lezen is, wordt als mislukt gemarkeerd en de rest gaat door.
+- **Duidelijkere kaarten**: lukte Bijwerken niet, dan staat de reden in rood op de kaart (en in het
+  Netwerklog waarom een verbinding geweigerd werd). "Meer" werkt als een echt menu: pijltjes,
+  Home/End, Escape, klikken ernaast sluit het, en na een venster komt de focus terug op "Meer". De
+  knoppen van een kaart blijven op één regel, een filter kiezen met het toetsenbord houdt de focus,
+  lege schermen hebben een knop om verder te gaan, en de teksten zijn overal Nederlands
+  ("luisterbeurten", "API-sleutel", "19 sep 2023", "meestal binnen 2 dagen").
 
 ## Fase 2 – Stabiliseren
 
