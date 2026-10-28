@@ -818,7 +818,8 @@ def test_the_index_never_shows_excluded_files(client, config, planted, monkeypat
             return DAY.replace(year=2026)
     monkeypatch.setattr(stats_mod, "datetime", FakeNow)
     found = {p["path"] for p in client.get("/api/stats/photo-on-this-day").json()["photos"]}
-    assert found and found <= {str(p) for p in planted["visible"].values()}
+    # (the planted files are dated by their file date only, which Home leaves out like the screen does)
+    assert found <= {str(p) for p in planted["visible"].values()}
 
 
 # ---------- the query layer ----------

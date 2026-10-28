@@ -468,7 +468,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 "path": str(memory), "name": memory.name, "type": "image", "timestamp": 1603792800.0,
                 "year": 2020, "date_source": "exif"}]}))
             step("home: 'op deze dag' photo", lambda: (
-                page.evaluate("switchMainView('home')"),
+                page.evaluate("switchMainView('home'); loadPhotoOtdWidget()"),
                 page.wait_for_selector(".otd-large-image.active", timeout=10000)), 0.3)
             step("home: Enter on the photo", lambda: (page.focus(".otd-large-image.active"), page.keyboard.press("Enter")), 0.8)
             expect(page.evaluate("isViewerOpen()"), "home: Enter on the 'op deze dag' photo did not open it")

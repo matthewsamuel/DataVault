@@ -1017,6 +1017,11 @@
             fragment.appendChild(el);
         }
         content.appendChild(fragment);
+        // Roving tabindex: staat de tegel met de focus buiten beeld, dan krijgt de eerste zichtbare de tab-stop
+        if (!content.querySelector('.albums-tile[tabindex="0"]')) {
+            const firstTile = content.querySelector('.albums-tile');
+            if (firstTile) firstTile.tabIndex = 0;
+        }
         // Ontbrekende pagina's ophalen
         const pages = new Set();
         for (let i = first * state.cols; i <= Math.min(state.total - 1, (last + 1) * state.cols - 1); i++) pages.add(Math.floor(i / PAGE));
@@ -1143,9 +1148,11 @@
         const scroll = $('albums-scroll');
         const row = Math.floor(index / state.cols);
         const top = row * state.rowH + $('albums-content').offsetTop;
+        // De zwevende taakbalk onderaan mag de tegel niet bedekken
+        const dock = parseFloat(getComputedStyle(scroll).getPropertyValue('--job-dock-space')) || 0;
         if (scrollIntoView) {
             if (top < scroll.scrollTop) scroll.scrollTop = top - GAP;
-            else if (top + state.tile > scroll.scrollTop + scroll.clientHeight) scroll.scrollTop = top + state.tile - scroll.clientHeight + GAP;
+            else if (top + state.tile > scroll.scrollTop + scroll.clientHeight - dock) scroll.scrollTop = top + state.tile - scroll.clientHeight + GAP + dock;
             renderRows();
         }
         const old = $('albums-content').querySelector('.albums-tile[tabindex="0"]');
