@@ -128,6 +128,11 @@ def _op_state(op: Dict[str, Any], checks: recovery.FolderChecks) -> str:
     return "beside" if src_entry is not None else "ok"
 
 
+def _still_regular(path: str) -> bool:
+    entry = recovery.lstat_or_none(path)
+    return entry is not None and stat.S_ISREG(entry.st_mode)
+
+
 def _run_entry(run: Dict[str, Any]) -> Dict[str, Any]:
     checks = recovery.FolderChecks(config)
     listed = recovery.list_files(
@@ -135,6 +140,8 @@ def _run_entry(run: Dict[str, Any]) -> Dict[str, Any]:
         run["remaining"],
         lambda op: _op_state(op, checks),
         lambda op, state: recovery.file_entry(op["src_path"], op["dst_path"], state, "RAW_DUPLICATES"),
+        # Beyond the shown files: a file that is no longer in RAW_DUPLICATES needs no path checks
+        lambda op: _still_regular(op["dst_path"]) and _op_state(op, checks) in recovery.RESTORABLE_STATES,
     )
     n = listed["file_count"]
     return {

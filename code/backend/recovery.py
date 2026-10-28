@@ -204,29 +204,33 @@ def paged(fetch: Callable[[int, int], List[Dict[str, Any]]]) -> Iterator[Dict[st
 
 
 def list_files(records: Iterable[Any], total: int, state_of: Callable[[Any], str],
-               file_of: Callable[[Any, str], Dict[str, Any]]) -> Dict[str, Any]:
+               file_of: Callable[[Any, str], Dict[str, Any]],
+               can_restore: Optional[Callable[[Any], bool]] = None) -> Dict[str, Any]:
     """
     The files of one entry for the list. Only the FILES_PER_ENTRY shown files are checked on
     disk in full; beyond those, files are checked only until one is found that can go back
     (so 'undoable' is right), and the rest is left to the undo itself, which checks every
-    file again anyway. 'checked' says how many files 'restorable' counts: when it is less
-    than file_count, restorable is a lower bound.
+    file again anyway. can_restore(record) may answer that faster than state_of (no reason
+    needed there; e.g. a file that is gone needs no path checks). 'checked' says how many
+    files 'restorable' counts: when it is less than file_count, restorable is a lower bound.
     """
     shown: List[Dict[str, Any]] = []
     restorable = checked = 0
     first_reason = None
     for record in records:
-        if len(shown) >= FILES_PER_ENTRY and restorable:
-            break
-        state = state_of(record)
-        checked += 1
-        if state in RESTORABLE_STATES:
-            restorable += 1
         if len(shown) < FILES_PER_ENTRY:
+            state = state_of(record)
             file = file_of(record, state)
             shown.append(file)
             if first_reason is None and not file["restorable"]:
                 first_reason = file["reason"]
+            ok = state in RESTORABLE_STATES
+        elif restorable:
+            break
+        else:
+            ok = can_restore(record) if can_restore else state_of(record) in RESTORABLE_STATES
+        checked += 1
+        restorable += ok
     reason = None
     if restorable == 0:
         reason = first_reason or "Niets meer terug te zetten"
