@@ -894,6 +894,20 @@ function formatBytes(bytes) {
     return `${value.toLocaleString('nl-NL', { maximumFractionDigits: digits })} ${units[i]}`;
 }
 
+// Getallen altijd op z'n Nederlands: 1.234 en 1,2 (nooit 1.2 voor anderhalf)
+function formatNumberNl(value, digits = 0) {
+    const n = Number(value);
+    return isFinite(n) ? n.toLocaleString('nl-NL', { maximumFractionDigits: digits }) : '–';
+}
+
+// Een datum van de server (JJJJ-MM-DD) als '11 feb 2023'; iets anders blijft zoals het is
+function formatDateNl(isoDate) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ''));
+    if (!m) return String(isoDate || '');
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+        .toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 // ==================== SEARCH/FILTER ====================
 
 // Zoektekst zonder verschil in hoofdletters of Unicode-vorm: een naam die Finder als
@@ -3087,8 +3101,8 @@ function renderSpotifyStats(data) {
 
         // Record Day
         if (insights.record_day) {
-            updateText('stat-record-day-hours', `${insights.record_day.hours} uur`);
-            updateText('stat-record-day-date', `Recorddag: ${insights.record_day.date}`);
+            updateText('stat-record-day-hours', `${formatNumberNl(insights.record_day.hours, 1)} uur`);
+            updateText('stat-record-day-date', `Recorddag: ${formatDateNl(insights.record_day.date)}`);
         }
 
         // Binge
