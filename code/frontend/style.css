@@ -1272,6 +1272,15 @@ textarea.input {
     white-space: nowrap;
 }
 
+/* Elk venster: een rustig icoon voor de titel, overal even groot en even ver weg */
+.modal-title > i:first-child {
+    width: var(--icon-md);
+    margin-right: var(--space-sm);
+    color: var(--text-tertiary);
+    font-size: var(--icon-md);
+    text-align: center;
+}
+
 .modal-close {
     width: 30px;
     height: 30px;
@@ -3027,21 +3036,6 @@ a.breadcrumb-item:hover {
     border-bottom: 1px solid var(--border-hairline);
 }
 
-.move-modal-header h2 {
-    font-size: var(--fs-lg);
-    font-weight: var(--fw-semibold);
-    color: var(--text-primary);
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-
-.move-modal-header h2 i {
-    color: var(--text-tertiary);
-    font-size: var(--icon-sm);
-}
-
 .move-modal-body {
     display: flex;
     flex: 1;
@@ -4517,10 +4511,18 @@ a.breadcrumb-item:hover {
     text-align: center;
 }
 
+/* Grote icoontegel in Spotify-groen (Font Awesome, zoals de cijferkaarten) */
 .dna-big-icon {
-    font-size: 72px;
-    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 80px;
+    height: 80px;
     margin-bottom: var(--space-lg);
+    border-radius: var(--radius-xl);
+    background: var(--spotify-subtle);
+    color: var(--spotify-text);
+    font-size: var(--icon-2xl);
     animation: float 4s ease-in-out infinite;
 }
 
@@ -4600,7 +4602,21 @@ a.breadcrumb-item:hover {
 }
 
 .type-icon {
-    font-size: var(--fs-xl);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-tertiary);
+    font-size: var(--icon-sm);
+}
+
+.dna-type-item.active .type-icon {
+    background: var(--spotify-subtle);
+    color: var(--spotify-text);
 }
 
 .type-info {
@@ -4659,9 +4675,16 @@ a.breadcrumb-item:hover {
 }
 
 .insight-modal-icon {
-    font-size: 48px;
-    line-height: 1;
-    margin-bottom: var(--space-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto var(--space-sm);
+    border-radius: var(--radius-lg);
+    background: var(--spotify-subtle);
+    color: var(--spotify-text);
+    font-size: var(--icon-xl);
 }
 
 .insight-modal-title {

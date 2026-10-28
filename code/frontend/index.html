@@ -665,7 +665,7 @@
     <div class="modal" id="modal-folder-selector">
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
-                <h2 class="modal-title">Kies een map om te scannen</h2>
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Kies een map om te scannen</h2>
                 <button class="modal-close" onclick="closeFolderSelector()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
 
@@ -690,7 +690,7 @@
     <div class="modal" id="modal-comparison">
         <div class="modal-container comparison-container">
             <div class="modal-header">
-                <h2 class="modal-title">Kopieën vergelijken</h2>
+                <h2 class="modal-title"><i class="fas fa-clone" aria-hidden="true"></i> Kopieën vergelijken</h2>
                 <button class="modal-close" onclick="closeComparisonModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
 
@@ -742,7 +742,7 @@
     <div class="modal" id="modal-dup-confirm">
         <div class="modal-container dup-confirm-container">
             <div class="modal-header">
-                <h2 class="modal-title" id="dup-confirm-title">Duplicaten opruimen?</h2>
+                <h2 class="modal-title"><i class="fas fa-broom" aria-hidden="true"></i> <span id="dup-confirm-title">Duplicaten opruimen?</span></h2>
                 <button class="modal-close" onclick="closeCleanupDialog()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body dup-confirm-body">
@@ -807,7 +807,7 @@
     <div class="modal" id="modal-move-file">
         <div class="move-modal-container">
             <div class="move-modal-header">
-                <h2><i class="fas fa-folder-open" aria-hidden="true"></i> Bestand verplaatsen</h2>
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Bestand verplaatsen</h2>
                 <button class="modal-close" onclick="closeMoveFileModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
             </div>
             <div class="move-modal-body">
@@ -913,7 +913,7 @@
     <div class="modal" id="modal-dna-explanation">
         <div class="modal-container dna-modal-container">
             <div class="modal-header">
-                <h2 class="modal-title">Jouw luister-DNA</h2>
+                <h2 class="modal-title"><i class="fas fa-dna" aria-hidden="true"></i> Jouw luister-DNA</h2>
                 <button class="modal-close" onclick="closeDnaModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body dna-modal-body">
@@ -923,7 +923,7 @@
                         <!-- Dynamic art elements will be injected here -->
                     </div>
                     <div class="dna-hero-content">
-                        <div id="dna-modal-icon" class="dna-big-icon"></div>
+                        <div id="dna-modal-icon" class="dna-big-icon" aria-hidden="true"></div>
                         <h3 id="dna-modal-title" class="dna-hero-title"></h3>
                         <p id="dna-modal-description" class="dna-hero-desc"></p>
                     </div>
@@ -934,28 +934,28 @@
                     <h4 class="dna-sidebar-title">Typen</h4>
                     <div class="dna-types-list">
                         <div class="dna-type-item personality-early-bird" data-type="Early Bird">
-                            <span class="type-icon">🐦</span>
+                            <span class="type-icon" aria-hidden="true"><i class="fas fa-dove"></i></span>
                             <div class="type-info">
                                 <strong>Vroege vogel</strong>
                                 <span>5:00 – 12:00</span>
                             </div>
                         </div>
                         <div class="dna-type-item personality-daydreamer" data-type="Daydreamer">
-                            <span class="type-icon">☀️</span>
+                            <span class="type-icon" aria-hidden="true"><i class="fas fa-sun"></i></span>
                             <div class="type-info">
                                 <strong>Dagdromer</strong>
                                 <span>12:00 – 18:00</span>
                             </div>
                         </div>
                         <div class="dna-type-item personality-evening-chiller" data-type="Evening Chiller">
-                            <span class="type-icon">🌇</span>
+                            <span class="type-icon" aria-hidden="true"><i class="fas fa-cloud-moon"></i></span>
                             <div class="type-info">
                                 <strong>Avondgenieter</strong>
                                 <span>18:00 – 23:00</span>
                             </div>
                         </div>
                         <div class="dna-type-item personality-night-owl" data-type="Night Owl">
-                            <span class="type-icon">🦉</span>
+                            <span class="type-icon" aria-hidden="true"><i class="fas fa-moon"></i></span>
                             <div class="type-info">
                                 <strong>Nachtuil</strong>
                                 <span>23:00 – 5:00</span>
@@ -974,11 +974,11 @@
     <div class="modal" id="modal-insight-explanation">
         <div class="modal-container insight-modal-container">
             <div class="modal-header">
-                <h2 class="modal-title" id="insight-modal-header">Uitleg</h2>
+                <h2 class="modal-title" id="insight-modal-header"><i class="fas fa-circle-info" aria-hidden="true"></i> Uitleg</h2>
                 <button class="modal-close" onclick="closeInsightModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body insight-modal-body">
-                <div id="insight-modal-icon" class="insight-modal-icon">ℹ️</div>
+                <div id="insight-modal-icon" class="insight-modal-icon" aria-hidden="true"><i class="fas fa-circle-info"></i></div>
                 <h3 id="insight-modal-title" class="insight-modal-title">Uitleg</h3>
                 <p id="insight-modal-description" class="insight-modal-text"></p>
             </div>
@@ -992,7 +992,7 @@
     <div class="modal" id="modal-keurer-move">
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
-                <h2 class="modal-title"><i class="fas fa-folder-open"></i> Verplaatsen naar...</h2>
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Verplaatsen naar…</h2>
                 <button class="modal-close" onclick="keurerCloseMoveModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="keurer-move-topbar">
@@ -1048,7 +1048,7 @@
     <div class="modal" id="modal-keurer-folder">
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
-                <h2 class="modal-title">Kies een map om te keuren</h2>
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Kies een map om te keuren</h2>
                 <button class="modal-close" onclick="keurerCloseFolderPicker()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body folder-selector-body">

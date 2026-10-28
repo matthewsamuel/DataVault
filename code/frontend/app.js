@@ -2213,11 +2213,11 @@ function showDnaExplanation() {
     const currentDna = dnaText ? (dnaText.dataset.dna || dnaText.textContent).trim() : '';
 
     const dnaTypes = {
-        'Early Bird 🐦': { icon: '🐦', title: 'Vroege vogel', key: 'Early Bird', desc: 'Je luistert het meest tussen 5:00 en 12:00. Je begint de dag met muziek, nog voor de rest wakker is.' },
-        'Daydreamer ☀️': { icon: '☀️', title: 'Dagdromer', key: 'Daydreamer', desc: 'Je luistert het meest tussen 12:00 en 18:00. Muziek houdt je middag op gang.' },
-        'Evening Chiller 🌇': { icon: '🌇', title: 'Avondgenieter', key: 'Evening Chiller', desc: 'Je luistert het meest tussen 18:00 en 23:00. Muziek is je manier om de dag af te sluiten.' },
-        'Night Owl 🦉': { icon: '🦉', title: 'Nachtuil', key: 'Night Owl', desc: 'Je luistert het meest tussen 23:00 en 5:00. De nacht is van jou, met muziek als gezelschap.' },
-        'Balanced Listener': { icon: '🎧', title: 'Evenwichtige luisteraar', key: 'Balanced Listener', desc: 'Je luistert verspreid over de hele dag, zonder één piekmoment.' }
+        'Early Bird 🐦': { icon: 'fa-dove', title: 'Vroege vogel', key: 'Early Bird', desc: 'Je luistert het meest tussen 5:00 en 12:00. Je begint de dag met muziek, nog voor de rest wakker is.' },
+        'Daydreamer ☀️': { icon: 'fa-sun', title: 'Dagdromer', key: 'Daydreamer', desc: 'Je luistert het meest tussen 12:00 en 18:00. Muziek houdt je middag op gang.' },
+        'Evening Chiller 🌇': { icon: 'fa-cloud-moon', title: 'Avondgenieter', key: 'Evening Chiller', desc: 'Je luistert het meest tussen 18:00 en 23:00. Muziek is je manier om de dag af te sluiten.' },
+        'Night Owl 🦉': { icon: 'fa-moon', title: 'Nachtuil', key: 'Night Owl', desc: 'Je luistert het meest tussen 23:00 en 5:00. De nacht is van jou, met muziek als gezelschap.' },
+        'Balanced Listener': { icon: 'fa-headphones', title: 'Evenwichtige luisteraar', key: 'Balanced Listener', desc: 'Je luistert verspreid over de hele dag, zonder één piekmoment.' }
     };
 
     const info = dnaTypes[currentDna] || dnaTypes['Balanced Listener'];
@@ -2226,7 +2226,7 @@ function showDnaExplanation() {
     const iconEl = document.getElementById('dna-modal-icon');
     const titleEl = document.getElementById('dna-modal-title');
     const descEl = document.getElementById('dna-modal-description');
-    if (iconEl) iconEl.textContent = info.icon;
+    if (iconEl) iconEl.replaceChildren(createEl('i', { class: `fas ${info.icon}` }));
     if (titleEl) titleEl.textContent = info.title;
     if (descEl) descEl.textContent = info.desc;
 
@@ -2260,7 +2260,7 @@ function showDnaExplanation() {
             const clickedInfo = dnaTypes[fullTypeKey];
 
             // Update Hero
-            if (iconEl) iconEl.textContent = clickedInfo.icon;
+            if (iconEl) iconEl.replaceChildren(createEl('i', { class: `fas ${clickedInfo.icon}` }));
             if (titleEl) titleEl.textContent = clickedInfo.title;
             if (descEl) descEl.textContent = clickedInfo.desc;
         });
@@ -2478,22 +2478,22 @@ function showInsightExplanation(insightKey) {
 
     const insightDetails = {
         'record_day': {
-            icon: '🏆',
+            icon: 'fa-trophy',
             title: 'Recorddag',
             desc: 'De ene dag waarop je het allerlangst naar muziek luisterde.'
         },
         'top_binge': {
-            icon: '🔁',
+            icon: 'fa-repeat',
             title: 'Langste reeks',
             desc: 'Het nummer dat je het vaakst direct achter elkaar draaide, zonder iets anders ertussen.'
         },
         'mainstream_score': {
-            icon: '📈',
+            icon: 'fa-chart-line',
             title: 'Ontdekker of vaste favorieten',
             desc: 'Gaat meer dan 75% van je luistertijd naar een handvol topartiesten, dan heb je vaste favorieten. Is het breed verspreid, dan ben je een brede ontdekker.'
         },
         'seasonal_mood': {
-            icon: '🌤️',
+            icon: 'fa-cloud-sun',
             title: 'Seizoensstemming',
             desc: 'Of je in de wintermaanden of juist in de zomermaanden duidelijk meer luistert, op basis van je luistertijd per maand.'
         }
@@ -2506,7 +2506,7 @@ function showInsightExplanation(insightKey) {
     const titleEl = document.getElementById('insight-modal-title');
     const descEl = document.getElementById('insight-modal-description');
 
-    if (iconEl) iconEl.textContent = info.icon;
+    if (iconEl) iconEl.replaceChildren(createEl('i', { class: `fas ${info.icon}` }));
     if (titleEl) titleEl.textContent = info.title;
     if (descEl) descEl.textContent = info.desc;
 
@@ -2530,7 +2530,7 @@ async function openSettingsModal() {
         modal.innerHTML = `
         <div class="modal-container settings-modal-content" role="dialog" aria-labelledby="show-settings-title">
             <div class="modal-header">
-                <h2 class="modal-title" id="show-settings-title">Bronnen beheren</h2>
+                <h2 class="modal-title" id="show-settings-title"><i class="fas fa-sliders" aria-hidden="true"></i> Bronnen beheren</h2>
                 <button type="button" class="modal-close" onclick="closeSettingsModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
             </div>
             <div class="modal-body modal-body-list">
