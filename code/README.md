@@ -265,6 +265,11 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   laadt telt geen keuze. Na het opnieuw tekenen blijft de focus op dezelfde kant (`eloSetBody`).
   Na Tab of Enter krijgt het venster `.is-keyboard`, en dan heeft wat de focus heeft altijd een ring
   (WebKit geeft `:focus-visible` niet bij focus die met de hand verplaatst wordt).
+- Na een keuze is `elo.pair` meteen `null` (het gekozen paar komt nooit terug, ook niet via de
+  tabbladen); het volgende paar laadt na de korte pauze alleen als het venster nog open is, op
+  Vergelijken staat en er intussen niets anders laadde (`elo.seq`). Een antwoord dat binnenkomt
+  terwijl de Ranglijst openstaat, wordt weggegooid. Terugdraaien haalt de vergelijking pas van de
+  stapel als de server hem terugdraaide of weigerde (400, 404, 409).
 
 ### Achtergrondtaken
 - Duplicaten zoeken, vooraf indexeren, miniaturen maken en de bibliotheek bijwerken lopen als taak op de achtergrond

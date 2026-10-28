@@ -311,6 +311,14 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   precies terug. Verplaats je een foto, dan gaan zijn score en vergelijkingen mee. Was een van de
   twee foto's daarna nog veranderd (een duim, een latere keuze), dan zegt de app dat in plaats van
   te gokken.
+- Ga je meteen na een keuze naar de Ranglijst, dan blijft de ranglijst staan (er kwam soms een paar
+  overheen dat je niet kon kiezen), en bij Vergelijken krijg je daarna een nieuw paar. Lukt
+  terugdraaien even niet (geen verbinding, de app herstart), dan kun je het met **z** gewoon nog eens
+  proberen. Na terugdraaien staat "Teruggedraaid, kies opnieuw" onderin, in plaats van een melding
+  over de rechter foto.
+- De foto die je niet koos dooft rustig uit zonder dat het donkere vlak eromheen grijs wordt, en de
+  winnaar krijgt zijn +N in het groen. Lange shownamen in de keuzelijst eindigen netjes op "…".
+- Ook zonder shows staat **Welke is mooier?** bovenaan bij Shows, voor de hele bibliotheek.
 
 ## Fase 2 – Stabiliseren
 
