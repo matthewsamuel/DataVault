@@ -26,9 +26,11 @@ STRAND_COPIES = [
 ]
 BURST = [f"RAW/2022/bursts/burst_{i:02d}.jpg" for i in range(5)]
 
-# Names that must show up as text in the UI and never run as code (both are valid
-# names on macOS: no '/'). The frontend tests check that window.__xss stays unset.
-XSS_FOLDER = "Matthew's <b>Trip</b>"
+# Names that must show up as text in the UI and never run as code. A name cannot
+# contain '/', so the folder has an unclosed <b> (rendered as HTML it would turn
+# "Trip" bold and drop the tag from the text). The browser check makes sure
+# window.__xss stays unset and these names appear literally.
+XSS_FOLDER = "Matthew's <b>Trip"
 XSS_FILE = "xss <img src=x onerror=window.__xss=1>.jpg"
 XSS_TRACK = "<img src=x onerror=window.__xss=2>"
 XSS_PHOTOS = [f"RAW/{XSS_FOLDER}/{XSS_FILE}", f"library/{XSS_FOLDER}/{XSS_FILE}"]
