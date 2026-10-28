@@ -533,6 +533,28 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("document.querySelectorAll('.tl-photo-card').length") < 300,
                    "timeline: scrolling drew every card")
 
+            # A narrow window (Split View): the menu scrolls instead of running under the search
+            # field, and timeline tiles stay square and in line with the month headers
+            page.evaluate("document.getElementById('timeline-scroll').scrollTop = 0")
+            for width in (700, 820):
+                page.set_viewport_size({"width": width, "height": 900})
+                page.wait_for_timeout(600)
+                narrow = page.evaluate("""(() => {
+                    const card = document.querySelector('.tl-photo-card').getBoundingClientRect();
+                    const header = document.querySelector('.tl-group-header');
+                    const headerX = header.getBoundingClientRect().left + parseFloat(getComputedStyle(header).paddingLeft);
+                    return {tile: [Math.round(card.width), Math.round(card.height)], cardX: Math.round(card.left),
+                            headerX: Math.round(headerX),
+                            navRight: Math.round(document.querySelector('.nav-tabs').getBoundingClientRect().right),
+                            searchLeft: Math.round(document.querySelector('.nav-search').getBoundingClientRect().left),
+                            scrollsSideways: document.documentElement.scrollWidth > innerWidth};
+                })()""")
+                expect(abs(narrow["tile"][0] - narrow["tile"][1]) <= 1 and narrow["cardX"] == narrow["headerX"]
+                       and narrow["navRight"] <= narrow["searchLeft"] and not narrow["scrollsSideways"],
+                       f"narrow window {width}px: {narrow}")
+            page.set_viewport_size({"width": 1400, "height": 900})
+            page.wait_for_timeout(400)
+
             # Paging across a switch of source: a first page from the walk (made up here from
             # the real one, 500 rows) and the rest from the index is the same selection, so the
             # timeline goes on; a first page whose total differs makes it start over (once)

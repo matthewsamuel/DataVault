@@ -188,6 +188,14 @@ function switchMainView(view) {
         const on = tab.dataset.view === view;
         tab.classList.toggle('active', on);
         if (on) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current');
+        // In een smal venster schuift het menu: het actieve onderdeel altijd in beeld
+        const strip = on && tab.closest('.nav-tabs');
+        if (strip && strip.scrollWidth > strip.clientWidth) {
+            const left = tab.offsetLeft - strip.offsetLeft;
+            if (left < strip.scrollLeft || left + tab.offsetWidth > strip.scrollLeft + strip.clientWidth) {
+                strip.scrollLeft = left - (strip.clientWidth - tab.offsetWidth) / 2;
+            }
+        }
     });
 
     // Update sections

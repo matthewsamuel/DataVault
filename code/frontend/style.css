@@ -1984,12 +1984,25 @@ button.nav-brand {
     text-transform: uppercase;
 }
 
+/* Past het menu niet (smal venster, Split View), dan schuift het opzij in plaats van onder
+   het zoekveld te verdwijnen. Zo hoog als de balk, zodat het groene streepje binnen de
+   schuifstrook valt; 3px ruimte opzij voor de focusring. */
 .nav-tabs {
     display: flex;
     align-items: center;
+    align-self: stretch;
     gap: 2px;
     flex: 1;
     min-width: 0;
+    padding: 0 3px;
+    margin: 0 -3px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+}
+
+.nav-tabs::-webkit-scrollbar {
+    display: none;
 }
 
 .nav-tab {
@@ -3453,6 +3466,25 @@ a.breadcrumb-item:hover {
 @media (max-width: 900px) {
     :root {
         --page-gutter: 20px;
+    }
+
+    .top-nav {
+        gap: var(--space-sm);
+        padding: 0 var(--space-md);
+    }
+
+    .search-input {
+        width: 148px;
+    }
+
+    .nav-search .search-kbd {
+        display: none;
+    }
+
+    /* Het menu schuift: zachte randen laten zien dat er meer is (alleen de dekking telt) */
+    .nav-tabs {
+        -webkit-mask-image: linear-gradient(to right, transparent, var(--text-primary) 12px, var(--text-primary) calc(100% - 12px), transparent);
+        mask-image: linear-gradient(to right, transparent, var(--text-primary) 12px, var(--text-primary) calc(100% - 12px), transparent);
     }
 
     #modal-viewer > .modal-container {
@@ -7859,11 +7891,13 @@ button.otd-settings-icon:hover {
 /* ---- Smal scherm ---- */
 
 @media (max-width: 768px) {
+    /* Eén marge (--page-gutter) voor kop, maandkoppen en rijen: timeline.js rekent de
+       tegels uit met dezelfde marge, dus ze blijven vierkant en op één lijn */
     .tl-header {
         flex-direction: column;
         align-items: flex-start;
         gap: var(--space-sm);
-        padding: var(--space-lg) var(--space-lg) var(--space-sm);
+        padding: var(--space-lg) var(--page-gutter) var(--space-sm);
     }
 
     .tl-header-right {
@@ -7872,21 +7906,16 @@ button.otd-settings-icon:hover {
 
     .tl-folder-chips-bar,
     .tl-info-bar {
-        padding: 0 var(--space-lg) var(--space-sm);
+        padding: 0 var(--page-gutter) var(--space-sm);
     }
 
     .tl-slider-wrap {
-        padding: var(--space-sm) var(--space-lg) var(--space-xs);
+        padding: var(--space-sm) var(--page-gutter) var(--space-xs);
     }
 
     .tl-group-header {
-        padding: 0 var(--space-lg) var(--space-sm);
+        padding: 0 var(--page-gutter) var(--space-sm);
         font-size: var(--fs-md);
-    }
-
-    .tl-photo-row {
-        left: 12px !important;
-        right: 12px !important;
     }
 }
 
