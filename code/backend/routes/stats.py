@@ -143,6 +143,8 @@ OTD_SECONDS = 2.0
 BY_DATE_LIMIT = 20
 BY_DATE_MAX_FOLDERS = 2000
 BY_DATE_SECONDS = 4.0
+SEARCH_MAX_FOLDERS = 5000   # a name search that finds nothing stops after this many folders
+SEARCH_SECONDS = 4.0        # ... or after this long, and then answers complete: false
 
 
 def _roots(folders: Optional[List[str]]) -> List[Path]:
@@ -330,11 +332,18 @@ def search_photos(query: str, limit: int = 5) -> Dict[str, Any]:
     """
     wanted = _search_key(query)
     if not wanted:
-        return {"photos": []}
+        return {"photos": [], "complete": True}
     limit = max(1, min(limit, 50))
     results = []
+    # A name that matches nothing would otherwise walk the whole archive (minutes on a big
+    # disk); like on-this-day there is a budget, and the answer says when it ran out
+    deadline = time.monotonic() + SEARCH_SECONDS
+    walked = 0
 
     for root, dirs, files in walk_archive(config.VAULT_ROOT, config):
+        walked += 1
+        if walked > SEARCH_MAX_FOLDERS or time.monotonic() > deadline:
+            return {"photos": results, "complete": False}
         dirs.sort()
         for filename in sorted(files):
             if is_photo(Path(filename)) and wanted in _search_key(filename):
@@ -344,9 +353,9 @@ def search_photos(query: str, limit: int = 5) -> Dict[str, Any]:
                     "type": "photo",
                 })
                 if len(results) >= limit:
-                    return {"photos": results}
+                    return {"photos": results, "complete": True}
 
-    return {"photos": results}
+    return {"photos": results, "complete": True}
 
 
 def _search_key(text: str) -> str:

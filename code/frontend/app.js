@@ -3154,9 +3154,12 @@ function chatShowPhotos(url, size, titleOf, emptyText, limit) {
         .then(data => {
             loading.remove();
             const photos = (data.photos || []).slice(0, limit);
+            // complete: false = de server stopte na zijn tijdsbudget, niet het hele archief is bekeken
+            const partly = data.complete === false
+                ? ' Ik heb binnen de tijd niet het hele archief kunnen doorzoeken.' : '';
             chatMessages.appendChild(photos.length > 0
                 ? chatPhotoGrid(photos, size, titleOf)
-                : chatBubble(emptyText));
+                : chatBubble(emptyText + partly));
             chatMessages.scrollTop = chatMessages.scrollHeight;
         })
         .catch(err => {

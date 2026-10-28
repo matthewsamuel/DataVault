@@ -98,3 +98,39 @@ def test_web_pages_and_svgs_from_the_archive_are_downloads_never_pages(client, v
     r = client.get("/api/file", params={"path": str(song)}, headers={"Range": "bytes=0-9"})
     assert r.status_code == 206 and len(r.content) == 10
     assert r.headers["content-type"].startswith("audio/") and "content-disposition" not in r.headers
+
+
+def test_a_name_search_that_finds_nothing_stops_at_its_budget(client, monkeypatch):
+    """A miss used to walk the whole archive; now it stops after SEARCH_MAX_FOLDERS folders
+    (or SEARCH_SECONDS) and says the answer is not complete."""
+    from backend.routes import stats
+    walked = []
+    real_walk = stats.walk_archive
+
+    def counting_walk(*args, **kwargs):
+        for step in real_walk(*args, **kwargs):
+            walked.append(step[0])
+            yield step
+    monkeypatch.setattr(stats, "walk_archive", counting_walk)
+
+    body = client.get("/api/stats/search-photos", params={"query": "bestaat-nergens"}).json()
+    assert body == {"photos": [], "complete": True}
+    everything = len(walked)
+    assert everything > 5
+
+    walked.clear()
+    monkeypatch.setattr(stats, "SEARCH_MAX_FOLDERS", 3)
+    body = client.get("/api/stats/search-photos", params={"query": "bestaat-nergens"}).json()
+    assert body == {"photos": [], "complete": False}
+    assert len(walked) <= 4                      # stopped instead of walking all folders
+
+    walked.clear()
+    monkeypatch.setattr(stats, "SEARCH_MAX_FOLDERS", 10_000)
+    monkeypatch.setattr(stats, "SEARCH_SECONDS", -1)
+    body = client.get("/api/stats/search-photos", params={"query": "bestaat-nergens"}).json()
+    assert body["complete"] is False and len(walked) == 1
+
+    # A hit within the budget is still found and complete
+    monkeypatch.setattr(stats, "SEARCH_SECONDS", 4.0)
+    body = client.get("/api/stats/search-photos", params={"query": "strand"}).json()
+    assert body["photos"] and body["complete"] is True

@@ -545,6 +545,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   halverwege weg), dan meldt hij dat de tijdlijn mogelijk onvolledig is en bewaart hij dat
   onvolledige antwoord niet meer. Voorheen bleef zo'n lege of halve tijdlijn staan, ook nadat de
   map weer leesbaar was, tot een herstart.
+- Foto's zoeken op naam (chat) doorzocht bij een naam die nergens voorkwam het hele archief, wat
+  op een grote schijf minuten kon duren. Nu stopt het zoeken na 5000 mappen of 4 seconden, net
+  als "op deze dag", en zegt Pasha erbij dat niet het hele archief doorzocht is.
 - Panorama's en scans boven 600 megapixel staan nu op hun EXIF-datum in de tijdlijn en bij "op
   deze dag". Voorheen kregen ze voorgoed hun bestandsdatum, omdat de app hun EXIF niet las.
 - "Op deze dag" doet per bezoek een begrensde hoeveelheid werk (eerst wat de app al weet, daarna
