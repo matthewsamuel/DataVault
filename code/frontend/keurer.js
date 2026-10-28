@@ -18,6 +18,7 @@ let keurerMoveHighlightIndex = -1;
 let keurerHistory = [];
 const KEURER_UNDO_MAX = 20;
 let keurerUndoBusy = false;
+let keurerMoveBusy = false;   // één verplaatsverzoek tegelijk (Enter in zoekveld én boom)
 
 // ==================== INITIALISATIE ====================
 
@@ -536,7 +537,6 @@ async function keurerOpenMoveModal() {
     tree.forEach(f => keurerRenderMoveFolderNode(treeContainer, f, 0));
 
     // Keyboard nav via centraal systeem
-    if (window._keurerMoveNav) window._keurerMoveNav.nav.resetIndex();
     window._keurerMoveNav = activateFolderTreeModal({
         modalId: 'modal-keurer-move',
         containerId: 'keurer-move-folder-tree',
@@ -775,6 +775,7 @@ function keurerRenderMoveFolderNode(container, folder, depth) {
 }
 
 function keurerCloseMoveModal() {
+    if (keurerMoveBusy) return; // het antwoord van de server sluit de modal
     document.getElementById('modal-keurer-move').classList.remove('active');
     keurerMoveSelectedFolder = null;
     // Zoekbalk wissen
@@ -787,8 +788,9 @@ function keurerCloseMoveModal() {
 }
 
 async function keurerConfirmMove() {
-    if (!keurerMoveSelectedFolder) return;
+    if (keurerMoveBusy || !keurerMoveSelectedFolder) return;
     if (keurerIndex >= keurerFileQueue.length) return;
+    keurerMoveBusy = true;
 
     const file = keurerFileQueue[keurerIndex];
     const btn  = document.getElementById('btn-keurer-confirm-move');
@@ -833,6 +835,8 @@ async function keurerConfirmMove() {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check"></i> Verplaatsen';
         showToast('Fout', `Verplaatsen mislukt: ${e.message}`, 'error');
+    } finally {
+        keurerMoveBusy = false;
     }
 }
 
@@ -1082,7 +1086,6 @@ async function keurerOpenFolderPicker() {
     });
 
     // Keyboard nav
-    if (window._keurerFolderNav) window._keurerFolderNav.nav.resetIndex();
     window._keurerFolderNav = activateFolderTreeModal({
         modalId: 'modal-keurer-folder',
         containerId: 'keurer-folder-tree',

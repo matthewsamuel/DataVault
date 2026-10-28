@@ -70,7 +70,6 @@ function openFolderSelector() {
 
     modal.classList.add('active');
 
-    if (window._dupNav) window._dupNav.nav.resetIndex();
     window._dupNav = activateFolderTreeModal({
         modalId: 'modal-folder-selector',
         containerId: 'folder-selector-tree',

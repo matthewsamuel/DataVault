@@ -417,7 +417,7 @@ function initFolderTreeKeyNav(config) {
         clearHighlight();
     }
 
-    return { resetIndex, handleKeydown, attachTo: (el) => el.addEventListener('keydown', handleKeydown) };
+    return { resetIndex, handleKeydown };
 }
 
 
@@ -442,6 +442,14 @@ function activateFolderTreeModal(opts) {
 
     const modal = document.getElementById(modalId);
     if (modal) {
+        // Eén luisteraar per modal: die van een vorige keer openen eerst weghalen. Anders
+        // reageren alle oude navigaties (elk met een eigen markering) ook op Enter en kan
+        // een bestand in een andere map belanden dan de gemarkeerde.
+        if (modal._treeNav) {
+            modal.removeEventListener('keydown', modal._treeNav.handleKeydown);
+            modal._treeNav.resetIndex();
+        }
+        modal._treeNav = nav;
         modal.setAttribute('tabindex', '-1');
         modal.addEventListener('keydown', nav.handleKeydown);
         const focusEl = focusSelector ? modal.querySelector(focusSelector) : null;

@@ -410,6 +410,12 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   pijltjestoetsen toonden foto's uit een ander tabblad. Een foto uit de chat openen maakte
   daarna de Files-weergave kapot (klikken gaf een fout). Alle drie opgelost. Verplaats je een
   foto vanuit de tijdlijn, dan verdwijnt hij daar ook uit de lijst.
+- Verplaatsvenster: na een paar keer openen kon één Enter een bestand naar een andere map
+  sturen dan de gemarkeerde (en er gingen meerdere verplaatsverzoeken tegelijk). Nu reageert
+  elk venster maar één keer op een toets, en verstuurt dubbel Enter of dubbelklikken nooit een
+  tweede verzoek (ook in de Keurer). Tijdens een slideshow schuiven de pijltjestoetsen in het
+  verplaatsvenster de show niet meer door, en wordt na het verplaatsen precies die dia uit de
+  show gehaald.
 - Meldingen (toasts) staan nu altijd bovenop, ook boven de viewer en de slideshow.
 
 ### Shows
