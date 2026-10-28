@@ -59,6 +59,60 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   een deel van het archief af te lopen, en vinden dus altijd alles. Elke treffer wordt eerst nog op
   de schijf gecontroleerd.
 
+### Herstelcentrum: alles terugzetten op één plek
+- Nieuw tabblad **Herstel**: één lijst, nieuwste eerst, van alles wat de app in je archief verplaatste:
+  Keurer (prullenmand en verplaatsen), duplicaten opruimen en Verplaatsen in de viewer. Per actie zie
+  je wat waarheen ging en wanneer, met een knop **Terugzetten**. De app wist nooit iets; elk bestand
+  kan terug naar zijn oude plek.
+- Kan iets niet terug, dan staat erbij waarom: het bestand staat niet meer in de prullenmand of de
+  doelmap, er staat nu een ander bestand met dezelfde naam, of op de oude plek staat al een bestand.
+  Er wordt nooit iets overschreven en nooit een ander bestand "teruggezet".
+- Verplaatsen in de viewer kon tot nu toe niet ongedaan worden; dat kan nu ook, vanuit het
+  Herstelcentrum. Na het verplaatsen zegt de melding waar je het terugvindt.
+- Bij Duplicaten staat naast Herstellen een knop naar het Herstelcentrum.
+- Volgende functies die bestanden verplaatsen (zoals "beste bewaren" bij bijna-duplicaten en de
+  assistent) komen vanzelf in dezelfde lijst.
+
+### Toetsenbord
+- Eén vaste set sneltoetsen in de hele app; **?** toont ze allemaal:
+  - **1** tot **9** of **g** + letter (g b Bestanden, g t Tijdlijn, g r Herstel, ...) gaat naar een tabblad;
+  - **/** gaat naar het zoekveld en **t** wisselt het thema (Auto, Licht, Donker);
+  - in de viewer: **←** **→** bladeren, **+** **−** **0** zoomen, **m** verplaatsen en **f** toon in Finder.
+- Het raster van Bestanden en de tijdlijn werken met de pijltjes, Home/End en PageUp/PageDown; Enter
+  of spatie opent een map of foto, Backspace gaat in Bestanden een map omhoog. In de tijdlijn blijft
+  de kolom gelijk als je met ↑ ↓ over een maand heen gaat.
+- Geen sneltoets doet iets terwijl je in een invoerveld typt, of samen met Cmd, Ctrl of Alt.
+- Elk venster houdt de focus binnen zich (Tab gaat rond), **Esc** sluit alleen het bovenste venster,
+  en daarna staat de focus weer waar hij was: op de foto in het raster of in het chatvak. Na het
+  sluiten van een foto die vanuit de chat geopend werd, kun je dus meteen verder typen.
+- Overal een duidelijke focusrand als je met het toetsenbord werkt. Het themamenu, de mapkeuze van
+  de tijdlijn, de opslagwidget, Shows-kaarten en de Spotify-tegels werken ook met het toetsenbord.
+
+### Instellingen
+- Nieuw: **Instellingen** (het tandwiel rechtsboven, of 9). Eén plek voor het thema, het taalmodel van
+  Pasha, de bibliotheek (stand en "Alles controleren"), de Shows-bronnen en een link naar het
+  Herstelcentrum. Volgende onderdelen (kaart, zoeken op beeld, back-ups) krijgen hier hun eigen stuk.
+
+### Duidelijker scherm
+- Lege schermen zeggen wat er aan de hand is en wat je kunt doen ("Deze map is leeg", "Niets
+  gevonden", "Kies mappen voor je tijdlijn"); iets dat niet laadde toont de reden en **Opnieuw
+  proberen**.
+- Tijdens het laden staan er grijze plaatshouders in de vorm van wat er komt, in plaats van een leeg
+  vlak of een draaiend rondje.
+- Meldingen tonen de titel met een sluitknop en daaronder de tekst. Fouten en waarschuwingen blijven
+  langer staan, met de muis erop blijft een melding staan, en een fout wordt meteen voorgelezen.
+- De rest van de app is nu ook Nederlands (tabbladen, knoppen, vensters, maanden in de tijdlijn,
+  Spotify-koppen). Knoppen met alleen een icoon hebben een uitleg bij de muis en voor schermlezers.
+- Het opslagoverzicht toont groottes als KB, MB of GB: een map van een paar MB staat er nu gewoon in
+  (was 0,00 GB of ontbrak), net als kleine bestanden bij de grootste bestanden.
+
+### Licht en donker thema
+- Elk scherm, venster en het takenpaneel zijn in beide thema's nagelopen. Alle tekst haalt nu het
+  WCAG AA-contrast (minstens 4,5:1). Het groen in het lichte thema is donkerder (het oude groen was als
+  tekst slecht leesbaar), grijze en rode tekst zijn bijgesteld, en de kop "Collecties" bij Shows was in
+  het lichte thema wit op wit.
+- Het thema kies je ook met het toetsenbord (menu met pijltjes, of **t**) en in Instellingen.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden
@@ -703,9 +757,10 @@ Bekend, maar bewust nog niet in fase 2 opgelost:
   zonder bladeren), en het scannen ervan is nog geen achtergrondtaak. *(Opgelost in fase 3: de
   tijdlijn leest uit de bibliotheek en laadt per pagina.)*
 - Het opslagoverzicht laat mappen kleiner dan ongeveer 5 MB weg, omdat het in hele GB's met twee
-  decimalen rekent (zo'n map wordt 0,00 GB).
+  decimalen rekent (zo'n map wordt 0,00 GB). *(Opgelost in fase 3: het
+  overzicht rekent in bytes en toont KB, MB of GB.)*
 - Na het sluiten van een foto die vanuit de chat geopend werd, staat de cursor niet meteen weer
-  in het chatvak.
+  in het chatvak. *(Opgelost in fase 3: de focus gaat terug naar het chatvak.)*
 - Start je een tweede server op hetzelfde archief (met de hand, op een andere poort), dan ziet
   die bij het opstarten de lopende taken van de eerste als "onderbroken".
 - Twee oudere opdrachten (`/api/duplicates/delete_single` en `/api/duplicates/scan_folder`, niet

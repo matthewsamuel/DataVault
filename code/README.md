@@ -95,7 +95,7 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Scan een map op byte voor byte identieke bestanden (grootte, dan xxHash3; vlak voor elke verplaatsing een volledige vergelijking)
 - Per groep kies je welke kopie blijft (regel of zelf aanklikken)
 - Duplicaten verplaatsen naar RAW_DUPLICATES (structuur behouden), nooit wissen
-- Elke opruimactie is in één keer terug te zetten (Herstellen)
+- Elke opruimactie is in één keer terug te zetten (Herstellen, of in het Herstelcentrum)
 
 ### Bibliotheek (media-index)
 - De app houdt een index bij van elke foto, video en audiobestand in het archief (datum, afmetingen,
@@ -111,6 +111,30 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Een bestand dat weg is, wordt eerst verborgen en pas aan het eind van een ronde uit de index
   gehaald. De index leest alleen; hij verplaatst of wist nooit een bestand.
 - `DATAVAULT_AUTO_INDEX=0` zet het automatisch bijwerken uit (de tests doen dat).
+
+### Herstelcentrum
+- Eén lijst (tab **Herstel**, sneltoets 8) van alles wat de app in het archief verplaatste: Keurer
+  (prullenmand, verplaatsen), duplicaten opruimen en Verplaatsen in de viewer, nieuwste eerst, met per
+  actie wat waarheen ging en een knop **Terugzetten**. Kan iets niet terug (weg, een ander bestand op
+  die plek, de oude plek bezet), dan staat de reden erbij. Er wordt nooit iets overschreven.
+- `GET /api/recovery?offset=&limit=` geeft de lijst; elke regel noemt zelf het verzoek dat hem
+  terugzet (`undo: {url, body}`): `/api/keurer/undo`, `/api/duplicates/undo` of `/api/recovery/undo`.
+- Een nieuwe soort verplaatsing (bijv. bijna-duplicaten "beste bewaren", verplaatsingen door de
+  assistent) heeft geen eigen tabel, route of scherm nodig: `recovery.register_kind("soort", "Label")`
+  en per verplaatst bestand `ActionRecorder.add(src, dst)` direct na `move_no_overwrite` (zie de uitleg
+  bovenin `backend/recovery.py`; migratie 12 bevat de gedeelde tabellen).
+
+### Toetsenbord, instellingen en thema's
+- `1`–`9` of `g` + letter wisselt van tabblad, `/` gaat naar het zoekveld, `t` wisselt het thema, `?`
+  toont alle sneltoetsen. Pijltjes, Home/End en PageUp/PageDown bewegen door het raster van Bestanden en
+  de tijdlijn; Enter of spatie opent. Geen sneltoets werkt terwijl je typt.
+- Elk venster houdt de focus binnen zich, Escape sluit het bovenste, en de focus gaat daarna terug
+  waar hij was (`frontend/ui.js`).
+- **Instellingen** (tandwiel, sneltoets 9): thema, taalmodel, bibliotheek, Shows-bronnen. Een nieuw
+  onderdeel voegt een stuk toe met `registerSettingsSection({id, title, icon, order, description, render})`
+  (uitleg bovenin `frontend/settings.js`).
+- Beide thema's halen WCAG AA-contrast voor alle zichtbare tekst; de rooktest controleert dat op elk
+  scherm (`tests/ui/a11y_checks.js`).
 
 ### Achtergrondtaken
 - Duplicaten zoeken, vooraf indexeren, miniaturen maken en de bibliotheek bijwerken lopen als taak op de achtergrond
@@ -128,7 +152,7 @@ python3 tests/ui/smoke_webkit.py chromium      # of in Chromium; --headed om mee
 
 De rooktest bouwt zelf een wegwerp-testkluis, start een eigen server op een vrije poort
 (`DATAVAULT_TESTING=1`), klikt door alle tabbladen (en viewer, verplaatsvenster, chat,
-thema's, Shows) en faalt bij elke JavaScript-fout, consolefout of mislukte API-aanroep. Hij
+thema's, Shows, sneltoetsen, Herstelcentrum, Instellingen, contrast in beide thema's) en faalt bij elke JavaScript-fout, consolefout of mislukte API-aanroep. Hij
 heeft een Python met Playwright nodig (`pip install playwright && playwright install webkit`)
 en wordt niet door pytest meegenomen.
 

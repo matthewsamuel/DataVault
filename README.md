@@ -79,7 +79,8 @@ backend/
 ├── file_ops.py                # Safe atomic file operations with metadata preservation
 ├── thumbnail.py               # Thumbnail generation (PIL) with cache validation, atomic writes
 ├── jobs.py                    # JobManager: background jobs with progress, cancel, pause, resume, vault wait
-├── job_types.py               # The job types: dup_scan, hashing, thumbnails
+├── job_types.py               # The job types: dup_scan, hashing, thumbnails, index
+├── recovery.py                # Recovery center registry: providers, ActionRecorder, undo of shared records
 │
 └── routes/
     ├── folders.py             # Folder tree enumeration, recursive traversal
@@ -90,6 +91,7 @@ backend/
     ├── shows.py               # Slideshow generation, weighted sampling, ELO ratings
     ├── chat.py                # LLM chat with Ollama, context injection, action tags, streaming
     ├── keurer.py              # Photo curation endpoints, streak calculation, undo support
+    ├── recovery.py            # GET /api/recovery (every undoable move), POST /api/recovery/undo
     ├── stats.py               # Statistics aggregation, general analytics
     └── timeline.py            # Chronological media browsing, date indexing, virtual scrolling
 ```
@@ -105,9 +107,10 @@ backend/
 
 ```
 frontend/
-├── index.html                 # 6 main sections: home, viewer, duplicates, spotify, shows, keurer, timeline
+├── index.html                 # 9 main sections: home, viewer, duplicates, spotify, shows, keurer, timeline, recovery, settings
 ├── api.js                     # Adds the session token to every write (loaded first)
 ├── dom.js                     # Safe DOM helpers: createEl, html`...`, setHTML (loaded second)
+├── ui.js                      # Empty/error/skeleton states; focus trap, Escape and focus return for every overlay
 ├── app.js                     # Core state management, view switching, prefetch caching
 ├── style.css                  # Responsive design (Flexbox/Grid), theme system, animations
 ├── keurer.js                  # Photo curator UI, swipe detection, undo history
@@ -115,6 +118,9 @@ frontend/
 ├── timeline.js                # Timeline UI, virtual scrolling, slider navigation
 ├── wave-background.js         # Animated background (only while visible; still with reduced motion)
 ├── resizable-sidebar.js       # Interactive folder tree sidebar
+├── recovery.js                # Herstelcentrum: one chronological list of reversible actions with undo
+├── settings.js                # Instellingen: sections register with registerSettingsSection()
+├── shortcuts.js               # Keyboard scheme (1-9, g + letter, /, t, ?) and the shortcut overview
 └── vendor/                    # Font Awesome 6.4.0 and JetBrains Mono, with licenses (no CDN)
 ```
 
