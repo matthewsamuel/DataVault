@@ -70,6 +70,14 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   alle zichtbare kopieën als duplicaat werden aangeboden. Verborgen bestanden doen nu niet meer
   mee aan de scan.
 
+- Herstarten via het DataVault-logo vraagt nu eerst om bevestiging. Het herstart alleen de
+  eigen server: voorheen werd alles op poort 8000 hard afgesloten (ook andere programma's) en
+  altijd op poort 8000 opnieuw gestart. Nu wacht een hulpproces tot de server gestopt is en
+  start hem met precies dezelfde instellingen opnieuw.
+- Het wachtscherm tijdens herstarten herkent de nieuwe server (en niet de oude die nog even
+  antwoordt), stopt met controleren zodra hij terug is en toont na 30 seconden een melding
+  met een knop om het scherm te sluiten, in plaats van eindeloos te blijven wachten.
+
 ### Foto Keurer
 - Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het
   bestand naartoe ging (prullenmand of doelmap). Undo stuurt alleen nog het nummer van de

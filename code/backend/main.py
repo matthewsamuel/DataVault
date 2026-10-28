@@ -7,6 +7,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pathlib import Path
 from typing import Optional
 import os
+import uuid
 
 # Ensure ffmpeg is in PATH for video thumbnails
 if '/usr/local/bin' not in os.environ.get('PATH', ''):
@@ -19,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend import file_ops, security
+from backend import file_ops, restart, security
 from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline
 
 
@@ -44,6 +45,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     # No CORS: the frontend is served same-origin, so no other website may read the API.
     # Every state-changing request needs this process's session token (see backend/security.py).
     app.state.session_token = security.new_session_token()
+    app.state.instance_id = uuid.uuid4().hex
     app.add_middleware(security.SessionTokenMiddleware, token=app.state.session_token)
     # Added last = outermost: a foreign Host header (DNS rebinding) is refused first
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=security.allowed_hosts())
@@ -121,42 +123,17 @@ core_router = APIRouter()
 
 
 @core_router.post("/api/restart")
-async def restart_server():
+def restart_server():
     """
-    Sluit de huidige server af en start hem opnieuw op.
-    Spawnt een los achtergrondproces dat na 1s de server herstart.
+    Herstart alleen dit serverproces (nooit iets anders op poort 8000 of elders).
+    Een hulpproces wacht tot dit proces gestopt is en start de server dan opnieuw
+    met dezelfde Python, argumenten, werkmap en omgeving (zie backend/restart.py).
+    Vereist het sessietoken, zoals elk POST-verzoek.
     """
-    import subprocess, sys, os
-
-    # Pad naar de project-root (één niveau boven backend/)
-    project_root = str(Path(__file__).parent.parent)
-    python_exec  = sys.executable
-
-    # Shell-script dat wacht, alle processen op poort 8000 doodt, en opnieuw opstart
-    script = f"""#!/bin/bash
-sleep 1
-# Dood alle processen op poort 8000 (inclusief reloader parent/child)
-PIDS=$(lsof -ti :8000 2>/dev/null)
-if [ -n "$PIDS" ]; then
-    kill $PIDS 2>/dev/null
-    sleep 0.5
-    kill -9 $PIDS 2>/dev/null
-fi
-sleep 1
-cd "{project_root}"
-export PATH="/usr/local/bin:$PATH"
-nohup "{python_exec}" -m uvicorn --factory backend.main:create_app \\
-    --host 127.0.0.1 --port 8000 \\
-    >> /tmp/datavault_server.log 2>&1 &
-"""
-    subprocess.Popen(
-        ['bash', '-c', script],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    return {"status": "restarting"}
+    try:
+        return restart.schedule_restart()
+    except restart.RestartNotPossible as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @core_router.get("/api/health")
@@ -170,6 +147,9 @@ async def health_check(request: Request):
 
     return {
         "status": "running",
+        # Changes on every (re)start, so the page can tell the new process from the old one
+        "instance": request.app.state.instance_id,
+        "pid": os.getpid(),
         "vault_available": path_status["vault_root"],
         "vault_path": str(config.VAULT_ROOT),
         "paths": path_status

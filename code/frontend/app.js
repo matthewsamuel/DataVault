@@ -1542,41 +1542,72 @@ function saveOtdSettings() {
 
 // ==================== SERVER RESTART ====================
 
+// Hoe lang de pagina op de herstarte server wacht voordat ze een foutmelding toont
+const RESTART_TIMEOUT_MS = 30000;
+const RESTART_POLL_MS = 600;
+
+function setBrandRestarting(active) {
+    const brand = document.querySelector('.nav-brand');
+    if (!brand) return;
+    if (active) {
+        brand.dataset.restarting = '1';
+        brand.style.opacity = '0.5';
+        brand.style.cursor = 'wait';
+        brand.title = 'Server herstart...';
+    } else {
+        delete brand.dataset.restarting;
+        brand.style.opacity = '';
+        brand.style.cursor = 'pointer';
+        brand.title = 'Server herstarten';
+    }
+}
+
 async function restartServer() {
     const brand = document.querySelector('.nav-brand');
 
     // Dubbele klik beveiliging
     if (brand && brand.dataset.restarting) return;
-    if (brand) {
-        brand.dataset.restarting = '1';
-        brand.style.opacity = '0.5';
-        brand.style.cursor = 'wait';
-        brand.title = 'Server herstart...';
-    }
+    if (!confirm('DataVault-server herstarten?\n\nDe app is dan een paar seconden niet bereikbaar.')) return;
+
+    setBrandRestarting(true);
+
+    // Onthoud welk serverproces nu draait: de poll wacht op een NIEUW proces,
+    // niet op het oude dat vlak na het verzoek nog even antwoordt
+    let oldInstance = null;
+    try {
+        const health = await fetch(`${API_BASE}/api/health`, { cache: 'no-store' });
+        if (health.ok) oldInstance = (await health.json()).instance || null;
+    } catch (_) { /* server niet bereikbaar; poll hieronder wacht gewoon */ }
 
     try {
-        await fetch(`${API_BASE}/api/restart`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/api/restart`, { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            setBrandRestarting(false);
+            showToast('Herstarten mislukt', err.detail || `Serverfout (${res.status})`, 'error');
+            return;
+        }
     } catch (_) {
-        // Verwacht — server valt weg vóór response
+        // Kan gebeuren als de server wegvalt vóór het antwoord binnen is
     }
 
-    // Toon overlay en poll tot server terug is
-    showRestartOverlay();
+    // Toon overlay en poll tot de nieuwe server er is (of tot de time-out)
+    showRestartOverlay(oldInstance);
 }
 
-function showRestartOverlay() {
+function showRestartOverlay(oldInstance) {
     let overlay = document.getElementById('restart-overlay');
     if (!overlay) {
         overlay = document.createElement('div');
         overlay.id = 'restart-overlay';
-        overlay.innerHTML = `
-            <div class="restart-box">
-                <div class="loading-spinner" style="width:32px;height:32px;margin:0 auto 14px;"></div>
-                <div class="restart-title">Server herstart...</div>
-                <div class="restart-sub" id="restart-sub">Even geduld</div>
-            </div>`;
         document.body.appendChild(overlay);
     }
+    overlay.innerHTML = `
+        <div class="restart-box">
+            <div class="loading-spinner" id="restart-spinner" style="width:32px;height:32px;margin:0 auto 14px;"></div>
+            <div class="restart-title" id="restart-title">Server herstart...</div>
+            <div class="restart-sub" id="restart-sub">Even geduld</div>
+        </div>`;
     overlay.style.display = 'flex';
 
     let dots = 0;
@@ -1586,25 +1617,54 @@ function showRestartOverlay() {
         if (subEl) subEl.textContent = 'Even geduld' + '.'.repeat(dots);
     }, 400);
 
-    // Poll elke 600ms tot server antwoordt
-    const poll = setInterval(async () => {
+    const startedAt = Date.now();
+
+    const succeed = () => {
+        clearInterval(dotTimer);
+        overlay.style.display = 'none';
+        setBrandRestarting(false);
+        // Nieuw proces = nieuw sessietoken; alvast ophalen (api.js zou het anders bij het
+        // eerstvolgende wijzigende verzoek doen)
+        if (window.DataVaultSession) window.DataVaultSession.refresh().catch(() => {});
+        showToast('DataVault', 'Server succesvol herstart', 'success');
+    };
+
+    const giveUp = () => {
+        clearInterval(dotTimer);
+        setBrandRestarting(false);
+        const spinner = document.getElementById('restart-spinner');
+        if (spinner) spinner.remove();
+        document.getElementById('restart-title').textContent = 'Server reageert niet';
+        subEl.textContent = `Na ${RESTART_TIMEOUT_MS / 1000} seconden is de server nog niet terug. `
+            + 'Start DataVault opnieuw met start.sh of de DataVault-app.';
+        const close = document.createElement('button');
+        close.className = 'btn btn-secondary';
+        close.style.marginTop = '16px';
+        close.textContent = 'Sluiten';
+        close.onclick = () => { overlay.style.display = 'none'; };
+        overlay.querySelector('.restart-box').appendChild(close);
+    };
+
+    // Eén poll tegelijk (setTimeout i.p.v. setInterval), stopt na succes of time-out
+    const poll = async () => {
         try {
             const res = await fetch(`${API_BASE}/api/health`, { cache: 'no-store' });
             if (res.ok) {
-                clearInterval(poll);
-                clearInterval(dotTimer);
-                overlay.style.display = 'none';
-                const brand = document.querySelector('.nav-brand');
-                if (brand) {
-                    delete brand.dataset.restarting;
-                    brand.style.opacity = '';
-                    brand.style.cursor = 'pointer';
-                    brand.title = 'Server herstarten';
+                const data = await res.json();
+                if (!oldInstance || data.instance !== oldInstance) {
+                    succeed();
+                    return;
                 }
-                showToast('DataVault', 'Server succesvol herstart', 'success');
             }
         } catch (_) { /* nog niet klaar */ }
-    }, 600);
+
+        if (Date.now() - startedAt >= RESTART_TIMEOUT_MS) {
+            giveUp();
+            return;
+        }
+        setTimeout(poll, RESTART_POLL_MS);
+    };
+    setTimeout(poll, RESTART_POLL_MS);
 }
 
 // ==================== INITIALIZATION ====================
