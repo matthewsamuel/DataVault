@@ -1103,20 +1103,23 @@ let searchTimer = null;
 
 function queueGlobalSearch(query) {
     clearTimeout(searchTimer);
-    // Het zoekveld zoekt (nog) alleen in de map die in Bestanden open is. Op een ander scherm
-    // filtert typen niets weg dat je niet ziet: Enter opent Bestanden en zoekt daar.
+    // In Bestanden filtert typen de geopende map. Op een ander scherm filtert typen niets weg
+    // dat je niet ziet: Enter opent het zoekvenster (search.js) voor de hele bibliotheek.
     if (currentMainView() !== 'viewer') return;
     searchTimer = setTimeout(() => handleGlobalSearch(query), SEARCH_DEBOUNCE_MS);
 }
 
+// Enter: zoeken in de hele bibliotheek (Slim zoeken of op bestandsnaam), ook vanuit Bestanden
 function globalSearchKeydown(event) {
     const input = event.currentTarget;
-    if (event.key !== 'Enter' || currentMainView() === 'viewer' || !input.value.trim()) return;
+    if (event.key !== 'Enter' || !input.value.trim()) return;
     event.preventDefault();
-    const query = input.value;
+    if (typeof openSearch === 'function') {
+        openSearch(input.value);
+        return;
+    }
     switchMainView('viewer');
-    input.value = query;
-    handleGlobalSearch(query);
+    handleGlobalSearch(input.value);
 }
 
 // Wat het zoekveld doet, zichtbaar in de plaatshouder en (op andere schermen) de Enter-hint
@@ -1124,9 +1127,9 @@ function updateSearchFieldForView(view) {
     const input = document.getElementById('global-search');
     if (!input) return;
     const here = view === 'viewer';
-    input.placeholder = here ? 'Zoek in deze map…' : 'Zoek in Bestanden…';
-    input.setAttribute('aria-label', here ? 'Zoek in de geopende map (sneltoets /)'
-        : 'Zoek in de geopende map van Bestanden: typ en druk op Enter (sneltoets /)');
+    input.placeholder = here ? 'Zoek in deze map…' : 'Zoek in je foto\u2019s…';
+    input.setAttribute('aria-label', here ? 'Zoek in de geopende map; Enter zoekt in de hele bibliotheek (sneltoets /)'
+        : 'Zoek in de hele bibliotheek: typ en druk op Enter (sneltoets /)');
     input.closest('.search-field').classList.toggle('search-elsewhere', !here);
 }
 
@@ -1272,6 +1275,7 @@ function renderViewerFile() {
     if (media) modalBody.insertBefore(media, modalBody.firstChild);
 
     modalMetadata.replaceChildren(viewerMetadata(file));
+    if (typeof searchViewerChanged === 'function') searchViewerChanged(file);
 }
 
 // Alleen echte gegevens: de datum van het bestand (of de opnamedatum uit de tijdlijn) en

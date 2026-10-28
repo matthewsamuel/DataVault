@@ -125,9 +125,10 @@ function noticeJob(job) {
     }
 }
 
-// Een automatische bijwerkronde van de bibliotheek (door de app zelf gestart)
+// Een automatische ronde (door de app zelf gestart): de bibliotheek bijwerken, of foto's
+// herkennen voor Slim zoeken
 function jobIsAuto(job) {
-    return job.type === 'index' && !!(job.params && job.params.auto);
+    return (job.type === 'index' || job.type === 'semantic') && !!(job.params && job.params.auto);
 }
 
 async function jobsLibraryRefresh() {
