@@ -32,7 +32,7 @@ import threading
 import unicodedata
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Iterator, List, Optional, Set, Tuple
+from typing import Any, Callable, Iterator, List, Optional, Set, Tuple
 
 from fastapi import HTTPException
 
@@ -291,11 +291,18 @@ def scan_dir(folder: Path, archive_filter: ArchiveFilter) -> List[os.DirEntry]:
         return [entry for entry in it if not archive_filter.skip(entry)]
 
 
-def walk_archive(top, config, archive_filter: Optional[ArchiveFilter] = None) -> Iterator[Tuple[str, List[str], List[str]]]:
+def walk_archive(
+    top,
+    config,
+    archive_filter: Optional[ArchiveFilter] = None,
+    onerror: Optional[Callable[[str, OSError], None]] = None,
+) -> Iterator[Tuple[str, List[str], List[str]]]:
     """
     Drop-in for os.walk(top) over the archive: yields (root, dirnames, filenames)
     top-down, never yields or enters excluded entries, never follows symlinks.
-    Callers may prune dirnames in place, as with os.walk. Unreadable folders are skipped.
+    Callers may prune or sort dirnames in place, as with os.walk. Unreadable folders
+    and entries are skipped; onerror(path, error) is told about each one, so a caller
+    that must not miss files (the duplicate scan) can count and report them.
     """
     archive_filter = archive_filter or ArchiveFilter(config)
     stack = [str(top)]
@@ -310,9 +317,13 @@ def walk_archive(top, config, archive_filter: Optional[ArchiveFilter] = None) ->
                         dirnames.append(entry.name)
                     elif entry.is_file(follow_symlinks=False):
                         filenames.append(entry.name)
-                except OSError:
+                except OSError as e:
+                    if onerror:
+                        onerror(entry.path, e)
                     continue
-        except OSError:
+        except OSError as e:
+            if onerror:
+                onerror(root, e)
             continue
         yield root, dirnames, filenames
         stack.extend(os.path.join(root, d) for d in reversed(dirnames))
