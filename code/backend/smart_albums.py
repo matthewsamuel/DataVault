@@ -12,6 +12,8 @@ this table (app_settings 'smart_albums_defaults'). The user can hide or delete t
 like any album; restore_defaults() adds the missing ones again and shows them all.
 A default whose name the user has given to an album of their own comes back with a
 number after it ("Video's (2)"): two albums never share a name.
+When a later version changes a default's filter (UPGRADES), an unchanged default is
+updated once; one the user changed is left alone.
 
 Counts: count() of every album for the sidebar is cached per album until the index
 changes (media_index.generation()) or COUNT_SECONDS pass (ratings and Keurer decisions
@@ -25,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from backend import library_filters, media_index
 
 DEFAULTS_KEY = "smart_albums_defaults"
-DEFAULTS_VERSION = 1
+DEFAULTS_VERSION = 2
 MAX_ALBUMS = 200
 MAX_NAME = 80
 COUNT_SECONDS = 30.0
@@ -36,8 +38,13 @@ DEFAULTS: List[Tuple[str, str, Dict[str, Any], str, str]] = [
     ("videos", "Video's", {"kind": ["video"]}, "-taken", "fa-video"),
     ("undated", "Zonder datum", {"capture_date": "missing"}, "-taken", "fa-calendar-xmark"),
     ("located", "Met locatie", {"has_gps": True}, "-taken", "fa-location-dot"),
-    ("this_year", "Dit jaar", {"period": "this_year"}, "-taken", "fa-calendar-day"),
+    ("this_year", "Dit jaar", {"period": "this_year", "capture_date": "known"}, "-taken", "fa-calendar-day"),
     ("iphone", "iPhone", {"camera_contains": "iPhone"}, "-taken", "fa-mobile-screen"),
+]
+# (version, builtin key, filter before, filter after): applied once to an untouched default
+UPGRADES: List[Tuple[int, str, Dict[str, Any], Dict[str, Any]]] = [
+    # 'Dit jaar' counted files dated only by the day they were copied (version 2)
+    (2, "this_year", {"period": "this_year"}, {"period": "this_year", "capture_date": "known"}),
 ]
 DEFAULT_ICON = "fa-images"
 # The icons an album may have (shown as a Font Awesome class; never free text)
@@ -73,13 +80,28 @@ def _row(row) -> Dict[str, Any]:
 def ensure_defaults(db) -> bool:
     """Add the default albums once (never again after the user deleted one). True if added."""
     try:
-        if (db.get_setting(DEFAULTS_KEY, 0) or 0) >= DEFAULTS_VERSION:
+        done = db.get_setting(DEFAULTS_KEY, 0) or 0
+        if done >= DEFAULTS_VERSION:
             return False
     except Exception:
         return False
-    added = _add_defaults(db, unhide=False)
+    if done:
+        _upgrade_defaults(db, done)
+        added = 0
+    else:
+        added = _add_defaults(db, unhide=False)
     db.set_setting(DEFAULTS_KEY, DEFAULTS_VERSION)
     return added > 0
+
+
+def _upgrade_defaults(db, done: int) -> None:
+    """A default's newer filter, for the defaults the user did not change (filter still the old one)."""
+    now = time.time()
+    with db._connect() as conn:
+        for version, key, before, after in UPGRADES:
+            if version > done:
+                conn.execute("UPDATE smart_albums SET filters = ?, updated_at = ? WHERE builtin = ? AND filters = ?",
+                             (json.dumps(after, sort_keys=True), now, key, json.dumps(before, sort_keys=True)))
 
 
 def _free_name(conn, name: str) -> str:

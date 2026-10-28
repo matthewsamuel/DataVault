@@ -200,16 +200,17 @@ def on_this_day(date_: Optional[str] = Query(None, alias="date"),
     before this one, newest year first: {ready, month, day, year, total, years:
     [{year, years_ago, total, items}]}. Each year holds its first per_year items by
     capture time (total says how many there are). Capture dates are local wall-clock
-    time, as in the timeline. allowed_folders (one parameter per folder) limits it to
-    those folders, like the 'op deze dag' choice on Home. In a year that is not a
-    leap year, 28 February also shows the photos of 29 February.
+    time, as in the timeline, and only real ones count (EXIF or the video itself): a
+    file dated only by its copy day is no memory. allowed_folders (one parameter per
+    folder) limits it to those folders, like the 'op deze dag' choice on Home. In a
+    year that is not a leap year, 28 February also shows the photos of 29 February.
     """
     today = _today()
     day = _parse_day(date_)
     month_days = [(day.month, day.day)]
     if (day.month, day.day) == (2, 28) and not calendar.isleap(today.year):
         month_days.append((2, 29))
-    filters: Dict[str, Any] = {"kind": ["photo", "video"], "month_days": month_days,
+    filters: Dict[str, Any] = {"kind": ["photo", "video"], "capture_date": "known", "month_days": month_days,
                                "date_to": datetime(today.year, 1, 1).timestamp()}
     if allowed_folders:
         from backend.routes.timeline import selected_roots

@@ -558,3 +558,45 @@ def test_names_stay_unique_also_for_restored_defaults_and_beyond_ascii(indexed):
     other = client.post("/api/library/albums", json={"name": "Anders"}).json()
     assert client.patch(f"/api/library/albums/{other['id']}", json={"name": "ÜNÏCODE"}).status_code == 409
     assert client.patch(f"/api/library/albums/{other['id']}", json={"name": "anders"}).status_code == 200
+
+
+def test_on_this_day_and_dit_jaar_leave_out_files_dated_only_by_the_file(client, config, monkeypatch):
+    day = config.VAULT_ROOT / "RAW/dag"
+    _photo(day / "echt.jpg", (1, 1, 1), "exif", "2020:07:14 10:00:00")
+    copied = _photo(day / "kopie zonder exif.jpg", (2, 2, 2), "geen exif")
+    stamp = datetime(2021, 7, 14, 12, 0).timestamp()
+    os.utime(copied, (stamp, stamp))
+    _index(client)
+    # The copy really is dated 14 July 2021 by its file date (else this test proves nothing)
+    assert _names(_browse(client, folder="RAW/dag", date_from="2021-07-14", date_to="2021-07-14")) == [
+        "kopie zonder exif.jpg"]
+    data = _otd(client, monkeypatch, date(2026, 10, 28), date="07-14", allowed_folders=["RAW/dag"])
+    assert [(g["year"], [i["name"] for i in g["items"]]) for g in data["years"]] == [(2020, ["echt.jpg"])]
+    # The default 'Dit jaar' counts real capture dates only
+    this_year = next(a for a in _albums(client)["albums"] if a["builtin"] == "this_year")
+    assert this_year["filters"] == {"period": "this_year", "capture_date": "known"}
+    assert all(i["date_source"] in ("exif", "video") for i in _browse(client, album=this_year["id"])["items"])
+
+
+def test_an_unchanged_dit_jaar_from_before_is_updated_once(client, config, app):
+    import json
+    from backend import smart_albums
+    from backend.routes import albums
+    db = albums.db
+    with db._connect() as conn:
+        conn.execute("UPDATE smart_albums SET filters = ? WHERE builtin = 'this_year'",
+                     (json.dumps({"period": "this_year"}),))
+        conn.execute("UPDATE smart_albums SET filters = ? WHERE builtin = 'videos'",
+                     (json.dumps({"kind": ["video"], "year": 2019}),))
+    db.set_setting(smart_albums.DEFAULTS_KEY, 1)
+    assert smart_albums.ensure_defaults(db) is False
+    by_key = {a["builtin"]: a for a in _albums(client)["albums"]}
+    assert by_key["this_year"]["filters"] == {"period": "this_year", "capture_date": "known"}
+    assert by_key["videos"]["filters"] == {"kind": ["video"], "year": 2019}
+    assert len(by_key) == 6 and db.get_setting(smart_albums.DEFAULTS_KEY) == smart_albums.DEFAULTS_VERSION
+    # A user who changed 'Dit jaar' back keeps it that way (the upgrade ran once)
+    with db._connect() as conn:
+        conn.execute("UPDATE smart_albums SET filters = ? WHERE builtin = 'this_year'",
+                     (json.dumps({"period": "this_year"}),))
+    smart_albums.ensure_defaults(db)
+    assert {a["builtin"]: a for a in _albums(client)["albums"]}["this_year"]["filters"] == {"period": "this_year"}
