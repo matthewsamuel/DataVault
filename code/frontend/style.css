@@ -4321,7 +4321,20 @@ a.breadcrumb-item:hover {
 }
 
 .stat-label {
+    /* Onderaan de kaart: in een rij staan de labels op één lijn, ook als de ene waarde een
+       getal (mono, groot) is en de andere een woord (sans, kleiner) */
+    margin-top: auto;
     font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+/* Een eenheid achter een getal ('1,2 uur'): gewone letter, rustiger kleur */
+.stat-unit {
+    margin-left: var(--space-xs);
+    font-family: var(--font-sans);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-medium);
+    letter-spacing: normal;
     color: var(--text-secondary);
 }
 
@@ -4353,6 +4366,24 @@ a.breadcrumb-item:hover {
 .on-this-day-section h3 i {
     color: var(--spotify-text);
     font-size: var(--icon-sm);
+}
+
+/* Topartiesten en topnummers staan naast elkaar en zijn even hoog; de kortste lijst eindigt
+   met een rustige slotregel (spotifyListEnd) */
+.spotify-lists-container .spotify-list-section {
+    display: flex;
+    flex-direction: column;
+}
+
+.spotify-lists-container .spotify-list {
+    flex: 1;
+}
+
+.spotify-list-end {
+    padding: var(--space-md);
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+    text-align: center;
 }
 
 .spotify-list {

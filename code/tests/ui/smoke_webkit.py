@@ -476,8 +476,35 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("shows: close sources", lambda: page.evaluate("closeSettingsModal()"), 0.3)
             if page.query_selector(".shows-hero"):
                 step("shows: slideshow", lambda: page.click(".shows-hero"), 1.5)
+                # Title, details and progress bar have their own rows: the photo's row ends above them
+                for height in (768, 900):
+                    page.set_viewport_size({"width": 1024 if height == 768 else 1400, "height": height})
+                    page.wait_for_timeout(300)
+                    rows = page.evaluate("""(() => { const box = id => document.querySelector(id).getBoundingClientRect();
+                        return [box('.player-controls-top').bottom, box('#slide-container').top,
+                                box('#slide-container').bottom, box('.player-controls-bottom').top]; })()""")
+                    expect(rows[0] <= rows[1] + 1 and rows[2] <= rows[3] + 1,
+                           f"shows: slideshow chrome overlaps the photo at height {height} ({rows})")
+                page.set_viewport_size({"width": 1400, "height": 900})
+                expect(page.get_attribute(".elo-rating-badge", "aria-label", timeout=2000).startswith("Score "),
+                       "shows: the score badge has no name")
                 step("shows: next slide", lambda: page.keyboard.press("ArrowRight"), 0.8)
                 step("shows: close slideshow", lambda: page.keyboard.press("Escape"), 0.8)
+
+            # Spotify: both top lists show everything the export has (never cut to the shorter one),
+            # the shorter one ends with a quiet closing line, and the stat labels in a row line up
+            step("spotify: top lists", lambda: (page.click(".nav-tab[data-view='spotify']"), page.wait_for_timeout(1200)), 0)
+            lists = page.evaluate("""(async () => {
+                const year = document.getElementById('spotify-year-select').value;
+                const d = await fetchJSON(`${API_BASE}/api/spotify/stats?year=${encodeURIComponent(year)}`);
+                const count = id => document.querySelectorAll(`#${id} .spotify-list-item`).length;
+                const labels = [...document.querySelectorAll('.spotify-stats-grid')].map(grid =>
+                    new Set([...grid.querySelectorAll('.stat-label')].map(l => Math.round(l.getBoundingClientRect().bottom))).size);
+                return {api: [d.top_artists.length, d.top_tracks.length], shown: [count('top-artists-list'), count('top-tracks-list')],
+                        ends: document.querySelectorAll('.spotify-list-end').length, labelRows: labels};
+            })()""")
+            expect(lists["api"] == lists["shown"] and lists["ends"] == (lists["api"][0] != lists["api"][1])
+                   and all(n == 1 for n in lists["labelRows"]), f"spotify: top lists or stat labels ({lists})")
 
             # Spotify year switch, timeline back again
             step("spotify: year", lambda: (page.click(".nav-tab[data-view='spotify']"),

@@ -3273,17 +3273,18 @@ function renderSpotifyStats(data) {
     const dnaEl = document.getElementById('stat-dna');
     if (dnaEl) dnaEl.dataset.dna = data.listening_dna || '';
 
-    // 2. Lists: naast elkaar even lang, zodat er onder de kortste geen leeg vlak staat
-    const shared = Math.min(data.top_artists.length, data.top_tracks.length) || undefined;
-    renderSpotifyList('top-artists-list', data.top_artists.slice(0, shared), (item, i) => spotifyListItem({
+    // 2. Lists: altijd alles wat er is. De kaarten zijn even hoog (CSS); is de ene lijst
+    // korter, dan sluit een rustige slotregel hem af in plaats van een leeg vlak.
+    const longest = Math.max(data.top_artists.length, data.top_tracks.length);
+    renderSpotifyList('top-artists-list', data.top_artists, (item, i) => spotifyListItem({
         rank: `#${i + 1}`, name: item.name, meta: `${Math.round(item.ms / 60000).toLocaleString('nl-NL')} min`,
         icon: 'fab fa-spotify', query: item.name,
-    }));
+    }), spotifyListEnd(data.top_artists.length, longest, 'artiest', 'artiesten'));
 
-    renderSpotifyList('top-tracks-list', data.top_tracks.slice(0, shared), (item, i) => spotifyListItem({
+    renderSpotifyList('top-tracks-list', data.top_tracks, (item, i) => spotifyListItem({
         rank: `#${i + 1}`, name: item.name, meta: `${item.artist} • ${item.count}× gespeeld`,
         icon: 'fas fa-play', query: `${item.name} ${item.artist}`,
-    }));
+    }), spotifyListEnd(data.top_tracks.length, longest, 'nummer', 'nummers'));
 
     // 2.5 New Insights
     if (data.new_insights) {
@@ -3291,7 +3292,9 @@ function renderSpotifyStats(data) {
 
         // Record Day
         if (insights.record_day) {
-            updateText('stat-record-day-hours', `${formatNumberNl(insights.record_day.hours, 1)} uur`);
+            const hoursEl = document.getElementById('stat-record-day-hours');
+            if (hoursEl) hoursEl.replaceChildren(formatNumberNl(insights.record_day.hours, 1),
+                createEl('span', { class: 'stat-unit', text: 'uur' }));
             updateText('stat-record-day-date', `Recorddag: ${formatDateNl(insights.record_day.date)}`);
         }
 
@@ -3454,10 +3457,19 @@ function updateText(id, text) {
     if (el) el.textContent = text;
 }
 
-function renderSpotifyList(id, items, buildItem) {
+function renderSpotifyList(id, items, buildItem, end = null) {
     const list = document.getElementById(id);
     if (!list) return;
-    list.replaceChildren(...items.map((item, i) => buildItem(item, i)));
+    list.replaceChildren(...items.map((item, i) => buildItem(item, i)), ...(end ? [end] : []));
+}
+
+// Slotregel onder een lijst die korter is dan de lijst ernaast: zo is te zien dat dit alles is
+function spotifyListEnd(count, longest, one, many) {
+    if (count >= longest) return null;
+    const text = count === 0 ? `Geen ${many} in deze periode`
+        : count === 1 ? `Dat is de enige ${one} in deze periode`
+        : `Dat zijn alle ${count} ${many} in deze periode`;
+    return createEl('div', { class: 'spotify-list-end', text });
 }
 
 // Eén klikbare regel in een Spotify-lijst; namen komen uit de export en zijn altijd tekst
