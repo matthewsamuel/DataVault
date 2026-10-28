@@ -149,8 +149,16 @@ async function backupNow(e) {
     } catch (_) {
         status = null;
     }
-    if (box && box.isConnected && status) backupRenderStatus(box, status);
-    else settingsRefreshSection('backups');
+    if (box && box.isConnected && status) {
+        // De knop blijft op dezelfde plek in beeld (Chromium verschuift anders de pagina als de
+        // inhoud vervangen wordt)
+        const before = button.getBoundingClientRect().top;
+        backupRenderStatus(box, status);
+        const now = document.getElementById('settings-backup-now');
+        if (now) window.scrollBy(0, now.getBoundingClientRect().top - before);
+    } else {
+        settingsRefreshSection('backups');
+    }
 }
 
 registerSettingsSection({
