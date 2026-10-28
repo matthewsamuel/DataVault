@@ -66,7 +66,8 @@ function backupRestoreHelp(status) {
     const list = `${status.restore_command}`;
     const one = `${status.restore_command} <naam>`;
     return createEl('details', { class: 'backup-restore' },
-        createEl('summary', null, createEl('i', { class: 'fas fa-clock-rotate-left', 'aria-hidden': 'true' }), ' Een back-up terugzetten'),
+        createEl('summary', null, createEl('i', { class: 'fas fa-clock-rotate-left', 'aria-hidden': 'true' }), ' Een back-up terugzetten',
+            createEl('i', { class: 'fas fa-chevron-right backup-restore-chevron', 'aria-hidden': 'true' })),
         createEl('ol', { class: 'backup-steps' },
             createEl('li', { text: 'Stop DataVault (stop_datavault.sh, of sluit de app). Zolang de app draait, weigert het terugzetten.' }),
             createEl('li', null, 'Bekijk in Terminal welke back-ups er zijn:', backupCommandBlock(list, 'Opdracht om de back-ups te tonen')),

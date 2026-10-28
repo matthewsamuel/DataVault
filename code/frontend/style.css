@@ -9407,7 +9407,7 @@ button.otd-settings-icon:hover {
 }
 
 .backup-error i {
-    margin-top: 2px;
+    margin-top: var(--space-2xs);
 }
 
 .backup-restore {
@@ -9421,12 +9421,34 @@ button.otd-settings-icon:hover {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+    min-height: var(--control-h);
     padding: var(--space-sm) var(--space-md);
     cursor: pointer;
+    list-style: none;
     font-size: var(--fs-sm);
     font-weight: var(--fw-medium);
     color: var(--text-primary);
     border-radius: var(--radius-md);
+    transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.backup-restore > summary::-webkit-details-marker {
+    display: none;
+}
+
+.backup-restore > summary:hover {
+    background-color: var(--surface-hover);
+}
+
+/* Het pijltje rechts draait open, zoals een uitklapbaar stuk overal */
+.backup-restore > summary .backup-restore-chevron {
+    margin-left: auto;
+    font-size: var(--icon-xs);
+    transition: transform var(--duration-base) var(--ease-out);
+}
+
+.backup-restore[open] > summary .backup-restore-chevron {
+    transform: rotate(90deg);
 }
 
 .backup-restore > summary:focus-visible {
@@ -9449,7 +9471,7 @@ button.otd-settings-icon:hover {
 
 .backup-steps {
     margin: 0;
-    padding: var(--space-md) var(--space-md) var(--space-md) calc(var(--space-md) + 20px);
+    padding: var(--space-md) var(--space-md) var(--space-md) var(--space-2xl);
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);

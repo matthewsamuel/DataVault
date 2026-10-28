@@ -397,6 +397,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect("vandaag" in (page.text_content("#settings-backups") or ""), "settings: the last backup time is not shown")
             expect(page.evaluate("document.activeElement.id") == "settings-backup-now",
                    f"settings: focus left 'Nu back-uppen' ({page.evaluate('document.activeElement.id')})")
+            expect(page.is_visible("#settings-backups .backup-restore-chevron"),
+                   "settings: the restore steps have no chevron that shows they open")
             page.evaluate("document.querySelector('#settings-backups .backup-restore').open = true")
             restore_text = page.text_content("#settings-backups .backup-restore") or ""
             expect("restore_backup.py" in restore_text, "settings: the restore steps do not show the command")
