@@ -101,6 +101,26 @@ def test_scan_without_candidates_or_cancelled_answers_200(client, vault, monkeyp
     assert client.get("/api/raw_duplicates/progress").json()["status"] == "cancelled"
 
 
+@pytest.mark.parametrize("reason, status, words", [
+    ("pause", 409, "gepauzeerd"),
+    ("shutdown", 503, "onderbroken"),
+])
+def test_scan_paused_or_interrupted_while_waiting_names_its_job(client, vault, monkeypatch, reason, status, words):
+    """R23-5: a scan paused from the job dock made the old endpoint answer 500 'Scan paused'."""
+    from backend import jobs
+
+    def stopped(self):
+        self._live.stop_reason = reason  # as a pause from the dock (or a server stop) does
+        raise jobs.JobStopped(reason)
+
+    monkeypatch.setattr(jobs.JobContext, "check", stopped)
+    r = _scan(client, vault / "RAW")
+    [job] = client.get("/api/jobs?type=dup_scan").json()["jobs"]
+    assert r.status_code == status, r.text
+    assert words in r.json()["detail"] and f"taak {job['id']}" in r.json()["detail"]
+    assert job["can_resume"] is True
+
+
 def test_scan_refuses_folders_that_hold_moved_files(client, vault, config):
     """DUP-SCAN-PROTECTED-ROOT: groups found in RAW_DUPLICATES could never be cleaned."""
     for folder in (config.DUPLICATES_FOLDER / "zz", config.TRASH_FOLDER):

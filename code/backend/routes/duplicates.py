@@ -157,7 +157,9 @@ def scan_folder_for_duplicates(
     One scan at a time (409 otherwise). A cancelled scan is a normal answer
     (cancelled: true); read errors are counted and reported (complete: false);
     a folder that disappears mid-scan gives 503, and so does an unplugged vault
-    (the job then waits for it and finishes later, see /api/jobs).
+    (the job then waits for it and finishes later, see /api/jobs). A scan paused
+    from the job dock gives 409, one interrupted by a server stop 503; both name
+    the job, which can be resumed.
     """
     from backend.jobs import QUEUED, RUNNING
     from backend.routes.jobs import call, get_manager
@@ -182,6 +184,11 @@ def scan_folder_for_duplicates(
     if job["status"] == "waiting_for_vault":
         from backend.main import VAULT_UNREACHABLE
         raise HTTPException(status_code=503, detail=f"{VAULT_UNREACHABLE} De scan gaat verder zodra de schijf terug is (taak {job['id']}).")
+    if job["status"] == "paused":
+        # Paused from the job dock while this request waited: it can be resumed there
+        raise HTTPException(status_code=409, detail=f"De scan is gepauzeerd (taak {job['id']}). Hervat hem in het takenpaneel.")
+    if job["status"] == "interrupted":
+        raise HTTPException(status_code=503, detail=f"De scan is onderbroken omdat de server stopt (taak {job['id']}). Hervat hem in het takenpaneel.")
     if job["error"] == str(ScanFolderGone()):
         raise HTTPException(status_code=503, detail="De map is tijdens de scan onbereikbaar geworden (schijf losgekoppeld?)")
     raise HTTPException(status_code=500, detail=job["error"] or f"Scan {job['status']}")

@@ -375,3 +375,6 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Takenpaneel: de knop "Bekijk" staat alleen nog bij een duplicatenscan waarvan de uitkomst nog
   bewaard is (de app bewaart de laatste vijf). Voorheen gaf "Bekijk" bij een oudere scan alleen
   de melding dat het resultaat niet meer bewaard was.
+- De oude scanopdracht (`/api/duplicates/scan_folder`, niet meer door het scherm gebruikt) gaf
+  een serverfout als je de scan intussen in het takenpaneel pauzeerde. Nu krijg je een
+  duidelijke melding met het nummer van de taak, die je in het takenpaneel kunt hervatten.
