@@ -285,6 +285,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                         ".filter(dt => new Set([...dt.children].map(k => k.offsetTop)).size > 1)"
                                         ".map(dt => dt.textContent)")
                 expect(not wrapped, f"keys: shortcut keys wrap at {width}px: {wrapped}")
+            # In a low window the groups scroll and the footnote stays whole inside the panel
+            page.set_viewport_size({"width": 1024, "height": 600})
+            note = page.evaluate("(() => { const n = document.querySelector('#shortcut-help .shortcut-note').getBoundingClientRect();"
+                                 " const p = document.querySelector('#shortcut-help .dv-overlay-panel').getBoundingClientRect();"
+                                 " return [Math.round(n.bottom), Math.round(p.bottom)]; })()")
+            expect(note[0] <= note[1], f"keys: the overview's footnote is cut off in a low window ({note})")
             page.set_viewport_size({"width": 1400, "height": 900})
             expect_focus_trapped("shortcut-help", "keys: shortcut overview")
             step("keys: Escape closes the overview", lambda: page.keyboard.press("Escape"), 0.3)
@@ -392,6 +398,13 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"keurer: arrows in the theme menu acted on the Keurer ({page.evaluate(keurer_state)} != {before})")
             step("keurer: Escape closes the theme menu", lambda: page.keyboard.press("Escape"), 0.3)
             expect(page.evaluate("document.activeElement.id") == "theme-button", "keurer: focus not back on the theme button")
+            # Opened with the mouse, then arrows: the menu marks the focused option itself (Safari
+            # shows no focus ring after a click)
+            step("theme menu: click, then an arrow", lambda: (page.click("#theme-button"), page.keyboard.press("ArrowDown")), 0.2)
+            expect(page.evaluate("document.getElementById('theme-dropdown').classList.contains('keyboard')"
+                                 " && document.activeElement.classList.contains('theme-option')"),
+                   "theme menu: arrows after a click do not mark the focused option")
+            step("theme menu: close", lambda: page.keyboard.press("Escape"), 0.3)
             step("keurer: arrow on the theme button", lambda: page.keyboard.press("ArrowRight"), 0.8)
             expect(page.evaluate(keurer_state) == before and Path(keurer_file).exists(),
                    "keurer: an arrow on the theme button decided on a file")

@@ -121,7 +121,8 @@ function buildShortcutHelp() {
                 createEl('h2', { id: 'shortcut-help-title', class: 'modal-title' },
                     createEl('i', { class: 'fas fa-keyboard', 'aria-hidden': 'true' }), ' Sneltoetsen'),
                 close),
-            createEl('div', { class: 'shortcut-groups' }, ...groups),
+            // Scrolt in een laag venster; met tabindex ook met de pijltjes te scrollen
+            createEl('div', { class: 'shortcut-groups', tabindex: '0', role: 'region', 'aria-label': 'Alle sneltoetsen' }, ...groups),
             createEl('p', { class: 'shortcut-note',
                 text: 'Sneltoetsen doen niets terwijl je in een invoerveld typt, en nooit samen met Cmd, Ctrl of Alt. ' +
                       'Wil je in Safari met Tab alleen ook langs knoppen: Safari > Instellingen > Geavanceerd, de Tab-optie aan.' })));

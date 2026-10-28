@@ -120,6 +120,7 @@ function toggleThemeDropdown() {
     const dropdown = document.getElementById('theme-dropdown');
     const open = !dropdown.classList.contains('open');
     dropdown.classList.toggle('open', open);
+    dropdown.classList.remove('keyboard');
     document.getElementById('theme-button').setAttribute('aria-expanded', String(open));
     if (open) {
         // Met het toetsenbord geopend: meteen op de huidige keuze
@@ -131,7 +132,7 @@ function toggleThemeDropdown() {
 function closeThemeDropdown(returnFocus = false) {
     const dropdown = document.getElementById('theme-dropdown');
     const wasOpen = dropdown.classList.contains('open');
-    dropdown.classList.remove('open');
+    dropdown.classList.remove('open', 'keyboard');
     const button = document.getElementById('theme-button');
     if (button) button.setAttribute('aria-expanded', 'false');
     if (wasOpen && (returnFocus || dropdown.contains(document.activeElement)) && button) button.focus();
@@ -159,6 +160,9 @@ document.addEventListener('keydown', (e) => {
         // Deze toetsen zijn voor het menu: niet ook voor de Keurer, het raster of de viewer erachter
         e.preventDefault();
         e.stopPropagation();
+        // Met de muis geopend en dan met pijlen verder: Safari toont dan geen :focus-visible,
+        // dus het menu laat zelf zien welke optie de focus heeft
+        dropdown.classList.add('keyboard');
         if (e.key === 'Home' || e.key === 'End') {
             options[e.key === 'Home' ? 0 : options.length - 1].focus();
             return;
@@ -2837,6 +2841,9 @@ function renderSettingsTree(tree, container) {
     tree.forEach(item => {
         container.appendChild(createSettingsFolderElement(item));
     });
+    // Geen enkele map met submappen: dan ook geen lege ruimte voor de uitklappijltjes, zodat
+    // de rijen op de lijn van de tekst erboven staan
+    container.classList.toggle('is-flat', !tree.some(item => item.children && item.children.length));
 }
 
 function createSettingsFolderElement(item) {

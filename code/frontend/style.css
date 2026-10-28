@@ -2215,7 +2215,8 @@ button.nav-brand {
     outline: none;
 }
 
-.theme-option:focus-visible {
+.theme-option:focus-visible,
+.theme-dropdown.keyboard .theme-option:focus {
     background-color: var(--surface-active);
     outline: 2px solid var(--focus-ring);
     outline-offset: -2px;
@@ -5212,6 +5213,13 @@ a.breadcrumb-item:hover {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
+    /* De rijen hebben binnen hun hover-vlak wat ruimte links; zo staat het icoon of het
+       pijltje op de lijn van de tekst erboven */
+    margin-left: calc(-1 * var(--space-xs));
+}
+
+.settings-list.is-flat > .settings-tree-item > .settings-tree-header > .settings-chevron {
+    display: none !important;
 }
 
 .inline-error {
@@ -8438,10 +8446,22 @@ button.otd-settings-icon:hover {
 
 /* ---------- Sneltoetsenoverzicht ---------- */
 
+/* Kop en voetnoot staan vast; alleen de groepen scrollen, zodat de voetnoot in een laag
+   venster niet halverwege wordt afgesneden */
+.shortcut-help .dv-overlay-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 .shortcut-groups {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     gap: var(--space-xl) var(--space-2xl);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .shortcut-group h3 {
@@ -8492,7 +8512,8 @@ button.otd-settings-icon:hover {
 }
 
 .shortcut-note {
-    margin-top: var(--space-xl);
+    flex: none;
+    margin-top: var(--space-lg);
     padding-top: var(--space-lg);
     border-top: 1px solid var(--border-hairline);
     font-size: var(--fs-xs);
