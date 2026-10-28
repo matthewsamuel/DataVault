@@ -141,20 +141,49 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   dunne randen en iets lichtere kaarten.
 - Afgeronde hoeken, meer ruimte en overal dezelfde knoppen, invoervelden, keuzelijsten (zonder de
   systeemknop), schakelaars, filterpillen, kaarten, vensters, menu's en meldingen.
-- Bovenbalk: onderdelen met een groen streepje onder het actieve, een duidelijk zoekveld met de
-  sneltoets **/**, en de themakeuze als een klein menu. Op een smaller scherm past alles nog.
+- Bovenbalk: onderdelen met een groen streepje onder het actieve (ook "Herstelcentrum" voluit), een
+  duidelijk zoekveld met de sneltoets **/**, en de themakeuze als een klein menu. Op een smaller
+  scherm past alles nog. Het zoekveld zoekt in de map die bij Bestanden open is; op een ander
+  scherm zie je dat aan "Zoek in Bestanden…" en brengt **Enter** je daarheen met je zoekopdracht.
+  Vind je niets, dan wist "Zoekopdracht wissen" hem weer.
+- Elke pagina heeft dezelfde breedte en dezelfde kop (icoon, titel, één regel uitleg): de titel
+  springt niet meer heen en weer als je van tabblad wisselt. Ook de Keurer en de Tijdlijn hebben
+  zo'n kop.
 - Home begint met een begroeting en de datum, daarna "op deze dag" (foto en Spotify naast elkaar),
   tegels met het aantal foto's, video's en audio en de opslag, en Pasha in chatballonnen met zijn
-  hondenkopje naast elk antwoord.
+  hondenkopje naast elk antwoord. Pasha's kaart is zo hoog als de berichten, met tot het eerste
+  bericht drie voorbeeldvragen om op te klikken.
+- Is de schijf losgekoppeld, dan tonen de "op deze dag"-kaarten een rustige melding (geen tekst
+  meer die in het laadrondje meedraait) en de opslagtegel een streepje met de reden eronder. Is er
+  niets van deze dag, dan zegt de kaart dat met een knop ("Naar Spotify", "Mappen kiezen").
+- Getallen en datums overal op z'n Nederlands: "448 GB", "12,1 GB vrij", "1,2 uur",
+  "Recorddag: 11 feb 2023".
 - Bestanden: het pad begint bij het archief ("Archief › RAW › 2019") in plaats van bij de schijf.
   Foto's zijn even grote, afgeronde tegels die licht omhoog komen onder de muis en zacht verschijnen
-  als ze geladen zijn. Mappen en bestanden hebben iconen in plaats van emoji.
+  als ze geladen zijn. Mappen en bestanden hebben iconen in plaats van emoji. Bestanden en Tijdlijn
+  gebruiken nu precies dezelfde fototegel.
+- Ook de viewer, Duplicaten, het vergelijkvenster en de opruimbevestiging tonen paden vanaf het
+  archief ("RAW/misc/strand.jpg"); het volledige pad staat in de tooltip en achter Kopieer.
 - De viewer toont de foto groot op een donkere achtergrond (ook in het lichte thema), met de gegevens
   rustig in een paneel rechts en ronde knoppen om te zoomen en te bladeren.
-- Keurer: de foto staat centraal en past in het venster met de knoppen eronder; de sneltoetsen staan
-  eronder als toetsjes. Tijdlijn: de maandkoppen vallen niet meer over de foto's heen.
-- Spotify houdt zijn eigen groen, met iconen in plaats van emoji, en de luistertypes en uitleg in het
-  Nederlands ("Vroege vogel", "Brede ontdekker"). De uitgelichte show heet nu "Verras me".
+- Keurer: de foto staat centraal en de pagina is precies zo hoog als het venster, dus de knoppen
+  en de sneltoetsen (als toetsjes) staan ook op een laptopscherm (1280×720, 1024×768) zonder
+  scrollen in beeld. De map en het aantal dat nog te doen is staan rechts in de kop.
+- Tijdlijn: de maandkoppen vallen niet meer over de foto's heen, en de foto's zijn vierkant bij
+  elke vensterbreedte, net als in Bestanden.
+- Spotify houdt zijn eigen groen, met iconen in plaats van emoji (ook in de vensters "Jouw
+  luister-DNA" en "Uitleg"), en de luistertypes en uitleg in het Nederlands ("Vroege vogel", "Brede
+  ontdekker"). De grafieken "Per maand" en "Per uur" hebben maanden en uren eronder, en één
+  tooltip per staaf. De uitgelichte show heet nu "Verras me".
+- Vensters hebben in het donkere thema weer zichtbare scheidingslijnen, en elke venstertitel heeft
+  één rustig icoon op dezelfde plek.
+- In het venster Bestand verplaatsen zie je met de pijltjes welke map gemarkeerd is (groene ring),
+  en die map staat dan ook bij "Naar" met de knop aan: Enter en de knop doen wat je ziet. Ook de
+  keuzes in het themamenu krijgen met het toetsenbord de groene ring.
+- Het takenpaneel rechtsonder klapt vanzelf in als er niets meer loopt, is nooit hoger dan 40% van
+  het venster, en toont van de afgeronde taken alleen de nieuwste; de rest staat op één regel
+  ("3 eerder klaar") die je kunt openklappen of in één keer verbergen. Zo bedekt het geen knoppen
+  meer. "1 groepen" heet nu "1 groep".
 - De achtergrondgolven in de mappenkolom zijn weg; alleen Spotify heeft ze nog.
 - Beweging is kort en subtiel, en staat helemaal stil als je in macOS "Beperk beweging" aan hebt.
 

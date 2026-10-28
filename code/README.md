@@ -150,6 +150,16 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Daaronder staan de gedeelde componenten (`.btn`, `.input`, `.select`, `.switch`, `.pill`,
   `.segmented`, `.card`, `.stat-tile`, `.modal-*`, `.menu`, `.toast`, `.empty-state`, `.skeleton`,
   `.progress`, `.badge`, `.thumb-tile`, ...). Een nieuw scherm gebruikt alleen die.
+- Elke pagina staat in dezelfde kolom (`--page-max`, met `--page-gutter`) en begint met
+  `.page-header` (een `h1.page-title` met icoon, een `.page-subtitle`, rechts eventueel knoppen).
+  Zelf scrollende pagina's houden onderaan `--space-4xl` vrij voor het takenpaneel.
+- Elke fototegel is `.thumb-tile` (Bestanden: `.media-card.thumb-tile`, Tijdlijn:
+  `.tl-photo-card.thumb-tile`): afgerond, omhoog bij hover, glans tijdens laden, `.selected` geeft
+  de groene ring met vinkje.
+- Op zwevende vlakken (vensters, menu's, meldingen, takenpaneel) is de haarlijn
+  `--border-overlay`; voeg een nieuw zwevend vlak toe aan die regel onder `@tokens:end`.
+- Een venstertitel is `h2.modal-title` met één `<i>` vooraan; paden toon je met
+  `archivePath()`/`pathNodes()` (app.js) vanaf het archief, met het volledige pad als `title`.
 - `http://127.0.0.1:<poort>/styleguide.html` toont ze allemaal, licht en donker naast elkaar.
 - De rooktest bewaart van elk scherm een schermafbeelding in beide thema's (het pad staat in de
   uitvoer, of zet `DATAVAULT_SMOKE_SHOTS`).
