@@ -1197,7 +1197,9 @@
         const today = state.otdMonth === now.getMonth() + 1 && state.otdDay === now.getDate();
         $('albums-otd-today').disabled = today;
         $('albums-otd-title-text').textContent = today ? 'Op deze dag' : `Op ${state.otdDay} ${MONTHS[state.otdMonth - 1]}`;
-        $('albums-otd-subtitle').textContent = `Foto's en video's van ${state.otdDay} ${MONTHS[state.otdMonth - 1]} in eerdere jaren, ${today ? 'vandaag ' : ''}per jaar.`;
+        const dayName = `${state.otdDay} ${MONTHS[state.otdMonth - 1]}`;
+        $('albums-otd-subtitle').textContent = today ? `Foto's en video's van vandaag, ${dayName}, in eerdere jaren.`
+            : `Foto's en video's van ${dayName} in eerdere jaren.`;
         const allowed = otdFolders();
         const note = $('albums-otd-folders');
         note.replaceChildren(...(allowed.length ? [

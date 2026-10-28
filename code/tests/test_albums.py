@@ -490,3 +490,10 @@ def test_album_list_is_fast_with_many_rows(client, config, app):
     started = time.perf_counter()
     page = _browse(client, kind="photo", keurer="undecided", sort="-rating", limit=200)
     assert page["total"] == 18000 and time.perf_counter() - started < 2.0
+
+
+def test_camera_text_is_matched_literally(indexed):
+    # % and _ in the text are characters, not wildcards
+    assert _browse(indexed, camera_contains="iPhone")["total"] >= 2
+    assert _browse(indexed, camera_contains="%")["total"] == 0
+    assert _browse(indexed, camera_contains="i_hone")["total"] == 0
