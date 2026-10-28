@@ -51,7 +51,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Voor een pad buiten het archief geeft de app altijd hetzelfde antwoord, of het nu bestaat of
   niet, zodat niet af te leiden is wat er buiten het archief staat.
 - Bestandsnamen met accenten worden ook gevonden als ze in een andere Unicode-vorm binnenkomen
-  (bijv. `é` als `e` + accentteken).
+  (bijv. `é` als `e` + accentteken). De app gebruikt daarbij altijd de schrijfwijze zoals die
+  op de schijf staat, ook voor wat ze bewaart (Keurer-beslissingen, ratings, uitgeschakelde
+  Shows-mappen). Zo hoort één map of foto nooit bij twee verschillende sleutels, afhankelijk
+  van hoe de naam binnenkwam.
 - De eigen bestanden van de app (de database en de miniaturen-cache) worden niet meer als foto
   geserveerd en kunnen nergens meer gekozen worden.
 - Het opslagoverzicht werkt nu ook als er een map is waarvan de naam met een streepje begint

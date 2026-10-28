@@ -100,6 +100,54 @@ def test_new_name_is_stored_as_nfc(config, vault):
     assert str(locate(nfd, config)) == unicodedata.normalize("NFC", nfd)
 
 
+def _nfd_folder(vault):
+    """A folder whose name is NFD on disk (as Finder/HFS+ copies often leave it), with one photo."""
+    folder = vault / unicodedata.normalize("NFD", "RAW/Été")
+    folder.mkdir()
+    shutil.copy2(vault / STRAND, folder / "strand.jpg")
+    return folder
+
+
+def test_existing_names_get_their_on_disk_spelling(config, vault):
+    """R-2.1b-3: whatever Unicode form the request uses, the answer is spelled as on disk."""
+    on_disk = _nfd_folder(vault)
+    nfc = unicodedata.normalize("NFC", str(on_disk))
+    assert nfc != str(on_disk)
+    for spelling in (nfc, str(on_disk)):
+        assert str(locate(spelling, config, folder=True)) == str(on_disk)
+        assert str(locate(spelling + "/strand.jpg", config)) == str(on_disk / "strand.jpg")
+        # A new name in that folder: folder as on disk, new name as NFC
+        new = locate(spelling + "/" + unicodedata.normalize("NFD", "nieuw é.jpg"), config)
+        assert str(new) == str(on_disk) + "/" + unicodedata.normalize("NFC", "nieuw é.jpg")
+    # And the other way round: an NFC name on disk asked for in NFD
+    nfd = unicodedata.normalize("NFD", str(vault / KOFFIE))
+    assert str(locate(nfd, config)) == str(vault / KOFFIE)
+    # A rename in the folder is seen at once (the listing cache follows the folder's mtime)
+    os.rename(on_disk / "strand.jpg", on_disk / unicodedata.normalize("NFD", "strände.jpg"))
+    found = locate(unicodedata.normalize("NFC", f"{on_disk}/strände.jpg"), config)
+    assert str(found) == str(on_disk / unicodedata.normalize("NFD", "strände.jpg"))
+
+
+def test_stored_keys_do_not_depend_on_the_request_spelling(client, vault, config):
+    """Keurer folders, Shows settings and ratings use the on-disk spelling for any input form."""
+    on_disk = _nfd_folder(vault)
+    nfc = unicodedata.normalize("NFC", str(on_disk))
+    for spelling in (nfc, str(on_disk)):
+        r = client.get("/api/keurer/files", params={"folder": spelling})
+        assert r.status_code == 200 and r.json()["folder"] == str(on_disk)
+    r = client.post("/api/shows/vote", json={"path": nfc + "/strand.jpg", "vote": "up"})
+    assert r.status_code == 200
+    from backend.database import Database
+    assert Database(config.DB_PATH).get_all_ratings() == {str(on_disk / "strand.jpg"): 1050}
+    r = client.post("/api/shows/settings", json={"path": nfc, "enabled": False})
+    assert r.status_code == 200
+    assert client.get("/api/shows/settings").json()["disabled_folders"] == [str(on_disk)]
+    r = client.post("/api/keurer/decide", json={"path": nfc + "/strand.jpg", "folder": nfc, "decision": "keep"})
+    assert r.status_code == 200, r.text
+    [row] = Database(config.DB_PATH).get_recent_keurer_decisions(5)
+    assert (row["path"], row["folder"]) == (str(on_disk / "strand.jpg"), str(on_disk))
+
+
 def test_app_internal_files_are_refused(config, vault):
     for p in [config.CACHE_FOLDER, config.DB_PATH, config.CACHE_FOLDER / "thumbs" / "x.jpg"]:
         with pytest.raises(HTTPException) as e:

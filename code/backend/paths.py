@@ -4,8 +4,9 @@ DataVault Dashboard - Path safety
 Security-critical. Every route that takes a path or folder from a request runs
 it through resolve_in_vault(), so there is one rule for what a request may touch:
 - relative input is taken relative to the vault root, absolute input as is;
-- the spelling on disk wins, otherwise the NFC (or NFD) form of the name, so a
-  name typed or copied in another Unicode form still finds its file;
+- every name is spelled as it is on disk (looked up by its NFC form), so a name
+  typed or copied in another Unicode form finds its file and stored keys never
+  depend on the form the client sent; a name that does not exist yet gets NFC;
 - after resolving '..' and symlinks the path must lie inside VAULT_ROOT, both
   for the folder it is in and for what it points to (a symlink out of the vault
   is refused);
@@ -27,7 +28,9 @@ files or folders (including macOS '._' AppleDouble files) and no symlinks.
 """
 import os
 import stat
+import threading
 import unicodedata
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterator, List, Optional, Set, Tuple
 
@@ -41,15 +44,68 @@ ACCESS_DENIED = "Toegang geweigerd: pad ligt buiten het archief"
 APP_DIR = Path(__file__).resolve().parent.parent.parent
 
 
+# Per folder: NFC form of each name -> the names on disk with that form.
+# Keyed by (path, inode, mtime): adding, removing or renaming an entry changes the mtime.
+_NAMES_CACHE: "OrderedDict[str, Tuple[Tuple[int, int], dict]]" = OrderedDict()
+_NAMES_CACHE_SIZE = 256
+_names_lock = threading.Lock()
+
+
+def _names_by_nfc(folder: str) -> Optional[dict]:
+    """{NFC name: [names on disk]} for one folder, or None if it cannot be listed."""
+    try:
+        st = os.stat(folder)
+    except OSError:
+        return None
+    key = (st.st_ino, st.st_mtime_ns)
+    with _names_lock:
+        cached = _NAMES_CACHE.get(folder)
+        if cached is not None and cached[0] == key:
+            _NAMES_CACHE.move_to_end(folder)
+            return cached[1]
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return None
+    by_nfc: dict = {}
+    for name in names:
+        by_nfc.setdefault(unicodedata.normalize("NFC", name), []).append(name)
+    with _names_lock:
+        _NAMES_CACHE[folder] = (key, by_nfc)
+        _NAMES_CACHE.move_to_end(folder)
+        while len(_NAMES_CACHE) > _NAMES_CACHE_SIZE:
+            _NAMES_CACHE.popitem(last=False)
+    return by_nfc
+
+
 def _on_disk_spelling(path: Path) -> Path:
-    """The given spelling if it exists; else the NFC or NFD form that does; else NFC."""
-    if os.path.lexists(path):
+    """
+    The path with every name spelled as it is on disk, whatever Unicode form the
+    request used (APFS finds a file under NFC and NFD alike, so an existence check
+    alone would keep the request's spelling and stored keys would depend on the
+    client). Names that do not exist (yet) get their NFC form. ASCII names have
+    only one form and are taken as given, so ordinary paths cost no listing.
+    """
+    text = str(path)
+    if text.isascii():
         return path
-    for form in ("NFC", "NFD"):
-        variant = Path(unicodedata.normalize(form, str(path)))
-        if os.path.lexists(variant):
-            return variant
-    return Path(unicodedata.normalize("NFC", str(path)))
+    parts = Path(text).parts
+    current = parts[0]
+    exists = True
+    for name in parts[1:]:
+        if name.isascii() or name in (".", ".."):
+            current = os.path.join(current, name)
+            continue
+        if exists:
+            by_nfc = _names_by_nfc(current)
+            matches = by_nfc.get(unicodedata.normalize("NFC", name)) if by_nfc is not None else None
+            if matches:
+                # The exact spelling if it is there (a filesystem that keeps both forms apart), else the one on disk
+                current = os.path.join(current, name if name in matches else sorted(matches)[0])
+                continue
+            exists = False
+        current = os.path.join(current, unicodedata.normalize("NFC", name))
+    return Path(current)
 
 
 def locate(user_path: Any, config, folder: bool = False) -> Optional[Path]:
@@ -72,6 +128,8 @@ def locate(user_path: Any, config, folder: bool = False) -> Optional[Path]:
         else:
             entry = path.parent.resolve() / path.name
         target = entry.resolve()
+        if target != entry:
+            target = _on_disk_spelling(target)  # a symlink's text may use another Unicode form
     except (OSError, RuntimeError, ValueError):
         return None
     if not entry.is_relative_to(root) or not target.is_relative_to(root):
