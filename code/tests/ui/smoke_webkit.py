@@ -192,6 +192,32 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                            page.select_option("#spotify-year-select", index=page.evaluate(
                                                "document.getElementById('spotify-year-select').options.length - 1"))), 1.5)
             step("timeline again", lambda: page.click(".nav-tab[data-view='timeline']"), 1.0)
+
+            # Library (media index): the app indexed the vault by itself; the dock shows it,
+            # and 'Bibliotheek bijwerken' starts a full pass from the keyboard
+            step("library: line after the automatic pass", lambda: page.wait_for_function(
+                "/Bibliotheek: \\d/.test((document.getElementById('job-library') || {}).textContent || '')",
+                timeout=60000, polling=250), 0.2)
+            step("library: start a pass with the keyboard", lambda: (
+                page.focus("#btn-library-update"), page.keyboard.press("Enter")), 0.5)
+            step("library: pass done", lambda: page.wait_for_function(
+                "[...document.querySelectorAll('#toast-container .toast')]"
+                ".some(t => t.textContent.includes('Bibliotheek bijwerken: Klaar'))", timeout=60000, polling=250), 0.2)
+
+            # Timeline of the whole vault from the index: only what is in view is drawn
+            page.evaluate(f"localStorage.setItem('timeline_folders', JSON.stringify([{json.dumps(str(vault))}]))")
+            page.reload()
+            page.wait_for_load_state("networkidle")
+            step("timeline: whole vault", lambda: (page.click(".nav-tab[data-view='timeline']"),
+                                                   page.wait_for_selector(".tl-photo-card")), 1.5)
+            drawn = page.evaluate("document.querySelectorAll('.tl-photo-card').length")
+            total = page.text_content(".tl-info-count") or ""
+            expect(drawn < 300 and str(BIG_FILES)[0] in total,
+                   f"timeline: {drawn} cards drawn for {total.strip()!r} (virtualization broken?)")
+            step("timeline: scroll down", lambda: page.evaluate(
+                "document.getElementById('timeline-scroll').scrollTop = 100000"), 0.8)
+            expect(page.evaluate("document.querySelectorAll('.tl-photo-card').length") < 300,
+                   "timeline: scrolling drew every card")
             browser.close()
     finally:
         proc.terminate()

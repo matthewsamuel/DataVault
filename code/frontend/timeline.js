@@ -17,6 +17,15 @@
     let tlFoldersFailed = false;        // last folder list or scan failed (e.g. the disk was gone):
     let tlScanFailed = false;           // done again on return to the tab or when the disk is back
 
+    // Paging: the first page shows at once, the rest loads behind it (oldest first, so it
+    // only ever grows at the bottom). tlTotal is the whole selection, also before it is loaded.
+    const TL_FIRST_PAGE = 3000;
+    const TL_PAGE = 20000;
+    let tlTotal = 0;
+    let tlScanSeq = 0;                  // a newer scan stops the pages of an older one
+    let tlPagesLoading = false;
+    let tlPendingYear = null;           // a year asked for before its photos were loaded
+
     // Virtualization
     const ITEM_HEIGHT = 220;            // photo card height (px)
     const COLS = 5;                     // cards per row
@@ -147,7 +156,9 @@
         if (tlSelectedFolders.size > 0) {
             await scanTimeline();
         } else {
+            tlScanSeq++;   // pages still on their way are for the old selection
             tlFiles = [];
+            tlTotal = 0;
             renderEmptyState();
         }
     };
@@ -234,15 +245,28 @@
         if (tlSelectedFolders.size > 0) {
             await scanTimeline();
         } else {
+            tlScanSeq++;   // pages still on their way are for the old selection
             tlFiles = [];
+            tlTotal = 0;
             renderEmptyState();
         }
     };
 
     // ── Scanning ──────────────────────────────────────────
+    function timelineScanUrl(offset, limit) {
+        // Eén parameter per map: een mapnaam mag een komma bevatten
+        const params = new URLSearchParams();
+        [...tlSelectedFolders].forEach(folder => params.append('folders', folder));
+        params.set('offset', String(offset));
+        params.set('limit', String(limit));
+        return `${API_BASE}/api/timeline/scan?${params}`;
+    }
+
     async function scanTimeline() {
         if (tlScanning) return;
         tlScanning = true;
+        const seq = ++tlScanSeq;
+        tlPendingYear = null;
 
         const scrollEl = tlScrollContainer;
         const contentEl = tlContentEl;
@@ -260,11 +284,9 @@
         }
 
         try {
-            // Eén parameter per map: een mapnaam mag een komma bevatten
-            const params = new URLSearchParams();
-            [...tlSelectedFolders].forEach(folder => params.append('folders', folder));
-            const data = await fetchJSON(`${API_BASE}/api/timeline/scan?${params}`);
+            const data = await fetchJSON(timelineScanUrl(0, TL_FIRST_PAGE));
             tlFiles = timelineFilesFrom(data);
+            tlTotal = data.total || tlFiles.length;
             tlScanFailed = false;
             if (data.skipped && data.skipped.length) {
                 showToast('Tijdlijn', `${data.skipped.length} gekozen map(pen) niet gevonden en overgeslagen`, 'warning');
@@ -301,6 +323,10 @@
             tlRenderedRange = { start: -1, end: -1 };
             renderVisibleRows();
 
+            if (data.next_offset !== null && data.next_offset !== undefined) {
+                // Not awaited: the timeline can be used while the rest arrives
+                loadRemainingPages(seq, data.next_offset, data.version);
+            }
         } catch (e) {
             console.error('Timeline scan error:', e);
             tlScanFailed = true;
@@ -308,6 +334,45 @@
         }
 
         tlScanning = false;
+    }
+
+    // De rest van de tijdlijn, een pagina tegelijk, achter de eerste pagina aan
+    async function loadRemainingPages(seq, offset, version) {
+        tlPagesLoading = true;
+        renderInfoBar();
+        try {
+            while (offset !== null && offset !== undefined && seq === tlScanSeq) {
+                const page = await fetchJSON(timelineScanUrl(offset, TL_PAGE));
+                if (seq !== tlScanSeq) return;
+                if (page.version !== version) {
+                    // De selectie is intussen veranderd (bijv. bijgewerkt): opnieuw vanaf het begin
+                    tlPagesLoading = false;
+                    scanTimeline();
+                    return;
+                }
+                tlFiles = tlFiles.concat(timelineFilesFrom(page));
+                offset = page.next_offset;
+                buildGroups();
+                recomputeLayout();   // groeit alleen onderaan: de scrollpositie blijft staan
+                updateSliderFromScroll();
+                if (tlPendingYear !== null && tlYearBoundaries[tlPendingYear] < tlFiles.length) {
+                    const year = tlPendingYear;
+                    tlPendingYear = null;
+                    jumpToYear(year);
+                }
+                renderInfoBar();
+            }
+        } catch (e) {
+            if (seq === tlScanSeq) {
+                toastFetchError('Tijdlijn: verder laden mislukt', e);
+                tlScanFailed = true;   // bij terugkomen of als de schijf terug is: opnieuw
+            }
+        } finally {
+            if (seq === tlScanSeq) {
+                tlPagesLoading = false;
+                renderInfoBar();
+            }
+        }
     }
 
     // De server stuurt per bestand een korte rij [tijd, pad t.o.v. het archief, grootte,
@@ -340,9 +405,13 @@
         const range = years.length > 1
             ? `${years[0]} – ${years[years.length - 1]}`
             : years[0] || '';
+        const loading = tlPagesLoading && tlFiles.length < tlTotal
+            ? html`<span class="tl-info-loading" role="status">${tlFiles.length.toLocaleString()} van ${tlTotal.toLocaleString()} geladen…</span>`
+            : html``;
         infoBar.innerHTML = html`
-            <span class="tl-info-count"><i class="fas fa-images"></i> ${tlFiles.length.toLocaleString()} photos</span>
+            <span class="tl-info-count"><i class="fas fa-images"></i> ${tlTotal.toLocaleString()} photos</span>
             <span class="tl-info-range"><i class="fas fa-calendar-alt"></i> ${range}</span>
+            ${loading}
         `;
         infoBar.style.display = 'flex';
     }
@@ -622,12 +691,14 @@
             if (tlDateIndex[year][month] <= 0) delete tlDateIndex[year][month];
             if (Object.keys(tlDateIndex[year]).length === 0) delete tlDateIndex[year];
         }
-        tlYearBoundaries = {};
-        tlFiles.forEach((f, i) => {
-            const y = String(new Date(f.timestamp * 1000).getFullYear());
-            if (!(y in tlYearBoundaries)) tlYearBoundaries[y] = i;
+        // Jaren na dit bestand beginnen één plek eerder; een leeg jaar verdwijnt (ook als nog
+        // niet alles geladen is, dus niet opnieuw tellen uit tlFiles)
+        tlTotal = Math.max(0, tlTotal - 1);
+        Object.keys(tlYearBoundaries).forEach(y => {
+            if (!tlDateIndex[y]) delete tlYearBoundaries[y];
+            else if (tlYearBoundaries[y] > at) tlYearBoundaries[y]--;
         });
-        if (tlFiles.length === 0) {
+        if (tlFiles.length === 0 && !tlPagesLoading) {
             renderEmptyState('No photos found in selected folders');
             return;
         }
@@ -776,6 +847,12 @@
     window.jumpToYear = function (year) {
         const idx = tlYearBoundaries[year];
         if (idx === undefined) return;
+        if (idx >= tlFiles.length) {
+            // Nog niet geladen: springen zodra die pagina er is
+            tlPendingYear = year;
+            showToast('Tijdlijn', `${year} wordt nog geladen…`, 'info');
+            return;
+        }
 
         // Find the layout row that contains this file index
         for (let i = 0; i < tlLayoutRows.length; i++) {
