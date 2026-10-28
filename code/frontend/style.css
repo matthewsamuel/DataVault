@@ -7847,6 +7847,16 @@ button.otd-settings-icon:hover {
     font-size: var(--fs-xs);
 }
 
+.job-dock-title {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.job-dock-warning {
+    color: var(--warning-text);
+}
+
 .job-dock.collapsed .job-dock-body {
     display: none;
 }
@@ -7896,6 +7906,11 @@ button.otd-settings-icon:hover {
     --job-tone: var(--border-strong);
 }
 
+/* Klaar, maar met leesfouten: waarschuwingskleur, zoals gepauzeerd */
+.job-item.job-incomplete {
+    --job-tone: var(--warning);
+}
+
 .job-item-head,
 .job-item-foot {
     display: flex;
@@ -7938,7 +7953,8 @@ button.otd-settings-icon:hover {
 
 .job-waiting_for_vault .job-status,
 .job-paused .job-status,
-.job-interrupted .job-status {
+.job-interrupted .job-status,
+.job-incomplete .job-status {
     color: var(--warning-text);
 }
 
@@ -8095,6 +8111,22 @@ button.otd-settings-icon:hover {
 
 .job-library-update {
     flex: none;
+}
+
+/* De laatste ronde was onvolledig: een tweede regel onder het aantal (in de smalle balk
+   erachter) */
+.job-library-warning {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin-top: 2px;
+    color: var(--warning-text);
+    font-weight: var(--fw-semibold);
+}
+
+.job-dock.compact .job-library-warning {
+    display: inline-flex;
+    margin: 0 0 0 var(--space-sm);
 }
 
 .job-dock.compact {

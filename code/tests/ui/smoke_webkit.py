@@ -450,6 +450,36 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 "[...document.querySelectorAll('#toast-container .toast')]"
                 ".some(t => t.textContent.includes('Bibliotheek bijwerken: Klaar'))", timeout=60000, polling=250), 0.2)
 
+            # A run that finished with read errors stays in view: the dock does not fold away, the
+            # run is not put under 'eerder klaar', and an incomplete library pass is named too.
+            # (Made-up jobs, drawn and read back in one go before the next poll redraws the dock.)
+            dock = page.evaluate("""(() => {
+                const saved = { jobs: jobDock.jobs, library: jobDock.library };
+                const now = Date.now() / 1000;
+                const job = (id, summary, ago) => ({ id, type: 'dup_scan', label: 'Duplicaten zoeken', status: 'done',
+                    target: 'RAW', processed: 3, total: 3, params: {}, message: 'Klaar', summary,
+                    finished_at: now - ago, updated_at: now - ago });
+                jobDock.jobs = [job(-1, { complete: true, errors: 0 }, 1), job(-2, { complete: false, errors: 1 }, 5),
+                                job(-3, { complete: true, errors: 0 }, 9)];
+                jobDock.library = Object.assign({}, saved.library, { ready: true, last_pass_at: now, last_complete_at: now - 60 });
+                renderJobDock();
+                const el = document.getElementById('job-dock');
+                const folded = el.querySelector('.job-folded');
+                const result = {
+                    collapsed: el.classList.contains('collapsed'),
+                    incomplete: [...el.querySelectorAll('.job-item.job-incomplete')].map(i => i.dataset.id),
+                    title: el.querySelector('.job-dock-title').textContent,
+                    folded: folded ? folded.textContent : '',
+                    library: (el.querySelector('.job-library-warning') || {}).textContent || '',
+                };
+                jobDock.jobs = saved.jobs; jobDock.library = saved.library;
+                renderJobDock();
+                return result;
+            })()""")
+            expect(not dock["collapsed"] and dock["incomplete"] == ["-2"] and "1 onvolledig" in dock["title"]
+                   and "2 eerder" not in dock["folded"] and "onvolledig" in dock["library"],
+                   f"job dock: an incomplete run is folded away or not marked: {dock}")
+
             # Timeline of the whole vault from the index: only what is in view is drawn
             page.evaluate(f"localStorage.setItem('timeline_folders', JSON.stringify([{json.dumps(str(vault))}]))")
             page.reload()

@@ -209,6 +209,13 @@ function jobPercent(job) {
     return Math.min(100, Math.floor(job.processed / job.total * 100));
 }
 
+// Klaar, maar niet alles kon gelezen worden (leesfouten, een map die niet open ging). Zo'n
+// uitkomst vraagt aandacht: het paneel klapt er niet voor in en hij gaat niet bij 'eerder klaar'.
+function jobIncomplete(job) {
+    if (job.status !== 'done' || !job.summary) return false;
+    return job.summary.complete === false || Number(job.summary.errors) > 0;
+}
+
 function jobVisible(job) {
     if (jobDock.dismissed.has(job.id)) return false;
     if (JOB_ACTIVE.has(job.status) || ['paused', 'interrupted'].includes(job.status)) return true;
@@ -269,11 +276,13 @@ function createJobItem(job) {
     }
 
     const message = job.status === 'failed' && job.error ? job.error : (job.message || '');
-    return createEl('div', { class: `job-item job-${job.status}`, dataset: { id: String(job.id) } },
+    const incomplete = jobIncomplete(job) ? ' job-incomplete' : '';
+    return createEl('div', { class: `job-item job-${job.status}${incomplete}`, dataset: { id: String(job.id) } },
         createEl('div', { class: 'job-item-head' },
             createEl('span', { class: 'job-title', text: job.label, title: (job.params && job.params.folder) || '' }),
             createEl('span', { class: 'job-folder', text: jobFolderLabel(job), title: (job.params && job.params.folder) || '' }),
-            createEl('span', { class: 'job-status', text: JOB_STATUS_LABELS[job.status] || job.status })),
+            createEl('span', { class: 'job-status',
+                text: jobIncomplete(job) ? 'Onvolledig' : (JOB_STATUS_LABELS[job.status] || job.status) })),
         createEl('div', { class: 'job-progress' }, bar),
         createEl('div', { class: 'job-message', text: message }),
         createEl('div', { class: 'job-item-foot' },
@@ -303,6 +312,8 @@ function createLibraryLine() {
         const when = formatLibraryTime(lib.last_pass_at);
         if (when) text += ` · bijgewerkt ${when}`;
     }
+    // De laatste ronde (ook een automatische, die zelf niets meldt) kon niet alles lezen
+    const incomplete = lib.ready && !running && lib.last_pass_at && lib.last_pass_at !== lib.last_complete_at;
     const title = lib.ready
         ? `${lib.photos.toLocaleString('nl-NL')} foto's, ${lib.videos.toLocaleString('nl-NL')} video's, ` +
           `${lib.audio.toLocaleString('nl-NL')} audio in ${lib.folders.toLocaleString('nl-NL')} mappen`
@@ -319,8 +330,16 @@ function createLibraryLine() {
         },
     });
     if (running) button.disabled = true;
-    return createEl('div', { class: 'job-library', id: 'job-library' },
-        createEl('span', { class: 'job-library-text', text, title }),
+    const warning = incomplete
+        ? createEl('span', {
+            class: 'job-library-warning',
+            title: 'De laatste ronde kon niet alle mappen of bestanden lezen; de volgende ronde probeert ze opnieuw',
+        },
+            createEl('i', { class: 'fas fa-triangle-exclamation', 'aria-hidden': 'true' }),
+            createEl('span', { text: 'Laatste ronde onvolledig' }))
+        : null;
+    return createEl('div', { class: `job-library${incomplete ? ' incomplete' : ''}`, id: 'job-library' },
+        createEl('span', { class: 'job-library-text', title }, text, warning),
         button);
 }
 
@@ -340,15 +359,19 @@ function renderJobDock() {
     }
 
     // Afgerond (klaar of geannuleerd) vraagt geen aandacht meer: is er verder niets, dan klapt
-    // het paneel vanzelf in, zodat het niets van de pagina bedekt
-    const finished = visible.filter(j => j.status === 'done' || j.status === 'cancelled');
+    // het paneel vanzelf in, zodat het niets van de pagina bedekt. Een onvolledige uitkomst
+    // (leesfouten) telt niet als afgerond: die blijft open in beeld.
+    const finished = visible.filter(j => (j.status === 'done' && !jobIncomplete(j)) || j.status === 'cancelled');
     const open = visible.filter(j => !finished.includes(j));
+    const incomplete = visible.filter(jobIncomplete).length;
     const idle = !open.length && !jobDock.error;
     const collapsed = idle ? !jobDock.idleOpen : jobDock.collapsed;
     dock.classList.toggle('collapsed', collapsed);
+    dock.classList.toggle('attention', incomplete > 0);
 
-    const title = active ? `Taken (${active} bezig)`
+    let title = active ? `Taken (${active} bezig)`
         : idle ? `${finished.length} ${finished.length === 1 ? 'taak' : 'taken'} klaar` : `Taken (${visible.length})`;
+    if (incomplete) title += ` · ${incomplete} onvolledig`;
     const header = createEl('button', {
         class: 'job-dock-header',
         'aria-expanded': collapsed ? 'false' : 'true',
@@ -358,7 +381,9 @@ function renderJobDock() {
             renderJobDock();
         },
     },
-        createEl('span', { class: 'job-dock-title', text: title }),
+        createEl('span', { class: 'job-dock-title' },
+            incomplete ? createEl('i', { class: 'fas fa-triangle-exclamation job-dock-warning', 'aria-hidden': 'true' }) : null,
+            title),
         createEl('i', { class: `fas ${collapsed ? 'fa-chevron-up' : 'fa-chevron-down'} job-dock-toggle`, 'aria-hidden': 'true' }));
 
     // Van de afgeronde taken staat de nieuwste er helemaal; de rest samen op één regel
