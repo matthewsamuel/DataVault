@@ -247,7 +247,7 @@ async function restoreLatestScan() {
         if (JOB_ACTIVE.has(job.status)) {
             setSelectedFolder(job.params.folder);
             followScanJob(job.id);
-        } else if (job.status === 'done' && !dupState.folder) {
+        } else if (job.status === 'done' && job.has_result && !dupState.folder) {
             await loadScanJobResult(job.id);
         } else if (job.params && job.params.folder && !selectedFolder) {
             setSelectedFolder(job.params.folder);

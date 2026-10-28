@@ -204,7 +204,8 @@ function createJobItem(job) {
     if (eta) details.push(eta);
 
     const actions = [];
-    if (job.type === 'dup_scan' && job.status === 'done') {
+    // Alleen de nieuwste uitkomsten worden bewaard: een oudere scan heeft niets meer om te tonen
+    if (job.type === 'dup_scan' && job.status === 'done' && job.has_result) {
         actions.push(jobButton('Bekijk', 'Toon dit resultaat in Duplicaten', () => openDuplicateScanJob(job.id)));
     }
     if (job.can_pause && !job.stopping) {

@@ -201,6 +201,8 @@ class JobManager:
     _COLUMNS = ("id", "type", "params", "status", "processed", "total", "message", "error",
                 "checkpoint", "summary", "created_at", "updated_at", "started_at", "finished_at")
     _JSON_COLUMNS = ("params", "checkpoint", "summary")
+    # Whether the result is still stored (older ones are pruned, see results_to_keep)
+    _SELECT = ", ".join(_COLUMNS) + ", EXISTS(SELECT 1 FROM job_results r WHERE r.job_id = jobs.id)"
 
     def __init__(self, db, config, types: List[JobType], vault_poll_interval: float = VAULT_POLL_INTERVAL):
         self.db = db
@@ -218,6 +220,7 @@ class JobManager:
 
     def _row(self, values) -> Dict[str, Any]:
         row = dict(zip(self._COLUMNS, values))
+        row["has_result"] = bool(values[len(self._COLUMNS)]) if len(values) > len(self._COLUMNS) else False
         for column in self._JSON_COLUMNS:
             row[column] = _loads(row[column])
         if row["params"] is None:
@@ -227,12 +230,12 @@ class JobManager:
     def _db_get(self, job_id: int) -> Optional[Dict[str, Any]]:
         with self.db._connect() as conn:
             values = conn.execute(
-                f"SELECT {', '.join(self._COLUMNS)} FROM jobs WHERE id = ?", (job_id,)
+                f"SELECT {self._SELECT} FROM jobs WHERE id = ?", (job_id,)
             ).fetchone()
         return self._row(values) if values else None
 
     def _db_list(self, limit: int, job_type: Optional[str]) -> List[Dict[str, Any]]:
-        sql = f"SELECT {', '.join(self._COLUMNS)} FROM jobs"
+        sql = f"SELECT {self._SELECT} FROM jobs"
         args: List[Any] = []
         if job_type:
             sql += " WHERE type = ?"
@@ -275,10 +278,6 @@ class JobManager:
     def _known(self, job_id: int) -> Optional[_Live]:
         """A job whose state in memory is newer than the database (running, or not saved yet)."""
         return self._live.get(job_id) or self._unsaved.get(job_id)
-
-    def _has_result(self, job_id: int) -> bool:
-        with self.db._connect() as conn:
-            return conn.execute("SELECT 1 FROM job_results WHERE job_id = ?", (job_id,)).fetchone() is not None
 
     def _store_result(self, job: Dict[str, Any], result: Dict[str, Any], summary: Optional[Dict[str, Any]]) -> None:
         """Result, summary and status 'done' in one transaction: never 'done' without its result."""
@@ -592,6 +591,7 @@ class JobManager:
             "message": row["message"],
             "error": row["error"],
             "summary": row["summary"],
+            "has_result": status == DONE and bool(row.get("has_result")),
             "checkpoint": row["checkpoint"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
@@ -661,7 +661,8 @@ class JobManager:
                     except Exception:
                         pass
                 with self._lock:
-                    live.row.update(status=DONE, summary=summary, finished_at=time.time(), updated_at=time.time())
+                    live.row.update(status=DONE, summary=summary, has_result=True,
+                                    finished_at=time.time(), updated_at=time.time())
                 return
         finally:
             with self._lock:

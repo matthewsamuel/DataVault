@@ -609,3 +609,19 @@ def test_cancel_while_the_paused_worker_is_still_cleaning_up_closes_the_job(clie
     time.sleep(0.2)
     assert manager.get(job["id"])["status"] == jobs.CANCELLED and job["id"] not in manager._live
     manager.shutdown()
+
+
+def test_a_job_whose_result_was_pruned_says_so(client, vault, monkeypatch):
+    """R23-3: the dock offers 'Bekijk' only while the result is still stored."""
+    manager = client.app.state.jobs
+    monkeypatch.setattr(manager.types["dup_scan"], "results_to_keep", 2)
+    folder = _copies(vault / "Snoei", n=2)
+    ids = [_wait(client, _start(client, "dup_scan", folder=str(folder))["id"])["id"] for _ in range(3)]
+    listed = {j["id"]: j for j in client.get("/api/jobs?type=dup_scan").json()["jobs"]}
+    assert [listed[i]["has_result"] for i in ids] == [False, True, True]
+    assert all(listed[i]["status"] == "done" for i in ids)
+    assert _job(client, ids[0])["has_result"] is False and _job(client, ids[2])["has_result"] is True
+    assert client.get(f"/api/jobs/{ids[0]}/result").status_code == 410
+    assert client.get(f"/api/jobs/{ids[2]}/result").status_code == 200
+    running = _start(client, "hashing", folder=str(folder))
+    assert running["has_result"] is False

@@ -372,3 +372,6 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   verder zonder dat de app hem nog volgde (niet meer te annuleren, en een tweede taak van
   dezelfde soort kon tegelijk starten). Annuleren in datzelfde moment liet de taak op
   "Gepauzeerd" staan. Beide kan niet meer.
+- Takenpaneel: de knop "Bekijk" staat alleen nog bij een duplicatenscan waarvan de uitkomst nog
+  bewaard is (de app bewaart de laatste vijf). Voorheen gaf "Bekijk" bij een oudere scan alleen
+  de melding dat het resultaat niet meer bewaard was.
