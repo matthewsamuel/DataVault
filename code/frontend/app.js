@@ -1724,6 +1724,13 @@ document.addEventListener('keydown', (e) => {
 // Hoe lang een melding blijft staan: een fout of waarschuwing lang genoeg om te lezen
 const TOAST_MS = { error: 8000, warning: 6000, success: 3500, info: 3500 };
 
+const TOAST_ICONS = {
+    success: 'fa-circle-check',
+    error: 'fa-circle-exclamation',
+    warning: 'fa-triangle-exclamation',
+    info: 'fa-circle-info',
+};
+
 function showToast(title, message, type = 'info') {
     const container = document.getElementById('toast-container');
     const duration = TOAST_MS[type] || TOAST_MS.info;
@@ -1744,6 +1751,8 @@ function showToast(title, message, type = 'info') {
     // Titel en melding zijn tekst: ze bevatten vaak bestandsnamen of een foutmelding van de server
     toast.append(
         createEl('div', { class: 'toast-header' },
+            // Het soort melding zit in het icoon en de balk links; de titel blijft rustig
+            createEl('i', { class: `fas ${TOAST_ICONS[type] || TOAST_ICONS.info} toast-icon`, 'aria-hidden': 'true' }),
             createEl('strong', { text: title }),
             createEl('button', { onClick: () => toast.remove(), 'aria-label': 'Melding sluiten', title: 'Sluiten' }, '\u00d7')),
         createEl('div', { class: 'toast-body', text: message }));

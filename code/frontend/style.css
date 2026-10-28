@@ -1508,10 +1508,10 @@ textarea.input {
     to { opacity: 1; transform: none; }
 }
 
-.toast.success { --toast-tone: var(--success); }
-.toast.error { --toast-tone: var(--danger); }
-.toast.warning { --toast-tone: var(--warning); }
-.toast.info { --toast-tone: var(--info); }
+.toast.success { --toast-tone: var(--success); --toast-icon: var(--success-text); }
+.toast.error { --toast-tone: var(--danger); --toast-icon: var(--danger-text); }
+.toast.warning { --toast-tone: var(--warning); --toast-icon: var(--warning-text); }
+.toast.info { --toast-tone: var(--info); --toast-icon: var(--info-text); }
 
 /* Titel met de sluitknop rechts, de melding eronder */
 .toast-header {
@@ -1520,6 +1520,18 @@ textarea.input {
     justify-content: space-between;
     gap: var(--space-md);
     font-weight: var(--fw-semibold);
+}
+
+.toast-header strong {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Het soort melding: een icoon in de kleur van de balk; titels zijn altijd neutraal */
+.toast-icon {
+    flex: none;
+    color: var(--toast-icon, var(--text-secondary));
+    font-size: var(--fs-sm);
 }
 
 .toast-header button {
@@ -1544,10 +1556,6 @@ textarea.input {
     color: var(--text-secondary);
     overflow-wrap: anywhere;
     line-height: var(--lh-snug);
-}
-
-.toast.error .toast-header strong {
-    color: var(--danger-text);
 }
 
 /* ---------- Lege, mislukte en ladende stukken (ui.js) ---------- */
