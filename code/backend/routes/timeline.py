@@ -13,8 +13,9 @@ from collections import defaultdict
 
 from backend.config import (
     Config, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS, MEDIA_EXTENSIONS,
-    EXCLUDED_FOLDER_NAMES, validate_path_in_vault, is_media_file
+    EXCLUDED_FOLDER_NAMES, is_media_file
 )
+from backend.paths import vault_folder_or_none
 
 router = APIRouter()
 
@@ -114,13 +115,9 @@ async def timeline_scan(
     all_files = []
 
     for folder_str in folder_paths:
-        folder_path = Path(folder_str)
-
-        # Validate path is in vault
-        if not validate_path_in_vault(folder_path, config.VAULT_ROOT):
-            continue  # Skip invalid paths silently
-
-        if not folder_path.exists() or not folder_path.is_dir():
+        # Skip paths outside the vault (or app-internal) silently, the same way as missing ones
+        folder_path = vault_folder_or_none(folder_str, config)
+        if folder_path is None or not folder_path.is_dir():
             continue
 
         files = _scan_folder_recursive(folder_path)

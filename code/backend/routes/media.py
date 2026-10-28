@@ -6,9 +6,10 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pathlib import Path
 from typing import Dict, Any
 
-from backend.config import Config, validate_path_in_vault, is_video
+from backend.config import Config, is_video
+from backend.paths import resolve_in_vault
 from backend.file_ops import (
-    move_no_overwrite, is_inside, same_folder, ARCHIVE_LOCK,
+    move_no_overwrite, same_folder, ARCHIVE_LOCK,
     FileOperationError, CrossDeviceError, DestinationFolderError, ProtectedPathError,
 )
 
@@ -30,16 +31,10 @@ def get_media_endpoint(folder: str = Query(...)) -> Dict[str, Any]:
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
-    if not folder or folder.strip() == "":
-        folder_path = config.VAULT_ROOT
-    else:
-        folder_path = Path(folder)
+    # Inside the vault first, existence second: the same 403 for anything outside
+    folder_path = resolve_in_vault(folder if folder.strip() else str(config.VAULT_ROOT), config, folder=True)
     
-    # Validate path is in vault
-    if not validate_path_in_vault(folder_path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Access denied: path outside vault")
-    
-    if not folder_path.exists():
+    if not folder_path.is_dir():
         raise HTTPException(status_code=404, detail="Folder not found")
     
     from backend.scanner import get_media_files
@@ -53,17 +48,13 @@ def get_media_endpoint(folder: str = Query(...)) -> Dict[str, Any]:
 
 @router.get("/api/file")
 def get_file_endpoint(path: str = Query(...)):
-    """Stream full media file"""
+    """Stream full media file (never the app's own cache or database)"""
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
-    file_path = Path(path)
+    file_path = resolve_in_vault(path, config)
     
-    # Validate path
-    if not validate_path_in_vault(file_path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Access denied: path outside vault")
-    
-    if not file_path.exists() or not file_path.is_file():
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     
     # Return file with appropriate content type so browsers can stream it natively
@@ -75,13 +66,9 @@ def get_thumbnail_endpoint(path: str = Query(...)):
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
-    file_path = Path(path)
+    file_path = resolve_in_vault(path, config)
     
-    # Validate path
-    if not validate_path_in_vault(file_path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Access denied: path outside vault")
-    
-    if not file_path.exists() or not file_path.is_file():
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     
     # Generate or get cached thumbnail
@@ -118,11 +105,7 @@ def open_in_finder_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
     if not file_path_str or not isinstance(file_path_str, str):
         raise HTTPException(status_code=400, detail="Missing or invalid 'path' in request body")
         
-    file_path = Path(file_path_str)
-    
-    # Validate file path is within vault
-    if not validate_path_in_vault(file_path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Access denied: path outside vault")
+    file_path = resolve_in_vault(file_path_str, config)
     
     # Check file exists
     if not file_path.exists():
@@ -160,20 +143,10 @@ def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(source_path_str, str) or not isinstance(destination_folder_str, str):
         raise HTTPException(status_code=400, detail="'source_path' and 'destination_folder' must be strings")
     
-    source_path = Path(source_path_str)
-    destination_folder = Path(destination_folder_str)
-    
-    # Validate both paths are within vault and outside the app's cache
-    if not validate_path_in_vault(source_path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Access denied: source path outside vault")
-    
-    if not validate_path_in_vault(destination_folder, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Access denied: destination path outside vault")
-    
-    # is_inside also catches other spellings such as .DATAVAULT_CACHE (case-insensitive volumes)
-    for path in (source_path, destination_folder):
-        if is_inside(path, config.CACHE_FOLDER) or is_inside(path, config.DB_PATH):
-            raise HTTPException(status_code=403, detail="Access denied: cache folder")
+    # Both inside the vault and outside the app's own folders (cache, database);
+    # is_inside (via resolve_in_vault) also catches other spellings such as .DATAVAULT_CACHE
+    source_path = resolve_in_vault(source_path_str, config)
+    destination_folder = resolve_in_vault(destination_folder_str, config, folder=True)
     
     try:
         # One app-wide lock: no other move can slip in between these checks and the move

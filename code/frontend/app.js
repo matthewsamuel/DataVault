@@ -1762,7 +1762,7 @@ async function storageNavigateToPath(folderPath) {
         const res = await fetch(`${API_BASE}/api/stats/storage-breakdown-nested${params}`);
         const data = await res.json();
 
-        if (data.error) {
+        if (!res.ok || data.error) {
             list.innerHTML = '<li>Fout bij laden van data.</li>';
             loading.style.display = 'none';
             content.style.display = 'block';

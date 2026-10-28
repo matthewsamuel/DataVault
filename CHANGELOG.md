@@ -43,6 +43,20 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
     De pagina doet dat automatisch (nieuw bestand `api.js`); na een herstart van de server
     haalt hij vanzelf de nieuwe sleutel op.
 
+- Eén centrale padcontrole voor elk onderdeel dat een pad of map ontvangt (viewer, miniaturen,
+  Keurer, duplicaten, Shows, tijdlijn, opslagoverzicht, "op deze dag"). Een pad moet, na het
+  oplossen van `..` en snelkoppelingen (symlinks), binnen het archief liggen. Voorheen kon het
+  opslagoverzicht met `..` mappen en bestanden buiten het archief tonen (tot in `/etc`) en kon
+  "foto op deze dag" elke map op de schijf doorzoeken.
+- Voor een pad buiten het archief geeft de app altijd hetzelfde antwoord, of het nu bestaat of
+  niet, zodat niet af te leiden is wat er buiten het archief staat.
+- Bestandsnamen met accenten worden ook gevonden als ze in een andere Unicode-vorm binnenkomen
+  (bijv. `é` als `e` + accentteken).
+- De eigen bestanden van de app (de database en de miniaturen-cache) worden niet meer als foto
+  geserveerd en kunnen nergens meer gekozen worden.
+- Het opslagoverzicht werkt nu ook als er een map is waarvan de naam met een streepje begint
+  (bijv. `-h`); voorheen gaf het hele overzicht dan een fout.
+
 ### Foto Keurer
 - Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het
   bestand naartoe ging (prullenmand of doelmap). Undo stuurt alleen nog het nummer van de

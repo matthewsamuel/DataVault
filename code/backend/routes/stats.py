@@ -1,12 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pathlib import Path
 import shutil
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import os
 import subprocess
 
 from backend.config import Config
+from backend.paths import resolve_in_vault, vault_folder_or_none
 from backend.routes.spotify import parse_spotify_data
 
 router = APIRouter()
@@ -33,6 +34,62 @@ async def get_storage_stats() -> Dict[str, Any]:
         "free_gb": round(free / (2**30), 2),
         "percent_used": round((used / total) * 100, 1)
     }
+def _du_breakdown(target_path: Path, names: List[str]) -> Dict[str, float]:
+    """
+    Size in GB of each named subfolder of target_path, measured with `du -sm`.
+    '--' ends du's options, so a folder named '-h' is measured instead of read as a flag;
+    lines du could not measure (no leading number) are skipped instead of failing everything.
+    """
+    breakdown = {}
+    if not names:
+        return breakdown
+    result = subprocess.run(
+        ["du", "-sm", "--", *names],
+        cwd=str(target_path),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    # 0 = all measured, 1 = some entries unreadable (still report the rest)
+    if result.returncode not in (0, 1):
+        return breakdown
+    for line in result.stdout.splitlines():
+        size_str, sep, folder_name = line.partition('\t')
+        if not sep:
+            continue
+        try:
+            size_mb = int(size_str)
+        except ValueError:
+            continue
+        gb_size = round(size_mb / 1024, 2)
+        if gb_size > 0:
+            breakdown[folder_name] = gb_size
+    # Sort by size descending
+    return dict(sorted(breakdown.items(), key=lambda item: item[1], reverse=True))
+
+
+def _subfolder_names(target_path: Path) -> List[str]:
+    """Visible real subfolders (no hidden folders, no symlinks)."""
+    return [
+        entry.name for entry in os.scandir(target_path)
+        if entry.is_dir(follow_symlinks=False) and not entry.name.startswith('.')
+    ]
+
+
+def _stats_folder(folder_path: Optional[str]) -> Path:
+    """
+    The folder a stats request is about: the vault root, or folder_path (relative to the
+    vault, or absolute) checked by resolve_in_vault. Outside the vault -> 403, whether it
+    exists or not; inside but missing -> 404.
+    """
+    if not folder_path:
+        return config.VAULT_ROOT.resolve()
+    target_path = resolve_in_vault(folder_path, config, folder=True)
+    if not target_path.is_dir():
+        raise HTTPException(status_code=404, detail="Map niet gevonden")
+    return target_path
+
+
 @router.get("/storage-breakdown")
 async def get_storage_breakdown() -> Dict[str, Any]:
     if not config:
@@ -42,40 +99,9 @@ async def get_storage_breakdown() -> Dict[str, Any]:
     if not vault_path.exists():
          return {"error": "Vault path does not exist"}
          
-    import os
-    breakdown = {}
     # Calculate sizes for immediate subdirectories using `du` for speed
-    import subprocess
     try:
-        # du -sm * calculates size in MB for all items in the current directory
-        # We run it inside the vault path
-        cmd = ["du", "-sm"] + [entry.name for entry in os.scandir(vault_path) if entry.is_dir() and not entry.name.startswith('.')]
-        
-        result = subprocess.run(
-            cmd,
-            cwd=str(vault_path),
-            capture_output=True,
-            text=True,
-            check=False
-        )
-        
-        if result.returncode == 0 or result.returncode == 1:
-            # Parse output: "1234\tFolderName"
-            for line in result.stdout.strip().split('\n'):
-                if line:
-                    parts = line.split('\t')
-                    if len(parts) >= 2:
-                        size_mb = int(parts[0])
-                        folder_name = parts[1]
-                        gb_size = round(size_mb / 1024, 2)
-                        
-                        if gb_size > 0:
-                            breakdown[folder_name] = gb_size
-                            
-        # Sort by size descending
-        sorted_breakdown = dict(sorted(breakdown.items(), key=lambda item: item[1], reverse=True))
-        return {"breakdown": sorted_breakdown}
-
+        return {"breakdown": _du_breakdown(vault_path, _subfolder_names(vault_path))}
     except Exception as e:
         return {"error": str(e)}
 
@@ -85,41 +111,11 @@ async def get_storage_breakdown_nested(folder_path: str = None) -> Dict[str, Any
     if not config:
         return {"error": "Config not loaded"}
 
-    vault_path = config.VAULT_ROOT
-    target_path = vault_path / folder_path if folder_path else vault_path
-
-    if not target_path.exists() or not target_path.is_dir():
-        return {"error": "Path does not exist"}
+    target_path = _stats_folder(folder_path)
 
     try:
-        target_path.relative_to(vault_path)
-    except ValueError:
-        return {"error": "Path is outside vault"}
-
-    breakdown = {}
-    try:
-        entries = [entry for entry in os.scandir(target_path) if entry.is_dir() and not entry.name.startswith('.')]
-
-        if not entries:
-            return {"breakdown": {}, "path": folder_path or "/"}
-
-        cmd = ["du", "-sm"] + [entry.name for entry in entries]
-        result = subprocess.run(cmd, cwd=str(target_path), capture_output=True, text=True, check=False)
-
-        if result.returncode == 0 or result.returncode == 1:
-            for line in result.stdout.strip().split('\n'):
-                if line:
-                    parts = line.split('\t')
-                    if len(parts) >= 2:
-                        size_mb = int(parts[0])
-                        folder_name = parts[1]
-                        gb_size = round(size_mb / 1024, 2)
-                        if gb_size > 0:
-                            breakdown[folder_name] = gb_size
-
-        sorted_breakdown = dict(sorted(breakdown.items(), key=lambda item: item[1], reverse=True))
-        return {"breakdown": sorted_breakdown, "path": folder_path or "/"}
-
+        breakdown = _du_breakdown(target_path, _subfolder_names(target_path))
+        return {"breakdown": breakdown, "path": folder_path or "/"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -129,16 +125,8 @@ async def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[st
     if not config:
         return {"error": "Config not loaded"}
 
-    vault_path = config.VAULT_ROOT
-    target_path = vault_path / folder_path if folder_path else vault_path
-
-    if not target_path.exists() or not target_path.is_dir():
-        return {"error": "Path does not exist"}
-
-    try:
-        target_path.relative_to(vault_path)
-    except ValueError:
-        return {"error": "Path is outside vault"}
+    vault_path = config.VAULT_ROOT.resolve()
+    target_path = _stats_folder(folder_path)
 
     files_with_sizes = []
 
@@ -185,11 +173,12 @@ async def get_photo_on_this_day(allowed_folders: str = None) -> Dict[str, Any]:
     
     try:
         if allowed_folders:
-            # allow multiple comma-separated bases
-            bases = [Path(p.strip()) for p in allowed_folders.split(',')]
+            # allow multiple comma-separated bases; only folders inside the vault count
+            # (anything else is skipped, the same way whether it exists or not)
+            bases = [vault_folder_or_none(p.strip(), config) for p in allowed_folders.split(',')]
             all_dirs = []
             for base in bases:
-                if base.exists() and base.is_dir():
+                if base is not None and base.is_dir():
                     all_dirs.extend([x[0] for x in os.walk(base)])
             all_dirs = list(set(all_dirs))
         else:

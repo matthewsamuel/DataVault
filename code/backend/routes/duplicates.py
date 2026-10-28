@@ -7,7 +7,8 @@ from typing import List, Dict, Any, Optional
 import os
 import stat
 
-from backend.config import Config, validate_path_in_vault
+from backend.config import Config
+from backend.paths import resolve_in_vault, is_in_vault
 from backend.file_ops import (
     safe_move_with_structure, move_no_overwrite, files_identical, is_inside, ARCHIVE_LOCK,
     FileOperationError, CrossDeviceError, ProtectedPathError,
@@ -79,7 +80,7 @@ def _paths_allowed(op: Dict[str, Any]) -> bool:
     """Re-validate what the database says before moving anything."""
     return (
         is_inside(Path(op["dst_path"]), config.DUPLICATES_FOLDER)
-        and validate_path_in_vault(Path(op["src_path"]), config.VAULT_ROOT)
+        and is_in_vault(op["src_path"], config, allow_internal=True)
         and _in_protected_folder(Path(op["src_path"])) is None
     )
 
@@ -193,14 +194,11 @@ async def scan_folder_for_duplicates(folder_path: str) -> Dict[str, Any]:
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
-    folder = Path(folder_path)
+    # Inside the vault first, existence second: the same 403 for anything outside
+    folder = resolve_in_vault(folder_path, config, folder=True)
     
-    if not folder.exists() or not folder.is_dir():
+    if not folder.is_dir():
         raise HTTPException(status_code=404, detail="Folder not found")
-    
-    # Validate folder is in vault
-    if not validate_path_in_vault(folder, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Folder must be within vault")
     
     try:
         from backend.scanner import find_duplicates_in_folder
@@ -243,16 +241,12 @@ def delete_single_duplicate(file_path: str, duplicate_of: Optional[str] = None) 
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
-    src_path = Path(file_path)
-    
-    # Validate file is in vault and is a plain file (no folders, no symlinks)
-    if not validate_path_in_vault(src_path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="File must be within vault")
+    # Validate file is in vault (a plain file, no folders or symlinks: checked below).
+    # The cache and other protected folders get their own 400 further down.
+    src_path = resolve_in_vault(file_path, config, allow_internal=True)
     
     keeper_str = duplicate_of or _find_keeper(src_path)
-    keeper = Path(keeper_str) if keeper_str else None
-    if keeper is not None and not validate_path_in_vault(keeper, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Original must be within vault")
+    keeper = resolve_in_vault(keeper_str, config, allow_internal=True) if keeper_str else None
     
     with ARCHIVE_LOCK:
         if not os.path.lexists(src_path):

@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException
 from pathlib import Path
 from typing import List, Dict, Any
 import random
-from backend.config import Config, is_media_file, is_video, validate_path_in_vault # corrected import
+from backend.config import Config, is_media_file, is_video
+from backend.paths import resolve_in_vault
 
 router = APIRouter()
 
@@ -248,6 +249,11 @@ async def update_settings(payload: Dict[str, Any]):
     
     if path is None or enabled is None:
         raise HTTPException(status_code=400, detail="Missing path or enabled status")
+    if not isinstance(path, str) or not isinstance(enabled, bool):
+        raise HTTPException(status_code=400, detail="Invalid path or enabled status")
+    
+    # Only folders inside the vault can be switched off (stored in one spelling)
+    path = str(resolve_in_vault(path, config, folder=True))
     
     conn = db._get_connection()
     cursor = conn.cursor()
@@ -289,12 +295,10 @@ async def vote_file(payload: Dict[str, Any]):
     path = payload.get("path")
     vote = payload.get("vote")
 
-    if not path or vote not in ("up", "down"):
+    if not path or not isinstance(path, str) or vote not in ("up", "down"):
         raise HTTPException(status_code=400, detail="Missing or invalid path/vote")
 
-    target_path = Path(path)
-    if not validate_path_in_vault(target_path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Access denied")
+    path = str(resolve_in_vault(path, config))
 
     current_rating = db.get_rating(path)
     change = 50 if vote == "up" else -50
@@ -310,13 +314,10 @@ async def get_folder_content(path: str):
     Used for playing a "Folder Show".
     Files are returned in ELO-weighted order: higher-rated photos appear first.
     """
-    target_path = Path(path)
-    
-    # Security check using config validator
-    if not validate_path_in_vault(target_path, config.VAULT_ROOT):
-         raise HTTPException(status_code=403, detail="Access denied")
+    # Inside the vault first, existence second: the same 403 for anything outside
+    target_path = resolve_in_vault(path, config, folder=True)
          
-    if not target_path.exists() or not target_path.is_dir():
+    if not target_path.is_dir():
          raise HTTPException(status_code=404, detail="Folder not found")
     
     # Fetch all ratings for ELO weighting

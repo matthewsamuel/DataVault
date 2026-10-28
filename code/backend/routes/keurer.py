@@ -8,7 +8,8 @@ import os
 import random
 import stat
 
-from backend.config import Config, validate_path_in_vault, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS
+from backend.config import Config, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS
+from backend.paths import resolve_in_vault
 from backend.file_ops import (
     move_no_overwrite, is_inside, same_folder, ARCHIVE_LOCK,
     FileOperationError, CrossDeviceError, DestinationExistsError, ProtectedPathError,
@@ -36,12 +37,9 @@ def get_keurer_files(folder: str = Query(...)) -> Dict[str, Any]:
     if not config:
         raise HTTPException(status_code=500, detail="Configuratie niet geïnitialiseerd")
 
-    folder_path = Path(folder)
+    folder_path = resolve_in_vault(folder, config, folder=True)
 
-    if not validate_path_in_vault(folder_path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Toegang geweigerd: pad buiten vault")
-
-    if not folder_path.exists() or not folder_path.is_dir():
+    if not folder_path.is_dir():
         raise HTTPException(status_code=404, detail="Map niet gevonden")
 
     decided_set = set(db.get_keurer_decided_paths(str(folder_path)))
@@ -98,15 +96,16 @@ def _refuse(status: int, detail: str):
     raise HTTPException(status_code=status, detail=detail)
 
 
-def _check_archive_path(path: Path, what: str):
+def _check_archive_path(path, what: str, folder: bool = False) -> Path:
     """
     Pad moet in de vault liggen en niet in de cache van de app (of de database zelf),
-    ook niet via een andere schrijfwijze zoals .DATAVAULT_CACHE (zie file_ops.is_inside).
+    ook niet via een andere schrijfwijze zoals .DATAVAULT_CACHE (zie backend/paths.py).
+    Geeft het gecontroleerde, absolute pad terug.
     """
-    if not validate_path_in_vault(path, config.VAULT_ROOT):
-        _refuse(403, f"Toegang geweigerd: {what} buiten vault")
-    if is_inside(path, config.CACHE_FOLDER) or is_inside(path, config.DB_PATH):
-        _refuse(403, f"Toegang geweigerd: {what} in de cache-map")
+    try:
+        return resolve_in_vault(path, config, folder=folder)
+    except HTTPException as e:
+        _refuse(e.status_code, f"Toegang geweigerd: {what} ligt buiten het archief")
 
 
 def _is_regular_file(path: Path) -> bool:
@@ -197,12 +196,9 @@ def decide_file(body: Dict[str, Any]) -> Dict[str, Any]:
     ):
         _refuse(400, "Ontbrekende of ongeldige velden")
 
-    file_path = Path(path_str)
-    folder_path = Path(folder_str)
-
-    _check_archive_path(file_path, "pad")
-    _check_archive_path(folder_path, "map")
-    if file_path.parent.resolve() != folder_path.resolve():
+    file_path = _check_archive_path(path_str, "pad")
+    folder_path = _check_archive_path(folder_str, "map", folder=True)
+    if not same_folder(file_path.parent, folder_path):
         _refuse(400, "Bestand staat niet in de gekozen map")
     if not _is_regular_file(file_path):
         _refuse(404, "Bestand niet gevonden")
@@ -221,8 +217,7 @@ def decide_file(body: Dict[str, Any]) -> Dict[str, Any]:
                 dest_str = body.get("destination_folder")
                 if not dest_str or not isinstance(dest_str, str):
                     _refuse(400, "Geen (geldige) doelmap opgegeven")
-                dest_folder = Path(dest_str)
-                _check_archive_path(dest_folder, "doelmap")
+                dest_folder = _check_archive_path(dest_str, "doelmap", folder=True)
                 if not dest_folder.is_dir():
                     _refuse(404, "Doelmap niet gevonden")
                 if same_folder(dest_folder, file_path.parent):
@@ -238,7 +233,7 @@ def decide_file(body: Dict[str, Any]) -> Dict[str, Any]:
         dest_ino, dest_size = _fingerprint(dest_path) if dest_path else (None, None)
         try:
             decision_id = db.record_keurer_decision(
-                path_str, folder_str, decision, str(dest_path) if dest_path else None,
+                str(file_path), str(folder_path), decision, str(dest_path) if dest_path else None,
                 dest_ino, dest_size,
             )
         except Exception as e:
