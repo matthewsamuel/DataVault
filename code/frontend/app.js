@@ -8,6 +8,7 @@ let currentFolder = '';
 let currentMedia = [];
 let filteredMedia = [];
 let folderTree = [];
+let foldersLoaded = false;   // /api/folders gaf een antwoord (een leeg archief is dan echt leeg)
 let expandedFolders = new Set();
 let currentView = 'grid';
 let currentSort = 'name';
@@ -420,6 +421,7 @@ async function loadFolders() {
     try {
         const data = await fetchJSON(`${API_BASE}/api/folders`);
         folderTree = data.folders;
+        foldersLoaded = true;
 
         // Load expanded state from localStorage
         const savedExpanded = localStorage.getItem('expandedFolders');
@@ -432,7 +434,28 @@ async function loadFolders() {
         if (!currentFolder) showArchiveRoot();
     } catch (error) {
         toastFetchError('Mappen laden mislukt', error);
+        showFoldersFailed(error);
     }
+}
+
+// De mappen kwamen niet (archief los, serverfout): geen lege pagina maar zeggen wat er is,
+// met 'Opnieuw proberen'. Komt het archief terug, dan laadt reloadAfterVaultReturn ze vanzelf.
+function showFoldersFailed(error) {
+    const gone = error && error.code === 'vault_unavailable';
+    if (!folderTree || folderTree.length === 0) {
+        const tree = document.getElementById('folder-tree');
+        if (tree) tree.replaceChildren(createEl('div', {
+            class: 'folder-tree-empty', text: gone ? 'Archief niet bereikbaar' : 'Mappen niet geladen',
+        }));
+    }
+    if (currentFolder) return;
+    ++mediaLoadSeq;
+    currentMedia = [];
+    filteredMedia = [];
+    gridItems = [];
+    document.getElementById('media-grid').replaceChildren(
+        errorState(gone ? 'Archief niet bereikbaar' : 'Mappen konden niet geladen worden', error, () => loadFolders()));
+    updateBreadcrumb('');
 }
 
 function renderSidebarFolderTree() {
@@ -705,7 +728,10 @@ function renderMediaGrid(keepCount = false) {
             })
             : currentFolder
                 ? emptyState({ icon: 'fa-folder-open', title: 'Deze map is leeg', text: 'Er staan hier geen bestanden of submappen.' })
-                : emptyState({ icon: 'fa-folder-tree', title: 'Kies een map', text: 'Kies links een map om de bestanden te zien.' }));
+                : (foldersLoaded && folderTree.length === 0)
+                    ? emptyState({ icon: 'fa-box-open', title: 'Het archief is leeg', text: 'Zet mappen met foto\'s, video\'s of muziek in het archief; ze verschijnen hier.',
+                        action: { label: 'Opnieuw kijken', onClick: () => loadFolders() } })
+                    : emptyState({ icon: 'fa-folder-tree', title: 'Kies een map', text: 'Kies links een map om de bestanden te zien.' }));
         return;
     }
 

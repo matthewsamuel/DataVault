@@ -620,11 +620,28 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                       ".map(id => document.getElementById(id).textContent)")
                 expect(len(set(metas)) == 1 and "niet bereikbaar" in metas[0], f"home unplugged: tile lines {metas}")
                 page.screenshot(path=str(shots / "home_unplugged.png"))
+                # Bestanden: not a blank page and an empty folder column, but say what is going on
+                page.evaluate("switchMainView('viewer')")
+                page.wait_for_selector("#media-grid .empty-state", timeout=10000)
+                files = page.evaluate("[document.querySelector('#media-grid .empty-state-title').textContent,"
+                                      " document.getElementById('folder-tree').textContent.trim()]")
+                expect(files == ["Archief niet bereikbaar", "Archief niet bereikbaar"], f"files unplugged: {files}")
+                page.screenshot(path=str(shots / "files_unplugged.png"))
                 # (the 503s of an unplugged archive are expected here)
                 problems[seen:] = [p for p in problems[seen:] if "503" not in p and "Failed to load resource" not in p]
                 print(f"  {'ok' if len(problems) == seen else 'PROBLEM':7} home: archive unplugged")
             finally:
                 unplugged.rename(vault)
+
+            # An archive without any folder: 'Het archief is leeg', not 'Kies een map'
+            page.route("**/api/folders", lambda route: route.fulfill(json={"folders": []}))
+            page.reload()
+            page.wait_for_load_state("networkidle")
+            page.evaluate("switchMainView('viewer')")
+            page.wait_for_selector("#media-grid .empty-state", timeout=10000)
+            empty = page.text_content("#media-grid .empty-state-title")
+            expect(empty == "Het archief is leeg", f"files: an empty archive says {empty!r}")
+            page.unroute("**/api/folders")
             browser.close()
     finally:
         proc.terminate()
