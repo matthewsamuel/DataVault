@@ -154,7 +154,8 @@ UI Update (render, toast notification)
   and that both files are **byte-for-byte identical** (`file_ops.files_identical`, no cached hash). Only then is the
   duplicate moved to RAW_DUPLICATES with its folder structure, via `move_no_overwrite`. So the last copy of a photo
   can never be moved away, even if the folder changed since the scan.
-- **Undo:** every removal is recorded per run; `POST /api/raw_duplicates/undo_last` moves the last run back.
+- **Undo:** every removal is recorded per run; `POST /api/raw_duplicates/undo_last` moves the newest run that
+  still has a file in RAW_DUPLICATES back (a run whose files were tidied away by hand no longer blocks older ones).
   A file that took the original place is never overwritten: the restored file then gets `name_RESTORED_001.ext`.
 
 **Code Example:**
@@ -414,10 +415,14 @@ CREATE TABLE keurer_decisions (
     folder TEXT NOT NULL,
     decision TEXT NOT NULL,  -- 'keep', 'delete', 'move'
     decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(path, folder),
-    INDEX idx_keurer_folder ON keurer_decisions(folder),
-    INDEX idx_keurer_date ON keurer_decisions(decided_at)
+    dest_path TEXT,          -- where delete/move put the file (for server-side undo)
+    dest_ino INTEGER,        -- inode + size of that file, checked before undo
+    dest_size INTEGER
 );
+-- Only 'keep' is unique per path: delete/move rows always stay, so their undo is never lost
+CREATE UNIQUE INDEX idx_keurer_keep_path_folder ON keurer_decisions(path, folder) WHERE decision = 'keep';
+CREATE INDEX idx_keurer_folder ON keurer_decisions(folder);
+CREATE INDEX idx_keurer_date ON keurer_decisions(decided_at);
 
 -- Hash cache: avoid re-hashing unchanged files
 CREATE TABLE file_hashes (

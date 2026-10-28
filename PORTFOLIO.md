@@ -85,89 +85,70 @@ frontend/
 **Solution Architecture:**
 
 1. **Hash-Based Content Addressing**
-   - Uses SHA-256 hashing with caching to identify duplicate files by content, not name
+   - Uses xxHash3-128 hashing with caching to find candidate duplicates by content, not name
    - Cache validity verified by file size and modification time (mtime)
-   - Two hash algorithms available:
-     - SHA-256: Cryptographic standard, used for main duplicate detection
-     - xxHash3-128: 5-10x faster than SHA-256, suitable for speed-critical operations
+   - A hash only *proposes* a duplicate: before anything moves, a full byte-for-byte compare decides
    
    ```python
-   def compute_hash(file_path: Path, db: Database) -> str:
-       """Compute SHA-256 with cache validation"""
+   def compute_hash_xxh3(file_path: Path, db: Database) -> str:
+       """xxHash3-128 with cache validation (5-10x faster than SHA-256)"""
        stat = file_path.stat()
        cached = db.get_cached_hash(file_path, stat.st_size, stat.st_mtime)
        if cached:
            return cached  # Cache hit
        
-       # Full file scan with 8KB chunking for memory efficiency
-       sha256 = hashlib.sha256()
+       hasher = xxhash.xxh3_128()
        with open(file_path, 'rb') as f:
-           while chunk := f.read(8192):
-               sha256.update(chunk)
+           while chunk := f.read(65536):  # 64KB chunks
+               hasher.update(chunk)
        
-       hash_hex = sha256.hexdigest()
-       db.store_hash(file_path, size, mtime, hash_hex)  # Cache for future
+       hash_hex = hasher.hexdigest()
+       db.store_hash(file_path, stat.st_size, stat.st_mtime, hash_hex)  # Cache for future
        return hash_hex
    ```
 
-2. **Vault-Wide Scanning with Progress Tracking**
-   - Builds hash index of entire vault (all files → hashes mapping)
-   - Identifies RAW folder files that have exact matches elsewhere
+2. **Per-Folder Scanning with Progress Tracking**
+   - Scans one chosen folder (and its subfolders), not the whole vault
+   - Groups files by size first: files of different sizes can never be duplicates, so most files are never hashed
+   - Hashes the remaining candidates in parallel; within each hash group the first file is the kept original
    - Tracks progress with phase indicators and cancellation support
-   - Graceful error handling (continues on corrupt files)
    
    ```python
-   def find_duplicates(config: Config, db: Database) -> List[Dict]:
-       # Initialize progress tracking
-       progress = ScanProgress(status='scanning', phase='Scanning for duplicates...')
-       set_scan_progress(progress)
+   def find_duplicates_in_folder(folder_path: Path, config: Config, db: Database) -> Dict:
+       by_size = defaultdict(list)
+       for file_path in media_files_under(folder_path):
+           by_size[file_path.stat().st_size].append(file_path)
+       candidates = [f for group in by_size.values() if len(group) > 1 for f in group]
        
-       # Build hash index: hash -> [file_paths]
-       vault_hashes: Dict[str, List[str]] = {}
+       with ThreadPoolExecutor(max_workers=max_workers) as executor:
+           ...  # compute_hash_xxh3 per candidate, honouring is_scan_cancelled()
        
-       for file_path in all_vault_files:
-           if is_scan_cancelled():  # Support cancellation
-               return []
-           
-           file_hash = compute_hash(file_path, db)  # Uses cache
-           vault_hashes[file_hash].append(str(file_path))
-           update_scan_progress(...)
-       
-       # Find RAW files with duplicates elsewhere
-       duplicates = []
-       for raw_file in raw_folder_files:
-           file_hash = compute_hash(raw_file, db)
-           if len(vault_hashes[file_hash]) > 1:
-               duplicates.append(...)  # Has duplicates
-       
-       return duplicates
+       # For identical files A, B, C: A is kept, B and C are reported as duplicate_of A
+       return {"duplicates": duplicates, "total_files": total_files}
    ```
 
-3. **Safe Removal with Undo Support**
-   - Moves duplicates to separate folder preserving directory structure
-   - Records all operations in database for transactional rollback
-   - Invalidates hash cache for affected files
+3. **Verified Removal with Undo Support**
+   - Right before moving, the server re-checks that the file is a regular file outside
+     RAW_DUPLICATES/TRASH/cache and that the kept original still exists and is byte-for-byte identical
+   - Checks and move run under one app-wide lock, so a second request can never move "the other copy" away
+   - Moves the duplicate to RAW_DUPLICATES preserving its folder structure, never overwriting
+   - Records every move in the database for undo
    
    ```python
-   def safe_move_with_structure(src_path, src_root, dst_root) -> Tuple[Path, bool]:
-       """Move file preserving folder structure"""
-       rel_path = src_path.relative_to(src_root)
-       dst_path = dst_root / rel_path
-       
-       # Handle filename conflicts
-       if dst_path.exists():
-           dst_path = handle_conflict(dst_path, suffix_prefix="DUP")
-       
-       # Atomic move using os.replace() - preserves all metadata
-       os.replace(str(src_path), str(dst_path))
-       
-       return dst_path, was_conflict
+   with ARCHIVE_LOCK:  # shared by every move in the app
+       if not files_identical(src_path, keeper):  # full byte compare, no cached hash
+           raise HTTPException(409, "Original changed since the scan; scan again")
+       dst_path, was_conflict = safe_move_with_structure(
+           real_src, base_folder, config.DUPLICATES_FOLDER.resolve(), conflict_suffix="DUP"
+       )  # -> move_no_overwrite(): a clash becomes name_DUP_001.ext
+       db.record_delete_operation(db.create_delete_run(), src_path, dst_path)
    ```
 
 **Technical Achievements:**
 - Concurrent file processing with ThreadPoolExecutor for multi-core efficiency
-- Deterministic hash index ordering for reproducible results
-- Cross-device move detection (prevents metadata loss on different volumes)
+- Size pre-filter: only files that share a size are hashed
+- The last copy of a photo can never be moved away, even if the folder changed since the scan
+- Cross-device move detection (refused instead of copy + delete)
 - Progress streaming to UI with 1-second update intervals
 
 ---
@@ -402,37 +383,35 @@ frontend/
        }
    ```
 
-3. **Undo History with File Restoration**
-   - Maintains in-memory history stack (max 20 operations)
-   - Records both trash location (for deleted files) and moved_to location (for relocations)
-   - Reverses operations by moving files back from trash or move destination
-   - Updates database to mark decisions as "not made"
+3. **Server-Side Undo History**
+   - Every decision row stores where the file went (`dest_path` in TRASH or the move target)
+     plus its inode and size, so undo can tell the moved file apart from a later same-named file
+   - The client only sends a decision id; all paths come from the database and are re-validated
+   - Undo never overwrites: 409 if the original place is taken, 410 if the moved file is gone or different
+   - `GET /api/keurer/history` returns the last 20 undoable decisions, so the stack survives a reload
    
    ```javascript
-   keurerHistory = [];
-   
    async function keurerUndo() {
-       if (keurerHistory.length === 0) return;
-       
-       const last = keurerHistory.pop();
-       const response = await fetch(`/api/keurer/undo`, {
+       const entry = keurerHistory[keurerHistory.length - 1];
+       const res = await fetch(`${API_BASE}/api/keurer/undo`, {
            method: 'POST',
            headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ last_decision: last })
+           body: JSON.stringify({ id: entry.id }),  // never a path
        });
-       
-       if (response.ok) {
-           // File restored, show next unrated file
-           keurerLoadFiles();
-           showToast('Undo', `${last.file} restored`, 'success');
+       if (!res.ok) {
+           // 404/409/410: this step cannot be undone (any more); show why
+           throw new Error(await keurerErrorDetail(res));
        }
+       const data = await res.json();
+       keurerApplyStats(data.stats);  // counters and streak straight from the server
    }
    ```
 
 4. **API Endpoints**
    - `GET /api/keurer/files`: Returns unrated files from selected folder (excludes already-decided)
    - `POST /api/keurer/decide`: Records decision (keep/delete/move), performs file operation
-   - `POST /api/keurer/undo`: Reverses last decision, restores file
+   - `POST /api/keurer/undo`: Reverses one decision by id, restores the file without overwriting
+   - `GET /api/keurer/history`: The last 20 decisions that can still be undone
    - `GET /api/keurer/stats`: Calculates and returns streak information
 
 **Technical Achievements:**
@@ -759,44 +738,41 @@ frontend/
 - macOS extended attributes
 - File permissions
 
-**Solution:** Use atomic `os.replace()` exclusively:
+**Second issue:** a plain `os.rename()`/`os.replace()` silently overwrites a file that already has the target name.
+
+**Solution:** every move in the app goes through one helper, `file_ops.move_no_overwrite()`:
 
 ```python
-def safe_rename(src: Path, dst: Path, allow_cross_device: bool = False) -> None:
+def move_no_overwrite(src: Path, dst: Path, rename_on_conflict: bool = True,
+                      suffix_prefix: str = "DUP") -> Path:
     """
-    MANDATORY: Safe file rename using os.replace() ONLY.
-    
-    Preserves ALL metadata:
-    - Modified time (mtime)
-    - Created time (ctime)
-    - EXIF/IPTC tags
-    - Extended attributes
+    MANDATORY: the only way the app moves an archive file.
+    One atomic, exclusive rename on the same volume: the file keeps its inode,
+    so mtime, birthtime, EXIF, extended attributes and Finder locks all stay.
+    Never replaces an existing file: a clash becomes name_DUP_001.ext.
     """
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        # Primary: os.replace() is atomic and metadata-preserving
-        os.replace(str(src), str(dst))
-    except OSError as e:
-        if e.errno == 18:  # EXDEV - Cross-device link
-            if not allow_cross_device:
-                raise CrossDeviceError(
-                    f"Cannot move across devices (different volumes): {src} → {dst}\n"
-                    f"Metadata cannot be preserved in cross-device moves."
-                )
-            else:
-                # Unsafe fallback only if explicitly enabled
-                import shutil
-                shutil.move(str(src), str(dst))
-        else:
-            raise FileOperationError(f"Failed to move file: {e}")
+    with ARCHIVE_LOCK:  # all moves in the app are serialised
+        ...  # refuse symlinks, folders, the app's own cache/database and cross-volume moves
+        candidate, counter = dst, 0
+        while True:
+            try:
+                # macOS: renamex_np(src, dst, RENAME_EXCL); elsewhere os.link + unlink
+                _exclusive_rename(src, candidate)  # EEXIST instead of overwriting
+                return candidate
+            except OSError as e:
+                if e.errno != errno.EEXIST or not rename_on_conflict:
+                    raise
+                counter += 1
+                candidate = conflict_name(dst, counter, suffix_prefix)
 ```
 
 **Key Benefits:**
-- Single atomic operation (no intermediate state)
+- Single atomic operation (no intermediate state, no half-moved files)
 - All metadata preserved on same volume
-- Prevents half-moved files if process crashes
-- Explicitly detects and rejects unsafe cross-device moves
+- Even two moves racing for the same name cannot clobber each other
+- Cross-device moves are refused with a clear error; there is no copy + delete fallback
+- Protected-folder checks (`is_inside`) compare folders by device + inode, so another spelling
+  such as `.DATAVAULT_CACHE` on a case-insensitive volume cannot slip past them
 
 ---
 
@@ -807,7 +783,7 @@ def safe_rename(src: Path, dst: Path, allow_cross_device: bool = False) -> None:
 **Solution:** Cache with stat-based invalidation:
 
 ```python
-def compute_hash(file_path: Path, db: Database) -> str:
+def compute_hash_xxh3(file_path: Path, db: Database) -> str:
     """Compute hash with cache validation by size/mtime"""
     stat = file_path.stat()
     size = stat.st_size
@@ -818,13 +794,13 @@ def compute_hash(file_path: Path, db: Database) -> str:
     if cached_hash:
         return cached_hash  # Cache hit: no re-hashing needed
     
-    # Cache miss: compute hash with 8KB chunks (memory efficient)
-    sha256 = hashlib.sha256()
+    # Cache miss: compute xxHash3-128 with 64KB chunks (memory efficient)
+    hasher = xxhash.xxh3_128()
     with open(file_path, 'rb') as f:
-        while chunk := f.read(8192):
-            sha256.update(chunk)
+        while chunk := f.read(65536):
+            hasher.update(chunk)
     
-    hash_hex = sha256.hexdigest()
+    hash_hex = hasher.hexdigest()
     db.store_hash(file_path, size, mtime, hash_hex)
     return hash_hex
 ```
@@ -1006,10 +982,14 @@ CREATE TABLE keurer_decisions (
     folder TEXT NOT NULL,
     decision TEXT NOT NULL,  -- 'keep', 'delete', or 'move'
     decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(path, folder),
-    INDEX idx_keurer_folder ON keurer_decisions(folder),
-    INDEX idx_keurer_date ON keurer_decisions(decided_at)
+    dest_path TEXT,          -- where delete/move put the file (migration 2)
+    dest_ino INTEGER,        -- inode + size of that file, checked before undo (migration 3)
+    dest_size INTEGER
 )
+-- Only 'keep' is unique per path; delete/move rows always stay so their undo is never lost
+CREATE UNIQUE INDEX idx_keurer_keep_path_folder ON keurer_decisions(path, folder) WHERE decision = 'keep';
+CREATE INDEX idx_keurer_folder ON keurer_decisions(folder);
+CREATE INDEX idx_keurer_date ON keurer_decisions(decided_at);
 
 -- Hash cache: avoid re-hashing unchanged files
 CREATE TABLE file_hashes (
@@ -1054,10 +1034,11 @@ CREATE TABLE show_settings (
 
 #### 4.2 Key Design Decisions
 
-1. **UNIQUE(path, folder) in keurer_decisions**
+1. **Unique 'keep' per (path, folder) in keurer_decisions**
    - Allows same file to be rated differently per source folder
-   - Enforces single decision per (file, folder) pair
-   - Prevents duplicate decision records
+   - A new judgement replaces an earlier 'keep' (nothing to undo there)
+   - Delete and move rows are never replaced, so a file's undo record cannot be lost
+   - Schema changes are numbered migrations (`backend/migrations.py`) with an automatic backup first
 
 2. **Indexed Lookups**
    - `idx_keurer_folder`: Fast filtering by source folder (keurer UI)
@@ -1239,8 +1220,8 @@ html[data-theme="light"] {
    
    with ThreadPoolExecutor(max_workers=4) as executor:
        futures = [
-           executor.submit(compute_hash, file_path, db)
-           for file_path in all_files
+           executor.submit(compute_hash_xxh3, file_path, db)
+           for file_path in candidates  # only files that share a size
        ]
        
        for i, future in enumerate(as_completed(futures)):
@@ -1253,13 +1234,10 @@ html[data-theme="light"] {
 
 3. **XXHash for Speed-Critical Paths**
    ```python
-   # Standard duplicate scan: SHA-256 (safe, canonical)
-   def compute_hash(file_path: Path, db: Database) -> str:
-       return hashlib.sha256(...)
-   
-   # Speed-critical (show metadata scan): xxHash3 (10x faster)
+   # Duplicate scan: xxHash3-128 only proposes candidates (10x faster than SHA-256);
+   # a byte-for-byte compare (files_identical) decides before anything is moved
    def compute_hash_xxh3(file_path: Path, db: Database) -> str:
-       hasher = xxhash.xxh3_128()  # 5-10x faster than SHA-256
+       hasher = xxhash.xxh3_128()
        while chunk := f.read(65536):  # 64KB chunks optimal for SSDs
            hasher.update(chunk)
        return hasher.hexdigest()
@@ -1295,37 +1273,42 @@ async def cancel_scan():
     return {"status": "cancelled"}
 
 # Scanner checks cancellation flag
-def find_duplicates(config, db):
-    for file in vault_files:
+def find_duplicates_in_folder(folder_path, config, db):
+    for file in folder_files:
         if is_scan_cancelled():
-            return []  # Clean exit
+            return {"duplicates": [], "total_files": 0}  # Clean exit
 ```
 
 #### 7.3 File Operation Error Handling
 
 ```python
-for dup in duplicates:
-    src_path = Path(dup["raw_path"])
-    
-    if not src_path.exists():
+# raw_duplicates/undo_last: restore one run, report every problem, lose no record
+for op in operations:
+    if not _paths_allowed(op):  # paths from the DB are re-validated
+        errors.append(f"Refused to restore {op['dst_path']}")
         skipped += 1
-        continue  # File already deleted
+        continue
+    if not _still_there(op):  # file no longer in RAW_DUPLICATES
+        skipped += 1
+        continue
     
     try:
-        dst_path = safe_move_with_structure(src_path, ...)
-        db.record_delete_operation(run_id, src_path, dst_path)
-        moved += 1
-    
+        restored_path = move_no_overwrite(dst_path, src_path, suffix_prefix="RESTORED")
     except CrossDeviceError as e:
-        errors.append(f"Cannot move across volumes: {src_path}")
+        errors.append(f"CRITICAL: Cross-device move blocked for {dst_path}: {e}")
         skipped += 1
-    
+        continue
     except FileOperationError as e:
-        errors.append(f"Move failed: {str(e)}")
+        errors.append(f"Failed to restore {dst_path}: {e}")  # stays recorded for a retry
         skipped += 1
+        continue
+    
+    db.delete_delete_operation(op["id"])  # forget only what was actually restored
+    restored += 1
 
 return {
-    "moved": moved,
+    "run_id": run_id,
+    "restored": restored,
     "skipped": skipped,
     "errors": errors  # Report all issues to user
 }
@@ -1336,12 +1319,12 @@ return {
 ### 8. KEY ENGINEERING ACHIEVEMENTS
 
 1. **Safe File Metadata Preservation**
-   - Atomic operations using os.replace(), not copy-delete
+   - Atomic, exclusive renames (`renamex_np(RENAME_EXCL)`), never copy-delete and never overwrite
    - Cross-device move detection and rejection
    - Maintains EXIF, timestamps, and extended attributes
 
 2. **Efficient Duplicate Detection**
-   - Content-addressed hashing with multi-algorithm support (SHA-256, xxHash3)
+   - Content-addressed xxHash3 hashing with size pre-filter; byte-for-byte compare before any move
    - Hash caching with stat-based invalidation (90%+ hit rates)
    - Concurrent scanning with progress tracking and cancellation
 
