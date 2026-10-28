@@ -560,7 +560,8 @@ def pass_message(result: Dict[str, Any]) -> str:
 
 def _carry_user_data(conn, src: str, dst: str, carry_keep: bool = True, keurer_dest: bool = False) -> None:
     """
-    What the user gave a file follows it to its new path: its Shows rating, and (with
+    What the user gave a file follows it to its new path: its Shows rating and comparison
+    history ('Welke is mooier?'), and (with
     carry_keep: only into the library, never into TRASH or RAW_DUPLICATES, where a Keurer
     'delete' replaces it) a Keurer 'keep', now for the folder it is in. With keurer_dest,
     a Keurer delete/move record that points at src points at dst instead, so its undo
@@ -570,6 +571,9 @@ def _carry_user_data(conn, src: str, dst: str, carry_keep: bool = True, keurer_d
         # dst is a free name (moves never overwrite): a rating there belonged to a file that is gone
         conn.execute("DELETE FROM file_ratings WHERE path = ?", (dst,))
         conn.execute("UPDATE file_ratings SET path = ? WHERE path = ?", (dst, src))
+    # The comparison history goes along, so a comparison can still be undone exactly (elo.py)
+    conn.execute("UPDATE elo_comparisons SET path_a = ? WHERE path_a = ?", (dst, src))
+    conn.execute("UPDATE elo_comparisons SET path_b = ? WHERE path_b = ?", (dst, src))
     folder = os.path.dirname(dst)
     if carry_keep and not conn.execute("SELECT 1 FROM keurer_decisions WHERE path = ? AND folder = ? AND decision = 'keep'",
                         (dst, folder)).fetchone():

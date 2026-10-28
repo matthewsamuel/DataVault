@@ -393,6 +393,44 @@ def _m012_recovery_actions(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_recovery_actions_created ON recovery_actions(created_at)")
 
 
+def _m050_elo_comparisons(conn: sqlite3.Connection):
+    """
+    'Welke is mooier?' in Shows (backend/elo.py): two photos side by side, the user picks
+    one, and both ratings (file_ratings, the same 1000-based scale as the up/down votes)
+    move by the standard Elo rule. elo_comparisons keeps every comparison with both paths,
+    the winner, both ratings and game counts before and after, so one can be undone
+    exactly. How many comparisons a photo took part in (its K-factor drops after 30) is
+    counted from these rows, so file_ratings itself does not change. existed_a/b say
+    whether the photo had a file_ratings row before (an undo then removes the row the
+    comparison made). Paths follow moves like ratings do (media_index._carry_user_data).
+    Version 50: numbers 50-59 belong to this feature. Only a new table: no existing row
+    is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elo_comparisons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_a TEXT NOT NULL,
+            path_b TEXT NOT NULL,
+            winner TEXT NOT NULL CHECK (winner IN ('a', 'b')),
+            rating_a_before INTEGER NOT NULL,
+            rating_a_after INTEGER NOT NULL,
+            rating_b_before INTEGER NOT NULL,
+            rating_b_after INTEGER NOT NULL,
+            games_a_before INTEGER NOT NULL,
+            games_b_before INTEGER NOT NULL,
+            existed_a INTEGER NOT NULL,
+            existed_b INTEGER NOT NULL,
+            k_a INTEGER NOT NULL,
+            k_b INTEGER NOT NULL,
+            scope TEXT,
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_a ON elo_comparisons(path_a)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_b ON elo_comparisons(path_b)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_scope ON elo_comparisons(scope, id)")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -407,6 +445,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (10, "app_settings", _m010_app_settings),
     (11, "media_index", _m011_media_index),
     (12, "recovery_actions", _m012_recovery_actions),
+    (50, "elo_comparisons", _m050_elo_comparisons),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

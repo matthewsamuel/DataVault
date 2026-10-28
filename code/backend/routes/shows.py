@@ -1,10 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import heapq
 import os
 import random
 import stat
+import threading
+import time
+from backend import elo, media_index
 from backend.config import Config, is_photo, is_video
 from backend.paths import resolve_in_vault, vault_folder_or_none, walk_archive
 
@@ -284,3 +287,215 @@ def get_folder_content(path: str):
     ratings = db.get_all_ratings() if db else {}
     paths = collect_show_files(target_path, get_disabled_folders())
     return pick_show_files(paths, ratings, SHOW_MAX_FILES)
+
+
+# --- 'Welke is mooier?': comparisons and the leaderboard (backend/elo.py) ------
+#
+# A scope is a folder: a show (a folder below library), the whole library (no folder
+# given), or any other folder in the vault. Its photos come from the media index once a
+# pass has finished (cached until the selection changes), else from a walk (cached for
+# CANDIDATE_TTL seconds). Disabled show folders never take part, as in the shows.
+
+CANDIDATE_TTL = 60
+LEADERBOARD_MAX = 200
+_candidates_lock = threading.Lock()
+_candidates_cache: Dict[str, Any] = {}
+
+
+def _scope_folder(folder: Optional[str]) -> Path:
+    """The folder a comparison round runs in: the given one (inside the vault) or library."""
+    if folder:
+        target = resolve_in_vault(folder, config, folder=True)
+    else:
+        target = vault_folder_or_none("library", config)
+        if target is None:
+            raise HTTPException(status_code=404, detail="De map library bestaat niet")
+    if not target.is_dir():
+        raise HTTPException(status_code=404, detail="Map niet gevonden")
+    return target
+
+
+def _scope_title(target: Path) -> str:
+    library_root = vault_folder_or_none("library", config)
+    return "Hele bibliotheek" if library_root is not None and target == library_root else target.name
+
+
+def _base_candidates(target: Path) -> List[Dict[str, Any]]:
+    """Every photo below target that may take part: [{path, id, size, taken, taken_source}]."""
+    folder = str(target)
+    disabled = get_disabled_folders()
+    if db is not None and media_index.usable(db):
+        filters = {"kind": "photo", "folder": folder}
+        key = ("index", media_index.selection_version(db, filters), tuple(disabled))
+        with _candidates_lock:
+            cached = _candidates_cache.get(folder)
+        if cached and cached[0] == key:
+            return cached[2]
+        rows, offset = [], 0
+        while True:
+            page = media_index.query(db, filters, sort="path", offset=offset, limit=media_index.MAX_LIMIT)
+            rows.extend(page)
+            if len(page) < media_index.MAX_LIMIT:
+                break
+            offset += len(page)
+        base = [{"path": r["path"], "id": r["id"], "size": r["size"], "taken": r["taken"],
+                 "taken_source": r["taken_source"]}
+                for r in rows if elo.is_elo_photo(r["path"]) and is_folder_enabled(Path(r["folder"]), disabled)]
+    else:
+        key = ("walk", tuple(disabled))
+        with _candidates_lock:
+            cached = _candidates_cache.get(folder)
+        if cached and cached[0] == key and time.monotonic() - cached[1] < CANDIDATE_TTL:
+            return cached[2]
+        base = [{"path": p, "id": None, "size": None, "taken": None, "taken_source": None}
+                for p in collect_show_files(target, disabled) if elo.is_elo_photo(p)]
+    with _candidates_lock:
+        _candidates_cache[folder] = (key, time.monotonic(), base)
+    return base
+
+
+def forget_candidates() -> None:
+    with _candidates_lock:
+        _candidates_cache.clear()
+
+
+def _with_ratings(base: List[Dict[str, Any]], ratings: Dict[str, Tuple[int, int, int]]) -> List[Dict[str, Any]]:
+    out = []
+    for item in base:
+        rating, games, votes = ratings.get(item["path"], (RATING_START, 0, 0))
+        out.append({**item, "rating": rating, "games": games, "votes": votes})
+    return out
+
+
+def _photo_info(item: Dict[str, Any]) -> Dict[str, Any]:
+    p = Path(item["path"])
+    return {"path": item["path"], "name": p.name, "folder": p.parent.name,
+            "rating": item["rating"], "games": item["games"], "votes": item.get("votes", 0)}
+
+
+def _require_db():
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+
+@router.get("/compare/pair")
+def compare_pair(folder: Optional[str] = None, prev: Optional[List[str]] = Query(None)) -> Dict[str, Any]:
+    """
+    The next two photos to compare in a scope: {scope: {path, title}, pair: [a, b] or null,
+    reason (when null: 'too_few' or 'no_pair'), stats: {photos, compared, comparisons}}.
+    prev (twice): the pair on screen now, which never comes back straight away; neither
+    does the last pair compared in this scope.
+    """
+    _require_db()
+    target = _scope_folder(folder)
+    scope = str(target)
+    base = _base_candidates(target)
+    candidates = _with_ratings(base, elo.ratings_below(db, scope))
+    avoid = []
+    if prev and len(prev) == 2:
+        avoid.append(prev)
+    last = elo.last_comparison(db, scope)
+    if last:
+        avoid.append((last["path_a"], last["path_b"]))
+    stats = {"photos": len(candidates), "compared": sum(1 for c in candidates if c["games"]),
+             "comparisons": elo.comparisons_in_scope(db, scope)}
+    pair, gone = None, False
+    pool = candidates
+    for _ in range(6):
+        pair = elo.choose_pair(pool, avoid)
+        if pair is None:
+            break
+        missing = [c["path"] for c in pair if not elo.still_there(c["path"])]
+        if not missing:
+            break
+        # Deleted or moved outside the app since the index or walk saw it: try without it
+        gone = True
+        pool = [c for c in pool if c["path"] not in missing]
+        pair = None
+    if gone:
+        forget_candidates()
+        media_index.request_update()
+    reason = None
+    if pair is None:
+        reason = "too_few" if len(pool) < 2 else "no_pair"
+    return {
+        "scope": {"path": scope, "title": _scope_title(target)},
+        "pair": [_photo_info(c) for c in pair] if pair else None,
+        "reason": reason,
+        "stats": stats,
+    }
+
+
+def _comparison_photo(value: Any) -> str:
+    path = resolve_in_vault(value, config)
+    if not elo.still_there(str(path)) or not elo.is_elo_photo(str(path)):
+        raise HTTPException(status_code=404, detail="Foto niet gevonden")
+    return str(path)
+
+
+@router.post("/compare")
+def compare(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Save one comparison: { a, b, winner: 'a'|'b', folder? }. Both ratings change in one
+    transaction (Elo, see backend/elo.py). Answers the history row with both new ratings.
+    """
+    _require_db()
+    winner = payload.get("winner")
+    if winner not in ("a", "b"):
+        raise HTTPException(status_code=400, detail="Kies 'a' of 'b' als winnaar")
+    a, b = _comparison_photo(payload.get("a")), _comparison_photo(payload.get("b"))
+    if a == b:
+        raise HTTPException(status_code=400, detail="Een foto kan niet tegen zichzelf")
+    scope = str(_scope_folder(payload.get("folder")))
+    return elo.record_comparison(db, a, b, winner, scope)
+
+
+@router.post("/compare/undo")
+def compare_undo(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Take back a comparison: { id } (or { folder }: the newest one there). Both ratings go
+    back to exactly what they were; 409 when one of the photos changed since.
+    """
+    _require_db()
+    comparison_id = payload.get("id")
+    if comparison_id is not None and (not isinstance(comparison_id, int) or isinstance(comparison_id, bool)):
+        raise HTTPException(status_code=400, detail="Ongeldige vergelijking")
+    scope = None
+    if comparison_id is None:
+        scope = str(_scope_folder(payload.get("folder")))
+    try:
+        return elo.undo_comparison(db, comparison_id, scope)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except elo.ComparisonConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/leaderboard")
+def leaderboard(folder: Optional[str] = None, limit: int = Query(50, ge=1, le=LEADERBOARD_MAX)) -> Dict[str, Any]:
+    """
+    The best-rated photos and videos below a scope: {scope, total (judged files), items:
+    [{rank, path, name, folder, rating, games, votes, wins}]}, highest rating first. Files
+    that are gone or in a disabled show folder are left out.
+    """
+    _require_db()
+    target = _scope_folder(folder)
+    scope = str(target)
+    disabled = get_disabled_folders()
+    rows = [(path, value) for path, value in elo.ratings_below(db, scope).items()
+            if is_show_media(path) and is_folder_enabled(Path(path).parent, disabled)]
+    rows.sort(key=lambda item: (-item[1][0], -item[1][1], item[0]))
+    items = []
+    for path, (rating, games, votes) in rows:
+        if len(items) >= limit:
+            break
+        if not elo.still_there(path):
+            continue
+        p = Path(path)
+        items.append({"rank": len(items) + 1, "path": path, "name": p.name, "folder": p.parent.name,
+                      "rating": rating, "games": games, "votes": votes, "wins": 0})
+    if items:
+        wins = elo.wins_of(db, [item["path"] for item in items])
+        for item in items:
+            item["wins"] = wins.get(item["path"], 0)
+    return {"scope": {"path": scope, "title": _scope_title(target)}, "total": len(rows), "items": items}
