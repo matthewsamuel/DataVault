@@ -59,6 +59,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   archief wordt meteen geweigerd, zonder dat de app eerst mappen buiten het archief doorleest.
 - De eigen bestanden van de app (de database en de miniaturen-cache) worden niet meer als foto
   geserveerd en kunnen nergens meer gekozen worden.
+- Staat het archief in `config.json` via een snelkoppeling (symlink) ingesteld, dan gebruikt de
+  app nu overal het echte pad. Voorheen bleef in Shows een uitgeschakelde map toch zichtbaar en
+  telden stemmen niet mee in "Feeling Lucky", omdat de app de map onder twee namen kende.
+- Shows volgt geen `library`-snelkoppeling meer die naar een map buiten het archief wijst.
 - Stemmen in Shows op een pad dat geen bestaand bestand is (een tikfout, een map of een
   snelkoppeling) wordt geweigerd, zodat er geen ratings voor niet-bestaande bestanden meer in de
   database belanden.

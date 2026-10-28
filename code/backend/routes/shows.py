@@ -5,7 +5,7 @@ import os
 import random
 import stat
 from backend.config import Config, is_media_file, is_video
-from backend.paths import ArchiveFilter, resolve_in_vault, scan_dir, walk_archive
+from backend.paths import ArchiveFilter, resolve_in_vault, scan_dir, vault_folder_or_none, walk_archive
 
 router = APIRouter()
 
@@ -115,9 +115,10 @@ async def get_stories() -> Dict[str, Any]:
     if not config.VAULT_ROOT.exists():
         raise HTTPException(status_code=503, detail="Vault not available")
     
-    # Shows come ONLY from the library folder
-    library_root = config.VAULT_ROOT / "library"
-    if not library_root.exists():
+    # Shows come ONLY from the library folder, in the resolved spelling that settings and
+    # votes are stored in (and never a 'library' symlink that points out of the vault)
+    library_root = vault_folder_or_none("library", config)
+    if library_root is None or not library_root.is_dir():
         return {"featured": None, "shows": []}
     
     disabled_folders = get_disabled_folders()

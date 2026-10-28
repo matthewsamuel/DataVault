@@ -25,6 +25,20 @@ def resolve_config_path(explicit: Optional[str] = None) -> Path:
         return Path(env_path)
     return DEFAULT_CONFIG_PATH
 
+
+def _real_path(value: str) -> Path:
+    """
+    The configured path with symlinks resolved, so every path the app walks, compares or
+    stores uses one spelling (a vault_root through a symlink would otherwise give two).
+    A disk that is not mounted yet resolves as far as it exists; on failure keep it as given.
+    """
+    path = Path(value)
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError):
+        return path
+
+
 class Config:
     """Configuration loaded from config.json"""
     
@@ -49,18 +63,18 @@ class Config:
         """Initialize paths from configuration"""
         data = self._data
 
-        self.VAULT_ROOT = Path(data["vault_root"])
-        self.RAW_FOLDER = Path(data["raw_folder"])
+        self.VAULT_ROOT = _real_path(data["vault_root"])
+        self.RAW_FOLDER = _real_path(data["raw_folder"])
         
         # Duplicates folder
         duplicates_folder = data.get('duplicates_folder')
-        self.DUPLICATES_FOLDER = Path(duplicates_folder) if duplicates_folder else self.VAULT_ROOT / 'RAW_DUPLICATES'
+        self.DUPLICATES_FOLDER = _real_path(duplicates_folder) if duplicates_folder else self.VAULT_ROOT / 'RAW_DUPLICATES'
         
         # Trash folder
         trash_folder = data.get('trash_folder')
-        self.TRASH_FOLDER = Path(trash_folder) if trash_folder else self.VAULT_ROOT / 'TRASH'
+        self.TRASH_FOLDER = _real_path(trash_folder) if trash_folder else self.VAULT_ROOT / 'TRASH'
 
-        self.CACHE_FOLDER = Path(data["cache_folder"])
+        self.CACHE_FOLDER = _real_path(data["cache_folder"])
         
         # Derived paths
         self.DB_PATH = self.CACHE_FOLDER / "datavault.db"

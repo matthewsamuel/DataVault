@@ -418,3 +418,65 @@ def test_symlink_loops_and_overlong_names_are_refused_not_500(client, config, va
     assert _get_raw(client, "/api/file", "path", str(loop / "x.jpg")).status_code == 403
     r = _get_raw(client, "/api/file", "path", str(vault / ("a" * 5000)))
     assert r.status_code in (403, 404)
+
+
+@pytest.fixture
+def linked_client(vault, tmp_path):
+    """
+    A config that names the vault through a symlink (like /var -> /private/var on macOS,
+    or a vault_root that is a link to the external disk).
+    """
+    from fastapi.testclient import TestClient
+    from backend.main import create_app
+    from fixtures.vault_builder import write_config
+    link = tmp_path / "vault_link"
+    os.symlink(vault, link)
+    app = create_app(str(write_config(link, tmp_path / "linked_config.json")))
+    with TestClient(app) as c:
+        c.headers["X-DataVault-Token"] = c.get("/api/session").json()["token"]
+        yield c, link
+
+
+def test_config_paths_are_resolved_once(vault, tmp_path):
+    from backend.config import Config
+    from fixtures.vault_builder import write_config
+    link = tmp_path / "vault_link"
+    os.symlink(vault, link)
+    cfg = Config(str(write_config(link, tmp_path / "linked_config.json")))
+    assert cfg.VAULT_ROOT == vault
+    assert cfg.RAW_FOLDER == vault / "RAW"
+    assert cfg.TRASH_FOLDER == vault / "TRASH"
+    assert cfg.DUPLICATES_FOLDER == vault / "RAW_DUPLICATES"
+    assert cfg.DB_PATH == vault / ".datavault_cache/datavault.db"
+
+
+def test_shows_with_a_symlinked_vault_root(linked_client, vault):
+    """
+    R-2.1b-6: settings and votes are stored in the resolved spelling, so the Shows walk
+    must use it too: a disabled folder disappears and a vote counts in the featured show.
+    """
+    c, link = linked_client
+    shows = c.get("/api/shows/stories").json()["shows"]
+    reis = [s for s in shows if s["title"] == "Reis Italië"]
+    assert len(reis) == 1
+    files = c.get("/api/shows/folder-content", params={"path": reis[0]["path"]}).json()
+    rome = [f for f in files if f["name"] == "rome.jpg"][0]
+    for _ in range(3):
+        assert c.post("/api/shows/vote", json={"path": rome["path"], "vote": "up"}).status_code == 200
+    featured = c.get("/api/shows/stories").json()["featured"]["files"]
+    assert [f["rating"] for f in featured if f["name"] == "rome.jpg"] == [1150]
+    # Disabling the folder (by the path /stories gave, or by the link spelling) hides it
+    for spelling in (reis[0]["path"], str(link / "library/Reis Italië")):
+        assert c.post("/api/shows/settings", json={"path": spelling, "enabled": False}).status_code == 200
+        stories = c.get("/api/shows/stories").json()
+        assert not [s for s in stories["shows"] if s["title"] == "Reis Italië"]
+        assert not [f for f in stories["featured"]["files"] if "Reis" in f["path"]]
+        assert c.post("/api/shows/settings", json={"path": spelling, "enabled": True}).status_code == 200
+        assert [s for s in c.get("/api/shows/stories").json()["shows"] if s["title"] == "Reis Italië"]
+
+
+def test_shows_library_symlinked_out_of_the_vault_is_not_walked(client, vault, outside):
+    shutil.move(str(vault / "library"), str(vault / "library_real"))
+    os.symlink(outside, vault / "library")
+    stories = client.get("/api/shows/stories").json()
+    assert stories["shows"] == [] and stories["featured"] is None
