@@ -18,7 +18,7 @@ def init_router(cfg: Config):
     config = cfg
 
 @router.get("/storage")
-async def get_storage_stats() -> Dict[str, Any]:
+def get_storage_stats() -> Dict[str, Any]:
     if not config:
         return {"error": "Config not loaded"}
         
@@ -221,7 +221,7 @@ def get_photo_on_this_day(allowed_folders: str = None) -> Dict[str, Any]:
          return {"error": str(e)}
 
 @router.get("/spotify-on-this-day")
-async def get_spotify_on_this_day() -> Dict[str, Any]:
+def get_spotify_on_this_day() -> Dict[str, Any]:
     now = datetime.now()
     date_filter = (now.month, now.day)
     

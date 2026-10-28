@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 import httpx
 import json
@@ -198,7 +199,9 @@ async def stream_ollama(ollama_messages: list, model: str) -> AsyncGenerator[str
 @router.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
     """Streaming chat endpoint — tokens worden direct verstuurd zodra ze beschikbaar zijn."""
-    system_prompt = build_system_prompt()
+    # De prompt leest mappen en Spotify-data van schijf: in de threadpool, nooit op de event loop
+    # (alleen het wachten op Ollama is echt async)
+    system_prompt = await run_in_threadpool(build_system_prompt)
     ollama_messages = [{"role": "system", "content": system_prompt}]
     for msg in request.messages:
         ollama_messages.append({"role": msg.role, "content": msg.content})
@@ -217,7 +220,7 @@ async def chat_stream(request: ChatRequest):
 @router.post("/api/chat")
 async def chat_with_ollama(request: ChatRequest):
     """Non-streaming fallback endpoint."""
-    system_prompt = build_system_prompt()
+    system_prompt = await run_in_threadpool(build_system_prompt)
     ollama_messages = [{"role": "system", "content": system_prompt}]
     for msg in request.messages:
         ollama_messages.append({"role": msg.role, "content": msg.content})

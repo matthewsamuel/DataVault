@@ -331,3 +331,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   honderden MB geheugen). Nieuw berekende hashes worden tussendoor in porties opgeslagen, zodat
   een gestopte scan bij de volgende keer niet opnieuw begint. De voortgang wordt hooguit een
   paar keer per seconde bijgewerkt en hooguit één keer per seconde in de database gezet.
+- De hele server bevroor zolang een zwaar verzoek liep: Shows (verhalen en mapinhoud),
+  Spotify-statistieken, opslag, "Spotify op deze dag" en het opbouwen van de chatprompt lazen
+  de schijf of de Spotify-export op de hoofdthread van de server. Ze lopen nu op een eigen
+  thread, zodat de rest van de app (miniaturen, mappen, voortgang, de statuscontrole) gewoon
+  blijft antwoorden. Alleen het wachten op het taalmodel van de chat is nog asynchroon.

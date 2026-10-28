@@ -195,7 +195,7 @@ def restart_server():
 
 
 @core_router.get("/api/health")
-async def health_check(request: Request):
+def health_check(request: Request):
     """Health check endpoint"""
     config = request.app.state.config
     if not config:

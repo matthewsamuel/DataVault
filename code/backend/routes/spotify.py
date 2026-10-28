@@ -311,12 +311,12 @@ def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[
     }
 
 @router.get("/years")
-async def get_years():
+def get_years():
     data = parse_spotify_data()
     return {'years': data['available_years']}
 
 @router.get("/stats")
-async def get_stats(year: Optional[str] = None):
+def get_stats(year: Optional[str] = None):
     # Determine current date for "On This Day"
     now = datetime.now()
     date_filter = (now.month, now.day)

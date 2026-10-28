@@ -95,7 +95,7 @@ def weighted_sample(files: List[Dict], k: int) -> List[Dict]:
     return random.choices(files, weights=weights, k=k)
 
 @router.get("/stories")
-async def get_stories() -> Dict[str, Any]:
+def get_stories() -> Dict[str, Any]:
     """
     Generate "Shows" based on sub-folders within the library folder ONLY.
     Structure:
@@ -225,7 +225,7 @@ def get_random_media_file(folder_path: Path) -> Path:
     return None
 
 @router.post("/settings")
-async def update_settings(payload: Dict[str, Any]):
+def update_settings(payload: Dict[str, Any]):
     """
     Update settings (enable/disable folders).
     Receives: { "path": "/path/to/folder", "enabled": true/false }
@@ -248,12 +248,12 @@ async def update_settings(payload: Dict[str, Any]):
     return {"status": "success", "message": f"Folder {'enabled' if enabled else 'disabled'}"}
 
 @router.get("/settings")
-async def get_settings():
+def get_settings():
     """Get current settings"""
     return {"disabled_folders": get_disabled_folders()}
 
 @router.post("/vote")
-async def vote_file(payload: Dict[str, Any]):
+def vote_file(payload: Dict[str, Any]):
     """
     Save a vote (up/down) for a media file and update its ELO rating.
     Receives: { "path": "/path/to/file", "vote": "up"|"down" }
@@ -285,7 +285,7 @@ async def vote_file(payload: Dict[str, Any]):
     return {"status": "ok", "new_rating": new_rating}
 
 @router.get("/folder-content")
-async def get_folder_content(path: str):
+def get_folder_content(path: str):
     """
     Get all media files in a specific folder (flat list).
     Used for playing a "Folder Show".
