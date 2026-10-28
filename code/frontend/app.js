@@ -3223,13 +3223,14 @@ function renderSpotifyStats(data) {
     const dnaEl = document.getElementById('stat-dna');
     if (dnaEl) dnaEl.dataset.dna = data.listening_dna || '';
 
-    // 2. Lists
-    renderSpotifyList('top-artists-list', data.top_artists, (item, i) => spotifyListItem({
+    // 2. Lists: naast elkaar even lang, zodat er onder de kortste geen leeg vlak staat
+    const shared = Math.min(data.top_artists.length, data.top_tracks.length) || undefined;
+    renderSpotifyList('top-artists-list', data.top_artists.slice(0, shared), (item, i) => spotifyListItem({
         rank: `#${i + 1}`, name: item.name, meta: `${Math.round(item.ms / 60000).toLocaleString('nl-NL')} min`,
         icon: 'fab fa-spotify', query: item.name,
     }));
 
-    renderSpotifyList('top-tracks-list', data.top_tracks, (item, i) => spotifyListItem({
+    renderSpotifyList('top-tracks-list', data.top_tracks.slice(0, shared), (item, i) => spotifyListItem({
         rank: `#${i + 1}`, name: item.name, meta: `${item.artist} • ${item.count}× gespeeld`,
         icon: 'fas fa-play', query: `${item.name} ${item.artist}`,
     }));

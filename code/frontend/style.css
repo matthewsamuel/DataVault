@@ -5448,9 +5448,10 @@ a.breadcrumb-item:hover {
     overflow: hidden;
 }
 
+/* Voortgang is groen, zoals overal in de app */
 .player-progress-fill {
     height: 100%;
-    background: var(--on-media);
+    background: var(--accent);
     width: 0%;
 }
 
