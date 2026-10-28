@@ -119,10 +119,14 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   die plek, de oude plek bezet), dan staat de reden erbij. Er wordt nooit iets overschreven.
 - `GET /api/recovery?offset=&limit=` geeft de lijst; elke regel noemt zelf het verzoek dat hem
   terugzet (`undo: {url, body}`): `/api/keurer/undo`, `/api/duplicates/undo` of `/api/recovery/undo`.
+  Per regel worden de 20 getoonde bestanden gecontroleerd en daarna alleen tot er één terug kan;
+  `checked` zegt hoeveel bestanden `restorable` telt (minder dan `file_count`: een ondergrens). Het
+  terugzetten zelf controleert elk bestand opnieuw.
 - Een nieuwe soort verplaatsing (bijv. bijna-duplicaten "beste bewaren", verplaatsingen door de
   assistent) heeft geen eigen tabel, route of scherm nodig: `recovery.register_kind("soort", "Label")`
   en per verplaatst bestand `ActionRecorder.add(src, dst)` direct na `move_no_overwrite` (zie de uitleg
-  bovenin `backend/recovery.py`; migratie 12 bevat de gedeelde tabellen).
+  bovenin `backend/recovery.py`; migratie 12 bevat de gedeelde tabellen). Een eigen Provider met veel
+  bestanden per actie bouwt zijn regel met `recovery.list_files` en `recovery.FolderChecks`.
 
 ### Toetsenbord, instellingen en thema's
 - `1`–`9` of `g` + letter wisselt van tabblad, `/` gaat naar het zoekveld, `t` wisselt het thema, `?`
