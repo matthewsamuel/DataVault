@@ -13,9 +13,9 @@ from collections import defaultdict
 
 from backend.config import (
     Config, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS, MEDIA_EXTENSIONS,
-    EXCLUDED_FOLDER_NAMES, is_media_file
+    is_media_file
 )
-from backend.paths import vault_folder_or_none
+from backend.paths import ArchiveFilter, scan_dir, vault_folder_or_none, walk_archive
 
 router = APIRouter()
 
@@ -54,18 +54,11 @@ def _scan_folder_recursive(folder_path: Path, photo_only: bool = False) -> List[
     results = []
     extensions = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS if not photo_only else PHOTO_EXTENSIONS
 
-    for root, dirs, files in os.walk(str(folder_path)):
-        # Skip excluded folders
-        dirs[:] = [
-            d for d in dirs
-            if not d.startswith('.') and d not in EXCLUDED_FOLDER_NAMES
-        ]
+    # walk_archive skips the app's own folders, TRASH, RAW_DUPLICATES, hidden files and symlinks
+    for root, dirs, files in walk_archive(folder_path, config):
         dirs.sort()
 
         for filename in sorted(files):
-            if filename.startswith('.'):
-                continue
-
             file_path = Path(root) / filename
             ext = file_path.suffix.lower()
 
@@ -96,7 +89,7 @@ def _scan_folder_recursive(folder_path: Path, photo_only: bool = False) -> List[
 
 
 @router.get("/scan")
-async def timeline_scan(
+def timeline_scan(
     folders: str = Query(..., description="Comma-separated folder paths")
 ) -> Dict[str, Any]:
     """
@@ -154,7 +147,7 @@ async def timeline_scan(
 
 
 @router.get("/folders")
-async def timeline_folders() -> Dict[str, Any]:
+def timeline_folders() -> Dict[str, Any]:
     """
     Get top-level folders in vault for the timeline folder picker.
     Returns folder tree with media file counts.
@@ -165,11 +158,7 @@ async def timeline_folders() -> Dict[str, Any]:
     if not config.VAULT_ROOT.exists():
         raise HTTPException(status_code=503, detail="Vault not available")
 
-    excluded_paths = {
-        config.DUPLICATES_FOLDER.resolve(),
-        config.CACHE_FOLDER.resolve(),
-        config.TRASH_FOLDER.resolve()
-    }
+    archive_filter = ArchiveFilter(config)
 
     def build_tree(root: Path, depth: int = 0, max_depth: int = 3) -> List[Dict]:
         if depth > max_depth:
@@ -177,21 +166,16 @@ async def timeline_folders() -> Dict[str, Any]:
 
         items = []
         try:
-            for entry in sorted(root.iterdir(), key=lambda p: p.name.lower()):
-                if not entry.is_dir():
+            for dir_entry in sorted(scan_dir(root, archive_filter), key=lambda e: e.name.lower()):
+                if not dir_entry.is_dir(follow_symlinks=False):
                     continue
-                if entry.name.startswith('.'):
-                    continue
-                if entry.name in EXCLUDED_FOLDER_NAMES:
-                    continue
-                if entry.resolve() in excluded_paths:
-                    continue
+                entry = Path(dir_entry.path)
 
                 # Quick media count (non-recursive, just this folder)
                 media_count = 0
                 try:
-                    for f in entry.iterdir():
-                        if f.is_file() and not f.name.startswith('.') and f.suffix.lower() in MEDIA_EXTENSIONS:
+                    for f in scan_dir(entry, archive_filter):
+                        if f.is_file(follow_symlinks=False) and Path(f.name).suffix.lower() in MEDIA_EXTENSIONS:
                             media_count += 1
                 except (PermissionError, OSError):
                     pass

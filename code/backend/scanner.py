@@ -9,10 +9,8 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 
-from backend.config import (
-    Config, EXCLUDED_FOLDER_NAMES, MEDIA_EXTENSIONS,
-    is_media_file, validate_path_in_vault
-)
+from backend.config import Config, MEDIA_EXTENSIONS, is_media_file
+from backend.paths import ArchiveFilter, scan_dir, walk_archive
 from backend.database import Database
 from backend.progress import (
     ScanProgress, set_scan_progress, update_scan_progress,
@@ -20,56 +18,34 @@ from backend.progress import (
 )
 from datetime import datetime
 
-def get_folders(root_path: Path, vault_root: Path, excluded_paths: Set[Path]) -> List[Dict[str, Any]]:
+def get_folders(root_path: Path, archive_filter: ArchiveFilter) -> List[Dict[str, Any]]:
     """
-    Recursively get folder tree excluding specific folders.
-    
-    Args:
-        root_path: Starting directory
-        vault_root: Vault root for validation
-        excluded_paths: Set of absolute paths to exclude
+    Recursively get the folder tree below root_path.
+    Skips what archive_filter excludes: the app's own folders, TRASH,
+    RAW_DUPLICATES, hidden folders and symlinks (see backend/paths.py).
     
     Returns:
         List of folder dicts with name, path, children
     """
-    if not root_path.exists() or not root_path.is_dir():
-        return []
-    
-    # Validate path is within vault
-    if not validate_path_in_vault(root_path, vault_root):
-        print(f"Path outside vault: {root_path}")
-        return []
-    
     folders = []
     
     try:
-        entries = sorted(root_path.iterdir(), key=lambda p: p.name.lower())
-        
-        for entry in entries:
-            # Skip if in excluded paths
-            if entry in excluded_paths:
-                continue
-                
-            # Skip hidden files/folders
-            if entry.name.startswith('.'):
-                continue
-            
-            # Skip excluded folder names
-            if entry.name in EXCLUDED_FOLDER_NAMES:
-                continue
-            
-            if entry.is_dir():
-                # Recursively get children
-                children = get_folders(entry, vault_root, excluded_paths)
-                
-                folders.append({
-                    "name": entry.name,
-                    "path": str(entry),
-                    "children": children
-                })
+        entries = sorted(scan_dir(root_path, archive_filter), key=lambda e: e.name.lower())
+    except OSError:
+        return folders
     
-    except PermissionError:
-        pass
+    for entry in entries:
+        try:
+            if not entry.is_dir(follow_symlinks=False):
+                continue
+        except OSError:
+            continue
+        path = Path(entry.path)
+        folders.append({
+            "name": entry.name,
+            "path": str(path),
+            "children": get_folders(path, archive_filter)
+        })
     
     return folders
 
@@ -95,70 +71,57 @@ def get_file_type(file_path: Path) -> str:
         return 'photo'
 
 
-def list_media_files(folder_path: Path, vault_root: Path) -> List[Dict[str, Any]]:
+def list_media_files(folder_path: Path, archive_filter: ArchiveFilter) -> List[Dict[str, Any]]:
     """
-    List all media files in a folder (non-recursive).
+    List the files and subfolders of a folder (non-recursive), skipping
+    what archive_filter excludes (see backend/paths.py).
     
     Args:
-        folder_path: Folder to list
-        vault_root: Vault root for validation
+        folder_path: Folder to list (already validated by the route)
+        archive_filter: The archive's exclusion rule
     
     Returns:
         List of file info dicts
     """
-    if not folder_path.exists() or not folder_path.is_dir():
-        return []
-    
-    # Validate path
-    if not validate_path_in_vault(folder_path, vault_root):
-        print(f"Access denied: path outside vault - {folder_path}")
-        return []
-    
     items = []
     
     try:
-        entries = sorted(folder_path.iterdir(), key=lambda p: p.name.lower())
-        
-        for entry in entries:
-            # Skip hidden files
-            if entry.name.startswith('.'):
-                continue
-            
-            try:
-                stat = entry.stat()
-            except (PermissionError, OSError):
-                continue
-            
-            if entry.is_dir():
-                # Folder
-                items.append({
-                    "path": str(entry),
-                    "name": entry.name,
-                    "type": "folder",
-                    "modified": stat.st_mtime
-                })
-            else:
-                # File
-                file_type = get_file_type(entry)
-                
-                items.append({
-                    "path": str(entry),
-                    "name": entry.name,
-                    "size": stat.st_size,
-                    "modified": stat.st_mtime,
-                    "type": file_type
-                })
+        entries = sorted(scan_dir(folder_path, archive_filter), key=lambda e: e.name.lower())
+    except OSError:
+        return items
     
-    except PermissionError:
-        pass
+    for entry in entries:
+        try:
+            stat = entry.stat(follow_symlinks=False)
+            is_dir = entry.is_dir(follow_symlinks=False)
+        except OSError:
+            continue
+        
+        if is_dir:
+            # Folder
+            items.append({
+                "path": entry.path,
+                "name": entry.name,
+                "type": "folder",
+                "modified": stat.st_mtime
+            })
+        else:
+            # File
+            items.append({
+                "path": entry.path,
+                "name": entry.name,
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+                "type": get_file_type(Path(entry.name))
+            })
     
     return items
 
 
 # Alias for API compatibility
-def get_media_files(folder_path: Path, vault_root: Path) -> List[Dict[str, Any]]:
+def get_media_files(folder_path: Path, archive_filter: ArchiveFilter) -> List[Dict[str, Any]]:
     """Alias for list_media_files for backwards compatibility."""
-    return list_media_files(folder_path, vault_root)
+    return list_media_files(folder_path, archive_filter)
 
 
 
@@ -250,7 +213,9 @@ def find_duplicates_in_folder(folder_path: Path, config: Config, db: Database) -
     size_groups: Dict[int, List[Path]] = defaultdict(list)
     file_count = 0
     
-    for root, _, files in os.walk(folder_path):
+    # Never TRASH, RAW_DUPLICATES, the cache, hidden files or symlinks (backend/paths.py):
+    # a hidden copy must never become the "original" that every visible copy is a duplicate of
+    for root, _, files in walk_archive(folder_path, config):
         if is_scan_cancelled():
             update_scan_progress(status='cancelled', phase='Scan cancelled by user', completed_at=datetime.now())
             return []

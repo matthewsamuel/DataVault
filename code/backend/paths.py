@@ -18,11 +18,18 @@ For a file, the returned path keeps its last component unresolved (only the
 folders above it are resolved), so a route can still see and refuse a symlink
 instead of silently acting on its target. For a folder (folder=True) the path is
 fully resolved, so listings and stored paths always use one spelling.
+
+Walks over the archive (folder tree, viewer, timeline, stats, Shows, duplicates,
+Keurer) all use one exclusion rule, ArchiveFilter / walk_archive(): never the
+app's own folders, TRASH or RAW_DUPLICATES (matched by identity, not by name, so
+a user folder that happens to be called 'dashboard' stays visible), no hidden
+files or folders (including macOS '._' AppleDouble files) and no symlinks.
 """
 import os
+import stat
 import unicodedata
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, List, Optional, Set, Tuple
 
 from fastapi import HTTPException
 
@@ -122,3 +129,93 @@ def vault_folder_or_none(user_path: Any, config) -> Optional[Path]:
         return resolve_in_vault(user_path, config, folder=True)
     except HTTPException:
         return None
+
+
+# --- Exclusions for walks over the archive -----------------------------------
+
+def excluded_folders(config) -> List[Path]:
+    """Folders a walk over the archive never shows or enters."""
+    folders = [config.CACHE_FOLDER, config.TRASH_FOLDER, config.DUPLICATES_FOLDER]
+    app_dir = app_dir_in_vault(config)
+    if app_dir is not None:
+        folders.append(app_dir)
+    return folders
+
+
+class ArchiveFilter:
+    """
+    The one exclusion rule for every walk over the archive. Build one per walk
+    (it snapshots the identities of the excluded folders) and ask skip(entry).
+    Skipped: hidden names (also '._' AppleDouble files), symlinks, and the
+    excluded folders, compared by device + inode so every spelling matches and
+    an unrelated folder with the same name does not.
+    """
+
+    def __init__(self, config):
+        self._ids: Set[Tuple[int, int]] = set()
+        for folder in excluded_folders(config):
+            try:
+                st = os.stat(folder)
+            except OSError:
+                continue  # does not exist (yet), so it cannot show up in a listing either
+            self._ids.add((st.st_dev, st.st_ino))
+        self._inodes = {ino for _, ino in self._ids}
+
+    def skip(self, entry: os.DirEntry) -> bool:
+        if entry.name.startswith("."):
+            return True
+        try:
+            if entry.is_symlink():
+                return True
+            if entry.inode() in self._inodes and entry.is_dir(follow_symlinks=False):
+                st = entry.stat(follow_symlinks=False)
+                return (st.st_dev, st.st_ino) in self._ids
+        except OSError:
+            return True
+        return False
+
+    def skip_path(self, path: Path) -> bool:
+        """skip() for a single path (lstat instead of a directory entry)."""
+        path = Path(path)
+        if path.name.startswith("."):
+            return True
+        try:
+            st = os.lstat(path)
+        except OSError:
+            return True
+        if stat.S_ISLNK(st.st_mode):
+            return True
+        return (st.st_dev, st.st_ino) in self._ids
+
+
+def scan_dir(folder: Path, archive_filter: ArchiveFilter) -> List[os.DirEntry]:
+    """The entries of one folder that a listing may show (unsorted)."""
+    with os.scandir(folder) as it:
+        return [entry for entry in it if not archive_filter.skip(entry)]
+
+
+def walk_archive(top, config, archive_filter: Optional[ArchiveFilter] = None) -> Iterator[Tuple[str, List[str], List[str]]]:
+    """
+    Drop-in for os.walk(top) over the archive: yields (root, dirnames, filenames)
+    top-down, never yields or enters excluded entries, never follows symlinks.
+    Callers may prune dirnames in place, as with os.walk. Unreadable folders are skipped.
+    """
+    archive_filter = archive_filter or ArchiveFilter(config)
+    stack = [str(top)]
+    while stack:
+        root = stack.pop()
+        dirnames: List[str] = []
+        filenames: List[str] = []
+        try:
+            for entry in scan_dir(Path(root), archive_filter):
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        dirnames.append(entry.name)
+                    elif entry.is_file(follow_symlinks=False):
+                        filenames.append(entry.name)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+        yield root, dirnames, filenames
+        stack.extend(os.path.join(root, d) for d in reversed(dirnames))

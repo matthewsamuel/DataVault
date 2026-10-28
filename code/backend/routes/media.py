@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from backend.config import Config, is_video
-from backend.paths import resolve_in_vault
+from backend.paths import resolve_in_vault, ArchiveFilter
 from backend.file_ops import (
     move_no_overwrite, same_folder, ARCHIVE_LOCK,
     FileOperationError, CrossDeviceError, DestinationFolderError, ProtectedPathError,
@@ -39,7 +39,7 @@ def get_media_endpoint(folder: str = Query(...)) -> Dict[str, Any]:
     
     from backend.scanner import get_media_files
     
-    media_files = get_media_files(folder_path, config.VAULT_ROOT)
+    media_files = get_media_files(folder_path, ArchiveFilter(config))
     
     return {
         "folder": str(folder_path),

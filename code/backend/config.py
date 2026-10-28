@@ -126,31 +126,9 @@ VIDEO_EXTENSIONS = {'.mp4', '.mov', '.m4v', '.avi', '.mkv', '.wmv', '.flv', '.we
 AUDIO_EXTENSIONS = {'.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.wma'}
 MEDIA_EXTENSIONS = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 
-# Folders to exclude from scanning
-EXCLUDED_FOLDER_NAMES = {
-    'RAW_DUPLICATES',
-    '.datavault_cache',
-    'dashboard'
-}
-
 # Thumbnail settings
 THUMB_SIZE = (300, 300)
 THUMB_QUALITY = 85
-
-def validate_path_in_vault(path: Path, vault_root: Path) -> bool:
-    """
-    Security-critical: Validate that a path is inside the vault.
-    Prevents directory traversal attacks.
-    """
-    try:
-        # Resolve to absolute paths
-        abs_path = path.resolve()
-        abs_vault = vault_root.resolve()
-        
-        # Check if path is inside vault
-        return abs_path.is_relative_to(abs_vault)
-    except (ValueError, RuntimeError):
-        return False
 
 def is_media_file(path: Path) -> bool:
     """Check if file is a supported media type"""

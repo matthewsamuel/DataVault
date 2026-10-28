@@ -7,7 +7,7 @@ import os
 import subprocess
 
 from backend.config import Config
-from backend.paths import resolve_in_vault, vault_folder_or_none
+from backend.paths import ArchiveFilter, resolve_in_vault, scan_dir, vault_folder_or_none, walk_archive
 from backend.routes.spotify import parse_spotify_data
 
 router = APIRouter()
@@ -91,7 +91,7 @@ def _stats_folder(folder_path: Optional[str]) -> Path:
 
 
 @router.get("/storage-breakdown")
-async def get_storage_breakdown() -> Dict[str, Any]:
+def get_storage_breakdown() -> Dict[str, Any]:
     if not config:
         return {"error": "Config not loaded"}
         
@@ -106,7 +106,7 @@ async def get_storage_breakdown() -> Dict[str, Any]:
         return {"error": str(e)}
 
 @router.get("/storage-breakdown-nested")
-async def get_storage_breakdown_nested(folder_path: str = None) -> Dict[str, Any]:
+def get_storage_breakdown_nested(folder_path: str = None) -> Dict[str, Any]:
     """Get storage breakdown for a specific folder and its subfolders."""
     if not config:
         return {"error": "Config not loaded"}
@@ -120,7 +120,7 @@ async def get_storage_breakdown_nested(folder_path: str = None) -> Dict[str, Any
         return {"error": str(e)}
 
 @router.get("/largest-files")
-async def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[str, Any]:
+def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[str, Any]:
     """Get largest files in a specific folder."""
     if not config:
         return {"error": "Config not loaded"}
@@ -131,7 +131,7 @@ async def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[st
     files_with_sizes = []
 
     try:
-        for root, _, files in os.walk(target_path):
+        for root, _, files in walk_archive(target_path, config):
             for filename in files:
                 file_path = Path(root) / filename
                 try:
@@ -156,7 +156,7 @@ async def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[st
         return {"error": str(e)}
 
 @router.get("/photo-on-this-day")
-async def get_photo_on_this_day(allowed_folders: str = None) -> Dict[str, Any]:
+def get_photo_on_this_day(allowed_folders: str = None) -> Dict[str, Any]:
     if not config:
         return {"error": "Config not loaded"}
          
@@ -170,6 +170,7 @@ async def get_photo_on_this_day(allowed_folders: str = None) -> Dict[str, Any]:
     
     valid_photos = []
     vault_root = config.VAULT_ROOT
+    archive_filter = ArchiveFilter(config)
     
     try:
         if allowed_folders:
@@ -179,18 +180,19 @@ async def get_photo_on_this_day(allowed_folders: str = None) -> Dict[str, Any]:
             all_dirs = []
             for base in bases:
                 if base is not None and base.is_dir():
-                    all_dirs.extend([x[0] for x in os.walk(base)])
+                    all_dirs.extend([x[0] for x in walk_archive(base, config, archive_filter)])
             all_dirs = list(set(all_dirs))
         else:
-            all_dirs = [x[0] for x in os.walk(vault_root)]
+            all_dirs = [x[0] for x in walk_archive(vault_root, config, archive_filter)]
             
         random.shuffle(all_dirs)
 
         for root in all_dirs:
             try:
-                for filename in os.listdir(root):
-                    file_path = Path(root) / filename
-                    if file_path.is_file() and file_path.suffix.lower() in MEDIA_EXTENSIONS:
+                for entry in scan_dir(Path(root), archive_filter):
+                    filename = entry.name
+                    file_path = Path(entry.path)
+                    if entry.is_file(follow_symlinks=False) and file_path.suffix.lower() in MEDIA_EXTENSIONS:
                         stat = file_path.stat()
                         mtime_dt = datetime.fromtimestamp(stat.st_mtime)
                         
@@ -238,7 +240,7 @@ async def get_spotify_on_this_day() -> Dict[str, Any]:
          return {"error": str(e)}
 
 @router.get("/photos-by-date")
-async def get_photos_by_date(date: str) -> Dict[str, Any]:
+def get_photos_by_date(date: str) -> Dict[str, Any]:
     """
     Find up to 20 photos corresponding to a specific date (YYYY-MM-DD).
     """
@@ -263,7 +265,7 @@ async def get_photos_by_date(date: str) -> Dict[str, Any]:
     try:
         # We need to search the vault. Since the AI might ask for any date, 
         # we do a full walk but bail out early if we find enough photos.
-        for root, _, files in os.walk(vault_root):
+        for root, _, files in walk_archive(vault_root, config):
             for filename in files:
                 file_path = Path(root) / filename
                 if file_path.suffix.lower() in MEDIA_EXTENSIONS:
@@ -290,7 +292,7 @@ async def get_photos_by_date(date: str) -> Dict[str, Any]:
 
 
 @router.get("/search-photos")
-async def search_photos(query: str, limit: int = 5) -> Dict[str, Any]:
+def search_photos(query: str, limit: int = 5) -> Dict[str, Any]:
     """Zoek foto's op bestandsnaam die de query bevat (case-insensitive)."""
     if not config or not query.strip():
         return {"photos": []}
@@ -302,8 +304,7 @@ async def search_photos(query: str, limit: int = 5) -> Dict[str, Any]:
                         '.tiff', '.tif', '.raw', '.cr2', '.nef', '.arw', '.dng', '.raf'}
 
     try:
-        for root, dirs, files in os.walk(config.VAULT_ROOT):
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for root, dirs, files in walk_archive(config.VAULT_ROOT, config):
             for filename in files:
                 ext = Path(filename).suffix.lower()
                 if ext in IMAGE_EXTENSIONS and query_lower in filename.lower():

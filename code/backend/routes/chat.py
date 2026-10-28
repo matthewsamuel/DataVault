@@ -36,11 +36,11 @@ def get_vault_context() -> str:
     # Mappen
     if config.VAULT_ROOT.exists():
         try:
-            excluded = {config.DUPLICATES_FOLDER.resolve(), config.CACHE_FOLDER.resolve()}
-            folders = [
-                e.name for e in sorted(config.VAULT_ROOT.iterdir())
-                if e.is_dir() and not e.name.startswith('.') and e.resolve() not in excluded
-            ]
+            from backend.paths import ArchiveFilter, scan_dir
+            folders = sorted(
+                e.name for e in scan_dir(config.VAULT_ROOT, ArchiveFilter(config))
+                if e.is_dir(follow_symlinks=False)
+            )
             if folders:
                 lines.append(f"Mappen in archief ({len(folders)}): {', '.join(folders[:25])}")
         except Exception:

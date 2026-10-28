@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 import random
 from backend.config import Config, is_media_file, is_video
-from backend.paths import resolve_in_vault
+from backend.paths import ArchiveFilter, resolve_in_vault, scan_dir, walk_archive
 
 router = APIRouter()
 
@@ -53,10 +53,8 @@ def get_all_media_recursive(root_path: Path, _vault_root: Path, ratings: Dict[st
     # Get list of disabled folders (more efficient to check against)
     disabled_folders = get_disabled_folders()
     
-    for root, dirs, filenames in os.walk(root_path):
-        # Skip hidden directories
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
-        
+    # walk_archive skips the app's own folders, TRASH, RAW_DUPLICATES, hidden files and symlinks
+    for root, dirs, filenames in walk_archive(root_path, config):
         # Check if current folder is enabled (or child of enabled)
         current_path = Path(root)
         if not is_folder_enabled(current_path, disabled_folders):
@@ -65,9 +63,6 @@ def get_all_media_recursive(root_path: Path, _vault_root: Path, ratings: Dict[st
             continue
         
         for filename in filenames:
-            if filename.startswith('.'):
-                continue
-                
             file_path = Path(root) / filename
             if is_media_file(file_path):
                 try:
@@ -131,26 +126,25 @@ async def get_stories() -> Dict[str, Any]:
     try:
         import os
         
-        for root, dirs, files in os.walk(library_root):
+        archive_filter = ArchiveFilter(config)
+        for root, dirs, files in walk_archive(library_root, config, archive_filter):
             current_path = Path(root)
             
-            # Prune disabled and hidden dirs
+            # Prune disabled dirs (hidden dirs and symlinks are never listed)
             dirs[:] = [
                 d for d in dirs
-                if not d.startswith('.')
-                and is_folder_enabled(current_path / d, disabled_folders)
+                if is_folder_enabled(current_path / d, disabled_folders)
             ]
             
             # Check for media in this folder (shallow first)
             has_media = False
             preview_file = None
             
-            with os.scandir(current_path) as it:
-                for entry in it:
-                    if entry.is_file() and is_media_file(Path(entry.path)):
-                        has_media = True
-                        preview_file = Path(entry.path)
-                        break
+            for name in files:
+                if is_media_file(Path(name)):
+                    has_media = True
+                    preview_file = current_path / name
+                    break
             
             # Deep search for preview if no direct media
             if not has_media:
@@ -211,16 +205,15 @@ def get_random_media_file(folder_path: Path) -> Path:
     media_files = []
     try:
         # Shallow check
-        with os.scandir(folder_path) as it:
-            for entry in it:
-                if entry.is_file() and is_media_file(Path(entry.path)):
-                    media_files.append(Path(entry.path))
+        for entry in scan_dir(folder_path, ArchiveFilter(config)):
+            if entry.is_file(follow_symlinks=False) and is_media_file(Path(entry.path)):
+                media_files.append(Path(entry.path))
         
         if media_files:
             return random.choice(media_files)
             
         # If no files in root, try one level deeper
-        for root, dirs, files in os.walk(folder_path):
+        for root, dirs, files in walk_archive(folder_path, config):
             for f in files:
                 p = Path(root) / f
                 if is_media_file(p):

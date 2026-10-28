@@ -9,7 +9,7 @@ import random
 import stat
 
 from backend.config import Config, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS
-from backend.paths import resolve_in_vault
+from backend.paths import ArchiveFilter, resolve_in_vault, scan_dir
 from backend.file_ops import (
     move_no_overwrite, is_inside, same_folder, ARCHIVE_LOCK,
     FileOperationError, CrossDeviceError, DestinationExistsError, ProtectedPathError,
@@ -48,16 +48,16 @@ def get_keurer_files(folder: str = Query(...)) -> Dict[str, Any]:
     files = []
     skipped = 0
 
+    # Geen verborgen bestanden (ook geen '._'-bestanden van macOS), symlinks of mappen
+    # van de app, TRASH en RAW_DUPLICATES (zie backend/paths.py)
     try:
-        entries = list(folder_path.iterdir())
+        entries = [Path(e.path) for e in scan_dir(folder_path, ArchiveFilter(config))]
     except PermissionError:
         raise HTTPException(status_code=403, detail="Kan map niet lezen")
 
     for item in sorted(entries, key=lambda x: x.name.lower()):
         try:
-            if not item.is_file():
-                continue
-            if item.name.startswith('.'):
+            if item.is_symlink() or not item.is_file():
                 continue
             if item.suffix.lower() not in media_extensions:
                 continue

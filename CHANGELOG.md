@@ -57,6 +57,19 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Het opslagoverzicht werkt nu ook als er een map is waarvan de naam met een streepje begint
   (bijv. `-h`); voorheen gaf het hele overzicht dan een fout.
 
+- Eén vaste regel voor wat de app overslaat bij het doorlopen van het archief (mappenboom,
+  viewer, tijdlijn, zoeken, "op deze dag", grootste bestanden, Shows, duplicatenscan, Keurer):
+  de eigen mappen van de app, TRASH, RAW_DUPLICATES, verborgen bestanden, macOS
+  `._`-bestanden en snelkoppelingen (symlinks). TRASH en RAW_DUPLICATES staan daardoor niet
+  meer in de mappenboom en de viewer.
+- Een eigen map die toevallig `dashboard` heet (bijv. `werk/dashboard`) verdween overal uit de
+  mappenboom en de tijdlijn. Nu wordt alleen de echte app-map overgeslagen, herkend aan haar
+  locatie in plaats van aan haar naam. Hetzelfde geldt voor een eigen map die `TRASH` heet
+  ergens dieper in het archief.
+- De duplicatenscan kon een verborgen kopie (bijv. `.foto.jpg`) als "origineel" kiezen, waarna
+  alle zichtbare kopieën als duplicaat werden aangeboden. Verborgen bestanden doen nu niet meer
+  mee aan de scan.
+
 ### Foto Keurer
 - Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het
   bestand naartoe ging (prullenmand of doelmap). Undo stuurt alleen nog het nummer van de

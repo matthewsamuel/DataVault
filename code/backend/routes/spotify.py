@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from fastapi import APIRouter, Query
 from collections import defaultdict
 from datetime import datetime
@@ -22,10 +23,13 @@ def get_spotify_files():
         return []
     
     # Look for both "Streaming_History_Audio_*.json" (Extended) and "StreamingHistory*.json" (Standard)
+    # Same exclusions as every other walk (no hidden or '._' files, no symlinks)
+    from backend.paths import walk_archive
     files = []
-    for path in spotify_data_root.rglob('*.json'):
-        if 'Streaming_History_Audio' in path.name or 'StreamingHistory' in path.name:
-            files.append(path)
+    for root, _, names in walk_archive(spotify_data_root, config):
+        for name in names:
+            if name.endswith('.json') and ('Streaming_History_Audio' in name or 'StreamingHistory' in name):
+                files.append(Path(root) / name)
     return files
 
 def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[tuple] = None):
