@@ -9,7 +9,9 @@ that vault) and stops it again at the end.
 It also drives the app with the keyboard (tabs, the shortcut overview, the Files grid and the
 viewer, Tab staying inside every window, focus going back where it was, Keurer keys that never
 act from the theme menu or the search field), moves a file and puts it back from the
-Herstelcentrum, checks Instellingen and the storage window, and runs a11y_checks.js on every screen in the light and the dark theme:
+Herstelcentrum, checks Instellingen (with a backup made from there) and the storage window,
+compares photos in 'Welke is mooier?' (keys, undo, leaderboard), and runs a11y_checks.js on
+every screen in the light and the dark theme:
 all visible text must reach WCAG AA contrast and every control must have a name. On the way
 it saves a screenshot of every screen in both themes (for a look at the design), in a temp
 folder it prints at the end, or in $DATAVAULT_SMOKE_SHOTS when that is set.
@@ -40,7 +42,8 @@ from pathlib import Path
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 CODE_DIR = Path(__file__).resolve().parents[2]
-VENV_PYTHON = CODE_DIR / "venv" / "bin" / "python"
+# The app's Python; DATAVAULT_PYTHON points elsewhere (a git worktree shares the main checkout's venv)
+VENV_PYTHON = Path(os.environ.get("DATAVAULT_PYTHON") or CODE_DIR / "venv" / "bin" / "python")
 BIG_FOLDER = "Groot"
 BIG_FILES = 1500
 MAX_THUMBS_ON_OPEN = 100
@@ -372,8 +375,24 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Instellingen: every built-in part is there and the theme can be chosen there
             step("settings: 9 opens Instellingen", lambda: page.keyboard.press("9"), 1.0)
-            for part in ("weergave", "taalmodel", "bibliotheek", "shows", "herstel", "over"):
+            for part in ("weergave", "taalmodel", "bibliotheek", "shows", "herstel", "backups", "over"):
                 expect(page.is_visible(f"#settings-{part}"), f"settings: part {part} missing")
+            # Back-ups: 'Nu back-uppen' makes one (checked and compressed, next to the vault in this
+            # test), the part then shows it, and the focus stays on the button
+            try:
+                step("settings: Nu back-uppen", lambda: (
+                    page.focus("#settings-backup-now"), page.keyboard.press("Enter"),
+                    page.wait_for_selector("#settings-backups .backup-kind", timeout=15000)), 0.5)
+            except PlaywrightError:
+                problems.append("settings: 'Nu back-uppen' did not show the new backup")
+            made = sorted(vault.parent.glob("vault_backups/datavault-*-handmatig.db.gz"))
+            expect(len(made) == 1, f"settings: expected one backup file, found {[m.name for m in made]}")
+            expect("vandaag" in (page.text_content("#settings-backups") or ""), "settings: the last backup time is not shown")
+            expect(page.evaluate("document.activeElement.id") == "settings-backup-now",
+                   f"settings: focus left 'Nu back-uppen' ({page.evaluate('document.activeElement.id')})")
+            page.evaluate("document.querySelector('#settings-backups .backup-restore').open = true")
+            expect("restore_backup.py" in (page.text_content("#settings-backups .backup-restore") or ""),
+                   "settings: the restore steps do not show the command")
             expect(page.evaluate("getComputedStyle(document.querySelector('.nav-tab-settings.active'), '::after').content") != "none",
                    "settings: the gear has no active indicator")
             step("settings: dark theme", lambda: page.check("input[data-theme-choice='dark']"), 0.3)
@@ -545,6 +564,66 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                        "shows: the score badge has no name")
                 step("shows: next slide", lambda: page.keyboard.press("ArrowRight"), 0.8)
                 step("shows: close slideshow", lambda: page.keyboard.press("Escape"), 0.8)
+
+            # Welke is mooier?: two photos side by side; ← / 2 pick, z takes the last pick back exactly,
+            # spatie skips, the pair just compared never comes straight back, Tab stays in the window
+            def board():
+                return page.evaluate("""(async () => (await fetchJSON(`${API_BASE}/api/shows/leaderboard?limit=200`))
+                    .items.map(i => [i.path, i.rating, i.games]).sort())()""")
+
+            def shown_pair():
+                return page.evaluate("elo.pair ? elo.pair.map(p => p.path) : []")
+
+            def comparisons():
+                return page.evaluate("(async () => (await fetchJSON(`${API_BASE}/api/shows/compare/pair`)).stats.comparisons)()")
+
+            try:
+                step("elo: open from Shows", lambda: (
+                    page.click(".nav-tab[data-view='shows']"), page.click("#btn-elo"),
+                    page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=10000)), 0.6)
+            except PlaywrightError:
+                problems.append("elo: the window showed no pair")
+            expect(page.evaluate("document.getElementById('elo-overlay').contains(document.activeElement)"),
+                   "elo: the focus is not in the window")
+            before_board, first = board(), shown_pair()
+            step("elo: ← picks the left photo", lambda: page.keyboard.press("ArrowLeft"), 1.4)
+            scores = {path: rating for path, rating, _ in board()}
+            expect(len(first) == 2 and scores.get(first[0], 0) > 1000 and scores.get(first[1], 9999) < 1000,
+                   f"elo: ← did not make the left photo win ({first}, {scores})")
+            expect(set(shown_pair()) != set(first), "elo: the pair just compared came straight back")
+            step("elo: z takes it back", lambda: page.keyboard.press("z"), 1.0)
+            expect(board() == before_board, "elo: z did not put both scores back exactly")
+            expect(shown_pair() == first, "elo: after z the same pair is not shown again")
+            step("elo: 2 picks the right photo", lambda: page.keyboard.press("2"), 1.4)
+            scores = {path: rating for path, rating, _ in board()}
+            expect(scores.get(first[1], 0) > 1000, f"elo: 2 did not make the right photo win ({scores})")
+            count, current = comparisons(), shown_pair()
+            step("elo: spatie skips", lambda: page.keyboard.press(" "), 0.8)
+            expect(comparisons() == count and shown_pair() != current, "elo: spatie did not just skip the pair")
+            page.focus("#elo-scope")
+            page.keyboard.press("1")
+            page.wait_for_timeout(400)
+            expect(comparisons() == count, "elo: a key in the collection list picked a photo")
+            page.focus("#elo-overlay")
+            expect_focus_trapped("elo-overlay", "elo: window")
+            step("elo: Ranglijst", lambda: page.click("#elo-tab-board"), 1.0)
+            ranks = page.evaluate("[...document.querySelectorAll('.elo-board-score')].map(e => Number(e.textContent.replace(/\\./g, '')))")
+            expect(len(ranks) >= 2 and ranks == sorted(ranks, reverse=True), f"elo: the leaderboard is not sorted ({ranks})")
+            for theme in ("light", "dark"):
+                page.evaluate(f"setTheme('{theme}')")
+                for tab in ("board", "compare"):
+                    page.evaluate(f"eloShowTab('{tab}')")
+                    page.wait_for_timeout(900)
+                    page.screenshot(path=str(shots / f"elo-{tab}_{theme}.png"))
+                    page.add_script_tag(path=str(A11Y_CHECKS))
+                    for fail in page.evaluate("__contrastFailures()"):
+                        problems.append(f"contrast {theme} elo {tab}: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+                    for control in page.evaluate("__unnamedControls()"):
+                        problems.append(f"unnamed control in elo {tab}: {control}")
+            page.evaluate("setTheme('auto')")
+            step("elo: Escape closes", lambda: page.keyboard.press("Escape"), 0.5)
+            expect(not page.is_visible("#elo-overlay") and page.evaluate("document.activeElement.id") == "btn-elo",
+                   f"elo: Escape did not close the window and return to its button ({page.evaluate('document.activeElement.id')})")
 
             # Spotify: both top lists show everything the export has (never cut to the shorter one),
             # the shorter one ends with a quiet closing line, and the stat labels in a row line up
