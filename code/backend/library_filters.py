@@ -43,6 +43,8 @@ PERIODS = ("this_year", "last_year", "this_month", "last_30_days")
 KEURER = ("keep", "undecided")
 CAPTURE = ("known", "missing")
 LIST_KEYS = ("kind", "ext", "folders")
+# (a folder name may contain a comma, so only these are split on commas in an address)
+COMMA_KEYS = ("kind", "ext")
 KEYS = ("kind", "ext", "date_from", "date_to", "year", "month", "period", "folder", "folders", "recursive",
         "camera", "camera_contains", "has_gps", "min_rating", "keurer", "orientation", "capture_date")
 # Sorts offered to the user (media_index.SORTS also has path and random)
@@ -50,7 +52,7 @@ SORTS = ("-taken", "taken", "name", "-name", "-size", "size", "-rating", "rating
 DEFAULT_SORT = "-taken"
 MAX_TEXT = 200
 MAX_EXTS = 30
-MAX_FOLDERS = 50
+MAX_FOLDERS = 300   # as many as the Home widget accepts (OTD_MAX_FOLDERS)
 MIN_YEAR, MAX_YEAR = 1800, 2200
 RATING_LIMIT = 10 ** 9
 _EXT_RE = re.compile(r"^\.[a-z0-9]{1,10}$")
@@ -174,7 +176,7 @@ def clean(spec: Any) -> Dict[str, Any]:
             if folder:
                 out[key] = folder
         elif key == "folders":
-            folders = {f for f in (_folder(v) for v in _list(value)) if f}
+            folders = {f for f in (_folder(v) for v in ([value] if isinstance(value, str) else _list(value))) if f}
             if len(folders) > MAX_FOLDERS:
                 raise FilterError(f"Hoogstens {MAX_FOLDERS} mappen")
             if folders:
@@ -211,7 +213,7 @@ def from_params(params: Iterable[Tuple[str, str]], reserved: Iterable[str] = ())
         if name in reserved:
             continue
         if name in LIST_KEYS:
-            spec.setdefault(name, []).extend(_list(value))
+            spec.setdefault(name, []).extend(_list(value) if name in COMMA_KEYS else [value])
         elif name in spec:
             raise FilterError(f"{name} staat er twee keer in")
         else:

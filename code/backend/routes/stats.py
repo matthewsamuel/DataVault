@@ -311,7 +311,7 @@ def get_photo_on_this_day(allowed_folders: Optional[List[str]] = Query(None)) ->
         dt = datetime.fromtimestamp(ts)
         return dt.month == now.month and dt.day == now.day and dt.year != now.year
 
-    found = _index_hits({"month_day": (now.month, now.day), "exclude_year": now.year}, roots,
+    found = _index_hits({"month_day": (now.month, now.day), "exclude_year": now.year, "capture_date": "known"}, roots,
                         OTD_LIMIT, sort="random")
     complete = True
     if found is None:

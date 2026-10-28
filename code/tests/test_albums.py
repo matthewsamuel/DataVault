@@ -604,11 +604,11 @@ def test_an_unchanged_dit_jaar_from_before_is_updated_once(client, config, app):
 def test_a_folders_list_filters_like_the_on_this_day_choice(indexed, config):
     clean = library_filters.clean
     assert clean({"folders": ["RAW/2019/", "library", "RAW/2019"]}) == {"folders": ["RAW/2019", "library"]}
-    assert clean({"folders": "RAW,library", "recursive": False}) == {"folders": ["RAW", "library"], "recursive": False}
+    assert clean({"folders": "RAW,library", "recursive": False}) == {"folders": ["RAW,library"], "recursive": False}
     with pytest.raises(library_filters.FilterError):
         clean({"folder": "RAW", "folders": ["library"]})
     with pytest.raises(library_filters.FilterError):
-        clean({"folders": [f"RAW/{i}" for i in range(51)]})
+        clean({"folders": [f"RAW/{i}" for i in range(301)]})
     client = indexed
     both = _browse(client, folders=["RAW/2019", "RAW/misc"])
     assert both["total"] == _browse(client, folder="RAW/2019")["total"] + _browse(client, folder="RAW/misc")["total"]
@@ -640,3 +640,37 @@ def test_each_on_this_day_year_opens_exactly_its_own_files(client, config, monke
     # In a leap year 28 February is one day only
     data = _otd(client, monkeypatch, date(2028, 2, 28))
     assert data["years"][0]["filters"]["date_to"] == "2020-02-28" and data["years"][0]["total"] == 2
+
+
+def test_a_folder_with_a_comma_survives_the_address_and_home_matches_the_screen(client, config, monkeypatch):
+    folder = config.VAULT_ROOT / "RAW/Reis, Italië"
+    _photo(folder / "a.jpg", (1, 1, 1), "a", "2019:07:14 12:00:00")
+    _index(client)
+    assert library_filters.from_params([("folders", "RAW/Reis, Italië"), ("kind", "photo,video")]) == {
+        "folders": ["RAW/Reis, Italië"], "kind": ["photo", "video"]}
+    page = _browse(client, folders=["RAW/Reis, Italië"])
+    assert page["total"] == 1 and page["filters"]["folders"] == ["RAW/Reis, Italië"]
+    data = _otd(client, monkeypatch, date(2026, 7, 14), allowed_folders=[str(folder)])
+    group = data["years"][0]
+    assert _browse(client, **group["filters"])["total"] == group["total"] == 1
+
+
+def test_many_home_folders_still_open_in_the_screen(client, config, monkeypatch):
+    folders = [str(config.VAULT_ROOT / f"RAW/map{i}") for i in range(80)]
+    assert library_filters.clean({"folders": folders})["folders"]
+
+
+def test_home_widget_leaves_out_file_dated_files_like_the_screen(client, config, monkeypatch):
+    now = datetime.now()
+    legacy = config.VAULT_ROOT / "library/WhatsApp/IMG-old.jpg"
+    _photo(legacy, (9, 9, 9), "w")
+    stamp = datetime(now.year - 2, now.month, min(now.day, 28), 12).timestamp()
+    os.utime(legacy, (stamp, stamp))
+    _index(client)
+    shown = {p["name"] for p in client.get("/api/stats/photo-on-this-day").json()["photos"]}
+    assert "IMG-old.jpg" not in shown
+
+
+def test_creating_an_album_refuses_unknown_fields_like_updating(client):
+    r = client.post("/api/library/albums", json={"name": "Diep", "filters": {"folder": "RAW"}, "extra": 1})
+    assert r.status_code == 400 and "Onbekend veld: extra" in r.json()["detail"]["error"] if isinstance(r.json().get("detail"), dict) else r.status_code == 400

@@ -462,6 +462,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(chip == "RAW", f"keurer: the folder chip shows {chip!r}, not the path from the archive")
 
             # Home: the 'op deze dag' photo opens with the keyboard
+            # (the fixtures only fall on 27 October; a fixed answer keeps this check date-independent)
+            memory = vault / "RAW/2020/Café Ümlaut/koffie é à ü.jpg"
+            page.route("**/api/stats/photo-on-this-day*", lambda route: route.fulfill(json={"complete": True, "photos": [{
+                "path": str(memory), "name": memory.name, "type": "image", "timestamp": 1603792800.0,
+                "year": 2020, "date_source": "exif"}]}))
             step("home: 'op deze dag' photo", lambda: (
                 page.evaluate("switchMainView('home')"),
                 page.wait_for_selector(".otd-large-image.active", timeout=10000)), 0.3)
@@ -608,6 +613,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             except PlaywrightError as e:
                 problems.append(f"albums: 'Alle N bekijken' did not show or open: {str(e).splitlines()[0]}")
             page.unroute("**/api/library/on-this-day*")
+            page.unroute("**/api/stats/photo-on-this-day*")
             all_n = page.evaluate("""[location.hash, (document.querySelector('#albums-count .albums-count-number') || {}).textContent,
                                       document.activeElement.id]""")
             year_total = sum(n for y, n in otd["api"] if y == 2019)

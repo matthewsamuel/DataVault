@@ -199,6 +199,9 @@ def _name_taken(conn, name: str, own_id: Optional[int] = None) -> bool:
 def create_album(db, config, data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise AlbumError("Verwacht een object met name, filters en sort")
+    unknown = set(data) - {"name", "filters", "sort", "icon"}
+    if unknown:
+        raise AlbumError(f"Onbekend veld: {', '.join(sorted(unknown))}")
     name = _name(data.get("name"))
     spec = _filters(data.get("filters"), config)
     sort = _sort(data.get("sort"))
