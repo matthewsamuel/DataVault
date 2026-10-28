@@ -13,6 +13,7 @@ import pytest
 os.environ["DATAVAULT_TESTING"] = "1"
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["DATAVAULT_AUTO_INDEX"] = "0"   # tests start index passes themselves (see test_media_index)
+os.environ["DATAVAULT_AUTO_BACKUP"] = "0"  # tests make backups themselves (see test_backup)
 os.environ.pop("DATAVAULT_CONFIG", None)
 
 CODE_DIR = Path(__file__).resolve().parent.parent
