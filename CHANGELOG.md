@@ -504,7 +504,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   lezen, gaan via het ingebouwde macOS-programma `sips`.
 - Panorama's en scans boven 179 megapixel krijgen een echte miniatuur in plaats van een grijs vlak.
   Dat geldt nu ook voor JPEG-panorama's boven 600 megapixel: die worden op 1/8 van hun grootte
-  ingelezen (een panorama van 624 megapixel kost zo ~35 MB geheugen).
+  ingelezen (een panorama van 624 megapixel kost zo ~35 MB geheugen). Een TIFF- of PNG-scan boven
+  600 megapixel gaat via het macOS-programma `sips`, één tegelijk en in een eigen proces, en krijgt
+  zo ook een echte miniatuur (tot 1000 megapixel). Voorheen bleef die voorgoed een grijs vlak.
 - De map met miniaturen groeit niet meer eindeloos. Wordt hij groter dan 4 GB (ongeveer 200.000
   miniaturen), dan ruimt de app bij het opstarten de miniaturen op die het langst niet getoond zijn,
   zoals die van bewerkte of verwijderde foto's. Alleen de eigen cache van de app; foto's zelf

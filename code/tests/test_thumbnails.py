@@ -92,7 +92,8 @@ def test_a_jpeg_above_twice_the_bomb_limit_is_drafted_instead_of_refused(tmp_pat
     out = tmp_path / "t.jpg"
     thumbnail.render_photo_thumbnail(src, out)
     assert Image.open(out).size == (300, 250) and not thumbnail.is_placeholder(out)
-    # Not a JPEG: no draft, so the limit still holds
+    # Not a JPEG: no draft, so Pillow's limit still holds (without sips, see below)
+    monkeypatch.setattr(thumbnail, "_have_sips", lambda: False)
     png = tmp_path / "groot.png"
     Image.new("L", (6000, 5000), 120).save(png)
     with pytest.raises(thumbnail.Undecodable):
@@ -289,3 +290,34 @@ def test_a_raw_or_heic_photo_pillow_cannot_read_goes_through_sips(tmp_path, monk
     assert max(img.size) == 300
     r, g, b = img.convert("RGB").getpixel((10, 10))
     assert r > 150 and g > 150 and b < 100
+
+
+def test_a_huge_tiff_or_png_goes_through_sips_one_at_a_time(tmp_path, monkeypatch):
+    # R25B-3: above the limit Pillow cannot reduce a TIFF or PNG while decoding; sips can
+    if not shutil.which("sips"):
+        pytest.skip("sips (macOS) ontbreekt")
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1_000_000)
+    held = []
+    real_sips = thumbnail._render_with_sips
+
+    def spy(src, out):
+        held.append(thumbnail._BIG_DECODE.locked())
+        return real_sips(src, out)
+
+    monkeypatch.setattr(thumbnail, "_render_with_sips", spy)
+    for name, kwargs in (("scan.tif", {"compression": "tiff_lzw"}), ("scan.png", {})):
+        src = tmp_path / name
+        Image.new("RGB", (3000, 2000), (20, 160, 40)).save(src, **kwargs)  # 6 MP > 2 x 1 MP
+        out = tmp_path / f"{name}.jpg"
+        thumbnail.render_photo_thumbnail(src, out)
+        img = Image.open(out)
+        assert img.size == (300, 200) and not thumbnail.is_placeholder(out)
+        r, g, b = img.convert("RGB").getpixel((150, 100))
+        assert g > 120 and r < 60
+    assert held == [True, True]
+    # Above SIPS_MAX_PIXELS it is not tried: sips would need gigabytes
+    monkeypatch.setattr(thumbnail, "SIPS_MAX_PIXELS", 5_000_000)
+    held.clear()
+    with pytest.raises(thumbnail.Undecodable):
+        thumbnail.render_photo_thumbnail(tmp_path / "scan.png", tmp_path / "x.jpg")
+    assert held == [] and not (tmp_path / "x.jpg").exists()

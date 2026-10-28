@@ -16,6 +16,7 @@ import io
 import os
 import re
 import shutil
+import struct
 import threading
 import time
 import warnings
@@ -40,10 +41,13 @@ THUMB_VERSION = 2
 # reduced size (draft), so allow up to 2 x 300 MP; very large non-JPEG images are
 # decoded one at a time (_BIG_DECODE) so memory stays bounded. A JPEG above even that
 # (a gigapixel panorama) is still made: the limit then applies to its drafted size
-# (1/8 per side), see _open_photo.
+# (1/8 per side), see _open_photo. Any other image above the limit (a TIFF or PNG scan)
+# goes through macOS's sips in its own process, one at a time, up to SIPS_MAX_PIXELS
+# (sips needs about 4 bytes per pixel: 2.5 GB for 640 MP, freed when it exits).
 Image.MAX_IMAGE_PIXELS = 300_000_000
 warnings.simplefilter("ignore", Image.DecompressionBombWarning)
 BIG_IMAGE_PIXELS = 50_000_000
+SIPS_MAX_PIXELS = 1_000_000_000
 _BIG_DECODE = threading.Lock()
 
 # At most this many thumbnails are made at once (requests and the thumbnail job together);
@@ -252,6 +256,11 @@ def render_photo_thumbnail(file_path: Path, output_path: Path) -> None:
             if file_path.suffix.lower() in RAW_PHOTO_EXTENSIONS | {'.heic', '.heif', '.hif'} and _have_sips():
                 _render_with_sips(file_path, output_path)
                 return
+            # Too large for Pillow even reduced (a TIFF or PNG scan): sips, one at a time
+            if isinstance(e, _TooLarge) and e.pixels <= SIPS_MAX_PIXELS and _have_sips():
+                with _BIG_DECODE:
+                    _render_with_sips(file_path, output_path)
+                return
             raise Undecodable(f"geen beeld te maken van dit bestand ({e})") from e
 
         # Save (errors here are about the cache, never about the photo)
@@ -259,26 +268,54 @@ def render_photo_thumbnail(file_path: Path, output_path: Path) -> None:
             img.save(tmp, 'JPEG', quality=THUMB_QUALITY, optimize=True)
 
 
-def _open_photo(file_path: Path) -> Image.Image:
+class _TooLarge(Image.DecompressionBombError):
+    """Above Pillow's limit even at the reduced size it would be decoded at."""
+
+    def __init__(self, full_size, size):
+        self.pixels = full_size[0] * full_size[1]
+        super().__init__(f"te groot, ook verkleind: {size[0]}x{size[1]}")
+
+
+def open_unchecked(file_path: Path) -> Image.Image:
     """
-    Image.open, except that a JPEG above Pillow's bomb limit is opened anyway: draft()
-    decodes it at 1/8 per side, so _decode_small checks the limit on that size instead.
+    Image.open without Pillow's bomb check on the stated size. Only for code that never
+    decodes the full image: reading EXIF, or _decode_small, which checks the size it
+    will actually decode at. Raises what Image.open raises for a file no plugin accepts.
     """
     try:
         return Image.open(file_path)
     except Image.DecompressionBombError:
-        with open(file_path, 'rb') as f:
-            if f.read(3) != b'\xff\xd8\xff':
-                raise
-        from PIL import JpegImagePlugin
-        return JpegImagePlugin.JpegImageFile(file_path)  # the same opener, without the size check
+        pass
+    # The same search as Image.open, minus the check; the plugin opens the file itself
+    with open(file_path, 'rb') as f:
+        prefix = f.read(16)
+    Image.init()
+    for fmt in Image.ID:
+        factory, accept = Image.OPEN[fmt]
+        accepted = not accept or accept(prefix)
+        if not accepted or isinstance(accepted, str):
+            continue
+        try:
+            return factory(str(file_path), str(file_path))
+        except (SyntaxError, IndexError, TypeError, struct.error):
+            continue
+    raise Image.UnidentifiedImageError(f"geen beeld: {file_path.name}")
+
+
+def _open_photo(file_path: Path) -> Image.Image:
+    """
+    Opened without the bomb check on the full size: draft() decodes a JPEG at 1/8 per
+    side, so _decode_small checks the limit on the size it will decode at instead.
+    """
+    return open_unchecked(file_path)
 
 
 def _decode_small(file_path: Path) -> Image.Image:
     with _open_photo(file_path) as img:
+        full_size = img.size
         img.draft('RGB', (THUMB_SIZE[0] * 2, THUMB_SIZE[1] * 2))  # JPEG only; a no-op otherwise
         if Image.MAX_IMAGE_PIXELS and img.size[0] * img.size[1] > 2 * Image.MAX_IMAGE_PIXELS:
-            raise Image.DecompressionBombError(f"te groot, ook verkleind: {img.size[0]}x{img.size[1]}")
+            raise _TooLarge(full_size, img.size)
         big = img.size[0] * img.size[1] > BIG_IMAGE_PIXELS
         with (_BIG_DECODE if big else _no_lock()):
             # In place, so the EXIF orientation stays with it; a loaded copy that
