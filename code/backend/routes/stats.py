@@ -223,7 +223,7 @@ def _walk_for_dates(roots: List[Path], matches, limit: int, max_folders: int, se
         stack.extend(subdirs)
         if not media:
             continue
-        for path, (ts, source) in media_dates.capture_dates(media, db).items():
+        for path, (ts, source) in media_dates.capture_dates(media, db, vault_root=config.VAULT_ROOT).items():
             if path not in found and matches(ts):
                 found[path] = (ts, source)
     return True

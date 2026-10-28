@@ -248,6 +248,9 @@
             if (data.skipped && data.skipped.length) {
                 showToast('Tijdlijn', `${data.skipped.length} gekozen map(pen) niet gevonden en overgeslagen`, 'warning');
             }
+            if (data.complete === false) {
+                showToast('Tijdlijn', `${data.errors || 'Sommige'} map(pen) of bestand(en) konden niet gelezen worden; de tijdlijn is mogelijk onvolledig`, 'warning');
+            }
             tlDateIndex = data.date_index || {};
             tlYearBoundaries = data.year_boundaries || {};
 

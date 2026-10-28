@@ -5,7 +5,9 @@ date (backend/media_dates.py: EXIF or the video's own date, else birthtime, else
 
 The scan answers in a compact form (one short row per file, paths relative to the
 vault) and is cached per folder selection until a folder below it changes (its mtime:
-a file added, removed or renamed), MEDIA-THUMBS-TIMELINE-12/PERF-6.
+a file added, removed or renamed), MEDIA-THUMBS-TIMELINE-12/PERF-6. Only a complete
+scan is cached: when a folder or file could not be read, or the vault went away during
+the scan, the answer says complete: false and the next request scans again.
 """
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
@@ -68,19 +70,27 @@ def selected_roots(folders: List[str]) -> Tuple[List[Path], List[str]]:
     return sorted(kept, key=str), skipped
 
 
-def _walk_media(roots: List[Path]) -> Tuple[List[Tuple[str, os.stat_result]], List[Tuple[str, int]]]:
-    """Every photo and video below roots with its stat, and the mtime of every folder walked."""
+def _walk_media(roots: List[Path], errors: List[str]) -> Tuple[List[Tuple[str, os.stat_result]], List[Tuple[str, int]]]:
+    """
+    Every photo and video below roots with its stat, and the mtime of every folder
+    walked. Every folder or file that could not be read is added to errors.
+    """
     files: List[Tuple[str, os.stat_result]] = []
     folders: List[Tuple[str, int]] = []
     extensions = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
     archive_filter = ArchiveFilter(config)
+
+    def onerror(path, error):
+        errors.append(path)
+
     for top in roots:
         # walk_archive skips the app's own folders, TRASH, RAW_DUPLICATES, hidden files and symlinks
-        for root, dirs, names in walk_archive(top, config, archive_filter):
+        for root, dirs, names in walk_archive(top, config, archive_filter, onerror=onerror):
             dirs.sort()
             try:
                 folders.append((root, os.stat(root).st_mtime_ns))
             except OSError:
+                errors.append(root)
                 continue
             for name in names:
                 if os.path.splitext(name)[1].lower() not in extensions:
@@ -89,6 +99,7 @@ def _walk_media(roots: List[Path]) -> Tuple[List[Tuple[str, os.stat_result]], Li
                 try:
                     files.append((path, os.stat(path)))
                 except OSError:
+                    errors.append(path)
                     continue
     return files, folders
 
@@ -103,10 +114,14 @@ def _unchanged(folders: Tuple[Tuple[str, int], ...]) -> bool:
     return True
 
 
-def _scan_payload(roots: List[Path]) -> Tuple[bytes, Tuple[Tuple[str, int], ...]]:
-    files, folders = _walk_media(roots)
-    dates = media_dates.capture_dates(files, db)
-    if db is not None:
+def _scan_payload(roots: List[Path]) -> Tuple[bytes, Tuple[Tuple[str, int], ...], bool]:
+    """(JSON answer, folder mtimes, complete). Only a complete answer may be cached."""
+    errors: List[str] = []
+    files, folders = _walk_media(roots, errors)
+    dates = media_dates.capture_dates(files, db, read_errors=errors, vault_root=config.VAULT_ROOT)
+    complete = not errors and config.VAULT_ROOT.is_dir()
+    if db is not None and complete:
+        # Only after a full walk: a folder that could not be read is not 'gone'
         existing = {path for path, _ in files}
         for top in roots:
             try:
@@ -142,8 +157,11 @@ def _scan_payload(roots: List[Path]) -> Tuple[bytes, Tuple[Tuple[str, int], ...]
         "date_sources": dict(sources),
         "folders": [str(r) for r in roots],
         "skipped": [],
+        "complete": complete,
+        "errors": len(errors),
     }
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), tuple(folders)
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return body, tuple(folders), complete
 
 
 @router.get("/scan")
@@ -155,8 +173,9 @@ def timeline_scan(
 
     One 'folders' parameter per folder (a folder name may contain a comma,
     MEDIA-THUMBS-TIMELINE-13). Answer: {total, root, columns, rows, date_index,
-    year_boundaries, date_sources, folders, skipped}; each row is
-    [timestamp, path relative to root, size, 'p'|'v', date source code].
+    year_boundaries, date_sources, folders, skipped, complete, errors}; each row is
+    [timestamp, path relative to root, size, 'p'|'v', date source code]. complete is
+    false (errors counts the folders and files) when something could not be read.
     """
     roots, skipped = selected_roots(folders)
     if not roots:
@@ -170,12 +189,15 @@ def timeline_scan(
     if cached is not None and _unchanged(cached[0]):
         body = cached[1]
     else:
-        body, folder_mtimes = _scan_payload(roots)
+        body, folder_mtimes, complete = _scan_payload(roots)
         with _scan_cache_lock:
-            _scan_cache[key] = (folder_mtimes, body)
-            _scan_cache.move_to_end(key)
-            while len(_scan_cache) > SCAN_CACHE_SIZE:
-                _scan_cache.popitem(last=False)
+            if complete:
+                _scan_cache[key] = (folder_mtimes, body)
+                _scan_cache.move_to_end(key)
+                while len(_scan_cache) > SCAN_CACHE_SIZE:
+                    _scan_cache.popitem(last=False)
+            else:
+                _scan_cache.pop(key, None)
 
     if skipped:
         # Rare; the cached body stays the same for every request

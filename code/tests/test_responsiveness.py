@@ -55,9 +55,9 @@ def _slow_hash(path):
 scanner.hash_file_xxh3 = _slow_hash
 
 _scan = timeline._walk_media
-def _slow_scan(roots):
+def _slow_scan(roots, *args):
     time.sleep(5)
-    return _scan(roots)
+    return _scan(roots, *args)
 timeline._walk_media = _slow_scan
 
 _parse = spotify.parse_spotify_data

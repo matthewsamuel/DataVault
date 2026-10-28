@@ -101,7 +101,7 @@ def test_the_timeline_answer_is_cached_until_a_folder_changes(client, vault, mon
     folder = vault / "RAW/2019"
     walks = []
     real = timeline._walk_media
-    monkeypatch.setattr(timeline, "_walk_media", lambda roots: (walks.append(roots), real(roots))[1])
+    monkeypatch.setattr(timeline, "_walk_media", lambda roots, errors: (walks.append(roots), real(roots, errors))[1])
     first = _scan(client, folder)
     second = _scan(client, folder)
     assert first == second and len(walks) == 1
@@ -243,3 +243,99 @@ def test_migration_9_adds_the_date_cache_and_keeps_every_user_row(tmp_path, monk
     db.store_media_dates([("/v/RAW/a.jpg", 10, 20, 1e9, "exif")])
     assert db.get_media_dates(["/v/RAW/a.jpg", "/v/x"]) == {"/v/RAW/a.jpg": (10, 20, 1e9, "exif")}
     db.close_all()
+
+
+def test_an_unreadable_folder_never_leaves_a_partial_timeline_in_the_cache(client, vault):
+    from backend.routes import timeline
+    folder = vault / "RAW/2019"
+    full = _scan(client, folder)
+    assert full["complete"] is True and full["errors"] == 0
+    inner = folder / "zomer vakantie"
+    known = [str(p) for p in inner.iterdir() if p.suffix.lower() in (".jpg", ".jpeg")]
+    assert known and set(timeline.db.get_media_dates(known)) == set(known)
+    timeline._scan_cache.clear()
+    os.chmod(inner, 0o000)
+    try:
+        partial = _scan(client, folder)
+        assert partial["complete"] is False and partial["errors"] >= 1
+        assert partial["total"] < full["total"]
+        # The dates of the files that could not be reached are not pruned
+        assert set(timeline.db.get_media_dates(known)) == set(known)
+    finally:
+        os.chmod(inner, 0o755)
+    again = _scan(client, folder)
+    assert again["complete"] is True
+    assert again["total"] == full["total"] and again["rows"] == full["rows"]
+
+
+def test_a_scan_while_the_vault_goes_away_is_not_cached(client, vault, monkeypatch):
+    from backend.routes import timeline
+    folder = vault / "RAW/2019"
+    real = media_dates.capture_dates
+    away = vault.parent / "weg"
+
+    def unplug_during(*args, **kwargs):
+        result = real(*args, **kwargs)
+        vault.rename(away)
+        return result
+
+    monkeypatch.setattr(media_dates, "capture_dates", unplug_during)
+    try:
+        r = client.get("/api/timeline/scan", params={"folders": [str(folder)]})
+    finally:
+        away.rename(vault)
+    assert r.status_code == 200 and r.json()["complete"] is False
+    assert timeline._scan_cache == {}
+
+
+def test_a_file_that_cannot_be_read_gets_no_stored_date(client, vault):
+    from backend.routes import timeline
+    folder = vault / "RAW/2018/x"
+    photo = _photo(folder / "oud.jpg", "2005:05:05 10:00:00")
+    os.chmod(photo, 0o000)
+    try:
+        with pytest.raises(PermissionError):
+            media_dates.embedded_date(photo)
+        data = _scan(client, folder)
+        [row] = timeline_files(data)
+        assert row["date_source"] in ("b", "m") and data["complete"] is False
+        assert timeline.db.get_media_dates([str(photo)]) == {}
+    finally:
+        os.chmod(photo, 0o644)
+    [row] = timeline_files(_scan(client, folder))
+    assert row["date_source"] == "e" and row["timestamp"] == _ts("2005-05-05 10:00")
+    names = {Path(p["path"]).name for p in
+             client.get("/api/stats/photos-by-date", params={"date": "2005-05-05"}).json()["photos"]}
+    assert "oud.jpg" in names
+
+
+def test_a_file_without_a_date_of_its_own_is_not_a_read_error(vault):
+    garbage = vault / "RAW/rommel.jpg"
+    garbage.write_bytes(b"geen foto" * 50)
+    assert media_dates.embedded_date(garbage) == (None, None)
+    clip = vault / "RAW/rommel.mp4"
+    clip.write_bytes(b"\x00\x00\x00\x01moov" + b"\xff" * 40)
+    assert media_dates.embedded_date(clip) == (None, None)
+    errors = []
+    st = os.stat(garbage)
+    assert media_dates.capture_dates([(str(garbage), st)], read_errors=errors) == {
+        str(garbage): media_dates.file_date(st)}
+    assert errors == []
+
+
+def test_nothing_is_stored_when_the_vault_is_gone_by_the_end(tmp_path):
+    class FakeDb:
+        stored = None
+
+        def get_media_dates(self, paths):
+            return {}
+
+        def store_media_dates(self, rows):
+            self.stored = rows
+
+    photo = _photo(tmp_path / "v" / "a.jpg", "2007:07:07 07:00:00")
+    db = FakeDb()
+    dates = media_dates.capture_dates([(str(photo), os.stat(photo))], db, vault_root=tmp_path / "weg")
+    assert dates[str(photo)][1] == "exif" and db.stored is None
+    media_dates.capture_dates([(str(photo), os.stat(photo))], db, vault_root=tmp_path / "v")
+    assert db.stored and db.stored[0][0] == str(photo)

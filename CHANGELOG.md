@@ -512,12 +512,19 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   datum dan de tijdlijn. De viewer toont bij een foto uit de tijdlijn waar de datum vandaan komt.
 - Opnamedatums worden één keer per bestand gelezen en bewaard; een gewijzigd bestand wordt
   opnieuw gelezen. Daardoor wordt elke volgende keer snel.
+- Kon een bestand even niet gelezen worden (geen rechten, een leesfout, de schijf viel weg), dan
+  bewaart de app voor dat bestand geen datum. Voorheen bleef zo'n foto voorgoed op de
+  aanmaakdatum staan in plaats van de EXIF-datum, tot het bestand zelf veranderde.
 - Mappen met een komma in de naam (bijv. "Parijs, 2019") werken nu in de tijdlijn en in de
   instelling van "op deze dag". Voorheen gaf zo'n map stil 0 foto's.
 - Kies je in de tijdlijn een map én een map daarbinnen, dan staat elke foto er nog maar één keer
   in. Mappen die niet meer bestaan worden gemeld in plaats van stil overgeslagen.
 - De tijdlijn laadt sneller: het antwoord van de server is ongeveer drie keer zo klein en wordt
   bewaard tot er in een van de mappen iets verandert.
+- Kon de tijdlijn een map of bestand niet lezen (geen rechten, een leesfout, de schijf viel
+  halverwege weg), dan meldt hij dat de tijdlijn mogelijk onvolledig is en bewaart hij dat
+  onvolledige antwoord niet meer. Voorheen bleef zo'n lege of halve tijdlijn staan, ook nadat de
+  map weer leesbaar was, tot een herstart.
 - "Op deze dag" doet per bezoek een begrensde hoeveelheid werk (eerst wat de app al weet, daarna
   hooguit 300 mappen of 2 seconden) in plaats van soms het hele archief door te lopen. Het toont
   alleen foto's en video's, nooit meer een muziekbestand als grijs vlak.

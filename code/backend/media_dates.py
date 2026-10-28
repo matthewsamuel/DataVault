@@ -11,7 +11,10 @@ EXIF dates are local time (cameras store no zone), QuickTime dates are UTC.
 
 Reading a date costs a file open, so dates are cached in SQLite (media_dates,
 migration 9) with the size and mtime_ns they were read at: a changed file is read
-again, an unchanged one never. A full index of the archive comes later; this module
+again, an unchanged one never. A file that has no date of its own is told apart from
+a file that could not be read (an OSError with an errno: no permission, an I/O error,
+the disk unplugged): the first gets its file date for good, the second only for this
+answer and is read again next time, so a passing read error never fixes a wrong date. A full index of the archive comes later; this module
 is the reusable piece it can build on.
 """
 import os
@@ -41,17 +44,29 @@ def _plausible(ts: Optional[float]) -> Optional[float]:
     return ts
 
 
+def _read_error(error: BaseException) -> bool:
+    """True for an error of the disk or the file system (it has an errno), not of the file's content."""
+    return isinstance(error, OSError) and error.errno is not None
+
+
 def exif_date(path: Path) -> Optional[float]:
-    """EXIF DateTimeOriginal (or DateTimeDigitized, DateTime) as a local-time epoch, or None."""
-    try:
-        from PIL import Image
-        from backend import thumbnail  # noqa: F401  (registers the HEIC opener, raises the pixel limit)
-        with Image.open(path) as img:
-            exif = img.getexif()
-            sub = exif.get_ifd(0x8769)
-            values = (sub.get(0x9003), sub.get(0x9004), exif.get(0x0132))
-    except Exception:
-        return None
+    """
+    EXIF DateTimeOriginal (or DateTimeDigitized, DateTime) as a local-time epoch, or None
+    when the file has none or is no readable image. Raises OSError when the file could
+    not be read (see _read_error).
+    """
+    from PIL import Image
+    from backend import thumbnail  # noqa: F401  (registers the HEIC opener, raises the pixel limit)
+    with open(path, "rb") as f:
+        try:
+            with Image.open(f) as img:
+                exif = img.getexif()
+                sub = exif.get_ifd(0x8769)
+                values = (sub.get(0x9003), sub.get(0x9004), exif.get(0x0132))
+        except Exception as e:
+            if _read_error(e):
+                raise
+            return None
     for value in values:
         if isinstance(value, bytes):
             value = value.decode("ascii", "ignore")
@@ -91,6 +106,7 @@ def quicktime_date(path: Path) -> Optional[float]:
     """
     The creation time in the movie header (moov/mvhd) of an mp4/mov, as a UTC epoch, or
     None. Reads only box headers (a few small reads, wherever moov is in the file).
+    Raises OSError when the file could not be read.
     """
     try:
         with open(path, "rb") as f:
@@ -126,13 +142,16 @@ def quicktime_date(path: Path) -> Optional[float]:
                         child += csize
                     return None
                 pos += size
-    except (OSError, struct.error):
+    except struct.error:
         return None
     return None
 
 
 def embedded_date(path: Path) -> Tuple[Optional[float], Optional[str]]:
-    """The date stored in the file itself and its source ('exif' or 'video'), or (None, None)."""
+    """
+    The date stored in the file itself and its source ('exif' or 'video'), or (None, None)
+    when it has none. Raises OSError when the file could not be read.
+    """
     ext = path.suffix.lower()
     if ext in PHOTO_EXTENSIONS:
         ts = exif_date(path)
@@ -152,7 +171,10 @@ def file_date(st: os.stat_result) -> Tuple[float, str]:
 
 
 def capture_date(path: Path, st: os.stat_result) -> Tuple[float, str]:
-    """(timestamp, source) by the rule at the top of this module, without the cache."""
+    """
+    (timestamp, source) by the rule at the top of this module, without the cache.
+    Raises OSError when the file could not be read.
+    """
     ts, source = embedded_date(path)
     if ts is not None:
         return ts, source
@@ -160,11 +182,16 @@ def capture_date(path: Path, st: os.stat_result) -> Tuple[float, str]:
 
 
 def capture_dates(entries: Iterable[Tuple[str, os.stat_result]], db=None,
-                  workers: int = READ_WORKERS) -> Dict[str, Tuple[float, str]]:
+                  workers: int = READ_WORKERS, read_errors: Optional[List[str]] = None,
+                  vault_root: Optional[Path] = None) -> Dict[str, Tuple[float, str]]:
     """
     {path: (timestamp, source)} for [(path, stat)], from the cache where the file is
     unchanged and read (in parallel) where it is not; what was read is stored. Works
     without a database (db None or unreachable): then every date is read.
+
+    A file that could not be read gets its file date in the answer but nothing is
+    stored for it, and its path is added to read_errors (when given). Nothing at all is
+    stored when vault_root is given and gone by the end (the disk was unplugged).
     """
     entries = list(entries)
     cached: Dict[str, Tuple[int, int, float, str]] = {}
@@ -190,17 +217,30 @@ def capture_dates(entries: Iterable[Tuple[str, os.stat_result]], db=None,
         path, st = item
         return capture_date(Path(path), st)
 
+    def sequential():
+        for item in todo:
+            try:
+                yield item, one(item), None
+            except Exception as e:
+                yield item, None, e
+
     if len(todo) == 1 or workers <= 1:
-        outcomes = [(item, one(item), None) for item in todo]
+        outcomes = sequential()
     else:
         from backend.jobs import bounded_map
         outcomes = bounded_map(one, todo, workers=workers)
     for (path, st), value, error in outcomes:
         if error is not None:
-            value = file_date(st)
+            # Not stored: the file is read again next time instead of keeping this date
+            result[path] = file_date(st)
+            if read_errors is not None:
+                read_errors.append(path)
+            continue
         result[path] = value
         read.append((path, st.st_size, st.st_mtime_ns, value[0], value[1]))
-    if db is not None:
+    if vault_root is not None and not Path(vault_root).is_dir():
+        return result
+    if db is not None and read:
         try:
             db.store_media_dates(read)
         except Exception:
