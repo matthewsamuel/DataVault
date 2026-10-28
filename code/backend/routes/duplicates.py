@@ -19,7 +19,7 @@ router = APIRouter()
 # Global state
 config: Config = None
 db = None
-last_scan_results: List[Dict[str, Any]] = []
+last_scan_results: List[Dict[str, Any]] = []  # flat {path, duplicate_of} pairs of the last scan
 
 def init_router(cfg: Config, database):
     """Initialize router with config and database"""
@@ -42,8 +42,13 @@ def _in_protected_folder(path: Path) -> Optional[Path]:
             return folder
     return None
 
+
+def _require_config():
+    if not config:
+        raise HTTPException(status_code=500, detail="Configuration not initialized")
+
 @router.get("/api/raw_duplicates/progress")
-async def get_scan_progress_endpoint():
+def get_scan_progress_endpoint():
     """Get current scan progress"""
     from backend.progress import get_scan_progress
     
@@ -52,7 +57,7 @@ async def get_scan_progress_endpoint():
         return progress.to_dict()
     return {
         "status": "idle",
-        "phase": "No scan in progress",
+        "phase": "Geen scan bezig",
         "total_files": 0,
         "processed_files": 0,
         "duplicates_found": 0,
@@ -60,7 +65,7 @@ async def get_scan_progress_endpoint():
     }
 
 @router.post("/api/raw_duplicates/cancel")
-async def cancel_scan_endpoint():
+def cancel_scan_endpoint():
     """Cancel the current scan"""
     from backend.progress import cancel_scan
     
@@ -69,7 +74,7 @@ async def cancel_scan_endpoint():
 
 
 @router.get("/api/raw_duplicates")
-async def get_duplicates_endpoint() -> Dict[str, Any]:
+def get_duplicates_endpoint() -> Dict[str, Any]:
     """Get last scan results"""
     return {
         "duplicates_found": len(last_scan_results),
@@ -185,39 +190,62 @@ def undo_last_delete_endpoint() -> Dict[str, Any]:
     }
 
 @router.post("/api/duplicates/scan_folder")
-async def scan_folder_for_duplicates(folder_path: str) -> Dict[str, Any]:
+def scan_folder_for_duplicates(
+    folder_path: str, rule: str = "oldest", prefer_folder: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Scan a specific folder for duplicates within that folder only.
+    Scan one folder (and its subfolders) for byte-identical media files.
+
+    rule picks the copy that stays in each group: oldest (default), newest,
+    shortest or folder (with prefer_folder). The client can re-apply any rule
+    itself from the returned copy data, and override per group.
+
+    A plain def: FastAPI runs it in the threadpool, so progress and cancel are
+    answered while it runs. One scan at a time (409 otherwise). A cancelled scan
+    is a normal answer (cancelled: true); read errors are counted and reported
+    (complete: false); a folder that disappears mid-scan (disk unplugged) gives 503.
     """
     global last_scan_results
-    
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
-    
+    from backend.progress import SCAN_LOCK
+    from backend.scanner import find_duplicates_in_folder, KEEP_RULES, ScanAborted
+
+    _require_config()
+
     # Inside the vault first, existence second: the same 403 for anything outside
     folder = resolve_in_vault(folder_path, config, folder=True)
-    
     if not folder.is_dir():
         raise HTTPException(status_code=404, detail="Folder not found")
-    
+
+    if rule not in KEEP_RULES:
+        raise HTTPException(status_code=400, detail=f"Onbekende regel: kies uit {', '.join(KEEP_RULES)}")
+    prefer = None
+    if rule == "folder":
+        if not prefer_folder:
+            raise HTTPException(status_code=400, detail="Kies een voorkeursmap voor deze regel")
+        prefer = str(resolve_in_vault(prefer_folder, config, folder=True))
+
+    if not SCAN_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Er loopt al een duplicatenscan")
     try:
-        from backend.scanner import find_duplicates_in_folder
-        
-        result = find_duplicates_in_folder(folder, config, db)
-        duplicates = result["duplicates"]
-        total_files = result["total_files"]
-        
-        last_scan_results = duplicates
-        
-        return {
-            "folder": str(folder),
-            "total_scanned": total_files,  # Actual count of all files scanned
-            "duplicates_found": len(duplicates),
-            "duplicates": duplicates
-        }
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+        result = find_duplicates_in_folder(folder, config, db, rule=rule, prefer_folder=prefer)
+    except ScanAborted:
+        raise HTTPException(status_code=503, detail="De map is tijdens de scan onbereikbaar geworden (schijf losgekoppeld?)")
+    finally:
+        SCAN_LOCK.release()
+
+    if not result["cancelled"]:
+        last_scan_results = [
+            {"path": copy["path"], "duplicate_of": group["copies"][group["keep"]]["path"]}
+            for group in result["groups"]
+            for i, copy in enumerate(group["copies"]) if i != group["keep"]
+        ]
+
+    return {
+        "folder": str(folder),
+        "total_scanned": result["total_files"],
+        **result,
+    }
+
 
 def _find_keeper(file_path: Path) -> Optional[str]:
     """The original the last folder scan paired with this duplicate."""

@@ -201,3 +201,30 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   terug te zetten. Zo'n actie wordt nu overgeslagen (en blijft bewaard, voor als de bestanden
   terugkomen). Bestanden die niet teruggezet konden worden, blijven geregistreerd voor een
   volgende poging in plaats van uit de geschiedenis te verdwijnen.
+- De duplicatenscan kiest nu vast en voorspelbaar welke kopie blijft staan. Voorheen hing dat af
+  van de volgorde waarin de schijf en de rekenthreads antwoordden, waardoor twee scans van
+  dezelfde map een ander "origineel" konden kiezen. De standaardregel: een niet-verborgen kopie
+  gaat voor (ook het Finder-kenmerk "verborgen" telt), dan de oudste opnamedatum (EXIF
+  DateTimeOriginal, anders de aanmaakdatum, anders de wijzigingsdatum), dan het kortste pad,
+  dan alfabetisch. Omdat kopieën byte voor byte gelijk zijn, is hun EXIF-datum dat ook; binnen
+  een groep beslist dus de bestandsdatum welke kopie het oudst is.
+- De scan geeft nu groepen terug (alle kopieën van één bestand samen) met per kopie de
+  opnamedatum en waar die vandaan komt, zodat je in de app zelf een andere regel of kopie kunt
+  kiezen.
+- Lege bestanden (0 bytes) tellen niet meer als duplicaat van elkaar (voorheen kon een lege
+  `.jpg` een "duplicaat" van een lege `.mp4` zijn).
+- Een map zonder mogelijke duplicaten of een geannuleerde scan gaf een serverfout; nu krijg je
+  gewoon "geen duplicaten" of "scan geannuleerd".
+- Mappen of bestanden die niet gelezen konden worden (geen rechten, schijf losgekoppeld) werden
+  stil overgeslagen en de scan meldde toch "klaar". Nu telt de scan zulke leesfouten, noemt hij
+  de eerste paden en meldt hij dat het resultaat onvolledig is. Verdwijnt de map tijdens de scan,
+  dan stopt hij met een duidelijke melding.
+- Voortgang en annuleren werken nu tijdens een scan (de scan blokkeerde voorheen de hele
+  server), en er loopt nooit meer dan één duplicatenscan tegelijk.
+- De opgeslagen controlegetallen (hashes) vermelden nu met welk algoritme ze berekend zijn, en
+  worden alleen gebruikt zolang het bestand aantoonbaar onveranderd is (zelfde inode, grootte,
+  wijzigingstijd en statuswijzigingstijd). Een bestand dat ter plekke is aangepast terwijl de
+  wijzigingsdatum werd teruggezet, wordt dus opnieuw gelezen. Oude opgeslagen waarden worden bij
+  de volgende scan vanzelf opnieuw berekend (database-migratie 6; je beoordelingen, streaks,
+  Keurer-beslissingen en undo-gegevens blijven ongemoeid). De cache wordt per scan in één keer
+  gelezen en geschreven, en vergeet bestanden die niet meer bestaan.

@@ -1,14 +1,18 @@
 """
 Progress tracking for long-running operations
 """
+import threading
 from typing import Dict, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
+# Only one duplicate scan at a time: progress and cancel are global
+SCAN_LOCK = threading.Lock()
+
 @dataclass
 class ScanProgress:
     """Track progress of duplicate scan operation"""
-    status: str  # 'idle', 'indexing', 'scanning', 'complete', 'error', 'cancelled'
+    status: str  # 'idle', 'counting', 'scanning', 'complete', 'incomplete' (read errors), 'error', 'cancelled'
     phase: str  # Description of current phase
     total_files: int = 0
     processed_files: int = 0

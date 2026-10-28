@@ -164,6 +164,25 @@ def _m005_keurer_keep_delete_history(conn: sqlite3.Connection):
     )
 
 
+def _m006_hash_cache_algo_and_fingerprint(conn: sqlite3.Connection):
+    """
+    The hash cache once held SHA-256 and xxHash3 values side by side in one
+    column called 'sha256', with nothing saying which was which, so a cached
+    SHA-256 made an identical file look different (REPO-HYGIENE-9). The column
+    becomes 'hash' and gets an 'algo' tag; existing rows keep algo NULL, which
+    never matches a lookup, so they are simply rehashed the next time.
+    A cached hash is now only trusted while the file's inode, size, mtime_ns and
+    ctime_ns are unchanged (ctime cannot be set back with utime, so an in-place
+    edit that restores the mtime is still noticed). The cache holds no user data.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(file_hashes)")}
+    if "sha256" in columns and "hash" not in columns:
+        conn.execute("ALTER TABLE file_hashes RENAME COLUMN sha256 TO hash")
+    for name, kind in (("algo", "TEXT"), ("ino", "INTEGER"), ("mtime_ns", "INTEGER"), ("ctime_ns", "INTEGER")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE file_hashes ADD COLUMN {name} {kind}")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -171,6 +190,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (3, "keurer_dest_fingerprint", _m003_keurer_dest_fingerprint),
     (4, "keurer_keep_move_history", _m004_keurer_keep_move_history),
     (5, "keurer_keep_delete_history", _m005_keurer_keep_delete_history),
+    (6, "hash_cache_algo_and_fingerprint", _m006_hash_cache_algo_and_fingerprint),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

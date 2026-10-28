@@ -4,7 +4,7 @@ SQLite database for hash caching and undo tracking
 """
 import sqlite3
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set, Tuple
 from datetime import datetime
 import uuid
 
@@ -85,42 +85,67 @@ class Database:
         conn.close()
     
     # Hash caching methods
-    
-    def get_cached_hash(self, path: Path, size: int, mtime: float) -> Optional[str]:
+    #
+    # A cached hash is only used while the file is provably unchanged: same algorithm,
+    # same inode, size, mtime_ns and ctime_ns (migration 6). Rows from before that
+    # migration have algo NULL and are rehashed the next time a scan needs them.
+
+    def get_cached_hashes(self, folder: Path, algo: str) -> Dict[str, Tuple[Tuple[int, int, int, int], str]]:
         """
-        Get cached hash if file unchanged.
-        Returns None if cache miss or file modified.
+        Every cached hash below folder in one query:
+        {path: ((ino, size, mtime_ns, ctime_ns), hash)}.
         """
+        prefix = str(folder).rstrip("/") + "/"
         conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "SELECT sha256, size, mtime FROM file_hashes WHERE path = ?",
-            (str(path),)
-        )
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            cached_hash, cached_size, cached_mtime = result
-            # Validate cache is still valid
-            if cached_size == size and cached_mtime == mtime:
-                return cached_hash
-        
-        return None
-    
-    def store_hash(self, path: Path, size: int, mtime: float, sha256: str):
-        """Store file hash in cache"""
+        try:
+            rows = conn.execute(
+                "SELECT path, ino, size, mtime_ns, ctime_ns, hash FROM file_hashes "
+                "WHERE algo = ? AND substr(path, 1, ?) = ?",
+                (algo, len(prefix), prefix),
+            ).fetchall()
+        finally:
+            conn.close()
+        return {row[0]: ((row[1], row[2], row[3], row[4]), row[5]) for row in rows}
+
+    def store_hashes(self, entries: List[Tuple[str, Tuple[int, int, int, int], str]], algo: str):
+        """Store [(path, (ino, size, mtime_ns, ctime_ns), hash)] in one transaction."""
+        if not entries:
+            return
+        now = datetime.now().isoformat(sep=" ")
         conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO file_hashes (path, size, mtime, sha256, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, (str(path), size, mtime, sha256, datetime.now()))
-        
-        conn.commit()
-        conn.close()
+        try:
+            with conn:
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO file_hashes
+                        (path, size, mtime, hash, algo, ino, mtime_ns, ctime_ns, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (path, fp[1], fp[2] / 1e9, digest, algo, fp[0], fp[2], fp[3], now)
+                        for path, fp, digest in entries
+                    ],
+                )
+        finally:
+            conn.close()
+
+    def prune_hashes(self, folder: Path, existing: Set[str]) -> int:
+        """Forget cached hashes below folder for paths that a full scan no longer found."""
+        prefix = str(folder).rstrip("/") + "/"
+        conn = self._get_connection()
+        try:
+            with conn:
+                paths = [
+                    row[0] for row in conn.execute(
+                        "SELECT path FROM file_hashes WHERE substr(path, 1, ?) = ?",
+                        (len(prefix), prefix),
+                    )
+                ]
+                gone = [(path,) for path in paths if path not in existing]
+                conn.executemany("DELETE FROM file_hashes WHERE path = ?", gone)
+        finally:
+            conn.close()
+        return len(gone)
     
     def invalidate_hash(self, path: Path):
         """Remove hash from cache"""

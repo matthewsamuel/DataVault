@@ -28,10 +28,12 @@ def test_delete_single_moves_identical_duplicate_and_undo_restores(client, vault
 def test_delete_single_uses_keeper_from_last_scan(client, vault):
     folder = vault / "RAW"
     scan = client.post("/api/duplicates/scan_folder", params={"folder_path": str(folder)}).json()
-    dup = scan["duplicates"][0]
+    group = scan["groups"][0]
+    keep = group["copies"][group["keep"]]["path"]
+    dup = next(c for i, c in enumerate(group["copies"]) if i != group["keep"])
     r = _delete_single(client, dup["path"])  # old API shape: only file_path
     assert r.status_code == 200, r.text
-    assert r.json()["duplicate_of"] == dup["duplicate_of"]
+    assert r.json()["duplicate_of"] == keep
 
 
 def test_delete_single_refuses_folders_and_symlinks(client, vault):

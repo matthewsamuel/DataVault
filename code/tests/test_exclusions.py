@@ -129,7 +129,7 @@ def test_duplicates_scan_never_picks_hidden_or_excluded_files(client, vault, con
     for rel in ["RAW/2019/._strand.jpg", "RAW/a/.strand.jpg"]:
         _plant(vault / rel, (vault / STRAND).read_bytes())
     scan = client.post("/api/duplicates/scan_folder", params={"folder_path": str(vault)}).json()
-    involved = {d["path"] for d in scan["duplicates"]} | {d["duplicate_of"] for d in scan["duplicates"]}
+    involved = {c["path"] for g in scan["groups"] for c in g["copies"]}
     assert not any("/." in p for p in involved), involved
     for p in planted["hidden"].values():
         assert str(p) not in involved
