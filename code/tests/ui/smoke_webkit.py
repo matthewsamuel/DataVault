@@ -359,6 +359,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("settings: 9 opens Instellingen", lambda: page.keyboard.press("9"), 1.0)
             for part in ("weergave", "taalmodel", "bibliotheek", "shows", "herstel", "over"):
                 expect(page.is_visible(f"#settings-{part}"), f"settings: part {part} missing")
+            expect(page.evaluate("getComputedStyle(document.querySelector('.nav-tab-settings.active'), '::after').content") != "none",
+                   "settings: the gear has no active indicator")
             step("settings: dark theme", lambda: page.check("input[data-theme-choice='dark']"), 0.3)
             expect(page.evaluate("document.documentElement.dataset.theme") == "dark", "settings: theme not set")
             page.check("input[data-theme-choice='auto']")
@@ -620,6 +622,15 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 expect(abs(narrow["tile"][0] - narrow["tile"][1]) <= 1 and narrow["cardX"] == narrow["headerX"]
                        and narrow["navRight"] <= narrow["searchLeft"] and not narrow["scrollsSideways"],
                        f"narrow window {width}px: {narrow}")
+            # From 1024 px up the whole menu fits, with at least 24 px before the search field
+            for width in (1024, 1150, 1240, 1400):
+                page.set_viewport_size({"width": width, "height": 900})
+                page.wait_for_timeout(200)
+                gap = page.evaluate("""(() => { const tabs = [...document.querySelectorAll('.top-nav .nav-tab')];
+                    const t = document.querySelector('.nav-tabs');
+                    return [Math.round(document.querySelector('.nav-search').getBoundingClientRect().left
+                                       - tabs[tabs.length - 1].getBoundingClientRect().right), t.scrollWidth > t.clientWidth + 1]; })()""")
+                expect(gap[0] >= 24 and not gap[1], f"menu at {width}px: {gap[0]} px before the search field, scrolls: {gap[1]}")
             page.set_viewport_size({"width": 1400, "height": 900})
             page.wait_for_timeout(400)
 

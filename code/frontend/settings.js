@@ -93,8 +93,9 @@ registerSettingsSection({
     description: 'Licht of donker, of automatisch zoals macOS. Sneltoets: t.',
     render(body) {
         const theme = currentTheme();
-        const choices = [['auto', 'Automatisch (systeem)'], ['light', 'Licht'], ['dark', 'Donker']];
-        const group = createEl('div', { class: 'settings-choice-group', role: 'radiogroup', 'aria-label': 'Thema' },
+        const choices = [['auto', 'Automatisch'], ['light', 'Licht'], ['dark', 'Donker']];
+        // Dezelfde segmentknop als Raster/Lijst, met echte keuzerondjes eronder (toetsenbord: pijlen)
+        const group = createEl('div', { class: 'segmented settings-choice-group', role: 'radiogroup', 'aria-label': 'Thema' },
             ...choices.map(([value, label]) => createEl('label', { class: 'settings-choice' },
                 createEl('input', {
                     type: 'radio', class: 'radio', name: 'settings-theme', value, checked: value === theme,
@@ -103,7 +104,7 @@ registerSettingsSection({
                 createEl('span', { text: label }))));
         body.append(group,
             createEl('div', { class: 'settings-actions' },
-                createEl('button', { type: 'button', class: 'btn btn-secondary btn-small', onClick: openShortcutHelp },
+                createEl('button', { type: 'button', class: 'btn btn-secondary', onClick: openShortcutHelp },
                     createEl('i', { class: 'fas fa-keyboard', 'aria-hidden': 'true' }), ' Sneltoetsen bekijken (?)')));
     },
 });
@@ -125,7 +126,7 @@ registerSettingsSection({
             settingsRow('Model', select),
             settingsRow('Status', status),
             createEl('div', { class: 'settings-actions' },
-                createEl('button', { type: 'button', class: 'btn btn-secondary btn-small', id: 'settings-chat-reload',
+                createEl('button', { type: 'button', class: 'btn btn-secondary', id: 'settings-chat-reload',
                     text: 'Opnieuw controleren', onClick: loadChatModels })));
         // Pas als het stuk op de pagina staat: renderChatModelSelects vult alle [data-chat-model]
         queueMicrotask(renderChatModelSelects);
@@ -159,7 +160,7 @@ registerSettingsSection({
             settingsRow('Laatst helemaal gecontroleerd', lib && lib.last_full_at ? formatLibraryTime(lib.last_full_at) : '—'),
             createEl('div', { class: 'settings-actions' },
                 createEl('button', {
-                    type: 'button', class: 'btn btn-secondary btn-small', id: 'settings-library-full', disabled: running,
+                    type: 'button', class: 'btn btn-secondary', id: 'settings-library-full', disabled: running,
                     text: running ? 'Bezig…' : 'Alles controleren',
                     title: 'Controleer alle mappen en bestanden, ook bestanden die op hun plek zijn bewerkt',
                     onClick: async (e) => { e.currentTarget.disabled = true; await startLibraryUpdate(); settingsRefreshSection('bibliotheek'); },
@@ -184,7 +185,7 @@ registerSettingsSection({
     description: 'Welke mappen in de map library meedoen aan Shows.',
     render(body) {
         body.append(createEl('div', { class: 'settings-actions' },
-            createEl('button', { type: 'button', class: 'btn btn-secondary btn-small', text: 'Bronnen beheren', onClick: openSettingsModal })));
+            createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Bronnen beheren', onClick: openSettingsModal })));
     },
 });
 
@@ -196,7 +197,7 @@ registerSettingsSection({
     description: 'De app wist nooit iets. Alles wat hij verplaatste, zet je terug in het Herstelcentrum.',
     render(body) {
         body.append(createEl('div', { class: 'settings-actions' },
-            createEl('button', { type: 'button', class: 'btn btn-secondary btn-small', text: 'Naar het Herstelcentrum',
+            createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Naar het Herstelcentrum',
                 onClick: () => switchMainView('recovery') })));
     },
 });
