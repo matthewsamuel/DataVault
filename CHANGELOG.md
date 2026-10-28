@@ -70,6 +70,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Verplaatsen in de viewer kon tot nu toe niet ongedaan worden; dat kan nu ook, vanuit het
   Herstelcentrum. Na het verplaatsen zegt de melding waar je het terugvindt.
 - Bij Duplicaten staat naast Herstellen een knop naar het Herstelcentrum.
+- Ook met grote opruimacties (duizenden duplicaten per keer) opent het Herstelcentrum meteen: de
+  lijst controleert de getoonde bestanden en verder alleen tot er één terug kan; de rest controleert
+  het terugzetten zelf. De lijst zegt dan hoeveel bestanden al gecontroleerd zijn.
 - Volgende functies die bestanden verplaatsen (zoals "beste bewaren" bij bijna-duplicaten en de
   assistent) komen vanzelf in dezelfde lijst.
 

@@ -10,6 +10,7 @@ that endpoint in 'undo', so the page always calls the endpoint that owns the rec
 See backend/recovery.py for how a new kind of action plugs in.
 """
 import os
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -18,6 +19,8 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 from backend import recovery
 from backend.config import Config
+from backend.file_ops import is_inside
+from backend.paths import is_in_vault
 from backend.routes import duplicates as duplicates_routes
 from backend.routes import keurer as keurer_routes
 
@@ -105,19 +108,35 @@ def _runs_newest(limit: int):
     return [(_run_time(run), run) for run in db.get_delete_runs(limit=limit)]
 
 
-def _op_state(op: Dict[str, Any]) -> str:
-    if not duplicates_routes._paths_allowed(op):
+def _op_state(op: Dict[str, Any], checks: recovery.FolderChecks) -> str:
+    src, dst = op["src_path"], op["dst_path"]
+    dst_entry = recovery.lstat_or_none(dst)
+    src_entry = recovery.lstat_or_none(src)
+    # duplicates_routes._paths_allowed, split per path so each half is done once per folder
+    allowed = (
+        checks.check("dup_dst", dst, dst_entry,
+                     lambda: is_inside(Path(dst), config.DUPLICATES_FOLDER))
+        and checks.check("dup_src", src, src_entry,
+                         lambda: is_in_vault(src, config, allow_internal=True)
+                         and duplicates_routes._in_protected_folder(Path(src)) is None)
+    )
+    if not allowed:
         return "refused"
-    if not duplicates_routes._still_there(op):
+    if dst_entry is None or not stat.S_ISREG(dst_entry.st_mode):
         return "missing"
     # The duplicates undo never overwrites: a taken name gets _RESTORED_001 next to it
-    return "beside" if os.path.lexists(op["src_path"]) else "ok"
+    return "beside" if src_entry is not None else "ok"
 
 
 def _run_entry(run: Dict[str, Any]) -> Dict[str, Any]:
-    ops = db.get_delete_operations(run["run_id"])
-    files = [recovery.file_entry(op["src_path"], op["dst_path"], _op_state(op), "RAW_DUPLICATES") for op in ops]
-    n = len(ops)
+    checks = recovery.FolderChecks(config)
+    listed = recovery.list_files(
+        recovery.paged(lambda after, limit: db.get_delete_operations(run["run_id"], after, limit)),
+        run["remaining"],
+        lambda op: _op_state(op, checks),
+        lambda op, state: recovery.file_entry(op["src_path"], op["dst_path"], state, "RAW_DUPLICATES"),
+    )
+    n = listed["file_count"]
     return {
         "key": f"duplicates:{run['run_id']}",
         "source": "duplicates",
@@ -125,8 +144,7 @@ def _run_entry(run: Dict[str, Any]) -> Dict[str, Any]:
         "title": f"{n} duplica{'at' if n == 1 else 'ten'} naar RAW_DUPLICATES",
         "folder": run.get("folder"),
         "created_at": _run_time(run),
-        **recovery.summarize(files, n),
-        "files": files[:recovery.FILES_PER_ENTRY],
+        **listed,
         "note": "Staat er op de oude plek intussen een ander bestand, dan komt het teruggezette bestand "
                 "ernaast (naam_RESTORED_001); er wordt niets overschreven.",
         "undo": {"url": "/api/duplicates/undo", "body": {"run_id": run["run_id"]}},

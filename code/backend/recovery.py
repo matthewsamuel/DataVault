@@ -41,7 +41,7 @@ import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 
 from backend.file_ops import (
     ARCHIVE_LOCK, CrossDeviceError, DestinationExistsError, FileOperationError, ProtectedPathError,
@@ -74,7 +74,8 @@ class Provider:
     """
     One source of entries for the recovery list.
     newest(limit) -> [(created_at, raw)] newest first, cheap (no disk access);
-    entry(raw) -> the entry as the API returns it (checks the disk);
+    entry(raw) -> the entry as the API returns it (checks the disk; for an action with many
+                  files, build it with list_files and FolderChecks so the list stays fast);
     count() -> how many entries there are in total.
     """
     name: str
@@ -137,13 +138,12 @@ def state_reason(state: str, name: str, place: str) -> Optional[str]:
     }.get(state)
 
 
-def moved_file_state(dst_path: str, ino: Optional[int], size: Optional[int]) -> str:
-    """Is the moved file still at dst_path: ok, missing, other or unknown (no fingerprint)."""
-    try:
-        st = os.lstat(dst_path)
-    except OSError:
-        return "missing"
-    if not stat.S_ISREG(st.st_mode):
+def moved_file_state(dst_path: str, ino: Optional[int], size: Optional[int], st: Any = False) -> str:
+    """Is the moved file still at dst_path: ok, missing, other or unknown (no fingerprint).
+    st: dst_path's lstat when the caller already has it (None: it does not exist)."""
+    if st is False:
+        st = lstat_or_none(dst_path)
+    if st is None or not stat.S_ISREG(st.st_mode):
         return "missing"
     if ino is None or size is None:
         return "unknown"
@@ -182,7 +182,94 @@ def summarize(files: List[Dict[str, Any]], total_files: int) -> Dict[str, Any]:
     if restorable == 0:
         first = next((f["reason"] for f in files if f["reason"]), None)
         reason = first or "Niets meer terug te zetten"
-    return {"restorable": restorable, "undoable": restorable > 0, "reason": reason, "file_count": total_files}
+    return {"restorable": restorable, "undoable": restorable > 0, "reason": reason, "file_count": total_files,
+            "checked": len(files)}
+
+
+RESTORABLE_STATES = ("ok", "beside")
+
+# Records read from the database at a time when an entry has to look further than its shown files
+_CHUNK = 500
+
+
+def paged(fetch: Callable[[int, int], List[Dict[str, Any]]]) -> Iterator[Dict[str, Any]]:
+    """Every record of fetch(after_id, limit), read a chunk at a time and only as far as needed."""
+    after = 0
+    while True:
+        rows = fetch(after, _CHUNK)
+        yield from rows
+        if len(rows) < _CHUNK:
+            return
+        after = rows[-1]["id"]
+
+
+def list_files(records: Iterable[Any], total: int, state_of: Callable[[Any], str],
+               file_of: Callable[[Any, str], Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    The files of one entry for the list. Only the FILES_PER_ENTRY shown files are checked on
+    disk in full; beyond those, files are checked only until one is found that can go back
+    (so 'undoable' is right), and the rest is left to the undo itself, which checks every
+    file again anyway. 'checked' says how many files 'restorable' counts: when it is less
+    than file_count, restorable is a lower bound.
+    """
+    shown: List[Dict[str, Any]] = []
+    restorable = checked = 0
+    first_reason = None
+    for record in records:
+        if len(shown) >= FILES_PER_ENTRY and restorable:
+            break
+        state = state_of(record)
+        checked += 1
+        if state in RESTORABLE_STATES:
+            restorable += 1
+        if len(shown) < FILES_PER_ENTRY:
+            file = file_of(record, state)
+            shown.append(file)
+            if first_reason is None and not file["restorable"]:
+                first_reason = file["reason"]
+    reason = None
+    if restorable == 0:
+        reason = first_reason or "Niets meer terug te zetten"
+    return {"restorable": restorable, "undoable": restorable > 0, "reason": reason,
+            "file_count": max(total, checked), "checked": checked, "files": shown}
+
+
+class FolderChecks:
+    """
+    Path checks for the list, done once per folder instead of once per file. Checking that a
+    recorded path lies in the vault (or in RAW_DUPLICATES, or outside the app's own folders)
+    resolves every folder above it on disk; for the files of one run that is the same work
+    every time, because only the name differs. A name that could change the answer is
+    always checked in full: a symlink, '.', '..', or the name of one of the folders the
+    checks compare with (the vault, TRASH, RAW_DUPLICATES, the cache, the database).
+    Only for showing the list: every undo checks every path again in full.
+    """
+
+    def __init__(self, config):
+        from backend.paths import app_dir_in_vault
+        folders = [config.VAULT_ROOT, config.TRASH_FOLDER, config.DUPLICATES_FOLDER,
+                   config.CACHE_FOLDER, config.DB_PATH, app_dir_in_vault(config)]
+        self._special = {Path(f).name.casefold() for f in folders if f is not None}
+        self._cache: Dict[Tuple[str, str], bool] = {}
+
+    def check(self, kind: str, path: str, entry: Optional[os.stat_result], full: Callable[[], bool]) -> bool:
+        """full() for path, or the answer full() gave for another file in the same folder.
+        entry is path's lstat (None when it does not exist)."""
+        name = os.path.basename(path)
+        if (not name or name in (".", "..") or "\x00" in path or name.casefold() in self._special
+                or (entry is not None and stat.S_ISLNK(entry.st_mode))):
+            return full()
+        key = (kind, os.path.dirname(path))
+        if key not in self._cache:
+            self._cache[key] = full()
+        return self._cache[key]
+
+
+def lstat_or_none(path: str) -> Optional[os.stat_result]:
+    try:
+        return os.lstat(path)
+    except (OSError, ValueError):
+        return None
 
 
 # ==================== RECORDING (migration 12) ====================
@@ -228,27 +315,38 @@ class ActionRecorder:
         return self.action_id
 
 
+def _move_file(config, move: Dict[str, Any], state: str) -> Dict[str, Any]:
+    return {**file_entry(move["src_path"], move["dst_path"], state, place_of(move["dst_path"], config)),
+            "move_id": move["id"]}
+
+
 def _action_files(db, config, action: Dict[str, Any]) -> List[Dict[str, Any]]:
-    out = []
-    for move in db.get_recovery_moves(action["id"]):
-        state = _move_state(config, move)
-        out.append({**file_entry(move["src_path"], move["dst_path"], state, place_of(move["dst_path"], config)),
-                    "move_id": move["id"]})
-    return out
+    checks = FolderChecks(config)
+    return [_move_file(config, move, _move_state(config, move, checks)) for move in db.get_recovery_moves(action["id"])]
 
 
-def _move_state(config, move: Dict[str, Any]) -> str:
-    if not (is_in_vault(move["src_path"], config, allow_internal=True)
-            and is_in_vault(move["dst_path"], config, allow_internal=True)):
+def _move_state(config, move: Dict[str, Any], checks: FolderChecks) -> str:
+    src, dst = move["src_path"], move["dst_path"]
+    dst_entry = lstat_or_none(dst)
+    src_entry = lstat_or_none(src)
+    in_vault = lambda path: lambda: is_in_vault(path, config, allow_internal=True)
+    if not (checks.check("vault", src, src_entry, in_vault(src))
+            and checks.check("vault", dst, dst_entry, in_vault(dst))):
         return "refused"
-    state = moved_file_state(move["dst_path"], move["dst_ino"], move["dst_size"])
-    if state == "ok" and os.path.lexists(move["src_path"]):
+    state = moved_file_state(dst, move["dst_ino"], move["dst_size"], dst_entry)
+    if state == "ok" and src_entry is not None:
         return "occupied"
     return state
 
 
 def action_entry(db, config, action: Dict[str, Any]) -> Dict[str, Any]:
-    files = _action_files(db, config, action)
+    checks = FolderChecks(config)
+    listed = list_files(
+        paged(lambda after, limit: db.get_recovery_moves(action["id"], after, limit)),
+        action["remaining"],
+        lambda move: _move_state(config, move, checks),
+        lambda move, state: file_entry(move["src_path"], move["dst_path"], state, place_of(move["dst_path"], config)),
+    )
     return {
         "key": f"action:{action['id']}",
         "source": action["kind"],
@@ -256,8 +354,7 @@ def action_entry(db, config, action: Dict[str, Any]) -> Dict[str, Any]:
         "title": action["title"],
         "folder": action["folder"],
         "created_at": action["created_at"],
-        **summarize(files, len(files)),
-        "files": [{k: v for k, v in f.items() if k != "move_id"} for f in files[:FILES_PER_ENTRY]],
+        **listed,
         "note": None,
         "undo": {"url": "/api/recovery/undo", "body": {"action_id": action["id"]}},
     }

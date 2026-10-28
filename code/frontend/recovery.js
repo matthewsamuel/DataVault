@@ -131,9 +131,17 @@ function recoveryEntryCard(entry) {
         onClick: (e) => recoveryUndo(entry, e.currentTarget),
     });
 
+    // Bij een grote actie controleert de lijst niet elk bestand (dat doet het terugzetten zelf):
+    // 'checked' zegt hoeveel bestanden 'restorable' telt
+    const checked = typeof entry.checked === 'number' ? entry.checked : count;
+    let partial = null;
+    if (entry.restorable < checked) {
+        partial = checked < count
+            ? `${entry.restorable} van de ${checked} gecontroleerde bestanden kunnen terug; de overige ${count - checked} worden bij het terugzetten gecontroleerd.`
+            : `${entry.restorable} van ${count} kunnen terug; de rest staat hieronder met de reden.`;
+    }
     const status = entry.undoable
-        ? (entry.restorable < count ? createEl('div', { class: 'recovery-status partial',
-            text: `${entry.restorable} van ${count} kunnen terug; de rest staat hieronder met de reden.` }) : null)
+        ? (partial ? createEl('div', { class: 'recovery-status partial', text: partial }) : null)
         : createEl('div', { class: 'recovery-status blocked', role: 'note' },
             createEl('i', { class: 'fas fa-circle-exclamation', 'aria-hidden': 'true' }),
             ` Kan niet terug: ${entry.reason || 'onbekende reden'}`);
@@ -180,7 +188,10 @@ function recoveryRender() {
 
 async function recoveryUndo(entry, button) {
     const n = entry.restorable;
-    const question = `${n === 1 ? 'Dit bestand' : `${n} bestanden`} terugzetten naar de oorspronkelijke plek?\n\n`
+    const unchecked = typeof entry.checked === 'number' && entry.checked < entry.file_count;
+    const what = unchecked ? `De ${entry.file_count} bestanden van deze actie (voor zover ze nog terug kunnen)`
+        : (n === 1 ? 'Dit bestand' : `${n} bestanden`);
+    const question = `${what} terugzetten naar de oorspronkelijke plek?\n\n`
         + (entry.note || 'Er wordt nooit iets overschreven.');
     if (!confirm(question)) return;
     button.disabled = true;

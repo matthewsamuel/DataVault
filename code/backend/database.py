@@ -488,12 +488,13 @@ class Database:
             ).fetchone()
         return self._action_row(row) if row else None
 
-    def get_recovery_moves(self, action_id: int) -> List[Dict[str, Any]]:
+    def get_recovery_moves(self, action_id: int, after_id: int = 0, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """The recorded files of one action (all, or a page: id > after_id, at most limit)."""
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT id, src_path, dst_path, dst_ino, dst_size, moved_at FROM recovery_moves "
-                "WHERE action_id = ? ORDER BY id",
-                (action_id,),
+                "WHERE action_id = ? AND id > ? ORDER BY id LIMIT ?",
+                (action_id, after_id, -1 if limit is None else limit),
             ).fetchall()
         return [
             {"id": r[0], "src_path": r[1], "dst_path": r[2], "dst_ino": r[3], "dst_size": r[4], "moved_at": r[5]}
@@ -576,15 +577,16 @@ class Database:
             ).fetchone()
         return self._run_row(row) if row else None
     
-    def get_delete_operations(self, run_id: str) -> List[Dict[str, str]]:
-        """Get all operations for a delete run"""
+    def get_delete_operations(self, run_id: str, after_id: int = 0, limit: Optional[int] = None) -> List[Dict[str, str]]:
+        """Get the operations of a delete run (all, or a page: id > after_id, at most limit)"""
         with self._connect() as conn:
             results = conn.execute("""
                 SELECT id, src_path, dst_path
                 FROM delete_operations
-                WHERE run_id = ?
+                WHERE run_id = ? AND id > ?
                 ORDER BY id
-            """, (run_id,)).fetchall()
+                LIMIT ?
+            """, (run_id, after_id, -1 if limit is None else limit)).fetchall()
         return [
             {"id": row[0], "src_path": row[1], "dst_path": row[2]}
             for row in results

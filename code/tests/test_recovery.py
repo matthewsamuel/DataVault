@@ -297,3 +297,90 @@ def test_migration_12_adds_recovery_tables_and_keeps_every_user_row(tmp_path, mo
     assert db.get_recovery_action(first) is None
     assert db.record_recovery_move(None, "viewer_move", "y", "/v/a", "/v/b", 1, 2) > first
     db.close_all()
+
+
+def _add_run(config, ops, created_at, folder):
+    """A duplicates run straight in the database: [(src, dst)]."""
+    import uuid
+    run_id = uuid.uuid4().hex
+    with sqlite3.connect(str(config.DB_PATH)) as conn:
+        conn.execute("INSERT INTO delete_runs (run_id, total_files, created_at, folder) VALUES (?, ?, ?, ?)",
+                     (run_id, len(ops), created_at, str(folder)))
+        conn.executemany("INSERT INTO delete_operations (run_id, src_path, dst_path) VALUES (?, ?, ?)",
+                         [(run_id, str(src), str(dst)) for src, dst in ops])
+    return run_id
+
+
+def test_large_duplicate_runs_list_fast_and_check_each_folder_once(client, vault, config, monkeypatch):
+    """The list checks the shown files, and beyond those only until one can go back; the path
+    checks (which resolve every folder on disk) run once per folder, not once per file."""
+    from backend.routes import recovery as recovery_routes
+    dups = config.DUPLICATES_FOLDER
+    now = time.time()
+    # 1. Every file is still in RAW_DUPLICATES (the usual case)
+    (dups / "hier").mkdir(parents=True)
+    present = []
+    for i in range(600):
+        dst = dups / "hier" / f"p{i}.jpg"
+        dst.write_bytes(b"p")
+        present.append((vault / "RAW" / "hier" / f"p{i}.jpg", dst))
+    run_present = _add_run(config, present, now - 30, vault / "RAW")
+    # 2. Every file is gone (RAW_DUPLICATES emptied by hand): every record has to be looked at
+    gone = [(vault / "RAW" / "weg" / f"g{i}.jpg", dups / "weg" / f"g{i}.jpg") for i in range(4000)]
+    run_gone = _add_run(config, gone, now - 20, vault / "RAW")
+    # 3. Only the very last file is still there
+    (dups / "laatste").mkdir()
+    last = [(vault / "RAW" / "l" / f"l{i}.jpg", dups / "laatste" / f"l{i}.jpg") for i in range(1500)]
+    last[-1][1].write_bytes(b"l")
+    run_last = _add_run(config, last, now - 10, vault / "RAW")
+
+    calls = {"is_inside": 0, "is_in_vault": 0}
+    for name in calls:
+        real = getattr(recovery_routes, name)
+
+        def counted(*args, _real=real, _name=name, **kwargs):
+            calls[_name] += 1
+            return _real(*args, **kwargs)
+        monkeypatch.setattr(recovery_routes, name, counted)
+
+    started = time.monotonic()
+    data = _list(client)
+    seconds = time.monotonic() - started
+    by_key = {e["key"]: e for e in data["entries"]}
+    assert seconds < 3, seconds
+    assert calls["is_inside"] <= 6 and calls["is_in_vault"] <= 6, calls
+
+    p = by_key[f"duplicates:{run_present}"]
+    assert p["file_count"] == 600 and p["undoable"] and p["checked"] == 20 and p["restorable"] == 20
+    assert len(p["files"]) == 20 and all(f["state"] == "ok" for f in p["files"])
+    g = by_key[f"duplicates:{run_gone}"]
+    assert g["file_count"] == 4000 and g["checked"] == 4000 and not g["undoable"] and g["restorable"] == 0
+    assert g["reason"] == "g0.jpg staat niet meer in RAW_DUPLICATES" and len(g["files"]) == 20
+    la = by_key[f"duplicates:{run_last}"]
+    assert la["undoable"] and la["restorable"] == 1 and la["checked"] == 1500
+    assert [f["state"] for f in la["files"]] == ["missing"] * 20
+
+    # The undo still checks every file itself
+    r = client.post("/api/duplicates/undo", json={"run_id": run_last})
+    assert r.status_code == 200 and r.json()["restored"] == 1
+    assert last[-1][0].exists()
+
+
+def test_folder_checks_still_check_names_that_could_change_the_answer(client, vault, config, tmp_path):
+    """A symlink in RAW_DUPLICATES that points outside, and a record whose name is that of the
+    vault's own TRASH folder, are refused although other files in the same folders are fine."""
+    dups = config.DUPLICATES_FOLDER / "mix"
+    dups.mkdir(parents=True)
+    (dups / "a.jpg").write_bytes(b"a")
+    outside = tmp_path / "buiten.jpg"
+    outside.write_bytes(b"buiten")
+    (dups / "link.jpg").symlink_to(outside)
+    (dups / "t.jpg").write_bytes(b"t")
+    ops = [(vault / "RAW" / "a.jpg", dups / "a.jpg"),
+           (vault / "RAW" / "link.jpg", dups / "link.jpg"),
+           (vault / config.TRASH_FOLDER.name, dups / "t.jpg")]
+    run_id = _add_run(config, ops, time.time(), vault / "RAW")
+    [entry] = _list(client)["entries"]
+    assert entry["key"] == f"duplicates:{run_id}"
+    assert [f["state"] for f in entry["files"]] == ["ok", "refused", "refused"]
+    assert entry["restorable"] == 1
