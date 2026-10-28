@@ -46,13 +46,9 @@ function saveJobDockPrefs() {
     } catch (e) { /* geen opslag */ }
 }
 
-async function jobsRequest(url, options) {
-    const response = await fetch(`${API_BASE}${url}`, options);
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-        throw new Error(typeof data.detail === 'string' ? data.detail : `Fout ${response.status}`);
-    }
-    return data;
+// Gooit een ApiError (api.js) met de melding van de server; meld hem met toastFetchError
+function jobsRequest(url, options) {
+    return fetchJSON(`${API_BASE}${url}`, options);
 }
 
 async function jobsStart(type, params) {
@@ -185,7 +181,7 @@ function jobButton(text, title, onClick, extraClass = '') {
         onClick: async (event) => {
             const button = event.currentTarget;
             button.disabled = true;
-            try { await onClick(); } catch (error) { showToast('Taak', error.message, 'error'); }
+            try { await onClick(); } catch (error) { toastFetchError('Taak', error); }
             finally { button.disabled = false; }
         },
     });
@@ -284,7 +280,7 @@ async function startThumbnailJob() {
         const job = await jobsStart('thumbnails', folder ? { folder } : {});
         showToast('Miniaturen maken', `Gestart voor ${jobFolderLabel(job)}; de voortgang staat rechtsonder.`, 'info');
     } catch (error) {
-        showToast('Miniaturen maken', error.message, 'error');
+        toastFetchError('Miniaturen maken', error);
     }
 }
 

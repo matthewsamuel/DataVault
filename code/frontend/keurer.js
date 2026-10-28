@@ -58,11 +58,8 @@ function keurerInit() {
 
 async function keurerLoadStats() {
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/stats`);
-        if (res.ok) {
-            keurerStats = await res.json();
-            keurerRenderStats();
-        }
+        keurerStats = await fetchJSON(`${API_BASE}/api/keurer/stats`);
+        keurerRenderStats();
     } catch (e) {
         console.warn('Keurer stats ophalen mislukt:', e);
     }
@@ -83,9 +80,7 @@ function keurerApplyStats(stats) {
 
 async function keurerLoadHistory() {
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/history`);
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await fetchJSON(`${API_BASE}/api/keurer/history`);
         // Server geeft nieuwste eerst; de stapel heeft de nieuwste achteraan
         keurerHistory = (data.entries || []).slice(0, KEURER_UNDO_MAX).reverse();
     } catch (e) {
@@ -100,12 +95,6 @@ function keurerDropHistory(id) {
 function keurerPushHistory(data) {
     keurerHistory.push({ id: data.id, decision: data.decision, folder: data.folder, file: data.file });
     if (keurerHistory.length > KEURER_UNDO_MAX) keurerHistory.shift();
-}
-
-// Foutmelding uit een API-antwoord halen
-async function keurerErrorDetail(res) {
-    const err = await res.json().catch(() => ({}));
-    return err.detail || `HTTP ${res.status}`;
 }
 
 function keurerUpdateRemaining() {
@@ -169,12 +158,7 @@ async function keurerLoadFiles() {
         </div>`;
 
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/files?folder=${encodeURIComponent(keurerFolder)}`);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
-        }
-        const data = await res.json();
+        const data = await fetchJSON(`${API_BASE}/api/keurer/files?folder=${encodeURIComponent(keurerFolder)}`);
         // De server geeft de map in één vaste schrijfwijze terug (symlinks en Unicode-vorm
         // opgelost); die gebruiken we voortaan, zodat undo de beslissing aan deze map koppelt
         if (data.folder && data.folder !== keurerFolder) {
@@ -391,27 +375,20 @@ function keurerAnimateUp() {
 // Geeft 'ok', 'gone' (bestand bestaat niet meer) of 'failed' terug
 async function keurerSendDecision(decision, file) {
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/decide`, {
+        const data = await fetchJSON(`${API_BASE}/api/keurer/decide`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: file.path, folder: keurerFolder, decision }),
         });
-        if (!res.ok) {
-            const detail = await keurerErrorDetail(res);
-            if (res.status === 404) {
-                showToast('Overgeslagen', `${file.name}: ${detail}`, 'warning');
-                return 'gone';
-            }
-            showToast('Fout', `Beslissing mislukt voor ${file.name}: ${detail}`, 'error');
-            return 'failed';
-        }
-        const data = await res.json();
         keurerPushHistory({ id: data.id, decision, folder: keurerFolder, file });
         keurerApplyStats(data.stats);
         return 'ok';
     } catch (e) {
-        console.error('Beslissing opslaan mislukt:', e);
-        showToast('Fout', 'Beslissing kon niet worden opgeslagen (server niet bereikbaar)', 'error');
+        if (e.status === 404) {
+            showToast('Overgeslagen', `${file.name}: ${e.message}`, 'warning');
+            return 'gone';
+        }
+        toastFetchError(`Beslissing mislukt voor ${file.name}`, e);
         return 'failed';
     }
 }
@@ -440,20 +417,11 @@ async function keurerUndo() {
     keurerUndoBusy = true;
 
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/undo`, {
+        const data = await fetchJSON(`${API_BASE}/api/keurer/undo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: entry.id }),
         });
-
-        if (!res.ok) {
-            const detail = await keurerErrorDetail(res);
-            // 404/409/410: deze stap kan niet (meer) terug; haal hem van de stapel
-            if ([404, 409, 410].includes(res.status)) keurerDropHistory(entry.id);
-            throw new Error(detail);
-        }
-
-        const data = await res.json();
         keurerDropHistory(entry.id);
         keurerApplyStats(data.stats);
 
@@ -469,7 +437,9 @@ async function keurerUndo() {
         showToast('Ongedaan gemaakt', `${label} teruggedraaid voor ${file.name}${where}`, 'success');
 
     } catch (e) {
-        showToast('Fout', `Undo mislukt: ${e.message}`, 'error');
+        // 404/409/410: deze stap kan niet (meer) terug; haal hem van de stapel
+        if ([404, 409, 410].includes(e.status)) keurerDropHistory(entry.id);
+        toastFetchError('Undo mislukt', e);
     } finally {
         keurerUndoBusy = false;
     }
@@ -518,8 +488,7 @@ async function keurerOpenMoveModal() {
         ? folderTree
         : await (async () => {
             try {
-                const res  = await fetch(`${API_BASE}/api/folders`);
-                const data = await res.json();
+                const data = await fetchJSON(`${API_BASE}/api/folders`);
                 return data.folders || [];
             } catch (_) { return []; }
         })();
@@ -798,7 +767,7 @@ async function keurerConfirmMove() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig...';
 
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/decide`, {
+        const movedData = await fetchJSON(`${API_BASE}/api/keurer/decide`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -808,10 +777,6 @@ async function keurerConfirmMove() {
                 destination_folder: keurerMoveSelectedFolder,
             }),
         });
-
-        if (!res.ok) throw new Error(await keurerErrorDetail(res));
-
-        const movedData = await res.json();
 
         document.getElementById('modal-keurer-move').classList.remove('active');
         const destFolder = keurerMoveSelectedFolder;
@@ -834,7 +799,7 @@ async function keurerConfirmMove() {
     } catch (e) {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check"></i> Verplaatsen';
-        showToast('Fout', `Verplaatsen mislukt: ${e.message}`, 'error');
+        toastFetchError('Verplaatsen mislukt', e);
     } finally {
         keurerMoveBusy = false;
     }
@@ -1076,8 +1041,7 @@ async function keurerOpenFolderPicker() {
         ? folderTree
         : await (async () => {
             try {
-                const res  = await fetch(`${API_BASE}/api/folders`);
-                const data = await res.json();
+                const data = await fetchJSON(`${API_BASE}/api/folders`);
                 return data.folders || [];
             } catch (_) { return []; }
         })();

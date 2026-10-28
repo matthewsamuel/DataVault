@@ -354,17 +354,18 @@ frontend/
    ```javascript
    async function keurerUndo() {
        const entry = keurerHistory[keurerHistory.length - 1];
-       const res = await fetch(`${API_BASE}/api/keurer/undo`, {
-           method: 'POST',
-           headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ id: entry.id }),  // never a path
-       });
-       if (!res.ok) {
+       try {
+           const data = await fetchJSON(`${API_BASE}/api/keurer/undo`, {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ id: entry.id }),  // never a path
+           });
+           keurerApplyStats(data.stats);  // counters and streak straight from the server
+       } catch (e) {
            // 404/409/410: this step cannot be undone (any more); show why
-           throw new Error(await keurerErrorDetail(res));
+           if ([404, 409, 410].includes(e.status)) keurerDropHistory(entry.id);
+           toastFetchError('Undo mislukt', e);  // no toast when the vault banner says it already
        }
-       const data = await res.json();
-       keurerApplyStats(data.stats);  // counters and streak straight from the server
    }
    ```
 

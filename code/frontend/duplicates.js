@@ -120,7 +120,7 @@ async function scanSelectedFolder() {
         const job = await jobsStart('dup_scan', { folder: selectedFolder, rule });
         followScanJob(job.id);
     } catch (error) {
-        showToast('Scan mislukt', error.message, 'error');
+        toastFetchError('Scan mislukt', error);
         button.disabled = false;
     }
 }
@@ -133,7 +133,7 @@ async function indexSelectedFolder() {
         const job = await jobsStart('hashing', { folder: selectedFolder });
         showToast('Indexeren', `Gestart voor ${jobFolderLabel(job)}; de voortgang staat rechtsonder.`, 'info');
     } catch (error) {
-        showToast('Indexeren mislukt', error.message, 'error');
+        toastFetchError('Indexeren mislukt', error);
     }
 }
 
@@ -197,7 +197,7 @@ async function cancelScan() {
         await jobsAction(dupState.scanJob, 'cancel');
         showToast('Stoppen', 'De scan wordt gestopt...', 'info');
     } catch (error) {
-        showToast('Stoppen mislukt', error.message, 'error');
+        toastFetchError('Stoppen mislukt', error);
     }
 }
 
@@ -218,7 +218,7 @@ async function loadScanJobResult(id) {
                 'zijn sinds de scan al verplaatst of gewijzigd en worden niet meer getoond.', 'info');
         }
     } catch (error) {
-        showToast('Resultaat laden mislukt', error.message, 'error');
+        toastFetchError('Resultaat laden mislukt', error);
     }
 }
 
@@ -765,13 +765,11 @@ async function runCleanup() {
         bar.textContent = percent + '%';
         text.textContent = `Verplaatsen... ${done}/${cleanup.files}`;
         try {
-            const response = await fetch(`${API_BASE}/api/duplicates/move`, {
+            const data = await fetchJSON(`${API_BASE}/api/duplicates/move`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ groups: chunk, run_id: runId, folder: dupState.folder }),
             });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.detail || `Fout ${response.status}`);
             if (data.run_id) runId = data.run_id;
             data.moved.forEach(m => moved.add(m.path));
             data.failed.forEach(f => failed.set(f.path, typeof f.detail === 'string' ? f.detail : `fout ${f.status}`));
@@ -822,9 +820,7 @@ async function loadDuplicateRuns() {
     const container = document.getElementById('dup-runs');
     if (!container) return;
     try {
-        const response = await fetch(`${API_BASE}/api/duplicates/runs`);
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `Fout ${response.status}`);
+        const data = await fetchJSON(`${API_BASE}/api/duplicates/runs`);
         renderDuplicateRuns(data.runs || []);
     } catch (error) {
         container.replaceChildren(createEl('div', { class: 'dup-runs-empty', text: `Kon de geschiedenis niet laden: ${error.message}` }));
@@ -870,13 +866,11 @@ async function undoDuplicateRun(run, button) {
     }
     button.disabled = true;
     try {
-        const response = await fetch(`${API_BASE}/api/duplicates/undo`, {
+        const data = await fetchJSON(`${API_BASE}/api/duplicates/undo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ run_id: run.run_id }),
         });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.detail || `Fout ${response.status}`);
         const beside = (data.files || []).filter(f => f.restored_path !== f.src_path).length;
         let message = `${data.restored} bestand${data.restored === 1 ? '' : 'en'} teruggezet.`;
         if (beside) message += ` ${beside} kwam${beside === 1 ? '' : 'en'} naast een bestaand bestand (_RESTORED_).`;
@@ -884,7 +878,7 @@ async function undoDuplicateRun(run, button) {
         if (dupState.folder) message += ' Scan opnieuw om ze weer als duplicaat te zien.';
         showToast('Teruggezet', message, data.errors && data.errors.length ? 'warning' : 'success');
     } catch (error) {
-        showToast('Terugzetten mislukt', error.message, 'error');
+        toastFetchError('Terugzetten mislukt', error);
     } finally {
         loadDuplicateRuns();
     }

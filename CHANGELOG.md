@@ -571,6 +571,12 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   in gewone taal, met de reden. Dezelfde melding stapelt zich niet meer op. Opslag, "op deze dag",
   Shows, stemmen in een slideshow en het opslagoverzicht melden nu een fout in plaats van stil
   leeg te blijven of te doen alsof het gelukt is.
+- Ook de Foto Keurer, het opruimen en terugzetten van duplicaten, de taakbalk rechtsonder,
+  verplaatsen, Open in Finder en de Shows-instellingen melden een fout nu op dezelfde manier.
+  Valt de schijf weg, dan verschijnt de rode balk meteen (niet pas bij de volgende controle,
+  tot 15 seconden later) en krijg je geen losse foutmelding meer.
+- Een scan of andere achtergrondtaak starten terwijl de schijf los is, zegt nu "Archief niet
+  bereikbaar" in plaats van "Map niet gevonden".
 - Ontbreekt er iets op deze Mac (ffmpeg voor video-miniaturen, HEIC-ondersteuning, Ollama of het
   gekozen chatmodel), dan staat er linksonder een rustige melding met hoe je het oplost. Die kun
   je wegklikken.

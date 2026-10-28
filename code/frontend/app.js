@@ -877,18 +877,13 @@ async function openInFinder() {
     btn.disabled = true;
 
     try {
-        const response = await fetch(`${API_BASE}/api/open-in-finder`, {
+        await fetchJSON(`${API_BASE}/api/open-in-finder`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: file.path })
         });
-
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            showToast('Open in Finder', err.detail || `Mislukt (${response.status})`, 'error');
-        }
     } catch (e) {
-        console.error('Error opening in Finder:', e);
+        toastFetchError('Open in Finder', e);
     } finally {
         setTimeout(() => {
             btn.textContent = oldText;
@@ -1199,7 +1194,7 @@ async function confirmMoveFile() {
 
     let moved;
     try {
-        const response = await fetch(`${API_BASE}/api/move-file`, {
+        moved = await fetchJSON(`${API_BASE}/api/move-file`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1207,15 +1202,8 @@ async function confirmMoveFile() {
                 destination_folder: destination
             })
         });
-
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${response.status}`);
-        }
-        moved = await response.json();
     } catch (e) {
-        console.error('Move error:', e);
-        showToast('Error', `Failed to move file: ${e.message}`, 'error');
+        toastFetchError('Verplaatsen mislukt', e);
         btn.replaceChildren(...originalContent);
         btn.disabled = false;
         moveInFlight = false;
@@ -2225,17 +2213,10 @@ async function openSettingsModal() {
 
     try {
         // Fetch both folder tree and settings
-        const [foldersRes, settingsRes] = await Promise.all([
-            fetch(`${API_BASE}/api/folders`),
-            fetch(`${API_BASE}/api/shows/settings`)
+        const [foldersData, settingsData] = await Promise.all([
+            fetchJSON(`${API_BASE}/api/folders`),
+            fetchJSON(`${API_BASE}/api/shows/settings`)
         ]);
-
-        if (!foldersRes.ok || !settingsRes.ok) {
-            throw new Error("Failed to load data");
-        }
-
-        const foldersData = await foldersRes.json();
-        const settingsData = await settingsRes.json();
 
         const disabledFolders = settingsData.disabled_folders || [];
 
@@ -2262,7 +2243,7 @@ async function openSettingsModal() {
 
     } catch (e) {
         console.error("Error loading settings:", e);
-        list.innerHTML = '<div class="error-message">Failed to load settings.</div>';
+        list.replaceChildren(createEl('div', { class: 'error-message', text: `Instellingen laden mislukt: ${e.message}` }));
     }
 }
 
@@ -2355,21 +2336,15 @@ function createSettingsFolderElement(item) {
 
 async function toggleSettingsFolder(path, enabled) {
     try {
-        const res = await fetch(`${API_BASE}/api/shows/settings`, {
+        await fetchJSON(`${API_BASE}/api/shows/settings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path, enabled })
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            showToast('Fout', err.detail || `Instelling opslaan mislukt (${res.status})`, 'error');
-            return;
-        }
         showToast('Instellingen', `Folder ${enabled ? 'ingeschakeld' : 'uitgeschakeld'}`, 'success');
         reloadShows();
     } catch (e) {
-        console.error("Error toggling folder:", e);
-        showToast('Fout', 'Instelling opslaan mislukt', 'error');
+        toastFetchError('Instelling opslaan mislukt', e);
     }
 }
 
@@ -2723,12 +2698,7 @@ async function loadSpotifyStats() {
     if (content) content.style.display = 'none';
 
     try {
-        const res = await fetch(url);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `Serverfout (${res.status})`);
-        }
-        const data = await res.json();
+        const data = await fetchJSON(url);
         if (seq !== spotifyLoadSeq) return;
         _prefetchCache[url] = Promise.resolve(data);
         show(data);
@@ -3056,17 +3026,16 @@ async function openFileInViewer(path) {
     const folder = path.slice(0, cut) || '/';
     const name = path.slice(cut + 1).normalize('NFC');
     try {
-        const res = await fetch(`${API_BASE}/api/media?folder=${encodeURIComponent(folder)}`);
-        if (!res.ok) { notFound(); return; }
-        const data = await res.json();
+        const data = await fetchJSON(`${API_BASE}/api/media?folder=${encodeURIComponent(folder)}`);
         const file = (data.files || []).find(f =>
             ['photo', 'video', 'audio'].includes(f.type) && f.name.normalize('NFC') === name);
         if (!file) { notFound(); return; }
         // Eigen lijst van één bestand: de Files-weergave blijft zoals hij was
         openViewer([file], 0);
     } catch (e) {
-        console.error('Bestand openen mislukt:', e);
-        notFound();
+        // Niet in (of buiten) het archief: niet gevonden; anders de echte reden (schijf weg, ...)
+        if ([400, 403, 404].includes(e.status)) notFound();
+        else toastFetchError('Niet geopend', e);
     }
 }
 
