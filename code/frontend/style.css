@@ -5508,20 +5508,7 @@ a.breadcrumb-item:hover {
     color: var(--text-secondary);
 }
 
-.home-section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-    margin-bottom: var(--space-md);
-}
 
-.home-section-title {
-    font-size: var(--fs-lg);
-    font-weight: var(--fw-semibold);
-    letter-spacing: var(--tracking-tight);
-    color: var(--text-primary);
-}
 
 /* ---- Cijfertegels ---- */
 
@@ -7608,71 +7595,13 @@ button.otd-settings-icon:hover {
     z-index: 2;
 }
 
-/* ---- Leeg en laden ---- */
 
-.tl-empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4xl) var(--space-xl);
-    text-align: center;
-    gap: var(--space-sm);
-}
 
-.tl-empty-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 56px;
-    height: 56px;
-    margin-bottom: var(--space-sm);
-    border-radius: var(--radius-full);
-    background: var(--surface-raised);
-    color: var(--text-tertiary);
-    font-size: var(--icon-xl);
-}
 
-.tl-empty-state h3 {
-    margin: 0;
-    font-size: var(--fs-md);
-    color: var(--text-primary);
-    font-weight: var(--fw-semibold);
-}
 
-.tl-empty-state p {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: var(--fs-sm);
-    max-width: 400px;
-}
 
-.tl-empty-state .btn {
-    margin-top: var(--space-sm);
-}
 
-.tl-loading-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-4xl) var(--space-xl);
-    gap: var(--space-lg);
-}
 
-.tl-loading-spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--border-default);
-    border-top-color: var(--accent);
-    border-radius: var(--radius-full);
-    animation: dv-spin 0.8s linear infinite;
-}
-
-.tl-loading-state p {
-    color: var(--text-secondary);
-    font-size: var(--fs-sm);
-}
 
 /* ---- Mappenkiezer ---- */
 
