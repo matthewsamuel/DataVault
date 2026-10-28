@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
+from backend import file_ops
 from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline
 
 
@@ -53,6 +54,9 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     try:
         # Load configuration
         config = Config(config_path)
+
+        # No file move may ever take something out of (or into) the app's own cache/database
+        file_ops.protect_paths([config.CACHE_FOLDER, config.DB_PATH])
 
         # Validate paths (but don't fail if T7 not mounted)
         path_status = config.validate_paths()

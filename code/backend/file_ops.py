@@ -9,6 +9,9 @@ CRITICAL: every move of an archive file in the app goes through move_no_overwrit
   racing for the same name cannot clobber each other.
 - No copy-then-delete fallback: a cross-volume move is refused.
 - Only regular files: directories and symlinks are refused.
+- One app-wide lock (ARCHIVE_LOCK): routes hold it from their last check until
+  the move is done, so two requests can never both move "the other copy" away.
+- Never touches the app's own folders (cache, database): see protect_paths().
 """
 import ctypes
 import ctypes.util
@@ -16,8 +19,10 @@ import errno
 import os
 import stat
 import sys
+import threading
+import unicodedata
 from pathlib import Path
-from typing import Tuple
+from typing import Iterable, List, Optional, Tuple
 
 
 class FileOperationError(Exception):
@@ -38,6 +43,33 @@ class DestinationExistsError(FileOperationError):
 class DestinationFolderError(FileOperationError):
     """Raised when the destination folder cannot be created (e.g. a file is in the way)"""
     pass
+
+
+class ProtectedPathError(FileOperationError):
+    """Raised when a move would take a file out of, or into, the app's own folders"""
+    pass
+
+
+# Every archive move (Keurer, viewer, duplicates, undo) runs under this lock.
+# Re-entrant, so a route can hold it across its checks and still call move_no_overwrite.
+ARCHIVE_LOCK = threading.RLock()
+
+# Folders/files no move may ever touch (the app's cache and live database); set at startup
+_protected_paths: List[Path] = []
+
+
+def protect_paths(paths: Iterable[Path]) -> None:
+    """Register the app's own folders/files; move_no_overwrite refuses anything inside them."""
+    global _protected_paths
+    _protected_paths = [Path(p) for p in paths]
+
+
+def protected_path_for(path: Path) -> Optional[Path]:
+    """The registered protected folder/file that path lies in (or is), else None."""
+    for protected in _protected_paths:
+        if is_inside(path, protected):
+            return protected
+    return None
 
 
 MAX_CONFLICT_SUFFIX = 9999
@@ -110,6 +142,16 @@ def move_no_overwrite(
     src = Path(src)
     dst = Path(dst)
 
+    with ARCHIVE_LOCK:
+        return _move_no_overwrite_locked(src, dst, rename_on_conflict, suffix_prefix)
+
+
+def _move_no_overwrite_locked(src: Path, dst: Path, rename_on_conflict: bool, suffix_prefix: str) -> Path:
+    for path in (src, dst):
+        protected = protected_path_for(path)
+        if protected is not None:
+            raise ProtectedPathError(f"Refusing to move {src} -> {dst}: {path} is inside {protected}")
+
     try:
         src_st = os.lstat(src)
     except FileNotFoundError:
@@ -119,7 +161,8 @@ def move_no_overwrite(
     if not stat.S_ISREG(src_st.st_mode):
         raise FileOperationError(f"Refusing to move something that is not a regular file: {src}")
 
-    if os.path.abspath(src) == os.path.abspath(dst):
+    if os.path.abspath(src) == os.path.abspath(dst) or _same_existing_file(src, dst):
+        # (the second check catches a different spelling, e.g. other letter case)
         raise FileOperationError(f"Source and destination are the same: {src}")
 
     try:
@@ -189,10 +232,61 @@ def files_identical(a: Path, b: Path, chunk_size: int = 1024 * 1024) -> bool:
                 return True
 
 
-def is_inside(path: Path, folder: Path) -> bool:
-    """True if path (after resolving symlinks and '..') lies inside folder."""
+def _identity(path: Path) -> Optional[Tuple[int, int]]:
+    """(device, inode) of an existing path, None if it does not exist."""
     try:
-        return Path(path).resolve().is_relative_to(Path(folder).resolve())
+        st = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return st.st_dev, st.st_ino
+
+
+def _same_existing_file(a: Path, b: Path) -> bool:
+    ida = _identity(a)
+    return ida is not None and ida == _identity(b)
+
+
+def _folded(path: Path) -> Path:
+    """Spelling as a case- and normalisation-insensitive volume (default macOS) sees it."""
+    return Path(unicodedata.normalize("NFC", str(path)).casefold())
+
+
+def is_inside(path: Path, folder: Path) -> bool:
+    """
+    True if path lies inside folder (or is folder itself), however it is spelled.
+
+    Security-critical for every protected-folder check (cache, TRASH,
+    RAW_DUPLICATES). Resolving symlinks and '..' is not enough: on a
+    case-insensitive volume <vault>/.DATAVAULT_CACHE is the cache folder too,
+    and resolve() keeps the spelling it was given. So every existing ancestor
+    of the path is compared with the folder by identity (device + inode).
+    If the folder does not exist yet, a case-insensitive comparison of the
+    names is used, which errs on the side of "inside".
+    """
+    try:
+        resolved = Path(path).resolve()
+        resolved_folder = Path(folder).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    if resolved.is_relative_to(resolved_folder):
+        return True
+
+    folder_id = _identity(resolved_folder)
+    if folder_id is None:
+        return _folded(resolved).is_relative_to(_folded(resolved_folder))
+
+    for ancestor in (resolved, *resolved.parents):
+        if _identity(ancestor) == folder_id:
+            return True
+    return False
+
+
+def same_folder(a: Path, b: Path) -> bool:
+    """True if a and b are the same folder, also when spelled differently."""
+    if _same_existing_file(a, b):
+        return True
+    try:
+        return Path(a).resolve() == Path(b).resolve()
     except (OSError, RuntimeError, ValueError):
         return False
 

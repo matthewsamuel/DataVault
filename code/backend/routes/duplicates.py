@@ -8,8 +8,8 @@ import os
 
 from backend.config import Config, validate_path_in_vault
 from backend.file_ops import (
-    safe_move_with_structure, move_no_overwrite, files_identical, is_inside,
-    FileOperationError, CrossDeviceError,
+    safe_move_with_structure, move_no_overwrite, files_identical, is_inside, ARCHIVE_LOCK,
+    FileOperationError, CrossDeviceError, ProtectedPathError,
 )
 
 router = APIRouter()
@@ -27,8 +27,18 @@ def init_router(cfg: Config, database):
 
 
 def _protected_folders() -> List[Path]:
-    """Folders the duplicates tool never takes files out of"""
-    return [config.DUPLICATES_FOLDER, config.TRASH_FOLDER, config.CACHE_FOLDER]
+    """
+    Folders the duplicates tool never takes files out of (nor accepts a kept original from).
+    Checked with is_inside, so other spellings (raw_duplicates, .DATAVAULT_CACHE) count too.
+    """
+    return [config.DUPLICATES_FOLDER, config.TRASH_FOLDER, config.CACHE_FOLDER, config.DB_PATH]
+
+
+def _in_protected_folder(path: Path) -> Optional[Path]:
+    for folder in _protected_folders():
+        if is_inside(path, folder):
+            return folder
+    return None
 
 @router.get("/api/raw_duplicates/progress")
 async def get_scan_progress_endpoint():
@@ -195,6 +205,8 @@ def delete_single_duplicate(file_path: str, duplicate_of: Optional[str] = None) 
     Only after checking, right before the move, that the kept original
     (duplicate_of, or the one from the last scan) still exists and is
     byte-for-byte identical, so the last copy of a photo can never be moved away.
+    The checks and the move run under the app-wide ARCHIVE_LOCK, so a second
+    request (another tab, or the Keurer) cannot move the original away in between.
     """
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
@@ -205,74 +217,78 @@ def delete_single_duplicate(file_path: str, duplicate_of: Optional[str] = None) 
     if not validate_path_in_vault(src_path, config.VAULT_ROOT):
         raise HTTPException(status_code=403, detail="File must be within vault")
     
-    if not os.path.lexists(src_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    if src_path.is_symlink() or not src_path.is_file():
-        raise HTTPException(status_code=400, detail="Only regular files can be moved")
-    
-    for folder in _protected_folders():
-        if is_inside(src_path, folder):
-            raise HTTPException(status_code=400, detail=f"Refusing files inside {folder.name}")
-    
     keeper_str = duplicate_of or _find_keeper(src_path)
-    if not keeper_str:
-        raise HTTPException(
-            status_code=409,
-            detail="Unknown original for this file; scan the folder again"
-        )
-    keeper = Path(keeper_str)
-    
-    if not validate_path_in_vault(keeper, config.VAULT_ROOT):
+    keeper = Path(keeper_str) if keeper_str else None
+    if keeper is not None and not validate_path_in_vault(keeper, config.VAULT_ROOT):
         raise HTTPException(status_code=403, detail="Original must be within vault")
     
-    if keeper.is_symlink() or not keeper.is_file() or any(is_inside(keeper, f) for f in _protected_folders()):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Kept original no longer exists: {keeper}. Nothing was moved; scan again"
-        )
-    
-    if os.path.samefile(src_path, keeper):
-        raise HTTPException(status_code=409, detail="File and original are the same file")
-    
-    if not files_identical(src_path, keeper):
-        raise HTTPException(
-            status_code=409,
-            detail=f"File is no longer identical to {keeper.name}. Nothing was moved; scan again"
-        )
-    
-    # Ensure duplicates folder exists
-    config.ensure_duplicates_folder()
-    
-    try:
-        # Compare real locations (resolves /var -> /private/var style aliases);
-        # the file itself is not a symlink, so only its folders are resolved
-        real_src = src_path.parent.resolve() / src_path.name
+    with ARCHIVE_LOCK:
+        if not os.path.lexists(src_path):
+            raise HTTPException(status_code=404, detail="File not found")
         
-        # Determine which folder to use as base
-        # If file is in RAW, use RAW as base, otherwise use vault root
-        if real_src.is_relative_to(config.RAW_FOLDER.resolve()):
-            base_folder = config.RAW_FOLDER.resolve()
-        else:
-            base_folder = config.VAULT_ROOT.resolve()
+        if src_path.is_symlink() or not src_path.is_file():
+            raise HTTPException(status_code=400, detail="Only regular files can be moved")
         
-        # Move file preserving structure (never overwrites, see file_ops)
-        dst_path, was_conflict = safe_move_with_structure(
-            real_src,
-            base_folder,
-            config.DUPLICATES_FOLDER.resolve(),
-            conflict_suffix="DUP"
-        )
-    
-    except CrossDeviceError as e:
-        raise HTTPException(status_code=409, detail=f"CRITICAL: Cross-device move blocked for {src_path}: {str(e)}")
+        protected = _in_protected_folder(src_path)
+        if protected is not None:
+            raise HTTPException(status_code=400, detail=f"Refusing files inside {protected.name}")
+        
+        if keeper is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Unknown original for this file; scan the folder again"
+            )
+        
+        if keeper.is_symlink() or not keeper.is_file() or _in_protected_folder(keeper) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Kept original no longer exists: {keeper}. Nothing was moved; scan again"
+            )
+        
+        if os.path.samefile(src_path, keeper):
+            raise HTTPException(status_code=409, detail="File and original are the same file")
+        
+        if not files_identical(src_path, keeper):
+            raise HTTPException(
+                status_code=409,
+                detail=f"File is no longer identical to {keeper.name}. Nothing was moved; scan again"
+            )
+        
+        # Ensure duplicates folder exists
+        config.ensure_duplicates_folder()
+        
+        try:
+            # Compare real locations (resolves /var -> /private/var style aliases);
+            # the file itself is not a symlink, so only its folders are resolved
+            real_src = src_path.parent.resolve() / src_path.name
+            
+            # Determine which folder to use as base
+            # If file is in RAW, use RAW as base, otherwise use vault root
+            if real_src.is_relative_to(config.RAW_FOLDER.resolve()):
+                base_folder = config.RAW_FOLDER.resolve()
+            else:
+                base_folder = config.VAULT_ROOT.resolve()
+            
+            # Move file preserving structure (never overwrites, see file_ops)
+            dst_path, was_conflict = safe_move_with_structure(
+                real_src,
+                base_folder,
+                config.DUPLICATES_FOLDER.resolve(),
+                conflict_suffix="DUP"
+            )
+        
+        except ProtectedPathError as e:
+            raise HTTPException(status_code=400, detail=f"Refused: {str(e)}")
+        
+        except CrossDeviceError as e:
+            raise HTTPException(status_code=409, detail=f"CRITICAL: Cross-device move blocked for {src_path}: {str(e)}")
 
-    except FileOperationError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to move {src_path}: {str(e)}")
+        except FileOperationError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to move {src_path}: {str(e)}")
 
-    # Record operation for undo
-    run_id = db.create_delete_run()
-    db.record_delete_operation(run_id, src_path, dst_path)
+        # Record operation for undo
+        run_id = db.create_delete_run()
+        db.record_delete_operation(run_id, src_path, dst_path)
     
     # Invalidate hash cache for both paths
     db.invalidate_hash(src_path)

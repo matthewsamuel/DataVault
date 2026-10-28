@@ -7,11 +7,11 @@ from typing import Dict, Any, Optional, Tuple
 import os
 import random
 import stat
-import threading
 
 from backend.config import Config, validate_path_in_vault, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS
 from backend.file_ops import (
-    move_no_overwrite, is_inside, FileOperationError, CrossDeviceError, DestinationExistsError,
+    move_no_overwrite, is_inside, same_folder, ARCHIVE_LOCK,
+    FileOperationError, CrossDeviceError, DestinationExistsError, ProtectedPathError,
 )
 
 router = APIRouter()
@@ -91,9 +91,6 @@ def get_keurer_files(folder: str = Query(...)) -> Dict[str, Any]:
     }
 
 
-# Bestandsoperaties van de Keurer één voor één, zodat twee snelle kliks niet door elkaar lopen
-_file_lock = threading.Lock()
-
 UNDO_STACK_SIZE = 20
 
 
@@ -102,10 +99,13 @@ def _refuse(status: int, detail: str):
 
 
 def _check_archive_path(path: Path, what: str):
-    """Pad moet in de vault liggen en niet in de cache van de app."""
+    """
+    Pad moet in de vault liggen en niet in de cache van de app (of de database zelf),
+    ook niet via een andere schrijfwijze zoals .DATAVAULT_CACHE (zie file_ops.is_inside).
+    """
     if not validate_path_in_vault(path, config.VAULT_ROOT):
         _refuse(403, f"Toegang geweigerd: {what} buiten vault")
-    if is_inside(path, config.CACHE_FOLDER):
+    if is_inside(path, config.CACHE_FOLDER) or is_inside(path, config.DB_PATH):
         _refuse(403, f"Toegang geweigerd: {what} in de cache-map")
 
 
@@ -207,7 +207,9 @@ def decide_file(body: Dict[str, Any]) -> Dict[str, Any]:
     if not _is_regular_file(file_path):
         _refuse(404, "Bestand niet gevonden")
 
-    with _file_lock:
+    # Eén gedeeld slot voor alle verplaatsingen in de app (ook viewer en duplicaten),
+    # zodat twee snelle kliks of twee tabbladen niet door elkaar lopen
+    with ARCHIVE_LOCK:
         dest_path = None
         try:
             if decision == "delete":
@@ -223,9 +225,11 @@ def decide_file(body: Dict[str, Any]) -> Dict[str, Any]:
                 _check_archive_path(dest_folder, "doelmap")
                 if not dest_folder.is_dir():
                     _refuse(404, "Doelmap niet gevonden")
-                if dest_folder.resolve() == file_path.parent.resolve():
+                if same_folder(dest_folder, file_path.parent):
                     _refuse(400, "Bestand staat al in deze map")
                 dest_path = move_no_overwrite(file_path, dest_folder / file_path.name)
+        except ProtectedPathError:
+            _refuse(403, "Toegang geweigerd: cache-map van de app")
         except CrossDeviceError as e:
             _refuse(409, f"Verplaatsen naar een andere schijf wordt geweigerd: {e}")
         except FileOperationError as e:
@@ -290,7 +294,7 @@ def undo_decision(body: Dict[str, Any]) -> Dict[str, Any]:
     ):
         _refuse(400, "Ontbrekend of ongeldig beslissing-id")
 
-    with _file_lock:
+    with ARCHIVE_LOCK:
         rec = db.get_keurer_decision(decision_id)
         if not rec:
             _refuse(404, "Beslissing niet gevonden (al ongedaan gemaakt?)")
@@ -331,6 +335,8 @@ def undo_decision(body: Dict[str, Any]) -> Dict[str, Any]:
             except DestinationExistsError:
                 _refuse(409, f"Op de oorspronkelijke plek staat al een bestand {original.name}; "
                              "er wordt niets overschreven")
+            except ProtectedPathError:
+                _refuse(403, "Toegang geweigerd: cache-map van de app")
             except CrossDeviceError as e:
                 _refuse(409, f"Terugzetten naar een andere schijf wordt geweigerd: {e}")
             except FileOperationError as e:

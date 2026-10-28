@@ -8,7 +8,8 @@ from typing import Dict, Any
 
 from backend.config import Config, validate_path_in_vault, is_video
 from backend.file_ops import (
-    move_no_overwrite, is_inside, FileOperationError, CrossDeviceError, DestinationFolderError,
+    move_no_overwrite, is_inside, same_folder, ARCHIVE_LOCK,
+    FileOperationError, CrossDeviceError, DestinationFolderError, ProtectedPathError,
 )
 
 router = APIRouter()
@@ -169,22 +170,28 @@ def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
     if not validate_path_in_vault(destination_folder, config.VAULT_ROOT):
         raise HTTPException(status_code=403, detail="Access denied: destination path outside vault")
     
-    if is_inside(source_path, config.CACHE_FOLDER) or is_inside(destination_folder, config.CACHE_FOLDER):
-        raise HTTPException(status_code=403, detail="Access denied: cache folder")
-    
-    # Only regular files, never folders or symlinks
-    if source_path.is_symlink() or not source_path.is_file():
-        raise HTTPException(status_code=404, detail="Source file not found")
-    
-    if destination_folder.exists() and not destination_folder.is_dir():
-        raise HTTPException(status_code=400, detail="Destination is not a folder")
-    
-    if destination_folder.resolve() == source_path.parent.resolve():
-        raise HTTPException(status_code=400, detail="File is already in this folder")
+    # is_inside also catches other spellings such as .DATAVAULT_CACHE (case-insensitive volumes)
+    for path in (source_path, destination_folder):
+        if is_inside(path, config.CACHE_FOLDER) or is_inside(path, config.DB_PATH):
+            raise HTTPException(status_code=403, detail="Access denied: cache folder")
     
     try:
-        # Atomic, metadata-preserving, never overwrites (see backend/file_ops.py)
-        destination_path = move_no_overwrite(source_path, destination_folder / source_path.name)
+        # One app-wide lock: no other move can slip in between these checks and the move
+        with ARCHIVE_LOCK:
+            # Only regular files, never folders or symlinks
+            if source_path.is_symlink() or not source_path.is_file():
+                raise HTTPException(status_code=404, detail="Source file not found")
+            
+            if destination_folder.exists() and not destination_folder.is_dir():
+                raise HTTPException(status_code=400, detail="Destination is not a folder")
+            
+            if same_folder(destination_folder, source_path.parent):
+                raise HTTPException(status_code=400, detail="File is already in this folder")
+            
+            # Atomic, metadata-preserving, never overwrites (see backend/file_ops.py)
+            destination_path = move_no_overwrite(source_path, destination_folder / source_path.name)
+    except ProtectedPathError:
+        raise HTTPException(status_code=403, detail="Access denied: cache folder")
     except CrossDeviceError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except DestinationFolderError as e:

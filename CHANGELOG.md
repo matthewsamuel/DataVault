@@ -20,6 +20,15 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Ongeldige verzoeken (bijv. een doelmap "onder" een bestand, of een getal waar een pad
   hoort) geven nu een nette foutmelding in plaats van een serverfout. Er werd en wordt in die
   gevallen niets verplaatst.
+- De beschermde mappen (cache met de database, prullenmand, RAW_DUPLICATES) zijn nu ook
+  beschermd als een pad anders geschreven wordt, bijvoorbeeld `.DATAVAULT_CACHE` in plaats van
+  `.datavault_cache`. Op een gewone (hoofdletterongevoelige) Mac-schijf is dat dezelfde map, en
+  voorheen kon één verzoek zo de database van de app naar de prullenmand verplaatsen. De
+  verplaatsfunctie zelf weigert nu ook alles in de cache-map of de database.
+- Alle verplaatsingen in de app (viewer, Keurer, duplicaten en ongedaan maken) wachten nu op
+  elkaar. Twee gelijktijdige verzoeken (bijv. twee tabbladen) kunnen daardoor niet allebei
+  "de andere kopie" van een foto wegzetten: de controle dat het origineel er nog is en het
+  verplaatsen gebeuren in één ononderbroken stap.
 
 ### Foto Keurer
 - Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het
