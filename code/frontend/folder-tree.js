@@ -29,11 +29,11 @@ function renderFolderTree(container, folders, config = {}) {
         selectedPath = null,
 
         showChevron = true,
-        chevronHtml = html`▶`,        // markup from html`...` (dom.js)
+        chevronHtml = html`<i class="fas fa-chevron-right" aria-hidden="true"></i>`,        // markup from html`...` (dom.js)
         showCheckbox = (selectionMode === 'multi'),
         showCount = false,
 
-        iconMode = 'emoji',          // 'emoji' | 'emoji-state' | 'fontawesome'
+        iconMode = 'fontawesome',    // 'fontawesome' | 'emoji' | 'emoji-state'
 
         onSelect,                    // (path, element) => void
         onToggle,                    // (path, isExpanded) => void
@@ -159,7 +159,7 @@ function renderFolderTree(container, folders, config = {}) {
 
         if (separateClicks && hasChildren) {
             iconEl.style.cursor = 'pointer';
-            iconEl.title = 'Toggle Folder';
+            iconEl.title = 'Map open- of dichtklappen';
             iconEl.onclick = (e) => {
                 e.stopPropagation();
                 doToggleExpand(folder.path, row.querySelector('.folder-chevron'), childrenContainer);

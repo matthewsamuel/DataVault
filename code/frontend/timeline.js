@@ -187,7 +187,7 @@
 
             const icon = document.createElement('span');
             icon.className = 'tl-picker-icon';
-            icon.textContent = '📁';
+            setHTML(icon, html`<i class="fas fa-folder" aria-hidden="true"></i>`);
 
             const name = document.createElement('span');
             name.className = 'tl-picker-name';

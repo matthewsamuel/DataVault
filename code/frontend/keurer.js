@@ -47,9 +47,9 @@ function keurerInit() {
         const cardArea = document.getElementById('keurer-card-area');
         if (cardArea) {
             cardArea.innerHTML = html`<div class="keurer-state-card">
-                <span style="font-size:3rem">⚠️</span>
-                <h3>Initialisatie mislukt</h3>
-                <p style="color:var(--danger)">${e.message}</p>
+                <span class="keurer-state-icon is-error" aria-hidden="true"><i class="fas fa-triangle-exclamation"></i></span>
+                <h3>Starten mislukt</h3>
+                <p class="keurer-state-error">${e.message}</p>
             </div>`;
         }
     }
@@ -119,20 +119,20 @@ function keurerRenderStats() {
     const el = document.getElementById('keurer-stats-bar');
     if (!el) return;
 
-    const streakIcon = keurerStats.streak > 0 ? '🔥' : '❄️';
+    const streakIcon = keurerStats.streak > 0 ? 'fa-fire' : 'fa-snowflake';
     const todayPct = Math.min(100, (keurerStats.today / keurerStats.goal) * 100);
     const streakCls = keurerStats.streak > 0 ? 'streak-active' : '';
     const goalCls = keurerStats.goal_reached_today ? 'goal-reached' : '';
 
     el.innerHTML = html`
         <div class="keurer-stat ${streakCls}" title="${keurerStats.streak} opeenvolgende dag(en) met ${keurerStats.goal}+ beoordelingen">
-            <span class="keurer-stat-icon">${streakIcon}</span>
+            <span class="keurer-stat-icon" aria-hidden="true"><i class="fas ${streakIcon}"></i></span>
             <span class="keurer-stat-value">${keurerStats.streak}</span>
-            <span class="keurer-stat-label">dag streak</span>
+            <span class="keurer-stat-label">dagen op rij</span>
         </div>
         <div class="keurer-stat-divider"></div>
         <div class="keurer-stat ${goalCls}" title="Dagdoel: ${keurerStats.goal} beoordelingen">
-            <span class="keurer-stat-icon">📅</span>
+            <span class="keurer-stat-icon" aria-hidden="true"><i class="fas fa-calendar-day"></i></span>
             <div class="keurer-daily-block">
                 <div class="keurer-daily-bar">
                     <div class="keurer-daily-fill" style="width: ${todayPct}%"></div>
@@ -143,7 +143,7 @@ function keurerRenderStats() {
         </div>
         <div class="keurer-stat-divider"></div>
         <div class="keurer-stat" title="Totaal aantal beoordeelde bestanden ooit">
-            <span class="keurer-stat-icon">🏷️</span>
+            <span class="keurer-stat-icon" aria-hidden="true"><i class="fas fa-tags"></i></span>
             <span class="keurer-stat-value">${keurerStats.total.toLocaleString('nl-NL')}</span>
             <span class="keurer-stat-label">totaal beoordeeld</span>
         </div>
@@ -164,7 +164,7 @@ async function keurerLoadFiles() {
     cardArea.innerHTML = `
         <div class="keurer-state-card">
             <div class="loading-spinner"></div>
-            <p style="margin-top: 16px;">Fotos laden...</p>
+            <p>Foto's laden…</p>
         </div>`;
 
     try {
@@ -194,7 +194,7 @@ async function keurerLoadFiles() {
         keurerLoadFailed = true;
         cardArea.innerHTML = html`
             <div class="keurer-state-card">
-                <span style="font-size: 3rem;">⚠️</span>
+                <span class="keurer-state-icon is-error" aria-hidden="true"><i class="fas fa-triangle-exclamation"></i></span>
                 <h3>Laden mislukt</h3>
                 <p>${e.message}</p>
                 <button class="btn btn-secondary" onclick="keurerLoadFiles()">Opnieuw proberen</button>
@@ -212,7 +212,7 @@ function keurerShowEmpty() {
 
     cardArea.innerHTML = `
         <div class="keurer-state-card">
-            <span style="font-size: 4rem;">📁</span>
+            <span class="keurer-state-icon" aria-hidden="true"><i class="fas fa-folder-open"></i></span>
             <h3>Kies een map</h3>
             <p>Selecteer een map om foto's en video's te beoordelen.</p>
             <button class="btn btn-primary" onclick="keurerOpenFolderPicker()">
@@ -228,10 +228,10 @@ function keurerShowDone(decidedCount) {
 
     cardArea.innerHTML = html`
         <div class="keurer-state-card">
-            <span style="font-size: 4rem;">✅</span>
-            <h3>Map volledig beoordeeld!</h3>
+            <span class="keurer-state-icon is-done" aria-hidden="true"><i class="fas fa-check"></i></span>
+            <h3>Map volledig beoordeeld</h3>
             <p>Alle ${decidedCount} bestanden in deze map zijn al beoordeeld.</p>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
+            <div class="keurer-state-actions">
                 <button class="btn btn-secondary" onclick="keurerOpenFolderPicker()">
                     <i class="fas fa-folder"></i> Andere map
                 </button>
@@ -281,27 +281,27 @@ function keurerShowCard() {
 
                 <!-- Overlays -->
                 <div class="keurer-card-overlay overlay-keep"   id="kc-overlay-keep">
-                    <div class="overlay-badge keep-badge"><i class="fas fa-heart"></i> HOUDEN</div>
+                    <div class="overlay-badge keep-badge"><i class="fas fa-heart"></i> Houden</div>
                 </div>
                 <div class="keurer-card-overlay overlay-delete" id="kc-overlay-delete">
-                    <div class="overlay-badge delete-badge"><i class="fas fa-trash"></i> WEGGOOIEN</div>
+                    <div class="overlay-badge delete-badge"><i class="fas fa-trash"></i> Prullenmand</div>
                 </div>
                 <div class="keurer-card-overlay overlay-move"   id="kc-overlay-move">
-                    <div class="overlay-badge move-badge"><i class="fas fa-folder-open"></i> VERPLAATSEN</div>
+                    <div class="overlay-badge move-badge"><i class="fas fa-folder-open"></i> Verplaatsen</div>
                 </div>
                 <div class="keurer-card-overlay overlay-undo"   id="kc-overlay-undo">
-                    <div class="overlay-badge undo-badge"><i class="fas fa-undo"></i> ONGEDAAN</div>
+                    <div class="overlay-badge undo-badge"><i class="fas fa-undo"></i> Ongedaan</div>
                 </div>
 
                 ${mediaHtml}
                 <div class="keurer-card-fallback" id="kc-fallback" style="display:none;">
-                    <i class="fas fa-${file.is_video ? 'video' : 'image'}" style="font-size:3rem;color:var(--text-secondary);"></i>
-                    <span style="color:var(--text-secondary);margin-top:12px;font-size:0.85rem;text-align:center;padding:0 16px;">${file.name}</span>
+                    <i class="fas fa-${file.is_video ? 'video' : 'image'}" aria-hidden="true"></i>
+                    <span>${file.name}</span>
                 </div>
 
                 <div class="keurer-card-footer">
                     <span class="keurer-card-name" title="${file.name}">${file.name}</span>
-                    <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+                    <div class="keurer-card-meta">
                         ${undoAvail ? html`<span class="keurer-undo-hint" title="Ongedaan maken (↓ pijl)"><i class="fas fa-undo"></i></span>` : ''}
                         <span class="keurer-card-progress">${keurerIndex + 1} / ${keurerFileQueue.length}</span>
                     </div>
@@ -494,7 +494,7 @@ async function keurerOpenMoveModal() {
     if (nameEl) nameEl.textContent = keurerFileQueue[keurerIndex].name;
 
     const treeContainer = document.getElementById('keurer-move-folder-tree');
-    treeContainer.innerHTML = '<div class="loading-spinner" style="margin:2rem auto;display:block;"></div>';
+    treeContainer.innerHTML = '<div class="loading-spinner"></div>';
 
     const tree = (typeof folderTree !== 'undefined' && folderTree.length > 0)
         ? folderTree
@@ -511,7 +511,7 @@ async function keurerOpenMoveModal() {
     treeContainer.innerHTML = '';
 
     if (tree.length === 0) {
-        treeContainer.innerHTML = '<p style="color:var(--danger);padding:1rem;">Mappen konden niet geladen worden.</p>';
+        treeContainer.innerHTML = '<p class="picker-message is-error">Mappen konden niet geladen worden.</p>';
         return;
     }
 
@@ -561,7 +561,7 @@ function keurerFilterMoveTree(query) {
     treeContainer.innerHTML = '';
 
     if (starts.length === 0 && contains.length === 0) {
-        treeContainer.innerHTML = '<p style="color:var(--text-secondary);padding:1rem 12px;font-size:0.85rem;">Geen mappen gevonden</p>';
+        treeContainer.innerHTML = '<p class="picker-message">Geen mappen gevonden</p>';
         return;
     }
 
@@ -579,7 +579,7 @@ function keurerFilterMoveTree(query) {
 
             const icon = document.createElement('span');
             icon.className = 'folder-icon';
-            icon.textContent = '📁';
+            setHTML(icon, html`<i class="fas fa-folder" aria-hidden="true"></i>`);
             item.appendChild(icon);
 
             const nameEl = document.createElement('span');
@@ -705,7 +705,7 @@ function keurerRenderMoveFolderNode(container, folder, depth) {
     if (hasChildren) {
         const chevron = document.createElement('span');
         chevron.className = 'folder-chevron';
-        chevron.innerHTML = '▶';
+        chevron.innerHTML = '<i class="fas fa-chevron-right" aria-hidden="true"></i>';
         chevron.onclick = e => {
             e.stopPropagation();
             const childDiv = wrapper.querySelector(':scope > .folder-children');
@@ -722,13 +722,13 @@ function keurerRenderMoveFolderNode(container, folder, depth) {
         item.appendChild(chevron);
     } else {
         const spacer = document.createElement('span');
-        spacer.style.cssText = 'width:16px;display:inline-block;flex-shrink:0;';
+        spacer.className = 'folder-chevron no-children';
         item.appendChild(spacer);
     }
 
     const icon = document.createElement('span');
     icon.className = 'folder-icon';
-    icon.textContent = '📁';
+    setHTML(icon, html`<i class="fas fa-folder" aria-hidden="true"></i>`);
     item.appendChild(icon);
 
     const name = document.createElement('span');
@@ -1082,7 +1082,7 @@ async function keurerOpenFolderPicker() {
     document.getElementById('btn-keurer-confirm-folder').disabled = true;
 
     const treeContainer = document.getElementById('keurer-folder-tree');
-    treeContainer.innerHTML = '<div class="loading-spinner" style="margin:2rem auto;display:block;"></div>';
+    treeContainer.innerHTML = '<div class="loading-spinner"></div>';
 
     const tree = (typeof folderTree !== 'undefined' && folderTree.length > 0)
         ? folderTree
@@ -1096,7 +1096,7 @@ async function keurerOpenFolderPicker() {
     treeContainer.innerHTML = '';
 
     if (tree.length === 0) {
-        treeContainer.innerHTML = '<p style="color:var(--danger);padding:1rem;">Mappen konden niet geladen worden.</p>';
+        treeContainer.innerHTML = '<p class="picker-message is-error">Mappen konden niet geladen worden.</p>';
         return;
     }
 

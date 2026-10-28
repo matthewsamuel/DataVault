@@ -434,7 +434,7 @@ function renderSidebarFolderTree() {
         indentBase: 0,
         expandedPaths: expandedFolders,
         selectedPath: currentFolder,
-        iconMode: 'emoji-state',
+        iconMode: 'fontawesome',
         separateClicks: true,
         onSelect: (path) => selectFolder(path),
         onToggle: () => localStorage.setItem('expandedFolders', JSON.stringify([...expandedFolders])),
@@ -762,42 +762,27 @@ function createFolderCard(folder) {
     // Add filename for list view
     card.setAttribute('data-filename', folder.name);
 
-    // Folder icon with type-based emoji
+    // Icoon (Font Awesome): een map, of het soort bestand
     const icon = document.createElement('div');
     icon.className = 'folder-card-icon';
+    icon.setAttribute('aria-hidden', 'true');
 
-    // Get appropriate emoji based on file/folder type
-    let iconEmoji = '📁'; // default folder
-
-    if (folder.type === 'folder') {
-        iconEmoji = '📁';
-    } else {
-        // For non-media files, use appropriate emoji
+    let iconClass = 'fa-folder';
+    if (folder.type !== 'folder') {
         const name = folder.name.toLowerCase();
         const ext = name.substring(name.lastIndexOf('.'));
-
-        // Document types
-        if (['.pdf'].includes(ext)) iconEmoji = '📄';
-        else if (['.doc', '.docx'].includes(ext)) iconEmoji = '📝';
-        else if (['.xls', '.xlsx', '.csv'].includes(ext)) iconEmoji = '📊';
-        else if (['.ppt', '.pptx'].includes(ext)) iconEmoji = '📽️';
-        else if (['.txt', '.md', '.log'].includes(ext)) iconEmoji = '📃';
-
-        // Archive types
-        else if (['.zip', '.rar', '.7z', '.tar', '.gz'].includes(ext)) iconEmoji = '🗜️';
-
-        // Audio types
-        else if (['.mp3', '.wav', '.flac', '.m4a', '.aac'].includes(ext)) iconEmoji = '🎵';
-
-        // Code/config files
-        else if (['.js', '.py', '.java', '.cpp', '.c', '.h', '.html', '.css'].includes(ext)) iconEmoji = '👨‍💻';
-        else if (['.json', '.xml', '.yaml', '.yml', '.toml', '.ini'].includes(ext)) iconEmoji = '⚙️';
-
-        // Other
-        else iconEmoji = '📄';
+        if (['.pdf'].includes(ext)) iconClass = 'fa-file-pdf';
+        else if (['.doc', '.docx'].includes(ext)) iconClass = 'fa-file-word';
+        else if (['.xls', '.xlsx', '.csv'].includes(ext)) iconClass = 'fa-file-excel';
+        else if (['.ppt', '.pptx'].includes(ext)) iconClass = 'fa-file-powerpoint';
+        else if (['.txt', '.md', '.log'].includes(ext)) iconClass = 'fa-file-lines';
+        else if (['.zip', '.rar', '.7z', '.tar', '.gz'].includes(ext)) iconClass = 'fa-file-zipper';
+        else if (['.mp3', '.wav', '.flac', '.m4a', '.aac'].includes(ext)) iconClass = 'fa-file-audio';
+        else if (['.js', '.py', '.java', '.cpp', '.c', '.h', '.html', '.css', '.json', '.xml', '.yaml', '.yml', '.toml', '.ini'].includes(ext)) iconClass = 'fa-file-code';
+        else iconClass = 'fa-file';
+        icon.classList.add('is-file');
     }
-
-    icon.textContent = iconEmoji;
+    icon.appendChild(createEl('i', { class: `fas ${iconClass}` }));
     card.appendChild(icon);
 
     // Folder name
