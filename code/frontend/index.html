@@ -20,55 +20,69 @@
             <span class="vault-banner-hint">Sluit de schijf aan; de app gaat vanzelf verder.</span>
         </div>
 
-        <!-- Top Navigation -->
-        <nav class="top-nav">
-            <div class="nav-brand" onclick="restartServer()" title="Server herstarten" style="cursor:pointer;">DataVault</div>
+        <!-- Top Navigation (sneltoetsen: 1-9 of g + letter, ? voor het overzicht; shortcuts.js) -->
+        <nav class="top-nav" aria-label="Hoofdmenu">
+            <button type="button" class="nav-brand" onclick="restartServer()" title="Server herstarten">DataVault</button>
 
-            <div class="nav-tabs">
-                <button class="nav-tab active" data-view="home" onclick="switchMainView('home')">
+            <div class="nav-tabs" aria-label="Onderdelen">
+                <button class="nav-tab active" data-view="home" onclick="switchMainView('home')" title="Home (1)">
                     Home
                 </button>
-                <button class="nav-tab" data-view="viewer" onclick="switchMainView('viewer')">
-                    Files
+                <button class="nav-tab" data-view="viewer" onclick="switchMainView('viewer')" title="Bestanden (2)">
+                    Bestanden
                 </button>
-                <button class="nav-tab" data-view="duplicates" onclick="switchMainView('duplicates')">
-                    Duplicates
+                <button class="nav-tab" data-view="duplicates" onclick="switchMainView('duplicates')" title="Duplicaten (3)">
+                    Duplicaten
                 </button>
-                <button class="nav-tab" data-view="spotify" onclick="switchMainView('spotify')">
-                    Spotify Wrapped
+                <button class="nav-tab" data-view="spotify" onclick="switchMainView('spotify')" title="Spotify Wrapped (4)">
+                    Spotify
                 </button>
-                <button class="nav-tab" data-view="shows" onclick="switchMainView('shows')">
+                <button class="nav-tab" data-view="shows" onclick="switchMainView('shows')" title="Shows (5)">
                     Shows
                 </button>
-                <button class="nav-tab" data-view="keurer" onclick="switchMainView('keurer')">
+                <button class="nav-tab" data-view="keurer" onclick="switchMainView('keurer')" title="Keurer (6)">
                     Keurer
                 </button>
-                <button class="nav-tab" data-view="timeline" onclick="switchMainView('timeline')">
-                    Timeline
+                <button class="nav-tab" data-view="timeline" onclick="switchMainView('timeline')" title="Tijdlijn (7)">
+                    Tijdlijn
+                </button>
+                <button class="nav-tab" data-view="recovery" onclick="switchMainView('recovery')" title="Herstelcentrum: alles terugzetten wat de app verplaatste (8)">
+                    Herstel
                 </button>
             </div>
 
             <div class="nav-actions">
-                <input type="text" class="search-input" id="global-search" placeholder="Search..."
-                    oninput="queueGlobalSearch(this.value)">
+                <input type="search" class="search-input" id="global-search" placeholder="Zoek in deze map…  /"
+                    aria-label="Zoek in de geopende map (sneltoets /)" oninput="queueGlobalSearch(this.value)">
 
                 <div class="theme-toggle">
-                    <button class="theme-button" onclick="toggleThemeDropdown()">
+                    <button type="button" class="theme-button" id="theme-button" onclick="toggleThemeDropdown()"
+                        aria-haspopup="true" aria-expanded="false" aria-controls="theme-dropdown" title="Thema (t wisselt)">
+                        <i class="fas fa-circle-half-stroke" aria-hidden="true"></i>
                         <span id="theme-label">Auto</span>
-                        <span>▼</span>
+                        <span aria-hidden="true">▼</span>
                     </button>
-                    <div class="theme-dropdown" id="theme-dropdown">
-                        <button class="theme-option" data-theme="auto" onclick="setTheme('auto')">
-                            Auto (System)
+                    <div class="theme-dropdown" id="theme-dropdown" role="menu" aria-label="Thema">
+                        <button type="button" class="theme-option" role="menuitemradio" data-theme="auto" onclick="setTheme('auto')">
+                            Automatisch (systeem)
                         </button>
-                        <button class="theme-option" data-theme="light" onclick="setTheme('light')">
-                            Light
+                        <button type="button" class="theme-option" role="menuitemradio" data-theme="light" onclick="setTheme('light')">
+                            Licht
                         </button>
-                        <button class="theme-option" data-theme="dark" onclick="setTheme('dark')">
-                            Dark
+                        <button type="button" class="theme-option" role="menuitemradio" data-theme="dark" onclick="setTheme('dark')">
+                            Donker
                         </button>
                     </div>
                 </div>
+
+                <button type="button" class="nav-icon-btn" onclick="toggleShortcutHelp()" title="Sneltoetsen (?)"
+                    aria-label="Sneltoetsen tonen">
+                    <i class="fas fa-keyboard" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="nav-icon-btn nav-tab-settings" data-view="settings" onclick="switchMainView('settings')"
+                    title="Instellingen (9)" aria-label="Instellingen">
+                    <i class="fas fa-cog" aria-hidden="true"></i>
+                </button>
             </div>
         </nav>
 
@@ -238,7 +252,7 @@
             </div>
 
             <div class="content-scroll">
-                <div class="media-grid" id="media-grid">
+                <div class="media-grid" id="media-grid" aria-label="Bestanden in deze map (pijltjes om te kiezen, Enter om te openen)">
                     <!-- Media cards will be populated by JavaScript -->
                 </div>
             </div>
@@ -286,6 +300,8 @@
                         <span class="dup-restore-title">Herstellen</span>
                         <span class="dup-restore-hint">Zet een opruimactie in één keer terug naar de oorspronkelijke
                             plek. Er wordt nooit iets overschreven.</span>
+                        <button type="button" class="btn btn-secondary btn-small dup-restore-all" onclick="switchMainView('recovery')"
+                            title="Alles wat de app verplaatste, ook Keurer en de viewer (sneltoets 8)">Herstelcentrum</button>
                     </div>
                     <div class="dup-runs" id="dup-runs"></div>
                 </div>
@@ -575,11 +591,46 @@
                 </div>
 
                 <!-- Photo Grid (virtualized) -->
-                <div class="tl-scroll-area" id="timeline-scroll">
+                <div class="tl-scroll-area" id="timeline-scroll" aria-label="Foto's op datum (pijltjes om te kiezen, Enter om te openen)">
                     <div class="tl-virtual-content" id="timeline-virtual-content">
                         <!-- Rendered by timeline.js -->
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- HERSTELCENTRUM: alles wat de app verplaatste, met terugzetten per actie (recovery.js) -->
+        <div id="section-recovery" class="section hidden">
+            <div class="recovery-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title"><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Herstelcentrum</h1>
+                        <p class="page-subtitle">Alles wat de app verplaatste (Keurer, duplicaten, de viewer), nieuwste
+                            eerst. De app wist nooit iets: elk bestand staat nog in het archief en kan terug naar
+                            zijn oude plek. Er wordt nooit iets overschreven.</p>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-small" onclick="recoveryLoad()" title="Lijst opnieuw laden">
+                        <i class="fas fa-rotate" aria-hidden="true"></i> Vernieuwen
+                    </button>
+                </div>
+                <div class="recovery-summary" id="recovery-summary" aria-live="polite"></div>
+                <div class="recovery-list" id="recovery-list"></div>
+                <div class="recovery-more" id="recovery-more" hidden>
+                    <button type="button" class="btn btn-secondary btn-small" onclick="recoveryLoadMore()">Meer laden</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- INSTELLINGEN: één plek voor alle keuzes; onderdelen melden zich aan (settings.js) -->
+        <div id="section-settings" class="section hidden">
+            <div class="settings-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title"><i class="fas fa-cog" aria-hidden="true"></i> Instellingen</h1>
+                        <p class="page-subtitle">Alles blijft op deze Mac. Keuzes gelden meteen.</p>
+                    </div>
+                </div>
+                <div class="settings-sections" id="settings-sections"></div>
             </div>
         </div>
 
@@ -1070,6 +1121,9 @@
     <script src="timeline.js?v=10"></script>
     <script src="wave-background.js?v=3"></script>
     <script src="resizable-sidebar.js?v=1"></script>
+    <script src="recovery.js?v=1"></script>
+    <script src="settings.js?v=1"></script>
+    <script src="shortcuts.js?v=1"></script>
 </body>
 
 </html>

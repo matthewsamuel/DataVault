@@ -43,6 +43,7 @@
 
     let tlSliderDragging = false;
     let tlScrollTicking = false;
+    let tlFocusIndex = 0;               // the card the keyboard is on (Tab lands here)
 
     // ── Persistence ───────────────────────────────────────
     function loadSavedFolders() {
@@ -89,6 +90,7 @@
 
         // Attach scroll listener
         container.addEventListener('scroll', onTimelineScroll, { passive: true });
+        container.addEventListener('keydown', onTimelineKeydown);
 
         // Recompute cols on resize
         // (not while the tab is hidden: its width is 0 then, which would mean 2 columns)
@@ -200,6 +202,11 @@
             row.appendChild(name);
             row.appendChild(count);
 
+            // Een aanvinkvakje voor het toetsenbord en schermlezers: Tab erheen, spatie of Enter
+            row.tabIndex = 0;
+            row.setAttribute('role', 'checkbox');
+            row.setAttribute('aria-checked', String(isSelected));
+            row.setAttribute('aria-label', folder.name);
             row.onclick = () => {
                 if (tlSelectedFolders.has(folder.path)) {
                     tlSelectedFolders.delete(folder.path);
@@ -209,6 +216,18 @@
                     tlSelectedFolders.add(folder.path);
                     checkbox.classList.add('checked');
                     checkbox.innerHTML = '<i class="fas fa-check"></i>';
+                }
+                row.setAttribute('aria-checked', String(tlSelectedFolders.has(folder.path)));
+            };
+            row.onkeydown = (e) => {
+                if (e.key === ' ' || e.key === 'Enter') {
+                    e.preventDefault();
+                    row.click();
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const rows = [...container.querySelectorAll('.tl-picker-row')];
+                    const next = rows[rows.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)];
+                    if (next) next.focus();
                 }
             };
 
@@ -275,6 +294,7 @@
         tlScanning = true;
         const seq = ++tlScanSeq;
         tlPendingYear = null;
+        tlFocusIndex = 0;
 
         const scrollEl = tlScrollContainer;
         const contentEl = tlContentEl;
@@ -601,6 +621,11 @@
         if (fragment.childElementCount > 0) {
             tlContentEl.appendChild(fragment);
         }
+        // Eén kaart in beeld is met Tab bereikbaar: die van het toetsenbord, anders de eerste
+        if (!tlContentEl.querySelector('.tl-photo-card[tabindex="0"]')) {
+            const first = tlContentEl.querySelector('.tl-photo-card');
+            if (first) first.tabIndex = 0;
+        }
     }
 
     function renderRowNode(rowIndex) {
@@ -644,6 +669,8 @@
         const card = document.createElement('div');
         card.className = 'tl-photo-card';
         card.setAttribute('data-index', index);
+        card.setAttribute('role', 'button');
+        card.tabIndex = index === tlFocusIndex ? 0 : -1;
 
         // Lazy image
         const img = document.createElement('img');
@@ -680,6 +707,7 @@
         dateLabel.className = 'tl-photo-date';
         dateLabel.textContent = dateStr;
         card.appendChild(dateLabel);
+        card.setAttribute('aria-label', `${file.name}, ${dateStr} ${timeStr}${file.type === 'video' ? ', video' : ''}`);
 
         // Click handler - open in viewer modal
         card.onclick = () => {
@@ -727,6 +755,110 @@
         setupSlider();
         updateSliderFromScroll();
     }
+
+    // ── Keyboard ──────────────────────────────────────────
+    // Arrows move between cards (up and down keep the column, across month headers),
+    // Home/End and PageUp/PageDown jump, Enter or space opens the viewer. The list is
+    // virtualized, so the target row is scrolled into view and drawn before it gets focus.
+
+    function layoutRowOf(index) {
+        let lo = 0, hi = tlLayoutRows.length - 1, found = -1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const row = tlLayoutRows[mid];
+            const first = row.type === 'row' ? row.rowFiles[0] : (tlGroups[row.groupIdx] || {}).startIdx;
+            if (first <= index) { found = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        // A header shares its first index with the row below it
+        while (found >= 0 && found < tlLayoutRows.length && tlLayoutRows[found].type !== 'row') found++;
+        return found;
+    }
+
+    function photoRowFrom(ri, step) {
+        for (let i = ri + step; i >= 0 && i < tlLayoutRows.length; i += step) {
+            if (tlLayoutRows[i].type === 'row') return i;
+        }
+        return -1;
+    }
+
+    function focusTimelineCard(index) {
+        if (!tlFiles.length || !tlScrollContainer) return;
+        index = Math.max(0, Math.min(tlFiles.length - 1, index));
+        const ri = layoutRowOf(index);
+        if (ri < 0) return;
+        const row = tlLayoutRows[ri];
+        const before = tlLayoutRows[ri - 1];
+        const top = before && before.type === 'header' ? before.top : row.top;
+        const view = tlScrollContainer.clientHeight;
+        const scroll = tlScrollContainer.scrollTop;
+        if (top < scroll) tlScrollContainer.scrollTop = top;
+        else if (row.top + row.height > scroll + view) tlScrollContainer.scrollTop = row.top + row.height - view;
+        renderVisibleRows();
+        updateSliderFromScroll();
+        updateCurrentDateLabel();
+        const old = tlContentEl.querySelector('.tl-photo-card[tabindex="0"]');
+        if (old) old.tabIndex = -1;
+        tlFocusIndex = index;
+        const card = tlContentEl.querySelector(`.tl-photo-card[data-index="${index}"]`);
+        if (card) {
+            card.tabIndex = 0;
+            card.focus({ preventScroll: true });
+        }
+    }
+
+    function onTimelineKeydown(e) {
+        const card = e.target.closest && e.target.closest('.tl-photo-card');
+        if (!card || e.altKey || e.ctrlKey || e.metaKey) return;
+        const index = Number(card.getAttribute('data-index'));
+        const ri = layoutRowOf(index);
+        const row = tlLayoutRows[ri];
+        const col = row ? index - row.rowFiles[0] : 0;
+        const rowsPerPage = Math.max(1, Math.floor(tlScrollContainer.clientHeight / ROW_HEIGHT) - 1);
+        const inRow = (target) => {
+            if (target < 0) return index;
+            const r = tlLayoutRows[target];
+            return Math.min(r.rowFiles[0] + col, r.rowFiles[r.rowFiles.length - 1]);
+        };
+        const rowsAway = (n) => {
+            let target = ri;
+            for (let i = 0; i < Math.abs(n); i++) {
+                const next = photoRowFrom(target, Math.sign(n));
+                if (next < 0) break;
+                target = next;
+            }
+            return inRow(target);
+        };
+        let next = null;
+        switch (e.key) {
+            case 'ArrowRight': next = index + 1; break;
+            case 'ArrowLeft': next = index - 1; break;
+            case 'ArrowDown': next = inRow(photoRowFrom(ri, 1)); break;
+            case 'ArrowUp': next = inRow(photoRowFrom(ri, -1)); break;
+            case 'PageDown': next = rowsAway(rowsPerPage); break;
+            case 'PageUp': next = rowsAway(-rowsPerPage); break;
+            case 'Home': next = 0; break;
+            case 'End': next = tlFiles.length - 1; break;
+            case 'Enter':
+            case ' ':
+                e.preventDefault();
+                card.click();
+                return;
+            default:
+                return;
+        }
+        e.preventDefault();
+        focusTimelineCard(next);
+    }
+
+    // Clicking a card (or Tab onto it) makes it the card the arrows go on from
+    document.addEventListener('focusin', (e) => {
+        const card = e.target.closest && e.target.closest('.tl-photo-card');
+        if (!card || !tlContentEl || !tlContentEl.contains(card)) return;
+        const old = tlContentEl.querySelector('.tl-photo-card[tabindex="0"]');
+        if (old && old !== card) old.tabIndex = -1;
+        card.tabIndex = 0;
+        tlFocusIndex = Number(card.getAttribute('data-index'));
+    });
 
     // ── Scroll Handler ────────────────────────────────────
     function onTimelineScroll() {

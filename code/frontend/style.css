@@ -24,6 +24,11 @@
     --text-tertiary: #555555;
     --border: #222222;
 
+    /* Tekst in accent- of waarschuwingskleur en sterkere randen (WCAG AA op de achtergrond) */
+    --accent-text: var(--accent);
+    --warning-text: var(--warning);
+    --border-strong: #555555;
+
     /* Namen die oudere regels gebruiken: verwijzen naar dezelfde kleuren */
     --primary: var(--accent);
     --color-primary: var(--accent);
@@ -59,7 +64,6 @@
     --text-tertiary: #999999;
     --border-color: #d0d0d0;
     --accent: #00aa2b;
-    /* Darker green for better contrast */
     --accent-rgb: 0, 170, 43;
     --accent-dim: #008822;
     --accent-glow: rgba(0, 170, 43, 0.2);
@@ -69,6 +73,11 @@
 
     /* Border adjustments */
     --border: #d0d0d0;
+
+    /* Tekst in accent- of waarschuwingskleur en sterkere randen (WCAG AA op de achtergrond) */
+    --accent-text: #00731d;
+    --warning-text: #8a5300;
+    --border-strong: #8a8a8a;
 }
 
 /* Auto (geen data-theme): volgt de systeeminstelling, ook live als die wisselt */
@@ -83,7 +92,6 @@
         --text-tertiary: #999999;
         --border-color: #d0d0d0;
         --accent: #00aa2b;
-        /* Darker green for better contrast */
         --accent-rgb: 0, 170, 43;
         --accent-dim: #008822;
         --accent-glow: rgba(0, 170, 43, 0.2);
@@ -93,6 +101,11 @@
 
         /* Border adjustments */
         --border: #d0d0d0;
+
+        /* Tekst in accent- of waarschuwingskleur en sterkere randen (WCAG AA op de achtergrond) */
+        --accent-text: #00731d;
+        --warning-text: #8a5300;
+        --border-strong: #8a8a8a;
     }
 }
 
@@ -116,6 +129,11 @@
     --text-tertiary: #555555;
 
     --border: #222222;
+
+    /* Tekst in accent- of waarschuwingskleur en sterkere randen (WCAG AA op de achtergrond) */
+    --accent-text: var(--accent);
+    --warning-text: var(--warning);
+    --border-strong: #555555;
 }
 
 /* ==================== BASE STYLES ==================== */
@@ -1904,6 +1922,10 @@ body::before {
     align-items: baseline;
     gap: var(--space-md);
     margin-bottom: var(--space-md);
+}
+
+.dup-restore-all {
+    margin-left: auto;
 }
 
 .dup-restore-title {
@@ -6512,6 +6534,48 @@ input:checked+.slider:before {
     border: 0;
 }
 
+/* Logo (herstarten) en icoonknoppen in de navigatie zijn echte knoppen */
+button.nav-brand {
+    background: none;
+    border: none;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 2px 4px;
+}
+
+.nav-icon-btn {
+    width: 30px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all var(--transition-fast);
+}
+
+.nav-icon-btn:hover,
+.nav-icon-btn.active {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.theme-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+button.otd-settings-icon {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    font-family: inherit;
+}
+
 /* ---------- Lege, mislukte en ladende stukken ---------- */
 
 .empty-state {
@@ -6632,4 +6696,404 @@ input:checked+.slider:before {
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+/* ---------- Vensters zoals het sneltoetsenoverzicht ---------- */
+
+.dv-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 35000;
+}
+
+.dv-overlay.active {
+    display: flex;
+}
+
+.dv-overlay-panel {
+    width: min(920px, 100%);
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+    padding: 20px 24px;
+    color: var(--text-primary);
+}
+
+.dv-overlay-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.shortcut-groups {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px 28px;
+}
+
+.shortcut-group h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent-text);
+    margin-bottom: 8px;
+}
+
+.shortcut-group dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 6px 12px;
+    align-items: baseline;
+}
+
+.shortcut-group dt {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+}
+
+.shortcut-group dd {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+kbd {
+    display: inline-block;
+    min-width: 22px;
+    padding: 1px 6px;
+    border: 1px solid var(--border-strong);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 11px;
+    text-align: center;
+}
+
+.shortcut-note {
+    margin-top: 16px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+/* ---------- Pagina's met een kop (Herstelcentrum, Instellingen) ---------- */
+
+.recovery-page,
+.settings-page {
+    width: 100%;
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.page-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+
+.page-title i {
+    color: var(--accent);
+    margin-right: 6px;
+}
+
+.page-subtitle {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 680px;
+}
+
+/* ---------- Herstelcentrum ---------- */
+
+.recovery-summary {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-bottom: 10px;
+    min-height: 1em;
+}
+
+.recovery-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.recovery-entry {
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 12px 14px;
+}
+
+.recovery-entry.is-blocked {
+    border-style: dashed;
+}
+
+.recovery-entry-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.recovery-icon {
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--bg-tertiary);
+    color: var(--accent);
+}
+
+.recovery-entry-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.recovery-entry-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.recovery-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent-text);
+    border: 1px solid var(--border-color);
+    padding: 1px 6px;
+    border-radius: 3px;
+}
+
+.recovery-entry-meta {
+    color: var(--text-secondary);
+    font-size: 11px;
+    margin-top: 2px;
+}
+
+.recovery-undo {
+    flex: none;
+}
+
+.recovery-status {
+    margin: 8px 0 0 44px;
+    font-size: 12px;
+}
+
+.recovery-status.blocked {
+    color: var(--warning-text);
+}
+
+.recovery-status.partial {
+    color: var(--text-secondary);
+}
+
+.recovery-details,
+.recovery-files {
+    margin: 8px 0 0 44px;
+}
+
+.recovery-details summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.recovery-details .recovery-files {
+    margin-left: 0;
+}
+
+.recovery-files {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.recovery-file {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    align-items: baseline;
+    font-size: 12px;
+}
+
+.recovery-file-name {
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.recovery-file-move {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.recovery-file-move i {
+    font-size: 10px;
+}
+
+.recovery-file-reason {
+    flex-basis: 100%;
+    color: var(--warning-text);
+    font-size: 11px;
+}
+
+.recovery-file-reason.note {
+    color: var(--text-secondary);
+}
+
+.recovery-note {
+    margin: 8px 0 0 44px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.recovery-more[hidden] {
+    display: none;
+}
+
+.recovery-more {
+    display: flex;
+    justify-content: center;
+    margin-top: 14px;
+}
+
+/* ---------- Instellingen ---------- */
+
+.settings-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.settings-section {
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 14px 16px;
+}
+
+.settings-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.settings-section-title i {
+    color: var(--accent);
+    width: 18px;
+}
+
+.settings-section-text {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+    margin-bottom: 10px;
+    max-width: 720px;
+}
+
+.settings-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.settings-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    align-items: center;
+    font-size: 12px;
+}
+
+.settings-row-label {
+    min-width: 200px;
+    color: var(--text-secondary);
+}
+
+.settings-row-value {
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.settings-choice-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.settings-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+.settings-choice:has(input:checked) {
+    border-color: var(--accent);
+    color: var(--accent-text);
+}
+
+.settings-choice input {
+    accent-color: var(--accent);
+}
+
+.settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+@media (max-width: 700px) {
+    .page-header {
+        flex-direction: column;
+    }
+
+    .recovery-status,
+    .recovery-details,
+    .recovery-files,
+    .recovery-note {
+        margin-left: 0;
+    }
+
+    .settings-row-label {
+        min-width: 0;
+    }
 }

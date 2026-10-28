@@ -72,9 +72,19 @@ function initTheme() {
     setTheme(saved, true);
 }
 
+const THEME_LABELS = { auto: 'Auto', light: 'Licht', dark: 'Donker' };
+const THEME_ORDER = ['auto', 'light', 'dark'];
+
+function currentTheme() {
+    let saved = null;
+    try { saved = localStorage.getItem('theme'); } catch (_) { /* geen opslag */ }
+    return THEME_ORDER.includes(saved) ? saved : 'auto';
+}
+
 function setTheme(theme, skipSave = false) {
+    if (!THEME_ORDER.includes(theme)) theme = 'auto';
     if (!skipSave) {
-        localStorage.setItem('theme', theme);
+        try { localStorage.setItem('theme', theme); } catch (_) { /* alleen voor deze sessie */ }
     }
 
     const html = document.documentElement;
@@ -85,25 +95,45 @@ function setTheme(theme, skipSave = false) {
         html.setAttribute('data-theme', theme);
     }
 
-    // Update UI
-    document.getElementById('theme-label').textContent =
-        theme === 'auto' ? 'Auto' : theme.charAt(0).toUpperCase() + theme.slice(1);
+    document.getElementById('theme-label').textContent = THEME_LABELS[theme];
 
-    // Update active state
-    document.querySelectorAll('.theme-option').forEach(opt => {
-        opt.classList.toggle('active', opt.dataset.theme === theme);
+    // Welke keuze actief is (ook voor schermlezers), in de navigatie en in Instellingen
+    document.querySelectorAll('.theme-option, [data-theme-choice]').forEach(opt => {
+        const value = opt.dataset.theme || opt.dataset.themeChoice;
+        opt.classList.toggle('active', value === theme);
+        if (opt.matches('[role="menuitemradio"]')) opt.setAttribute('aria-checked', String(value === theme));
+        if (opt.matches('input[type="radio"]')) opt.checked = value === theme;
     });
 
     closeThemeDropdown();
 }
 
-function toggleThemeDropdown() {
-    const dropdown = document.getElementById('theme-dropdown');
-    dropdown.classList.toggle('open');
+// Sneltoets t: Auto -> Licht -> Donker -> Auto
+function cycleTheme() {
+    const next = THEME_ORDER[(THEME_ORDER.indexOf(currentTheme()) + 1) % THEME_ORDER.length];
+    setTheme(next);
+    showToast('Thema', `Thema: ${THEME_LABELS[next]}`, 'info');
 }
 
-function closeThemeDropdown() {
-    document.getElementById('theme-dropdown').classList.remove('open');
+function toggleThemeDropdown() {
+    const dropdown = document.getElementById('theme-dropdown');
+    const open = !dropdown.classList.contains('open');
+    dropdown.classList.toggle('open', open);
+    document.getElementById('theme-button').setAttribute('aria-expanded', String(open));
+    if (open) {
+        // Met het toetsenbord geopend: meteen op de huidige keuze
+        const active = dropdown.querySelector('.theme-option.active') || dropdown.querySelector('.theme-option');
+        if (active) active.focus();
+    }
+}
+
+function closeThemeDropdown(returnFocus = false) {
+    const dropdown = document.getElementById('theme-dropdown');
+    const wasOpen = dropdown.classList.contains('open');
+    dropdown.classList.remove('open');
+    const button = document.getElementById('theme-button');
+    if (button) button.setAttribute('aria-expanded', 'false');
+    if (wasOpen && (returnFocus || dropdown.contains(document.activeElement)) && button) button.focus();
 }
 
 // Close dropdown when clicking outside
@@ -113,35 +143,52 @@ document.addEventListener('click', (e) => {
     }
 });
 
+// In het themamenu: pijltjes kiezen, Escape sluit (focus terug op de knop)
+document.addEventListener('keydown', (e) => {
+    const dropdown = document.getElementById('theme-dropdown');
+    if (!dropdown || !dropdown.classList.contains('open')) return;
+    const options = [...dropdown.querySelectorAll('.theme-option')];
+    const at = options.indexOf(document.activeElement);
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeThemeDropdown(true);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        options[(at + step + options.length) % options.length].focus();
+    } else if (e.key === 'Tab') {
+        closeThemeDropdown();
+    }
+}, true);
+
 // ==================== VIEW SWITCHING ====================
 
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings'];
+
+function currentMainView() {
+    return MAIN_VIEWS.find(v => {
+        const section = document.getElementById(`section-${v}`);
+        return section && section.classList.contains('active');
+    }) || 'home';
+}
+
 function switchMainView(view) {
-    // Update tabs
-    document.querySelectorAll('.nav-tab').forEach(tab => {
-        tab.classList.toggle('active', tab.dataset.view === view);
+    if (!MAIN_VIEWS.includes(view)) return;
+    // Update tabs (ook de tandwielknop van Instellingen)
+    document.querySelectorAll('.top-nav [data-view]').forEach(tab => {
+        const on = tab.dataset.view === view;
+        tab.classList.toggle('active', on);
+        if (on) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current');
     });
 
     // Update sections
-    document.getElementById('section-home').classList.toggle('active', view === 'home');
-    document.getElementById('section-home').classList.toggle('hidden', view !== 'home');
-
-    document.getElementById('section-viewer').classList.toggle('active', view === 'viewer');
-    document.getElementById('section-viewer').classList.toggle('hidden', view !== 'viewer');
-
-    document.getElementById('section-duplicates').classList.toggle('active', view === 'duplicates');
-    document.getElementById('section-duplicates').classList.toggle('hidden', view !== 'duplicates');
-
-    document.getElementById('section-spotify').classList.toggle('active', view === 'spotify');
-    document.getElementById('section-spotify').classList.toggle('hidden', view !== 'spotify');
-
-    document.getElementById('section-shows').classList.toggle('active', view === 'shows');
-    document.getElementById('section-shows').classList.toggle('hidden', view !== 'shows');
-
-    document.getElementById('section-keurer').classList.toggle('active', view === 'keurer');
-    document.getElementById('section-keurer').classList.toggle('hidden', view !== 'keurer');
-
-    document.getElementById('section-timeline').classList.toggle('active', view === 'timeline');
-    document.getElementById('section-timeline').classList.toggle('hidden', view !== 'timeline');
+    MAIN_VIEWS.forEach(v => {
+        const section = document.getElementById(`section-${v}`);
+        if (!section) return;
+        section.classList.toggle('active', v === view);
+        section.classList.toggle('hidden', v !== view);
+    });
 
     // Show/hide sidebar
     document.getElementById('sidebar').style.display = view === 'viewer' ? 'flex' : 'none';
@@ -168,6 +215,10 @@ function switchMainView(view) {
         if (typeof keurerInit === 'function') keurerInit();
     } else if (view === 'timeline') {
         if (typeof timelineInit === 'function') timelineInit();
+    } else if (view === 'recovery') {
+        if (typeof recoveryInit === 'function') recoveryInit();
+    } else if (view === 'settings') {
+        if (typeof settingsInit === 'function') settingsInit();
     }
 }
 
@@ -247,6 +298,7 @@ function renderShows(data) {
         hero.className = 'shows-hero';
         const cover = featured.files[0];
         hero.onclick = () => startShow(featured);
+        makeActivatable(hero, `Afspelen: ${featured.title}`);
 
         hero.innerHTML = html`
             <img src="${vaultFileUrl('thumb', cover.path)}" class="shows-hero-img">
@@ -280,6 +332,7 @@ function renderShows(data) {
             const card = document.createElement('div');
             card.className = 'show-card folder-card';
             card.onclick = () => playFolderShow(show);
+            makeActivatable(card, `Afspelen: ${show.title}`);
 
             let thumbUrl = '';
             if (show.preview) {
@@ -514,6 +567,7 @@ function toggleView(view) {
 
     document.querySelectorAll('.view-toggle-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === view);
+        btn.setAttribute('aria-pressed', String(btn.dataset.view === view));
     });
 
     const grid = document.getElementById('media-grid');
@@ -560,7 +614,12 @@ function renderMediaGrid(keepCount = false) {
     // Mappen eerst, dan de bestanden
     gridItems = filteredMedia.filter(item => item.type === 'folder')
         .concat(filteredMedia.filter(item => item.type !== 'folder'));
+    if (gridFocusIndex >= gridItems.length) gridFocusIndex = 0;
     renderMoreGridCards(Math.max(GRID_CHUNK, previous));
+    if (!grid.querySelector('[data-grid-index][tabindex="0"]')) {
+        const first = grid.querySelector('[data-grid-index]');
+        if (first) first.tabIndex = 0;
+    }
     observeGridEnd(grid);
 }
 
@@ -570,11 +629,94 @@ function renderMoreGridCards(count = GRID_CHUNK) {
     const fragment = document.createDocumentFragment();
     for (let i = gridRendered; i < end; i++) {
         const item = gridItems[i];
-        fragment.appendChild(item.type === 'folder' ? createFolderCard(item) : createMediaCard(item));
+        const card = item.type === 'folder' ? createFolderCard(item) : createMediaCard(item);
+        // Eén kaart is met Tab bereikbaar (de laatst gekozen); de pijltjes gaan naar de rest
+        card.dataset.gridIndex = String(i);
+        card.tabIndex = i === gridFocusIndex ? 0 : -1;
+        fragment.appendChild(card);
     }
     gridRendered = end;
     grid.appendChild(fragment);
 }
+
+// ==================== RASTER MET HET TOETSENBORD ====================
+// Pijltjes bewegen door de kaarten (ook naar kaarten die nog getekend moeten worden),
+// Home/End naar het begin of eind, Enter of spatie opent (een map of de viewer) en
+// Backspace gaat een map omhoog.
+
+let gridFocusIndex = 0;
+
+function gridColumns(grid) {
+    const cards = grid.querySelectorAll('.media-card');
+    if (cards.length < 2) return 1;
+    const top = cards[0].offsetTop;
+    let cols = 0;
+    for (const card of cards) {
+        if (card.offsetTop !== top) break;
+        cols++;
+    }
+    return Math.max(1, cols);
+}
+
+function focusGridCard(index) {
+    if (!gridItems.length) return;
+    index = Math.max(0, Math.min(gridItems.length - 1, index));
+    if (index >= gridRendered) renderMoreGridCards(index - gridRendered + GRID_CHUNK);
+    const grid = document.getElementById('media-grid');
+    const card = grid.querySelector(`[data-grid-index="${index}"]`);
+    if (!card) return;
+    const previous = grid.querySelector('[data-grid-index][tabindex="0"]');
+    if (previous && previous !== card) previous.tabIndex = -1;
+    card.tabIndex = 0;
+    gridFocusIndex = index;
+    card.focus({ preventScroll: true });
+    card.scrollIntoView({ block: 'nearest' });
+}
+
+function parentFolder(path) {
+    const at = (path || '').lastIndexOf('/');
+    return at > 0 ? path.slice(0, at) : '';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const grid = document.getElementById('media-grid');
+    grid.addEventListener('keydown', (e) => {
+        const card = e.target.closest('[data-grid-index]');
+        if (!card || e.altKey || e.ctrlKey || e.metaKey) return;
+        const index = Number(card.dataset.gridIndex);
+        const cols = gridColumns(grid);
+        const rows = Math.max(1, Math.floor(window.innerHeight / Math.max(1, card.offsetHeight)) - 1);
+        const moves = {
+            ArrowRight: index + 1, ArrowLeft: index - 1,
+            ArrowDown: index + cols, ArrowUp: index - cols,
+            Home: 0, End: gridItems.length - 1,
+            PageDown: index + cols * rows, PageUp: index - cols * rows,
+        };
+        if (e.key in moves) {
+            e.preventDefault();
+            focusGridCard(moves[e.key]);
+        } else if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            card.click();
+        } else if (e.key === 'Backspace' && currentFolder) {
+            const parent = parentFolder(currentFolder);
+            const root = folderTree.length ? parentFolder(folderTree[0].path) : '';
+            if (parent && parent.length > root.length) {
+                e.preventDefault();
+                selectFolder(parent);
+            }
+        }
+    });
+    // Klikken of Tab op een kaart maakt hem de kaart van waaruit de pijltjes verdergaan
+    grid.addEventListener('focusin', (e) => {
+        const card = e.target.closest('[data-grid-index]');
+        if (!card) return;
+        const previous = grid.querySelector('[data-grid-index][tabindex="0"]');
+        if (previous && previous !== card) previous.tabIndex = -1;
+        card.tabIndex = 0;
+        gridFocusIndex = Number(card.dataset.gridIndex);
+    });
+});
 
 function observeGridEnd(grid) {
     let sentinel = document.getElementById('media-grid-sentinel');
@@ -606,6 +748,8 @@ function createFolderCard(folder) {
     const card = document.createElement('div');
     card.className = 'media-card folder-card';
     card.onclick = () => selectFolder(folder.path);
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `Map ${folder.name}`);
 
     // Add filename for list view
     card.setAttribute('data-filename', folder.name);
@@ -661,6 +805,8 @@ function createMediaCard(file) {
     const card = document.createElement('div');
     card.className = 'media-card';
     card.onclick = () => openMediaModal(file);
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', file.name);
 
     // Thumbnail
     const img = document.createElement('img');
@@ -729,6 +875,7 @@ function createMediaCard(file) {
     infoIcon.className = 'media-info-icon';
     infoIcon.textContent = 'i';
     infoIcon.title = file.name;
+    infoIcon.setAttribute('aria-hidden', 'true');
     infoIcon.onclick = (e) => {
         e.stopPropagation();
         openMediaModal(file);
@@ -1289,7 +1436,7 @@ async function confirmMoveFile() {
         return;
     }
 
-    showToast('Moved', moved.message || 'File successfully moved', 'success');
+    showToast('Verplaatst', `${moved.message || 'Bestand verplaatst'}. Terugzetten kan in het Herstelcentrum.`, 'success');
     btn.replaceChildren(...originalContent);
     removeFromFilesView(file);
 
@@ -1418,6 +1565,16 @@ document.addEventListener('keydown', (e) => {
         && e.target.closest('#modal-viewer')) return;
     if (e.key === 'ArrowLeft') prevFile();
     if (e.key === 'ArrowRight') nextFile();
+    // Zoomen en de knoppen onderin, zonder muis (niet met Cmd/Ctrl: dat is de browserzoom)
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && !(tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter'))) {
+        const file = viewerFile();
+        const isImage = file && file.type !== 'video' && file.type !== 'audio' && file.type !== 'other';
+        if ((e.key === '+' || e.key === '=') && isImage) zoomIn();
+        else if ((e.key === '-' || e.key === '_') && isImage) zoomOut();
+        else if (e.key === '0' && isImage) fitToScreen();
+        else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); openMoveFileModal(); }
+        else if (e.key === 'f' || e.key === 'F') openInFinder();
+    }
     if (e.key === 'Escape') {
         // Alleen de viewer sluiten, niet ook de chat of slideshow eronder
         e.stopImmediatePropagation();
@@ -1523,8 +1680,7 @@ function setVaultAvailable(available, message) {
 // Alles wat zonder archief leeg of met een fout bleef, opnieuw laden
 function reloadAfterVaultReturn() {
     loadFolders();
-    const active = document.querySelector('.nav-tab.active');
-    const view = active ? active.dataset.view : 'home';
+    const view = currentMainView();
     if (view === 'home') fetchHomeWidgets();
     else if (view === 'viewer' && currentFolder) loadMedia(currentFolder);
     else if (view === 'shows') loadShows();
@@ -1532,6 +1688,8 @@ function reloadAfterVaultReturn() {
     else if (view === 'timeline' && typeof timelineVaultReturned === 'function') timelineVaultReturned();
     else if (view === 'keurer' && typeof keurerVaultReturned === 'function') keurerVaultReturned();
     else if (view === 'duplicates' && typeof duplicatesInit === 'function') duplicatesInit();
+    else if (view === 'recovery' && typeof recoveryLoad === 'function') recoveryLoad();
+    else if (view === 'settings' && typeof settingsRender === 'function') settingsRender();
     if (typeof jobsLibraryRefresh === 'function') jobsLibraryRefresh();
     loadChatModels();
 }
