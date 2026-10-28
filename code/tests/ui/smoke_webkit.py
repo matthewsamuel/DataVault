@@ -10,7 +10,9 @@ It also drives the app with the keyboard (tabs, the shortcut overview, the Files
 viewer, Tab staying inside every window, focus going back where it was, Keurer keys that never
 act from the theme menu or the search field), moves a file and puts it back from the
 Herstelcentrum, checks Instellingen and the storage window, and runs a11y_checks.js on every screen in the light and the dark theme:
-all visible text must reach WCAG AA contrast and every control must have a name.
+all visible text must reach WCAG AA contrast and every control must have a name. On the way
+it saves a screenshot of every screen in both themes (for a look at the design), in a temp
+folder it prints at the end, or in $DATAVAULT_SMOKE_SHOTS when that is set.
 
 Not collected by pytest (the name does not start with test_). Run it from the repo root
 with a Python that has Playwright (`pip install playwright && playwright install webkit`):
@@ -364,12 +366,16 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"storage: the list is cut off or narrow ({storage})")
             step("storage: close", lambda: page.keyboard.press("Escape"), 0.3)
 
-            # Every screen in both themes: all visible text reaches WCAG AA, every control has a name
+            # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
+            # and a screenshot to look at
+            shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
+            shots.mkdir(parents=True, exist_ok=True)
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
                 for view in VIEWS:
                     page.evaluate(f"switchMainView('{view}')")
                     page.wait_for_timeout(700)
+                    page.screenshot(path=str(shots / f"{view}_{theme}.png"))
                     page.add_script_tag(path=str(A11Y_CHECKS))
                     for fail in page.evaluate("__contrastFailures()"):
                         problems.append(f"contrast {theme} {view}: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
@@ -377,6 +383,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                         for control in page.evaluate("__unnamedControls()"):
                             problems.append(f"unnamed control on {view}: {control}")
             print(f"  ok      contrast and names checked on {len(VIEWS)} screens in 2 themes")
+            print(f"          screenshots: {shots}")
             page.evaluate("setTheme('auto')")
             page.evaluate("switchMainView('home')")
 
