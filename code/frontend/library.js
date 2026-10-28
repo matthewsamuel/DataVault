@@ -21,9 +21,9 @@
     const GAP = 12;
     const PRELOAD_ROWS = 3;
     const OTD_PER_YEAR = 60;
-    const FILTER_KEYS = ['kind', 'ext', 'date_from', 'date_to', 'year', 'month', 'period', 'folder', 'recursive',
-        'camera', 'camera_contains', 'has_gps', 'min_rating', 'keurer', 'orientation', 'capture_date'];
-    const LIST_KEYS = ['kind', 'ext'];
+    const FILTER_KEYS = ['kind', 'ext', 'date_from', 'date_to', 'year', 'month', 'period', 'folder', 'folders',
+        'recursive', 'camera', 'camera_contains', 'has_gps', 'min_rating', 'keurer', 'orientation', 'capture_date'];
+    const LIST_KEYS = ['kind', 'ext', 'folders'];
     const DEFAULT_SORT = '-taken';
     const SORTS = [
         ['-taken', 'Nieuwste eerst'], ['taken', 'Oudste eerst'], ['name', 'Naam (A-Z)'], ['-name', 'Naam (Z-A)'],
@@ -454,7 +454,10 @@
         const spec = { ...state.spec };
         if (value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length)) delete spec[key];
         else spec[key] = value;
-        if (key === 'folder' && !spec.folder) delete spec.recursive;
+        if (key === 'folder') {
+            delete spec.folders;        // één map of de mappen van 'op deze dag', nooit allebei
+            if (!spec.folder) delete spec.recursive;
+        }
         state.spec = spec;
         changed();
     }
@@ -566,10 +569,13 @@
         if (spec.year && spec.month) out.push(['year', `${MONTHS[spec.month - 1]} ${spec.year}`]);
         else if (spec.year) out.push(['year', String(spec.year)]);
         if (spec.month && !spec.year) out.push(['month', `Elke ${MONTHS[spec.month - 1]}`]);
-        if (spec.date_from && spec.date_to) out.push(['date_from', `${fmt(spec.date_from)} – ${fmt(spec.date_to)}`]);
+        if (spec.date_from && spec.date_to) out.push(['date_from', spec.date_from === spec.date_to ? fmt(spec.date_from) : `${fmt(spec.date_from)} – ${fmt(spec.date_to)}`]);
         else if (spec.date_from) out.push(['date_from', `Vanaf ${fmt(spec.date_from)}`]);
         else if (spec.date_to) out.push(['date_to', `Tot en met ${fmt(spec.date_to)}`]);
-        if (spec.folder) out.push(['folder', displayPath(folderAbs(spec.folder), 36) + (spec.recursive === false ? ' (zonder submappen)' : '')]);
+        const flat = spec.recursive === false ? ' (zonder submappen)' : '';
+        if (spec.folder) out.push(['folder', displayPath(folderAbs(spec.folder), 36) + flat]);
+        if (spec.folders && spec.folders.length === 1) out.push(['folders', displayPath(folderAbs(spec.folders[0]), 36) + flat]);
+        else if (spec.folders) out.push(['folders', `${spec.folders.length} mappen${flat}`]);
         if (spec.camera) out.push(['camera', spec.camera]);
         if (spec.camera_contains) out.push(['camera_contains', `Camera met '${spec.camera_contains}'`]);
         if (spec.ext) out.push(['ext', spec.ext.join(', ')]);
@@ -594,9 +600,14 @@
                     delete spec[key];
                     if (key === 'year') delete spec.month;
                     if (key === 'date_from' || key === 'date_to') { delete spec.date_from; delete spec.date_to; state.customRange = false; }
-                    if (key === 'folder') delete spec.recursive;
+                    if (key === 'folder' || key === 'folders') delete spec.recursive;
                     state.spec = spec;
                     changed();
+                    // Verder bij het volgende label (of het vorige), anders bij het aantal
+                    const left = chips.querySelectorAll('.chip-remove');
+                    const next = left[Math.min(at, left.length - 1)];
+                    if (next) next.focus();
+                    else $('albums-title').focus();
                 },
             }, createEl('i', { class: 'fas fa-xmark', 'aria-hidden': 'true' })))));
         $('albums-clear').hidden = labels.length === 0;
@@ -679,6 +690,7 @@
     window.albumsConfirmFolder = function () {
         if (!pickedFolder) return;
         const spec = { ...state.spec, folder: folderRel(pickedFolder) };
+        delete spec.folders;
         if ($('albums-folder-sub').checked) delete spec.recursive; else spec.recursive = false;
         albumsCloseFolderPicker();
         state.spec = spec;
@@ -1275,9 +1287,11 @@
                         createEl('span', { text: yearsAgo(group.years_ago) }),
                         createEl('span', { class: 'albums-otd-year-number tabular', text: String(group.year) })),
                     createEl('span', { class: 'albums-otd-year-meta', text: parts.join(' · ') }),
+                    // Precies deze N: de server geeft per jaar het filter mee (met de mappen van Home,
+                    // alleen echte opnamedatums, en 29 februari bij 28 februari in een gewoon jaar)
                     group.total > group.items.length ? createEl('button', {
                         type: 'button', class: 'btn btn-ghost btn-sm',
-                        onClick: () => albumsShow(null, { kind: ['photo', 'video'], date_from: realDay, date_to: realDay }, 'taken'),
+                        onClick: () => { albumsShow(null, group.filters || { kind: ['photo', 'video'], capture_date: 'known', date_from: realDay, date_to: realDay }, 'taken'); $('albums-title').focus(); },
                     }, `Alle ${formatNumberNl(group.total)} bekijken`, createEl('i', { class: 'fas fa-arrow-right', 'aria-hidden': 'true' })) : null),
                 grid);
         });
@@ -1301,15 +1315,28 @@
         else if (e.key === 'ArrowLeft') next = tiles[at - 1];
         else if (e.key === 'Home') next = tiles[0];
         else if (e.key === 'End') next = tiles[tiles.length - 1];
-        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        else if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp'].includes(e.key)) {
             const box = tile.getBoundingClientRect();
-            const down = e.key === 'ArrowDown';
-            const candidates = tiles.map(t => [t, t.getBoundingClientRect()])
-                .filter(([, b]) => down ? b.top > box.top + 2 : b.top < box.top - 2);
+            const down = e.key === 'ArrowDown' || e.key === 'PageDown';
+            // PageUp/PageDown: ongeveer een scherm verder (minstens één rij), op dezelfde plek in de rij
+            const page = e.key.startsWith('Page') ? Math.max(box.height, window.innerHeight * 0.8) : 0;
+            let candidates = tiles.map(t => [t, t.getBoundingClientRect()])
+                .filter(([, b]) => down ? b.top > box.top + 2 + Math.max(0, page - box.height) : b.top < box.top - 2 - Math.max(0, page - box.height));
+            if (!candidates.length && page) {
+                // Voorbij het eind of het begin: de laatste of eerste rij
+                candidates = tiles.map(t => [t, t.getBoundingClientRect()])
+                    .filter(([, b]) => down ? b.top > box.top + 2 : b.top < box.top - 2);
+                if (candidates.length) {
+                    const edge = down ? Math.max(...candidates.map(([, b]) => b.top)) : Math.min(...candidates.map(([, b]) => b.top));
+                    candidates = candidates.filter(([, b]) => Math.abs(b.top - edge) < 2);
+                }
+            }
             if (candidates.length) {
                 const rowTop = down ? Math.min(...candidates.map(([, b]) => b.top)) : Math.max(...candidates.map(([, b]) => b.top));
                 const row = candidates.filter(([, b]) => Math.abs(b.top - rowTop) < 2);
                 next = row.reduce((best, cur) => Math.abs(cur[1].left - box.left) < Math.abs(best[1].left - box.left) ? cur : best)[0];
+            } else if (page) {
+                next = down ? tiles[tiles.length - 1] : tiles[0];    // al op de bovenste of onderste rij, zoals in het raster
             }
         } else if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -1372,6 +1399,7 @@
             [['←', '→', '↑', '↓'], 'Door de foto\'s'],
             [['Enter'], 'Foto openen in de viewer'],
             [['Home', 'End'], 'Naar de eerste of laatste foto'],
+            [['PageUp', 'PageDown'], 'Een scherm terug of verder (ook in Op deze dag)'],
         ]);
     }
 })();
