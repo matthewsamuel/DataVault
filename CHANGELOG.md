@@ -248,9 +248,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Lukt het vastleggen van een verplaatsing in de database niet, dan zet de app het bestand meteen
   terug, zodat er nooit een bestand in RAW_DUPLICATES belandt zonder dat het terug te zetten is.
 - Een verborgen kopie (naam met een punt ervoor, in een verborgen map, of met het Finder-kenmerk
-  "verborgen") mag nooit blijven staan terwijl een zichtbare kopie wordt weggezet. De app biedt
-  dat zelf al niet aan, maar nu weigert ook de server zo'n verzoek ("De kopie die blijft is
-  verborgen"). Anders zou de enige overgebleven kopie er een zijn die Finder en de app niet tonen.
+  "verborgen") mag nooit blijven staan terwijl een zichtbare kopie wordt weggezet. De server
+  weigert zo'n verzoek ("De kopie die blijft is verborgen"), en in het duplicatenscherm kun je
+  zo'n kopie niet meer als blijvende kopie aanklikken: je krijgt dan meteen een melding, in
+  plaats van pas na het opruimen "0 verplaatst". Anders zou de enige overgebleven kopie er een zijn die Finder en de app niet tonen.
 - Is de schijf met het archief losgekoppeld, dan antwoorden Herstellen, terugzetten en de
   andere onderdelen die de database gebruiken (zoals de Keurer-geschiedenis) nu met
   "Archief niet bereikbaar (schijf losgekoppeld?)" in plaats van een onduidelijke serverfout.
@@ -277,6 +278,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   (ook als er geen kopie meer in staat), en je kunt meteen een andere map kiezen.
 - Klik op een kopie om juist die te bewaren; zo'n groep is gemarkeerd als "zelf gekozen" en
   met één klik terug te zetten naar de regel.
+- Breekt het opruimen af door een fout, dan zegt de melding nu dat je onder Herstellen ziet wat
+  al verplaatst is, in plaats van alleen een (mogelijk te laag) aantal.
 - "Vergelijk" toont de kopie die blijft en een kopie die verplaatst wordt naast elkaar, met
   "Bewaar rechter kopie" en "Ruim deze groep op".
 - "Alles opruimen" en "Ruim op" per groep vragen eerst om bevestiging in een venster dat

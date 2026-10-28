@@ -235,11 +235,19 @@ function ruleKeeper(group) {
     return best;
 }
 
+// Een verborgen kopie blijft nooit staan zolang er een zichtbare is: de server weigert dat ook,
+// want dan zou de enige overgebleven kopie er een zijn die Finder en de app niet tonen
+function canKeep(group, index) {
+    return !group.copies[index].hidden || group.copies.every(c => c.hidden);
+}
+
+const HIDDEN_KEEP_REFUSED = 'Een verborgen kopie kan niet de enige blijvende kopie zijn; kies een zichtbare kopie.';
+
 function keeperIndex(group) {
     const chosen = dupState.overrides.get(group.id);
     if (chosen) {
         const i = group.copies.findIndex(c => c.path === chosen);
-        if (i >= 0) return i;
+        if (i >= 0 && canKeep(group, i)) return i;
     }
     return ruleKeeper(group);
 }
@@ -303,6 +311,10 @@ function relativeToScan(path) {
 }
 
 function chooseCopy(group, index) {
+    if (!canKeep(group, index)) {
+        showToast('Verborgen kopie', HIDDEN_KEEP_REFUSED, 'warning');
+        return;
+    }
     if (index === ruleKeeper(group)) dupState.overrides.delete(group.id);
     else dupState.overrides.set(group.id, group.copies[index].path);
     refreshAllGroups();
@@ -462,7 +474,6 @@ function createGroupCard(group) {
                 group.copies.map((copy, index) => createEl('button', {
                     class: 'dup-copy',
                     dataset: { index: String(index) },
-                    title: `${copy.path}\nKlik om deze kopie te bewaren`,
                     onClick: () => chooseCopy(group, index),
                 },
                     createEl('span', { class: 'dup-copy-badge' }),
@@ -482,6 +493,10 @@ function updateGroupCard(card, group) {
         row.classList.toggle('keep', keeps);
         row.classList.toggle('move', !keeps);
         row.setAttribute('aria-pressed', keeps ? 'true' : 'false');
+        const keepable = canKeep(group, index);
+        row.classList.toggle('locked', !keepable);
+        row.setAttribute('aria-disabled', keepable ? 'false' : 'true');
+        row.title = `${copy.path}\n${keepable ? 'Klik om deze kopie te bewaren' : HIDDEN_KEEP_REFUSED}`;
         row.querySelector('.dup-copy-badge').textContent = keeps ? 'Blijft' : 'Naar RAW_DUPLICATES';
         const failure = dupState.failures.get(copy.path);
         row.querySelector('.dup-copy-error').textContent = failure ? `Niet verplaatst: ${failure}` : '';
@@ -521,6 +536,9 @@ function openComparisonModal(group) {
     setComparisonMedia('original', group.copies[keep], isVideo || isAudio);
     setComparisonMedia('duplicate', group.copies[other], isVideo || isAudio);
     currentComparisonGroup.compared = other;
+    const swap = document.getElementById('btn-comparison-swap');
+    swap.disabled = !canKeep(group, other);
+    swap.title = swap.disabled ? HIDDEN_KEEP_REFUSED : '';
 
     document.getElementById('btn-confirm-delete').textContent =
         `Ruim deze groep op (${group.copies.length - 1})`;
@@ -685,7 +703,8 @@ async function runCleanup() {
 
     const skipped = cleanup.files - moved.size - failed.size;
     if (requestError) {
-        showToast('Opruimen afgebroken', `${moved.size} verplaatst; daarna: ${requestError}`, 'error');
+        showToast('Opruimen afgebroken',
+            `${moved.size} zeker verplaatst; daarna: ${requestError}. Onder Herstellen staat wat al verplaatst is; scan daarna opnieuw.`, 'error');
     } else if (failed.size || skipped) {
         showToast('Deels opgeruimd',
             `${moved.size} verplaatst, ${failed.size} niet verplaatst` + (skipped > 0 ? `, ${skipped} niet geprobeerd (gestopt)` : '') +

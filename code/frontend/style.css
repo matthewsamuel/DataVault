@@ -2029,6 +2029,10 @@ body::before {
     color: var(--text-secondary);
 }
 
+.dup-copy.locked {
+    cursor: not-allowed;
+}
+
 .dup-copy-badge {
     justify-self: start;
     padding: 1px var(--space-sm);
