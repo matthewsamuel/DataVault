@@ -180,6 +180,316 @@ def test_hash_index_scales_without_comparing_every_pair():
     assert len(i) < 2000      # chance pairs of random hashes (C(63,11) / 2**63 * 5e9: a few hundred)
 
 
+# ---------- the job and the thresholds on the test vault ----------
+
+def test_the_test_vault_gives_the_burst_and_the_resized_copy_and_nothing_else(client, vault):
+    _index(client)
+    result = _run(client)
+    assert result["complete"] and result["errors"] == 0
+    assert result["analysed"] >= 18 and result["undecodable"] >= 2      # corrupt.jpg, empty.jpg, fake.heic
+    status = client.get("/api/series/status").json()
+    assert status["pending"] == 0 and status["analysed"] == result["analysed"]
+
+    for strictness in ("streng", "normaal", "ruim"):
+        listed = _series(client, strictness)
+        names = [_names(s) for s in listed["items"]]
+        # The resized, recompressed copy matches its original; the byte-identical copies of the
+        # original count as that one photo (they are the duplicates screen's work)
+        strand = _with(listed, "strand klein.jpg")
+        assert len(strand) == 1 and len(strand[0]["members"]) == 2, names
+        original = next(m for m in strand[0]["members"] if m["name"] != "strand klein.jpg")
+        assert original["name"] in {Path(p).name for p in [STRAND] + STRAND_COPIES}
+        assert len(original["copies"]) >= 2
+        assert strand[0]["kind"] == "near"
+        # The five shots of the burst are one series, a burst
+        burst = _with(listed, "burst_00.jpg")
+        assert len(burst) == 1 and _names(burst[0]) == [Path(p).name for p in BURST], names
+        assert burst[0]["kind"] == "burst"
+        # Nothing else: the other test photos are clearly different (other colours, other content)
+        assert len(listed["items"]) == 2, names
+        assert listed["total"] == 2
+
+
+def test_exact_copies_alone_are_no_series(client, vault):
+    """Two byte-identical files are the duplicates screen's work: no series here."""
+    (vault / KLEIN).rename(vault / "RAW/2022/klein.bak")    # outside the index: no media extension
+    _index(client)
+    _run(client)
+    listed = _series(client, "ruim")
+    assert not _with(listed, Path(STRAND).name) and not any(
+        n in {Path(p).name for p in STRAND_COPIES} for s in listed["items"] for n in _names(s))
+
+
+def test_bursts_need_the_same_camera_a_short_gap_and_the_same_folder(client, vault):
+    folder = vault / "RAW/2024/serie"
+    folder.mkdir(parents=True)
+    base = _scene(11)
+
+    def shot(name, shift, second, model="EOS R6"):
+        # The camera moves 30 px between shots: too different for a near-duplicate at
+        # 'streng' (phash ~10), alike enough for a burst
+        base.crop((shift, int(shift * .75), 800, 600)).resize((800, 600)).save(
+            folder / name, quality=90, exif=_exif(f"2024:03:01 10:00:{second:02d}", model=model))
+
+    for i, second in enumerate([0, 1, 2, 4, 12]):          # 12 s: too long after the shot before
+        shot(f"IMG_{i}.jpg", i * 30, second)
+    # Two shots a second apart that look as alike as IMG_0 and IMG_1, by two cameras
+    shot("A eigen camera.jpg", 300, 30)
+    shot("B andere camera.jpg", 330, 31, model="X-T4")
+    _index(client)
+    _run(client)
+    listed = [s for s in _series(client, "streng")["items"] if s["folder"] == str(folder)]
+    assert len(listed) == 1, [_names(s) for s in listed]
+    burst = listed[0]
+    assert burst["kind"] == "burst"
+    assert _names(burst) == ["IMG_0.jpg", "IMG_1.jpg", "IMG_2.jpg", "IMG_3.jpg"]
+    with sqlite3.connect(str(client.app.state.config.DB_PATH)) as conn:
+        gaps = [r[0] for r in conn.execute("SELECT gap FROM near_dup_pairs WHERE kind = 'burst'")]
+    assert gaps and max(gaps) <= near_dups.BURST_LOOKAHEAD * near_dups.BURST_GAP
+
+    # Spread over two folders, the shots are no burst any more (pairs are kept, the folder
+    # is checked when the series are made)
+    other = vault / "RAW/2024/elders"
+    other.mkdir()
+    for name in ("IMG_1.jpg", "IMG_3.jpg"):
+        os.rename(folder / name, other / name)   # test setup in the temp vault, like a move in Finder
+    _index(client)
+    _run(client)
+    assert not [s for s in _series(client, "streng")["items"] if s["folder"] in (str(folder), str(other), None)
+                and "IMG_0.jpg" in _names(s) + ["IMG_1.jpg"]]
+    assert not [s for s in _series(client, "streng")["items"] if {"IMG_1.jpg", "IMG_3.jpg"} & set(_names(s))]
+
+
+def test_strictness_changes_what_counts_as_alike(client, vault):
+    from PIL import ImageEnhance
+    folder = vault / "RAW/2024/varianten"
+    folder.mkdir(parents=True)
+    base = _scene(21)
+    w, h = base.size
+    base.save(folder / "origineel.jpg", quality=92)
+    base.resize((400, 300)).save(folder / "klein.jpg", quality=60)                  # phash 0
+    ImageEnhance.Brightness(base).enhance(1.08).save(folder / "lichter.jpg", quality=90)  # colour 11
+    base.crop((int(w * .04), int(h * .032), w, h)).resize((w, h)).save(folder / "bijgesneden.jpg", quality=90)  # phash 10
+    _scene(22).save(folder / "iets anders.jpg", quality=92)
+    _index(client)
+    _run(client)
+    found = {}
+    for strictness in ("streng", "normaal", "ruim"):
+        series = _with(_series(client, strictness), "origineel.jpg")
+        found[strictness] = _names(series[0]) if series else []
+    assert found == {
+        "streng": ["klein.jpg", "origineel.jpg"],
+        "normaal": ["klein.jpg", "lichter.jpg", "origineel.jpg"],
+        "ruim": ["bijgesneden.jpg", "klein.jpg", "lichter.jpg", "origineel.jpg"],
+    }
+    assert client.get("/api/series", params={"strictness": "heel"}).status_code == 400
+    assert client.get("/api/series", params={"sort": "kleur"}).status_code == 400
+
+
+# ---------- quality ----------
+
+def test_the_sharp_photo_beats_its_blurred_copy_and_the_order_is_fixed(client, vault):
+    folder = vault / "RAW/2024/scherp"
+    folder.mkdir(parents=True)
+    base = _scene(31, (1200, 900))
+    base.save(folder / "a scherp.jpg", quality=90)
+    base.filter(ImageFilter.GaussianBlur(2.5)).save(folder / "b wazig.jpg", quality=90)
+    base.resize((600, 450)).save(folder / "c klein.jpg", quality=90)
+    _index(client)
+    _run(client)
+    series = _with(_series(client, "normaal"), "a scherp.jpg")[0]
+    members = {m["name"]: m for m in series["members"]}
+    assert members["a scherp.jpg"]["best"] and series["best"] == members["a scherp.jpg"]["id"]
+    assert members["a scherp.jpg"]["score"] > members["b wazig.jpg"]["score"]
+    assert members["a scherp.jpg"]["breakdown"]["sharpness"] > members["b wazig.jpg"]["breakdown"]["sharpness"]
+    assert members["a scherp.jpg"]["breakdown"]["resolution"] > members["c klein.jpg"]["breakdown"]["resolution"]
+    assert set(members["a scherp.jpg"]["breakdown"]) == {"sharpness", "resolution", "exposure", "choice"}
+    again = _with(_series(client, "normaal"), "a scherp.jpg")[0]
+    assert again == series
+
+
+def test_quality_score_weighs_exposure_and_the_users_own_choice():
+    def member(i, **kw):
+        base = {"id": i, "path": f"/v/{i}.jpg", "size": 100, "width": 1000, "height": 750, "sharpness": 100.0,
+                "clip_low": 0.0, "clip_high": 0.0, "keurer_keep": False, "rating": None, "votes": 0}
+        return {**base, **kw}
+
+    members = [member(1, clip_high=0.2), member(2)]
+    near_dups.score_members(members)
+    assert members[1]["best"] and members[0]["breakdown"]["exposure"] < members[1]["breakdown"]["exposure"]
+
+    members = [member(1, sharpness=90.0), member(2, keurer_keep=True)]
+    near_dups.score_members(members)
+    assert members[1]["best"] and members[1]["breakdown"]["choice"] == 12
+
+    members = [member(1, rating=1200, votes=4), member(2)]
+    near_dups.score_members(members)
+    assert members[0]["best"] and members[0]["breakdown"]["choice"] == 8
+
+    # A tie: the bigger file, then the first path
+    members = [member(2), member(1)]
+    near_dups.score_members(members)
+    assert members[1]["best"]
+    members = [member(2), member(1, size=101)]
+    near_dups.score_members(members)
+    assert members[1]["best"]
+
+
+# ---------- the job: incremental, resumable, cancellable ----------
+
+def _phash_rows(config):
+    with sqlite3.connect(str(config.DB_PATH)) as conn:
+        return conn.execute("SELECT COUNT(*) FROM media_phash").fetchone()[0]
+
+
+def test_the_job_only_analyses_what_is_new_or_changed(client, vault, config, monkeypatch):
+    _index(client)
+    first = _run(client)
+    assert first["analysed"] > 0
+    calls = []
+    original = near_dups.analyse
+    monkeypatch.setattr(near_dups, "analyse", lambda path: calls.append(path) or original(path))
+    again = _run(client)
+    assert again["analysed"] == 0 and again["undecodable"] == 0 and calls == []
+    # Undecodable files are not tried again either (they give the same answer every time)
+    assert client.get("/api/series/status").json()["pending"] == 0
+
+    # One new photo and one edited in place: only those two are read
+    _scene(41).save(vault / "RAW/2024 nieuw.jpg", quality=90)
+    edited = vault / "RAW/2019/zomer vakantie/IMG_0002.JPG"
+    _scene(42).save(edited, quality=90)
+    _index(client, full=True)
+    assert client.get("/api/series/status").json()["pending"] == 2
+    third = _run(client)
+    assert third["analysed"] == 2 and sorted(Path(p).name for p in calls) == ["2024 nieuw.jpg", "IMG_0002.JPG"]
+    # The vault's series did not change through this
+    assert len(_series(client)["items"]) == 2
+
+
+@pytest.mark.parametrize("how", ["pause", "cancel"])
+def test_a_stopped_run_keeps_what_it_did_and_the_next_one_finishes(client, config, monkeypatch, how):
+    monkeypatch.setattr(near_dups, "BATCH", 3)
+    monkeypatch.setattr(near_dups, "ANALYSE_WORKERS", 1)
+    _index(client)
+    original = near_dups.analyse
+    calls = []
+    job_id = {}
+
+    def counted(path):
+        calls.append(path)
+        if len(calls) == 7 and job_id:
+            (_manager().pause if how == "pause" else _manager().cancel)(job_id["id"])
+        return original(path)
+
+    monkeypatch.setattr(near_dups, "analyse", counted)
+    r = client.post("/api/jobs", json={"type": "phash"})
+    job_id["id"] = r.json()["job"]["id"]
+    job = _manager().wait(job_id["id"], timeout=60)
+    assert job["status"] == ("paused" if how == "pause" else "cancelled"), job
+    stored = _phash_rows(config)
+    assert 0 < stored < 20
+    before = len(calls)
+    if how == "pause":
+        _manager().resume(job_id["id"])
+        job = _manager().wait(job_id["id"], statuses=("queued", "running"), timeout=60)
+        assert job["status"] == "done", job
+        result = client.get(f"/api/jobs/{job_id['id']}/result").json()["result"]
+    else:
+        result = _run(client)
+    # What the stopped run wrote is not read again (at most the one photo that was underway)
+    assert len(calls) - before <= result["analysed"] + result["undecodable"] + 1
+    assert len(set(calls)) >= len(calls) - 2
+    status = client.get("/api/series/status").json()
+    assert status["pending"] == 0
+    assert len(_series(client)["items"]) == 2
+
+
+def test_the_job_waits_for_the_index_and_waits_for_an_unplugged_vault(client, vault, config, monkeypatch):
+    r = client.post("/api/jobs", json={"type": "phash"})
+    assert r.status_code == 409 and "bibliotheek" in r.text.lower()
+    _index(client)
+
+    moved_away = vault.parent / "vault_unplugged"
+    original = near_dups.analyse
+    state = {"n": 0}
+
+    def unplug_once(path):
+        state["n"] += 1
+        if state["n"] == 3:
+            os.rename(vault, moved_away)      # the temp vault 'unplugged'
+        return original(path)
+
+    monkeypatch.setattr(near_dups, "analyse", unplug_once)
+    monkeypatch.setattr(near_dups, "ANALYSE_WORKERS", 1)
+    job = client.post("/api/jobs", json={"type": "phash"}).json()["job"]
+    waiting = _manager().wait(job["id"], statuses=("queued", "running"), timeout=60)
+    assert waiting["status"] == "waiting_for_vault", waiting
+    os.rename(moved_away, vault)
+    done = _manager().wait(job["id"], statuses=("queued", "running", "waiting_for_vault"), timeout=60)
+    assert done["status"] == "done", done
+    assert client.get("/api/series/status").json()["pending"] == 0
+    assert len(_series(client)["items"]) == 2
+
+
+def test_rows_of_removed_files_are_cleaned_up_with_the_index(client, vault, config):
+    _index(client)
+    _run(client)
+    with sqlite3.connect(str(config.DB_PATH)) as conn:
+        klein_id = conn.execute("SELECT id FROM media WHERE name = 'strand klein.jpg'").fetchone()[0]
+    (vault / KLEIN).rename(vault / "RAW/2022/bursts/klein.weg")   # no longer media: gone for the index
+    _index(client)
+    _index(client)          # the second pass removes rows that stayed missing
+    with sqlite3.connect(str(config.DB_PATH)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM media_phash WHERE media_id = ?", (klein_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM near_dup_pairs WHERE a = ?1 OR b = ?1", (klein_id,)).fetchone()[0] == 0
+    assert not _with(_series(client), Path(STRAND).name)
+
+
+def test_keep_all_hides_a_series_until_it_changes_and_reset_shows_it_again(client, vault):
+    _index(client)
+    _run(client)
+    burst = _with(_series(client), "burst_00.jpg")[0]
+    ids = [m["id"] for m in burst["members"]]
+    assert client.post("/api/series/keep-all", json={"members": ids}).status_code == 200
+    assert not _with(_series(client), "burst_00.jpg")
+    assert all((client.app.state.config.VAULT_ROOT / rel).exists() for rel in BURST)   # nothing moved
+    assert client.get("/api/series/status").json()["reviewed"] == 1
+    # A sixth shot joins the burst: it is a different series now and shows up again
+    Image.open(client.app.state.config.VAULT_ROOT / BURST[4]).save(
+        client.app.state.config.VAULT_ROOT / "RAW/2022/bursts/burst_05.jpg", quality=85,
+        exif=Image.open(client.app.state.config.VAULT_ROOT / BURST[4]).getexif())
+    _index(client)
+    _run(client)
+    assert len(_with(_series(client), "burst_00.jpg")[0]["members"]) == 6
+    assert client.post("/api/series/keep-all", json={"members": [ids[0], 99999]}).status_code == 409
+    r = client.post("/api/series/reviews/reset")
+    assert r.status_code == 200 and r.json()["shown_again"] == 1
+    assert client.get("/api/series/status").json()["reviewed"] == 0
+
+
+def test_series_are_paged_and_sorted(client, vault):
+    folder = vault / "RAW/2024/veel"
+    folder.mkdir(parents=True)
+    for n in range(4):
+        base = _scene(100 + n)
+        for k in range(n + 2):          # series of 2, 3, 4 and 5 photos
+            base.resize((800 - 40 * k, 600 - 30 * k)).save(folder / f"s{n}_{k}.jpg", quality=90 - k)
+    _index(client)
+    _run(client)
+    first = client.get("/api/series", params={"limit": 2}).json()
+    assert first["total"] == 6 and first["next_offset"] == 2 and len(first["items"]) == 2
+    sizes = [s["count"] for s in first["items"]]
+    rest = client.get("/api/series", params={"limit": 50, "offset": 2}).json()
+    assert rest["next_offset"] is None
+    sizes += [s["count"] for s in rest["items"]]
+    assert sizes == sorted(sizes, reverse=True) and sizes[:2] == [5, 5]
+    recent = client.get("/api/series", params={"sort": "recent", "limit": 50}).json()["items"]
+    taken = [s["taken"] for s in recent]
+    assert taken == sorted(taken, reverse=True)
+    assert client.get("/api/series", params={"limit": 999}).json()["limit"] == 50
+    assert client.get("/api/series", params={"offset": -1}).status_code == 422
+
+
 # ---------- migration ----------
 
 def test_migration_30_adds_the_tables_and_keeps_every_user_row(tmp_path, monkeypatch):

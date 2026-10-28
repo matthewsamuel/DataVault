@@ -7,6 +7,8 @@ hashing     fill the hash cache for a folder, so a later duplicate scan only rea
             what changed
 thumbnails  make the missing thumbnails of a folder (or the whole vault) ahead of time
 index       bring the media index (backend/media_index.py) up to date with the disk
+phash       fingerprint every photo of the index and find near-duplicates and bursts
+            (backend/near_dups.py)
 
 None of them moves or changes an archive file: they read the archive and write the
 app's own cache (hashes and the media index in the database, thumbnails in the
@@ -408,10 +410,48 @@ def index_type(config: Config, db) -> JobType:
                    results_to_keep=3, jobs_to_keep=5, describe=lambda params: "hele archief")
 
 
+# ---------- phash ----------
+
+def phash_type(config: Config, db) -> JobType:
+    """
+    Fingerprints (perceptual hashes, colours, sharpness) of every photo in the media index
+    that has none yet, or whose file changed, then the pairs of near-duplicates and
+    bursts (near_dups.run_job). Needs the index: before its first pass there is nothing
+    to go through. Resume needs no checkpoint: fingerprints are written in batches and
+    skipped next time, and a photo whose pairs were not looked up yet stays marked.
+    """
+    from backend import media_index, near_dups
+
+    def prepare(params: Dict[str, Any]) -> Dict[str, Any]:
+        if not media_index.usable(db):
+            media_index.request_update()
+            raise HTTPException(status_code=409, detail="De bibliotheek wordt nog opgebouwd; probeer het zo opnieuw")
+        return {}
+
+    def run(ctx: JobContext) -> Dict[str, Any]:
+        if not config.VAULT_ROOT.is_dir():
+            raise VaultUnavailable()
+        errors = _JobErrors(config)
+
+        def vault_check() -> None:
+            if errors.vault_lost or not config.VAULT_ROOT.is_dir():
+                raise VaultUnavailable()
+
+        result = near_dups.run_job(ctx, config, db, errors, vault_check)
+        ctx.progress(message=near_dups.run_message(result))
+        return result
+
+    return JobType(near_dups.PHASH_JOB, "Foto's vergelijken", prepare, run,
+                   summarize=lambda r: {k: r.get(k) for k in ("photos", "analysed", "undecodable", "series",
+                                                               "errors", "complete", "seconds")},
+                   results_to_keep=3, jobs_to_keep=5, describe=lambda params: "hele archief")
+
+
 def build_job_types(config: Config, db, on_dup_scan_done=None) -> List[JobType]:
     return [
         dup_scan_type(config, db, on_dup_scan_done),
         hashing_type(config, db),
         thumbnails_type(config),
         index_type(config, db),
+        phash_type(config, db),
     ]
