@@ -38,7 +38,7 @@ const SHORTCUT_GROUPS = [
         keys: [
             [['1', '…', '9'], 'Naar een onderdeel (volgorde van het menu)'],
             [['g', 'letter'], 'Naar een onderdeel: ' + SHORTCUT_VIEWS.map(v => `${v.g} ${v.label}`).join(', ')],
-            [['/'], 'Naar het zoekveld (zoekt in de geopende map)'],
+            [['/'], 'Naar het zoekveld; Enter zoekt in de hele bibliotheek (s opent het zoekvenster)'],
             [['t'], 'Thema wisselen: Auto, Licht, Donker'],
             [['?'], 'Dit overzicht'],
             [['Esc'], 'Bovenste venster sluiten, of uit een invoerveld'],
