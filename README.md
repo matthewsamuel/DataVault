@@ -217,8 +217,10 @@ dst_path, was_conflict = safe_move_with_structure(real_src, base_folder, config.
 **Problem:** Thousands of photos spanning decades; users need intuitive temporal exploration without loading everything.
 
 **Solution:**
-- **Date Extraction:** Uses macOS st_birthtime (file creation date) with mtime fallback
-- **Recursive Folder Scanning:** Efficient traversal excluding system folders
+- **Date Extraction (`backend/media_dates.py`):** EXIF DateTimeOriginal (then DateTimeDigitized, DateTime) for photos, the QuickTime `mvhd` creation time for mp4/mov/m4v/3gp, else macOS st_birthtime, else mtime. The same rule serves the timeline, "on this day" and photos-by-date. Dates are cached in SQLite (`media_dates`, migration 9) with the size and mtime_ns they were read at, and read with 4 threads when missing
+- **Recursive Folder Scanning:** Efficient traversal excluding system folders; one `folders` query parameter per folder (names may contain commas), nested selections are reduced to the outer folder (no photo twice), and folders that were not found come back in `skipped`
+- **Compact, cached answer:** one row per file `[timestamp, path relative to root, size, 'p'|'v', date source]` instead of a dict with the full path (about a third of the size), cached per folder selection until the mtime of any folder below it changes
+- **On this day / photos by date:** first the date cache (each row checked against the disk), then a walk in random order that stops at enough hits, 300 folders (photos-by-date: 2000) or a time budget (2 s / 4 s); `complete: false` says the budget ran out. Only photos and videos, never audio
 - **Date-Based Indexing:** Year → Month → Count structure for O(1) year jumping
 - **Year Boundaries:** Precomputed indices of first photo per year
 - **Virtual Scrolling:** Render only visible items (20-50 thumbnails at a time)

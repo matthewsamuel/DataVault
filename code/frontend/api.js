@@ -63,6 +63,48 @@
         return res;
     };
 
+    // Fouten van de server hebben één vorm: {"error": {"code", "message"}} (plus het
+    // oudere "detail" met dezelfde tekst). Dit haalt de leesbare melding eruit.
+    window.apiErrorMessage = function (data, fallback) {
+        if (data && data.error && typeof data.error.message === 'string') return data.error.message;
+        if (data && typeof data.detail === 'string') return data.detail;
+        return fallback || 'Er ging iets mis';
+    };
+
+    class ApiError extends Error {
+        constructor(message, status, code) {
+            super(message);
+            this.name = 'ApiError';
+            this.status = status;
+            this.code = code;
+        }
+    }
+    window.ApiError = ApiError;
+
+    // fetch + JSON, met één foutafhandeling voor de hele app: een antwoord dat niet ok is,
+    // wordt een ApiError met de melding van de server (status en code erbij). Is het
+    // archief niet bereikbaar, dan hoort de rest van de pagina dat via het event
+    // 'datavault:vault-unavailable' (de banner bovenin), zodat niet elk onderdeel een
+    // eigen melding hoeft te tonen.
+    window.fetchJSON = async function (url, options) {
+        let res;
+        try {
+            res = await window.fetch(url, options);
+        } catch (_) {
+            throw new ApiError('De DataVault-server is niet bereikbaar', 0, 'network');
+        }
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+            const code = (data && data.error && data.error.code) || `http_${res.status}`;
+            const err = new ApiError(window.apiErrorMessage(data, `Serverfout (${res.status})`), res.status, code);
+            if (code === 'vault_unavailable') {
+                window.dispatchEvent(new CustomEvent('datavault:vault-unavailable'));
+            }
+            throw err;
+        }
+        return data;
+    };
+
     window.DataVaultSession = {
         refresh: () => loadToken(true),
     };

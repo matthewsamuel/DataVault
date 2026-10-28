@@ -242,12 +242,20 @@
         }
 
         try {
-            const foldersParam = [...tlSelectedFolders].join(',');
-            const res = await fetch(`${API_BASE}/api/timeline/scan?folders=${encodeURIComponent(foldersParam)}`);
-            if (!res.ok) throw new Error('Scan failed');
+            // Eén parameter per map: een mapnaam mag een komma bevatten
+            const params = new URLSearchParams();
+            [...tlSelectedFolders].forEach(folder => params.append('folders', folder));
+            const res = await fetch(`${API_BASE}/api/timeline/scan?${params}`);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(apiErrorMessage(err, `Serverfout (${res.status})`));
+            }
 
             const data = await res.json();
-            tlFiles = data.files || [];
+            tlFiles = timelineFilesFrom(data);
+            if (data.skipped && data.skipped.length) {
+                showToast('Tijdlijn', `${data.skipped.length} gekozen map(pen) niet gevonden en overgeslagen`, 'warning');
+            }
             tlDateIndex = data.date_index || {};
             tlYearBoundaries = data.year_boundaries || {};
 
@@ -279,10 +287,32 @@
 
         } catch (e) {
             console.error('Timeline scan error:', e);
-            renderEmptyState('Failed to scan folders. Check console for details.');
+            renderEmptyState(`Scannen mislukt: ${e.message}`);
         }
 
         tlScanning = false;
+    }
+
+    // De server stuurt per bestand een korte rij [tijd, pad t.o.v. het archief, grootte,
+    // 'p'|'v', datumbron]; hier worden het weer bestandsobjecten voor de viewer
+    const TL_DATE_SOURCES = { e: 'exif', q: 'video', b: 'birthtime', m: 'mtime' };
+
+    function timelineFilesFrom(data) {
+        const root = String(data.root || '').replace(/\/+$/, '');
+        const columns = data.columns || [];
+        const at = name => columns.indexOf(name);
+        const [iTs, iPath, iSize, iType, iSource] = ['timestamp', 'path', 'size', 'type', 'date_source'].map(at);
+        return (data.rows || []).map(row => {
+            const rel = row[iPath];
+            return {
+                path: `${root}/${rel}`,
+                name: rel.slice(rel.lastIndexOf('/') + 1),
+                timestamp: row[iTs],
+                size: row[iSize],
+                type: row[iType] === 'v' ? 'video' : 'photo',
+                date_source: TL_DATE_SOURCES[row[iSource]] || null,
+            };
+        });
     }
 
     // Aantal foto's en jaarbereik; ook na een verplaatsing opnieuw getekend

@@ -257,6 +257,28 @@ def _m008_background_jobs(conn: sqlite3.Connection):
     """)
 
 
+def _m009_media_dates(conn: sqlite3.Connection):
+    """
+    The capture date of photos and videos (backend/media_dates.py), so the timeline,
+    'on this day' and photos-by-date read EXIF or a video's own date once per file
+    instead of on every request. One row per path with the size and mtime_ns it was
+    read at: a changed file is read again. taken is the date used (EXIF or video date,
+    else the file's birthtime, else its mtime), source says which. Only a new table:
+    no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media_dates (
+            path TEXT PRIMARY KEY,
+            size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            taken REAL NOT NULL,
+            source TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_dates_taken ON media_dates(taken)")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -267,6 +289,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (6, "hash_cache_algo_and_fingerprint", _m006_hash_cache_algo_and_fingerprint),
     (7, "delete_runs_sequence", _m007_delete_runs_sequence),
     (8, "background_jobs", _m008_background_jobs),
+    (9, "media_dates", _m009_media_dates),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

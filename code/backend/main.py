@@ -130,10 +130,10 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         duplicates.init_router(config, db)
         spotify.init_router(config)
         shows.init_router(config, db)
-        stats.init_router(config)
+        stats.init_router(config, db)
         chat.init_router(config)
         keurer.init_router(config, db)
-        timeline.init_router(config)
+        timeline.init_router(config, db)
 
         _say("DataVault Dashboard initialized successfully")
 

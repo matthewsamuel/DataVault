@@ -247,6 +247,62 @@ class Database:
         with self._connect() as conn:
             conn.execute("DELETE FROM file_hashes WHERE path = ?", (str(path),))
     
+    # Capture dates (migration 9, backend/media_dates.py). A row is only trusted while
+    # the file still has the size and mtime_ns it was read at.
+
+    def get_media_dates(self, paths: List[str]) -> Dict[str, Tuple[int, int, float, str]]:
+        """{path: (size, mtime_ns, taken, source)} for the given paths that have a row."""
+        found: Dict[str, Tuple[int, int, float, str]] = {}
+        with self._connect() as conn:
+            for i in range(0, len(paths), 500):
+                chunk = paths[i:i + 500]
+                for row in conn.execute(
+                    f"SELECT path, size, mtime_ns, taken, source FROM media_dates "
+                    f"WHERE path IN ({','.join('?' * len(chunk))})", chunk,
+                ):
+                    found[row[0]] = (row[1], row[2], row[3], row[4])
+        return found
+
+    def store_media_dates(self, rows: List[Tuple[str, int, int, float, str]]) -> None:
+        """Store [(path, size, mtime_ns, taken, source)] in one transaction."""
+        if not rows:
+            return
+        now = time.time()
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO media_dates (path, size, mtime_ns, taken, source, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [(*row, now) for row in rows],
+            )
+
+    def media_dates_between(self, start: float, end: float, limit: int = 2000) -> List[Tuple[str, int, int, float, str]]:
+        """Rows with start <= taken < end, oldest first."""
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT path, size, mtime_ns, taken, source FROM media_dates "
+                "WHERE taken >= ? AND taken < ? ORDER BY taken LIMIT ?",
+                (start, end, limit),
+            ).fetchall()
+
+    def media_dates_on_day(self, month: int, day: int, limit: int = 2000) -> List[Tuple[str, int, int, float, str]]:
+        """Rows taken on this month and day (local time) of any year."""
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT path, size, mtime_ns, taken, source FROM media_dates "
+                "WHERE strftime('%m-%d', taken, 'unixepoch', 'localtime') = ? LIMIT ?",
+                (f"{month:02d}-{day:02d}", limit),
+            ).fetchall()
+
+    def prune_media_dates(self, folder: Path, existing: Set[str]) -> int:
+        """Forget dates below folder for paths a full walk of it no longer found."""
+        prefix = str(folder).rstrip("/") + "/"
+        with self._connect() as conn:
+            paths = [row[0] for row in conn.execute(
+                "SELECT path FROM media_dates WHERE substr(path, 1, ?) = ?", (len(prefix), prefix))]
+            gone = [(path,) for path in paths if path not in existing]
+            conn.executemany("DELETE FROM media_dates WHERE path = ?", gone)
+        return len(gone)
+
     # Delete run tracking methods
     #
     # One run is one user action in the duplicates view (one click on 'opruimen'),

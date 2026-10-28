@@ -54,11 +54,11 @@ def _slow_hash(path):
     return _hash(path)
 scanner.hash_file_xxh3 = _slow_hash
 
-_scan = timeline._scan_folder_recursive
-def _slow_scan(folder):
+_scan = timeline._walk_media
+def _slow_scan(roots):
     time.sleep(5)
-    return _scan(folder)
-timeline._scan_folder_recursive = _slow_scan
+    return _scan(roots)
+timeline._walk_media = _slow_scan
 
 _parse = spotify.parse_spotify_data
 def _slow_parse(*args, **kwargs):

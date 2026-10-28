@@ -859,6 +859,8 @@ function viewerMetadata(file) {
     if (typeof file.size === 'number') add('Grootte:', formatBytes(file.size));
     if (typeof file.timestamp === 'number' && file.timestamp > 0) {
         add('Datum:', new Date(file.timestamp * 1000).toLocaleString());
+        const source = { exif: 'EXIF (opnamedatum)', video: 'video (opnamedatum)', birthtime: 'aanmaakdatum bestand', mtime: 'wijzigingsdatum bestand' }[file.date_source];
+        if (source) add('Bron:', source);
     } else if (typeof file.modified === 'number' && file.modified > 0) {
         add('Gewijzigd:', new Date(file.modified * 1000).toLocaleString());
     }
@@ -1508,10 +1510,13 @@ async function loadPhotoOtdWidget() {
         otdCycleStep = null;
         homeOtdCycle(false);
 
-        let otdAllowedFolders = JSON.parse(localStorage.getItem('otdAllowedFolders') || '[]');
-        const query = otdAllowedFolders.length > 0 ? `?allowed_folders=${encodeURIComponent(otdAllowedFolders.join(','))}` : '';
-        const res = await fetch(`${API_BASE}/api/stats/photo-on-this-day${query}`);
-        const data = await res.json();
+        let otdAllowedFolders = [];
+        try { otdAllowedFolders = JSON.parse(localStorage.getItem('otdAllowedFolders') || '[]'); } catch (_) { /* geen keuze bewaard */ }
+        // Eén parameter per map: een mapnaam mag een komma bevatten
+        const params = new URLSearchParams();
+        (Array.isArray(otdAllowedFolders) ? otdAllowedFolders : []).forEach(f => params.append('allowed_folders', f));
+        const query = params.toString() ? `?${params}` : '';
+        const data = await fetchJSON(`${API_BASE}/api/stats/photo-on-this-day${query}`);
 
         loading.style.display = 'none';
         content.style.display = 'block';
@@ -1552,10 +1557,10 @@ async function loadPhotoOtdWidget() {
                 homeOtdCycle(!document.getElementById('section-home').classList.contains('hidden'));
             }
         } else {
-            content.innerHTML = '<div class="storage-text" style="display:flex;height:100%;align-items:center;justify-content:center;">No photos from this day in past years.</div>';
+            content.innerHTML = '<div class="storage-text" style="display:flex;height:100%;align-items:center;justify-content:center;">Geen foto\'s van deze dag in eerdere jaren.</div>';
         }
     } catch (e) {
-        document.getElementById('photo-otd-loading').textContent = 'Failed to load';
+        document.getElementById('photo-otd-loading').textContent = `Laden mislukt: ${e.message}`;
     }
 }
 

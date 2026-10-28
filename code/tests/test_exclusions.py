@@ -10,6 +10,8 @@ from datetime import datetime
 
 import pytest
 
+from helpers import timeline_files
+
 from backend import paths
 from fixtures.vault_builder import STRAND, STRAND_COPIES
 
@@ -28,7 +30,8 @@ def _plant(path, data):
 @pytest.fixture
 def planted(vault, config, monkeypatch):
     """Files with 'zoekmij' in the name, dated DAY, 3 MB each: one visible, the rest excluded."""
-    jpeg = (vault / STRAND).read_bytes()
+    # A JPEG without EXIF: these files are dated by their file date (DAY)
+    jpeg = (vault / "RAW/2021/🎉 feest/no exif.jpg").read_bytes()
     data = jpeg + b"\0" * (BIG - len(jpeg))
     app_dir = vault / "dashboard"
     monkeypatch.setattr(paths, "APP_DIR", app_dir)
@@ -80,7 +83,7 @@ def test_timeline_folders_and_scan(client, vault, config, planted):
     tree = _tree_paths(client.get("/api/timeline/folders").json()["folders"])
     assert str(config.TRASH_FOLDER) not in tree and str(vault / "dashboard") not in tree
     assert str(vault / "werk" / "dashboard") in tree
-    files = client.get("/api/timeline/scan", params={"folders": str(vault)}).json()["files"]
+    files = timeline_files(client.get("/api/timeline/scan", params={"folders": str(vault)}).json())
     _assert_only_visible([f["path"] for f in files], planted)
 
 

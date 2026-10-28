@@ -1,149 +1,188 @@
 """
 DataVault Dashboard - Timeline Routes
-Efficient photo timeline with date-based indexing and pagination.
+The photo timeline: every photo and video of the chosen folders, ordered by capture
+date (backend/media_dates.py: EXIF or the video's own date, else birthtime, else mtime).
+
+The scan answers in a compact form (one short row per file, paths relative to the
+vault) and is cached per folder selection until a folder below it changes (its mtime:
+a file added, removed or renamed), MEDIA-THUMBS-TIMELINE-12/PERF-6.
 """
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+from collections import OrderedDict, defaultdict
+from datetime import datetime
+import json
 import os
-import stat as stat_module
-import subprocess
-from datetime import datetime, timezone
-from collections import defaultdict
+import threading
 
-from backend.config import (
-    Config, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS, MEDIA_EXTENSIONS,
-    is_media_file
-)
+from backend.config import Config, MEDIA_EXTENSIONS, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS
+from backend import media_dates
 from backend.paths import ArchiveFilter, scan_dir, vault_folder_or_none, walk_archive
 
 router = APIRouter()
 
 # Global state
 config: Config = None
+db = None
 
-def init_router(cfg: Config):
-    """Initialize router with config"""
-    global config
+# Cached scan answers: {selection: (folder mtimes, JSON bytes)}, newest last
+SCAN_CACHE_SIZE = 4
+_scan_cache: "OrderedDict[Tuple[str, ...], Tuple[Tuple[Tuple[str, int], ...], bytes]]" = OrderedDict()
+_scan_cache_lock = threading.Lock()
+
+TYPE_CODES = {"photo": "p", "video": "v"}
+
+
+def init_router(cfg: Config, database=None):
+    """Initialize router with config and database"""
+    global config, db
     config = cfg
+    db = database
+    with _scan_cache_lock:
+        _scan_cache.clear()
 
 
-def _get_creation_date(file_path: Path) -> float:
+def selected_roots(folders: List[str]) -> Tuple[List[Path], List[str]]:
     """
-    Get the best available creation/taken date for a media file.
-    On macOS we use st_birthtime (file creation date) which is typically
-    preserved from the original photo/video creation date.
-    Falls back to st_mtime if unavailable.
+    The chosen folders as resolved vault folders, without any that lies inside another
+    chosen one (a parent and its child would show every photo twice,
+    MEDIA-THUMBS-TIMELINE-14), plus the entries that were skipped (outside the vault,
+    not a folder): those are reported, never silently dropped.
     """
-    try:
-        s = file_path.stat()
-        # macOS: st_birthtime is the real creation date
-        birthtime = getattr(s, 'st_birthtime', None)
-        if birthtime and birthtime > 0:
-            return birthtime
-        return s.st_mtime
-    except (OSError, PermissionError):
-        return 0.0
+    roots: List[Path] = []
+    skipped: List[str] = []
+    for entry in folders:
+        if not isinstance(entry, str) or not entry.strip():
+            continue
+        folder = vault_folder_or_none(entry, config)
+        if folder is None or not folder.is_dir():
+            skipped.append(entry)
+            continue
+        roots.append(folder)
+    kept: List[Path] = []
+    for folder in sorted(set(roots), key=lambda p: (len(p.parts), str(p))):
+        if not any(folder == k or folder.is_relative_to(k) for k in kept):
+            kept.append(folder)
+    return sorted(kept, key=str), skipped
 
 
-def _scan_folder_recursive(folder_path: Path, photo_only: bool = False) -> List[Dict[str, Any]]:
-    """
-    Recursively scan a folder for media files and return them with timestamps.
-    Returns a flat list sorted by creation date.
-    """
-    results = []
-    extensions = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS if not photo_only else PHOTO_EXTENSIONS
-
-    # walk_archive skips the app's own folders, TRASH, RAW_DUPLICATES, hidden files and symlinks
-    for root, dirs, files in walk_archive(folder_path, config):
-        dirs.sort()
-
-        for filename in sorted(files):
-            file_path = Path(root) / filename
-            ext = file_path.suffix.lower()
-
-            if ext not in extensions:
-                continue
-
+def _walk_media(roots: List[Path]) -> Tuple[List[Tuple[str, os.stat_result]], List[Tuple[str, int]]]:
+    """Every photo and video below roots with its stat, and the mtime of every folder walked."""
+    files: List[Tuple[str, os.stat_result]] = []
+    folders: List[Tuple[str, int]] = []
+    extensions = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
+    archive_filter = ArchiveFilter(config)
+    for top in roots:
+        # walk_archive skips the app's own folders, TRASH, RAW_DUPLICATES, hidden files and symlinks
+        for root, dirs, names in walk_archive(top, config, archive_filter):
+            dirs.sort()
             try:
-                s = file_path.stat()
-                birthtime = getattr(s, 'st_birthtime', None)
-                if birthtime and birthtime > 0:
-                    ts = birthtime
-                else:
-                    ts = s.st_mtime
-
-                file_type = 'video' if ext in VIDEO_EXTENSIONS else 'photo'
-
-                results.append({
-                    "path": str(file_path),
-                    "name": filename,
-                    "timestamp": ts,
-                    "size": s.st_size,
-                    "type": file_type
-                })
-            except (OSError, PermissionError):
+                folders.append((root, os.stat(root).st_mtime_ns))
+            except OSError:
                 continue
+            for name in names:
+                if os.path.splitext(name)[1].lower() not in extensions:
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    files.append((path, os.stat(path)))
+                except OSError:
+                    continue
+    return files, folders
 
-    return results
+
+def _unchanged(folders: Tuple[Tuple[str, int], ...]) -> bool:
+    for path, mtime_ns in folders:
+        try:
+            if os.stat(path).st_mtime_ns != mtime_ns:
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def _scan_payload(roots: List[Path]) -> Tuple[bytes, Tuple[Tuple[str, int], ...]]:
+    files, folders = _walk_media(roots)
+    dates = media_dates.capture_dates(files, db)
+    if db is not None:
+        existing = {path for path, _ in files}
+        for top in roots:
+            try:
+                db.prune_media_dates(top, existing)
+            except Exception:
+                pass
+
+    vault = str(config.VAULT_ROOT).rstrip("/") + "/"
+    rows = []
+    for path, st in files:
+        ts, source = dates[path]
+        ext = os.path.splitext(path)[1].lower()
+        rows.append((ts, path[len(vault):] if path.startswith(vault) else path, st.st_size,
+                     "v" if ext in VIDEO_EXTENSIONS else "p", media_dates.SOURCES[source]))
+    rows.sort(key=lambda r: (r[0], r[1]))
+
+    date_index = defaultdict(lambda: defaultdict(int))
+    year_boundaries: Dict[int, int] = {}
+    sources: Dict[str, int] = defaultdict(int)
+    for i, row in enumerate(rows):
+        dt = datetime.fromtimestamp(row[0])
+        date_index[dt.year][dt.month] += 1
+        year_boundaries.setdefault(dt.year, i)
+        sources[row[4]] += 1
+
+    payload = {
+        "total": len(rows),
+        "root": str(config.VAULT_ROOT),
+        "columns": ["timestamp", "path", "size", "type", "date_source"],
+        "rows": [[round(r[0], 3), r[1], r[2], r[3], r[4]] for r in rows],
+        "date_index": {year: dict(months) for year, months in sorted(date_index.items())},
+        "year_boundaries": year_boundaries,
+        "date_sources": dict(sources),
+        "folders": [str(r) for r in roots],
+        "skipped": [],
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), tuple(folders)
 
 
 @router.get("/scan")
 def timeline_scan(
-    folders: str = Query(..., description="Comma-separated folder paths")
-) -> Dict[str, Any]:
+    folders: List[str] = Query(..., description="Folder paths, one 'folders' parameter per folder")
+):
     """
-    Scan selected folders recursively for media files with timestamps.
-    Returns metadata sorted chronologically (oldest first).
-    Only returns lightweight metadata — thumbnails are loaded lazily on frontend.
+    Scan the chosen folders for photos and videos, ordered by capture date (oldest first).
+
+    One 'folders' parameter per folder (a folder name may contain a comma,
+    MEDIA-THUMBS-TIMELINE-13). Answer: {total, root, columns, rows, date_index,
+    year_boundaries, date_sources, folders, skipped}; each row is
+    [timestamp, path relative to root, size, 'p'|'v', date source code].
     """
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
+    roots, skipped = selected_roots(folders)
+    if not roots:
+        if skipped:
+            raise HTTPException(status_code=404, detail="Geen van de gekozen mappen bestaat (nog) in het archief")
+        raise HTTPException(status_code=400, detail="Geen mappen gekozen")
 
-    folder_paths = [p.strip() for p in folders.split(",") if p.strip()]
+    key = tuple(str(r) for r in roots)
+    with _scan_cache_lock:
+        cached = _scan_cache.get(key)
+    if cached is not None and _unchanged(cached[0]):
+        body = cached[1]
+    else:
+        body, folder_mtimes = _scan_payload(roots)
+        with _scan_cache_lock:
+            _scan_cache[key] = (folder_mtimes, body)
+            _scan_cache.move_to_end(key)
+            while len(_scan_cache) > SCAN_CACHE_SIZE:
+                _scan_cache.popitem(last=False)
 
-    if not folder_paths:
-        raise HTTPException(status_code=400, detail="No folders specified")
-
-    all_files = []
-
-    for folder_str in folder_paths:
-        # Skip paths outside the vault (or app-internal) silently, the same way as missing ones
-        folder_path = vault_folder_or_none(folder_str, config)
-        if folder_path is None or not folder_path.is_dir():
-            continue
-
-        files = _scan_folder_recursive(folder_path)
-        all_files.extend(files)
-
-    # Sort by timestamp (oldest first)
-    all_files.sort(key=lambda f: f["timestamp"])
-
-    # Build date index: year -> month -> count
-    date_index = defaultdict(lambda: defaultdict(int))
-    for f in all_files:
-        dt = datetime.fromtimestamp(f["timestamp"])
-        date_index[dt.year][dt.month] += 1
-
-    # Convert to serializable format
-    date_index_serializable = {
-        year: dict(months)
-        for year, months in sorted(date_index.items())
-    }
-
-    # Build year boundaries (index of first photo per year) for quick jumping
-    year_boundaries = {}
-    for i, f in enumerate(all_files):
-        year = datetime.fromtimestamp(f["timestamp"]).year
-        if year not in year_boundaries:
-            year_boundaries[year] = i
-
-    return {
-        "total": len(all_files),
-        "files": all_files,
-        "date_index": date_index_serializable,
-        "year_boundaries": year_boundaries
-    }
+    if skipped:
+        # Rare; the cached body stays the same for every request
+        data = json.loads(body)
+        data["skipped"] = skipped
+        body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return Response(content=body, media_type="application/json")
 
 
 @router.get("/folders")

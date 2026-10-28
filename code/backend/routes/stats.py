@@ -1,22 +1,29 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pathlib import Path
 import shutil
-from datetime import datetime
-from typing import Dict, Any, List, Optional
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
 import os
+import random
+import sqlite3
+import stat as stat_module
 import subprocess
+import time
 import unicodedata
 
-from backend.config import Config, is_photo
-from backend.paths import ArchiveFilter, resolve_in_vault, scan_dir, vault_folder_or_none, walk_archive
+from backend import file_ops, media_dates
+from backend.config import Config, is_photo, media_type
+from backend.paths import ArchiveFilter, excluded_folders, resolve_in_vault, scan_dir, walk_archive
 from backend.routes.spotify import parse_spotify_data
 
 router = APIRouter()
 config: Config = None
+db = None
 
-def init_router(cfg: Config):
-    global config
+def init_router(cfg: Config, database=None):
+    global config, db
     config = cfg
+    db = database
 
 @router.get("/storage")
 def get_storage_stats() -> Dict[str, Any]:
@@ -156,70 +163,154 @@ def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[str, Any
     except Exception as e:
         return {"error": str(e)}
 
-@router.get("/photo-on-this-day")
-def get_photo_on_this_day(allowed_folders: str = None) -> Dict[str, Any]:
-    if not config:
-        return {"error": "Config not loaded"}
-         
-    now = datetime.now()
-    target_month = now.month
-    target_day = now.day
-    
-    import os
-    import random
-    from backend.config import MEDIA_EXTENSIONS
-    
-    valid_photos = []
-    vault_root = config.VAULT_ROOT
-    archive_filter = ArchiveFilter(config)
-    
-    try:
-        if allowed_folders:
-            # allow multiple comma-separated bases; only folders inside the vault count
-            # (anything else is skipped, the same way whether it exists or not)
-            bases = [vault_folder_or_none(p.strip(), config) for p in allowed_folders.split(',')]
-            all_dirs = []
-            for base in bases:
-                if base is not None and base.is_dir():
-                    all_dirs.extend([x[0] for x in walk_archive(base, config, archive_filter)])
-            all_dirs = list(set(all_dirs))
-        else:
-            all_dirs = [x[0] for x in walk_archive(vault_root, config, archive_filter)]
-            
-        random.shuffle(all_dirs)
+# "On this day" and photos-by-date use the capture date (backend/media_dates.py) and a
+# bounded amount of work per request (MEDIA-THUMBS-TIMELINE-10, PERF-14): first what the
+# date cache already knows (checked against the disk), then a walk in random order that
+# stops at enough hits, a number of folders or a time budget. Dates read on the way are
+# cached, so the answers get fuller and faster with every visit.
+OTD_LIMIT = 10
+OTD_MAX_FOLDERS = 300
+OTD_SECONDS = 2.0
+BY_DATE_LIMIT = 20
+BY_DATE_MAX_FOLDERS = 2000
+BY_DATE_SECONDS = 4.0
 
-        for root in all_dirs:
+
+def _roots(folders: Optional[List[str]]) -> List[Path]:
+    """The chosen folders inside the vault (nested ones once), or the whole vault."""
+    if not folders:
+        return [config.VAULT_ROOT]
+    from backend.routes.timeline import selected_roots
+    roots, _ = selected_roots(folders)
+    return roots
+
+
+def _shown_kind(path: Path, roots: List[Path], excluded: List[Path]) -> Optional[str]:
+    """'photo' or 'video' for a cached path that may still be shown, else None."""
+    kind = media_type(path)
+    if kind not in ("photo", "video"):
+        return None
+    if not any(path.is_relative_to(root) for root in roots):
+        return None
+    try:
+        below = path.relative_to(config.VAULT_ROOT).parts
+    except ValueError:
+        return None
+    if any(part.startswith(".") for part in below):
+        return None
+    if any(file_ops.is_inside(path, folder) for folder in excluded):
+        return None
+    return kind
+
+
+def _known_hits(rows, roots: List[Path], limit: int, found: Dict[str, Tuple[float, str]]) -> None:
+    """Rows from the date cache whose file is still there, unchanged and visible."""
+    excluded = excluded_folders(config)
+    for path, size, mtime_ns, taken, source in rows:
+        if len(found) >= limit:
+            return
+        p = Path(path)
+        if path in found or _shown_kind(p, roots, excluded) is None:
+            continue
+        try:
+            st = os.lstat(p)
+        except OSError:
+            continue
+        if stat_module.S_ISREG(st.st_mode) and st.st_size == size and st.st_mtime_ns == mtime_ns:
+            found[path] = (taken, source)
+
+
+def _walk_for_dates(roots: List[Path], matches, limit: int, max_folders: int, seconds: float,
+                    found: Dict[str, Tuple[float, str]]) -> bool:
+    """
+    Walk the folders below roots in random order (another part of the archive on every
+    visit) and add photos and videos whose capture date matches. Returns True when every
+    folder was walked, False when the budget ran out first.
+    """
+    archive_filter = ArchiveFilter(config)
+    stack = [str(root) for root in roots]
+    random.shuffle(stack)
+    deadline = time.monotonic() + seconds
+    walked = 0
+    while stack:
+        if len(found) >= limit or walked >= max_folders or time.monotonic() > deadline:
+            return False
+        folder = stack.pop()
+        walked += 1
+        try:
+            entries = scan_dir(Path(folder), archive_filter)
+        except OSError:
+            continue
+        subdirs, media = [], []
+        for entry in entries:
             try:
-                for entry in scan_dir(Path(root), archive_filter):
-                    filename = entry.name
-                    file_path = Path(entry.path)
-                    if entry.is_file(follow_symlinks=False) and file_path.suffix.lower() in MEDIA_EXTENSIONS:
-                        stat = file_path.stat()
-                        mtime_dt = datetime.fromtimestamp(stat.st_mtime)
-                        
-                        if mtime_dt.month == target_month and mtime_dt.day == target_day:
-                            if mtime_dt.year != now.year:
-                                valid_photos.append({
-                                    "path": str(file_path),
-                                    "name": filename,
-                                    "year": mtime_dt.year,
-                                    "type": "photo"
-                                })
-            except Exception:
+                if entry.is_dir(follow_symlinks=False):
+                    subdirs.append(entry.path)
+                elif entry.is_file(follow_symlinks=False) and media_type(Path(entry.name)) in ("photo", "video"):
+                    media.append((entry.path, entry.stat(follow_symlinks=False)))
+            except OSError:
                 continue
-            
-            if len(valid_photos) >= 10:
-                break
-                
-        if valid_photos:
-             # Sort by year ascending
-             valid_photos.sort(key=lambda x: x['year'])
-             return {"photos": valid_photos[:10]}
-        else:
-             return {"photos": []}
-             
-    except Exception as e:
-         return {"error": str(e)}
+        random.shuffle(subdirs)
+        stack.extend(subdirs)
+        if not media:
+            continue
+        for path, (ts, source) in media_dates.capture_dates(media, db).items():
+            if path not in found and matches(ts):
+                found[path] = (ts, source)
+    return True
+
+
+def _dated_item(path: str, ts: float, source: str) -> Dict[str, Any]:
+    p = Path(path)
+    return {
+        "path": path,
+        "name": p.name,
+        "type": media_type(p),
+        "timestamp": ts,
+        "year": datetime.fromtimestamp(ts).year,
+        "date_source": source,
+    }
+
+
+def _cache_rows(query, *args):
+    """Rows from the date cache, or none when the database is not reachable."""
+    if db is None:
+        return []
+    try:
+        rows = query(*args)
+    except sqlite3.Error:
+        return []
+    rows = list(rows)
+    random.shuffle(rows)
+    return rows
+
+
+@router.get("/photo-on-this-day")
+def get_photo_on_this_day(allowed_folders: Optional[List[str]] = Query(None)) -> Dict[str, Any]:
+    """
+    Up to 10 photos and videos taken on today's date in earlier years, oldest year first.
+    allowed_folders: one parameter per folder (a name may contain a comma); none = the
+    whole vault. 'complete' is false when the work budget ran out before every folder
+    was looked at.
+    """
+    now = datetime.now()
+    roots = _roots(allowed_folders)
+    if not roots:
+        return {"photos": [], "complete": True}
+
+    def matches(ts: float) -> bool:
+        dt = datetime.fromtimestamp(ts)
+        return dt.month == now.month and dt.day == now.day and dt.year != now.year
+
+    found: Dict[str, Tuple[float, str]] = {}
+    rows = [r for r in _cache_rows(getattr(db, "media_dates_on_day", None), now.month, now.day)
+            if datetime.fromtimestamp(r[3]).year != now.year]
+    _known_hits(rows, roots, OTD_LIMIT, found)
+    complete = _walk_for_dates(roots, matches, OTD_LIMIT, OTD_MAX_FOLDERS, OTD_SECONDS, found)
+    photos = sorted((_dated_item(p, ts, src) for p, (ts, src) in found.items()),
+                    key=lambda item: (item["year"], item["timestamp"]))[:OTD_LIMIT]
+    return {"photos": photos, "complete": complete or len(found) >= OTD_LIMIT}
+
 
 @router.get("/spotify-on-this-day")
 def get_spotify_on_this_day() -> Dict[str, Any]:
@@ -243,53 +334,23 @@ def get_spotify_on_this_day() -> Dict[str, Any]:
 @router.get("/photos-by-date")
 def get_photos_by_date(date: str) -> Dict[str, Any]:
     """
-    Find up to 20 photos corresponding to a specific date (YYYY-MM-DD).
+    Up to 20 photos and videos taken on a date (YYYY-MM-DD), by capture date, oldest first.
     """
-    if not config:
-        return {"error": "Config not loaded"}
-        
     try:
-        target_dt = datetime.strptime(date, "%Y-%m-%d")
+        target = datetime.strptime(date, "%Y-%m-%d")
     except ValueError:
-        return {"error": "Invalid date format, expected YYYY-MM-DD"}
-        
-    target_year = target_dt.year
-    target_month = target_dt.month
-    target_day = target_dt.day
-    
-    import os
-    from backend.config import MEDIA_EXTENSIONS
-    
-    valid_photos = []
-    vault_root = config.VAULT_ROOT
-    
-    try:
-        # We need to search the vault. Since the AI might ask for any date, 
-        # we do a full walk but bail out early if we find enough photos.
-        for root, _, files in walk_archive(vault_root, config):
-            for filename in files:
-                file_path = Path(root) / filename
-                if file_path.suffix.lower() in MEDIA_EXTENSIONS:
-                    try:
-                        stat = file_path.stat()
-                        mtime_dt = datetime.fromtimestamp(stat.st_mtime)
-                        
-                        if mtime_dt.year == target_year and mtime_dt.month == target_month and mtime_dt.day == target_day:
-                            valid_photos.append({
-                                "path": str(file_path),
-                                "name": filename,
-                                "type": "photo"
-                            })
-                            
-                            if len(valid_photos) >= 20:
-                                return {"photos": valid_photos}
-                    except Exception:
-                        pass
-        
-        return {"photos": valid_photos}
+        raise HTTPException(status_code=400, detail="Ongeldige datum, verwacht JJJJ-MM-DD")
+    start = target.timestamp()
+    end = (target + timedelta(days=1)).timestamp()
+    roots = [config.VAULT_ROOT]
 
-    except Exception as e:
-         return {"error": str(e)}
+    found: Dict[str, Tuple[float, str]] = {}
+    _known_hits(_cache_rows(getattr(db, "media_dates_between", None), start, end), roots, BY_DATE_LIMIT, found)
+    complete = _walk_for_dates(roots, lambda ts: start <= ts < end, BY_DATE_LIMIT,
+                               BY_DATE_MAX_FOLDERS, BY_DATE_SECONDS, found)
+    photos = sorted((_dated_item(p, ts, src) for p, (ts, src) in found.items()),
+                    key=lambda item: item["timestamp"])[:BY_DATE_LIMIT]
+    return {"photos": photos, "complete": complete or len(found) >= BY_DATE_LIMIT}
 
 
 @router.get("/search-photos")

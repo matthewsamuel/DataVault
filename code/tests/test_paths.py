@@ -320,11 +320,13 @@ def test_photo_on_this_day_only_searches_inside_the_vault(client, vault, outside
     private.parent.mkdir()
     private.write_bytes((vault / STRAND).read_bytes())
     os.utime(private, (last_year, last_year))
-    mine = vault / "library" / "Familie" / "opa.jpg"
+    # No EXIF, so its file date counts (setting mtime earlier also moves birthtime back)
+    mine = vault / "library" / "Familie" / "zonder exif.jpg"
+    mine.write_bytes((vault / "RAW/2021/🎉 feest/no exif.jpg").read_bytes())
     os.utime(mine, (last_year, last_year))
 
-    folders = ",".join([str(outside), str(outside / "sub"), f"{vault}/../{outside.name}",
-                        "RAW/misc/link_to_outside", str(vault / "library")])
+    folders = [str(outside), str(outside / "sub"), f"{vault}/../{outside.name}",
+               "RAW/misc/link_to_outside", str(vault / "library")]
     photos = client.get("/api/stats/photo-on-this-day", params={"allowed_folders": folders}).json()["photos"]
     assert [p["path"] for p in photos] == [str(mine)]
     only_outside = client.get("/api/stats/photo-on-this-day", params={"allowed_folders": str(outside)}).json()
@@ -332,10 +334,11 @@ def test_photo_on_this_day_only_searches_inside_the_vault(client, vault, outside
 
 
 def test_timeline_scan_skips_outside_folders(client, vault, outside):
-    r = client.get("/api/timeline/scan", params={"folders": f"{outside},{vault}/RAW/misc/link_to_outside,/etc"})
-    assert r.status_code == 200 and r.json()["total"] == 0
-    r = client.get("/api/timeline/scan", params={"folders": f"{outside},{vault}/library"})
+    r = client.get("/api/timeline/scan", params={"folders": [str(outside), f"{vault}/RAW/misc/link_to_outside", "/etc"]})
+    assert r.status_code == 404
+    r = client.get("/api/timeline/scan", params={"folders": [str(outside), f"{vault}/library"]})
     assert r.json()["total"] == len(list((vault / "library").rglob("*.jpg")))
+    assert r.json()["skipped"] == [str(outside)]
 
 
 def test_shows_settings_and_vote_only_accept_vault_paths(client, vault, outside):
