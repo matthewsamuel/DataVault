@@ -25,11 +25,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend import errors, file_ops, media_index, restart, security, thumbnail
+from backend import errors, file_ops, media_index, restart, security, semantic, thumbnail
 from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import (
-    folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery,
+    folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, search,
 )
 
 
@@ -47,7 +47,12 @@ async def _lifespan(app: FastAPI):
     auto_index = getattr(app.state, "auto_index", None)
     if auto_index is not None:
         auto_index.start()
+    auto_semantic = getattr(app.state, "auto_semantic", None)
+    if auto_semantic is not None:
+        auto_semantic.start()
     yield
+    if auto_semantic is not None:
+        await run_in_threadpool(auto_semantic.stop)
     if auto_index is not None:
         await run_in_threadpool(auto_index.stop)
     # Stop background jobs at their next check (they stay resumable as 'interrupted'),
@@ -95,6 +100,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.state.jobs = None
     app.state.db = None
     app.state.auto_index = None
+    app.state.auto_semantic = None
     try:
         # Load configuration
         config = Config(config_path)
@@ -123,7 +129,8 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
 
         # Background jobs (scans, hashing, thumbnails); what a previous run left
         # running can only be resumed by hand
-        job_manager = JobManager(db, config, build_job_types(config, db, on_dup_scan_done=duplicates.remember_scan))
+        job_manager = JobManager(db, config, build_job_types(config, db, on_dup_scan_done=duplicates.remember_scan)
+                                 + semantic.build_job_types(config, db))
         db.when_ready(lambda: _recover_jobs(job_manager))
         # Old-style thumbnails (made before EXIF rotation, path-only key) and stored
         # placeholders are made again on demand; clear them out in the background
@@ -138,6 +145,8 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         if os.environ.get("DATAVAULT_AUTO_INDEX", "1") != "0":
             app.state.auto_index = media_index.AutoIndexer(job_manager)
             media_index.set_updater(app.state.auto_index.request)
+            # Slim zoeken: photos are recognised after the index, once the model is installed
+            app.state.auto_semantic = semantic.SemanticAuto(job_manager, config, db)
         else:
             media_index.set_updater(None)
 
@@ -153,6 +162,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         timeline.init_router(config, db)
         library.init_router(config, db, job_manager)
         recovery.init_router(config, db)
+        search.init_router(config, db, job_manager)
 
         _say("DataVault Dashboard initialized successfully")
 
@@ -181,6 +191,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"], dependencies=vault)
     app.include_router(library.router, prefix="/api/library", tags=["library"], dependencies=vault)
     app.include_router(recovery.router, prefix="/api/recovery", tags=["recovery"], dependencies=vault)
+    app.include_router(search.router, prefix="/api/search", tags=["search"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 
