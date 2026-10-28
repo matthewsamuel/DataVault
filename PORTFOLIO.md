@@ -41,8 +41,9 @@ backend/
 ├── database.py          # SQLite database abstraction layer
 ├── scanner.py           # File discovery, hashing, duplicate detection algorithms
 ├── file_ops.py          # Safe atomic file operations with metadata preservation
-├── thumbnail.py         # Thumbnail generation and caching
-├── progress.py          # Long-running operation progress tracking
+├── thumbnail.py         # Thumbnail generation and caching (atomic writes)
+├── jobs.py              # Background jobs: JobManager, progress, cancel/pause/resume, vault wait
+├── job_types.py         # dup_scan, hashing, thumbnails
 └── routes/
     ├── folders.py       # Folder tree enumeration
     ├── media.py         # Individual file operations and serving
@@ -92,14 +93,17 @@ frontend/
    
    ```python
    cache = db.get_cached_hashes(folder_path, HASH_ALGO)       # one query per scan
-   for path in candidates:
-       cached = cache.get(str(path))
-       if cached and cached[0] == _fingerprint(stats[str(path)]):  # (ino, size, mtime_ns, ctime_ns)
-           hashes[str(path)] = cached[1]
+   for path in paths:
+       cached = cache.get(path)
+       if cached and cached[0] == fingerprints[path]:            # (ino, size, mtime_ns, ctime_ns)
+           hashes[path] = cached[1]
        else:
-           to_hash.append(path)                                  # hashed on up to 4 threads
-   ...
-   db.store_hashes(new_entries, HASH_ALGO)                       # one transaction per scan
+           to_hash.append(path)
+   # 4 threads, at most 16 submitted at once; on a stop nothing new starts
+   for path, digest, error in bounded_map(hash_file_xxh3, to_hash, workers=4, stop=lambda: reporter.stopping):
+       ...
+       if len(batch) >= HASH_FLUSH_FILES or (batch and now - last_flush >= HASH_FLUSH_SECONDS):
+           flush()                                               # executemany, one transaction per batch
    ```
 
 2. **Per-Folder Scanning with Progress Tracking**
@@ -107,8 +111,8 @@ frontend/
    - Groups files by size first: files of different sizes can never be duplicates, so most files are never hashed
    - Hashes the remaining candidates in parallel, then picks the copy that stays per group by an
      explicit, deterministic rule (never by which thread finished first)
-   - Tracks progress with phase indicators and cancellation support; read errors are counted and
-     reported instead of silently skipped
+   - Runs as a background job with progress, ETA, cancel, pause and resume; read errors are counted
+     and reported instead of silently skipped
    
    ```python
    def keeper_sort_key(copy, rule="oldest", prefer_folder=None):
@@ -857,67 +861,47 @@ const data = await _prefetchCache[`/api/spotify/stats?year=all`];
 
 ---
 
-#### 3.4 Progress Tracking for Long-Running Operations
+#### 3.4 Background Jobs for Long-Running Operations
 
-**Problem:** Large vault scans take minutes. Users get no feedback, fearing application hung.
+**Problem:** A duplicate scan of ~100k files took over a minute inside one HTTP request. The whole
+server stood still (the route was `async def`), progress and cancel could not answer, a reload lost
+everything, and an unplugged disk turned into a half result.
 
-**Solution:** Persistent progress state with async updates:
+**Solution:** A small job manager (`backend/jobs.py`) with a row per job in SQLite (migration 8):
 
 ```python
-# progress.py
-class ScanProgress:
-    def __init__(self, status='idle', phase=''):
-        self.status = status
-        self.phase = phase
-        self.total_files = 0
-        self.processed_files = 0
-        self.duplicates_found = 0
-        self.started_at = datetime.now()
-        self.completed_at = None
-    
-    def to_dict(self):
-        elapsed = (self.completed_at or datetime.now()) - self.started_at
-        return {
-            'status': self.status,
-            'phase': self.phase,
-            'total_files': self.total_files,
-            'processed_files': self.processed_files,
-            'duplicates_found': self.duplicates_found,
-            'progress_percent': round(100 * self.processed_files / max(1, self.total_files)),
-            'elapsed_seconds': elapsed.total_seconds()
-        }
-
-_scan_progress = None
-
-def set_scan_progress(progress: ScanProgress):
-    global _scan_progress
-    _scan_progress = progress
-
-def update_scan_progress(**kwargs):
-    global _scan_progress
-    if _scan_progress:
-        for key, value in kwargs.items():
-            setattr(_scan_progress, key, value)
+# queued -> running -> done | failed | cancelled
+#                   -> paused             (user; resume continues it)
+#                   -> waiting_for_vault  (disk unplugged; continues by itself)
+#                   -> interrupted        (server stopped; resume continues it)
+def run(ctx: JobContext):                       # a job type's handler
+    ctx.progress(0, None, "Bestanden zoeken...")  # memory only; written at most once per second
+    ...
+    ctx.check()                                 # raises JobStopped on cancel, pause or shutdown
+    ctx.save_checkpoint({...})                  # what a resumed run may skip
+    return result                               # stored zlib-compressed in job_results
 ```
 
-Frontend polls `/api/raw_duplicates/progress`:
+- One worker thread per running job and at most one job of a type at a time (others are queued);
+  starting the same job twice returns the first.
+- If the handler fails, or finishes, while `VAULT_ROOT` is gone, the job goes to `waiting_for_vault`,
+  polls, and runs again from its checkpoint (hashes and thumbnails already made are skipped through
+  their caches). A job is only `done` when it finished with the vault present. A final state that
+  could not be saved (the database is on the vault disk) is written once the disk is back.
+- On start-up, jobs left `running`, `queued` or `waiting_for_vault` become `interrupted`; on shutdown
+  the worker stops at its next check and the job is left `interrupted`, ready to resume.
+- The frontend (`jobs.js`) shows a job dock with progress bar, ETA (from a 30 s window of progress
+  samples), and pause/resume/cancel; the duplicates screen follows its scan job and reloads the stored
+  result, leaving out copies moved since.
 
-```javascript
-async function pollProgress() {
-    const response = await fetch('/api/raw_duplicates/progress');
-    const data = await response.json();
-    
-    updateProgressBar(data.progress_percent);
-    updatePhaseText(data.phase);
-    updateFileCount(`${data.processed_files}/${data.total_files}`);
-    
-    if (data.status !== 'scanning') {
-        clearInterval(progressPollInterval);
-    }
-}
+Measured on a synthetic vault of 106,659 tiny files (94,489 media files in RAW), internal SSD:
 
-progressPollInterval = setInterval(pollProgress, 1000);
-```
+| | Phase 1 | Before this step | Now |
+|---|---|---|---|
+| RAW scan, cold | 73.6 s | 6.2 s | 6.2 s |
+| RAW scan, warm (cached hashes) | 13.8 s | 1.6 s | 1.4 s |
+| `/api/health` during the scan | blocked for the whole scan | max 0.115 s | max 0.026 s |
+| Peak RSS during the cold scan | 892 MB (958 MB after) | 497 MB | 174 MB |
 
 ---
 
@@ -1022,6 +1006,18 @@ CREATE TABLE delete_operations (
     FOREIGN KEY (run_id) REFERENCES delete_runs(run_id)
 )
 CREATE INDEX idx_delops_run ON delete_operations(run_id);
+
+-- Background jobs (migration 8) and their stored results
+CREATE TABLE jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL,
+    processed INTEGER NOT NULL DEFAULT 0, total INTEGER, message TEXT, error TEXT,
+    checkpoint TEXT, summary TEXT,
+    created_at REAL NOT NULL, updated_at REAL NOT NULL, started_at REAL, finished_at REAL
+)
+CREATE INDEX idx_jobs_status ON jobs(status);
+CREATE INDEX idx_jobs_type ON jobs(type, id);
+CREATE TABLE job_results (job_id INTEGER PRIMARY KEY REFERENCES jobs(id), encoding TEXT NOT NULL, data BLOB NOT NULL)
 
 -- Folder visibility settings
 CREATE TABLE show_settings (
@@ -1264,18 +1260,14 @@ async def startup():
 #### 7.2 Operation Atomicity
 
 ```python
-# Scan can be cancelled mid-operation
-@router.post("/api/raw_duplicates/cancel")
-def cancel_scan():
-    from backend.progress import cancel_scan
-    cancel_scan()
-    return {"status": "cancelled"}
+# A job can be cancelled or paused mid-operation: POST /api/jobs/{id}/cancel | /pause
+# The scanner checks between steps; hashes already computed are flushed to the cache first
+for root, dirnames, filenames in walk_archive(folder_path, config, onerror=record_error):
+    reporter.check()          # raises JobStopped('cancel' | 'pause' | 'shutdown')
 
-# Scanner checks cancellation flag; the answer always has the same shape
-def find_duplicates_in_folder(folder_path, config, db, rule="oldest", prefer_folder=None):
-    for root, dirnames, filenames in walk_archive(folder_path, config, onerror=record_error):
-        if is_scan_cancelled():
-            return cancelled_result()  # {groups: [], cancelled: True, complete: False, ...}
+# SQLite: one connection per thread, WAL; every call commits or rolls back as a whole
+with self._connect() as conn:
+    conn.executemany("INSERT OR REPLACE INTO file_hashes ...", batch)
 ```
 
 #### 7.3 File Operation Error Handling

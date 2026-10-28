@@ -54,7 +54,8 @@ DataVault Dashboard is a full-featured web application for organizing, analyzing
 
 #### Performance & Reliability
 - **Background Prefetch** — Smart multi-stage prefetching (Spotify all-time → shows → per-year data) with promise-based caching
-- **Progress Tracking** — Long-running scans (duplicates, timeline) show real-time progress with cancellation support
+- **Background Jobs** — Duplicate scans, hashing and thumbnail pre-generation run as jobs in a worker thread (`backend/jobs.py`, `/api/jobs`): progress with ETA, cancel, pause and resume, persisted in SQLite so they survive a reload; a job left running by a stopped server comes back as `interrupted`, and one whose vault is unplugged waits for it and continues
+- **Never Blocking the Server** — Every route that touches the disk, a subprocess or SQLite is a plain `def` (threadpool); only the chat routes are `async` (they await Ollama). SQLite runs in WAL mode with one connection per thread and a busy timeout
 - **Graceful Error Handling** — Corrupt files skipped silently, cross-device moves detected, partial failures reported with details
 - **Security Hardening** — No CORS, trusted hosts only (127.0.0.1/localhost), a per-process session token on every state-changing request, one central path check (`resolve_in_vault`) and one exclusion rule for every walk over the archive
 
@@ -74,13 +75,15 @@ backend/
 ├── database.py                # SQLite abstraction (caching, ratings, decisions, undo tracking)
 ├── scanner.py                 # File discovery, xxHash3 hashing, per-folder duplicate detection
 ├── file_ops.py                # Safe atomic file operations with metadata preservation
-├── thumbnail.py               # Thumbnail generation (PIL) with cache validation
-├── progress.py                # Progress state tracking for long-running operations
+├── thumbnail.py               # Thumbnail generation (PIL) with cache validation, atomic writes
+├── jobs.py                    # JobManager: background jobs with progress, cancel, pause, resume, vault wait
+├── job_types.py               # The job types: dup_scan, hashing, thumbnails
 │
 └── routes/
     ├── folders.py             # Folder tree enumeration, recursive traversal
     ├── media.py               # Individual file operations, thumbnail serving, file downloads
-    ├── duplicates.py          # Per-folder duplicate scan, verified batch moves, undo per run
+    ├── duplicates.py          # Duplicate scan (as a job), verified batch moves, undo per run
+    ├── jobs.py                # /api/jobs: start, list, get, result, cancel, pause, resume
     ├── spotify.py             # Spotify JSON parsing, stats aggregation, year filtering
     ├── shows.py               # Slideshow generation, weighted sampling, ELO ratings
     ├── chat.py                # LLM chat with Ollama, context injection, action tags, streaming
@@ -150,10 +153,15 @@ UI Update (render, toast notification)
 **Problem:** Large vaults accumulate identical files across folders. Manual identification is impossible; naive approaches are too slow.
 
 **Solution:**
-- **Per-Folder Scan** (`POST /api/duplicates/scan_folder?folder_path=&rule=&prefer_folder=`, `scanner.find_duplicates_in_folder`):
+- **Per-Folder Scan as a background job** (`POST /api/jobs {type: "dup_scan", params: {folder, rule, prefer_folder}}`,
+  `scanner.find_duplicates_in_folder`); `POST /api/duplicates/scan_folder?folder_path=&rule=&prefer_folder=` runs
+  the same job and waits for it (for scripts):
   1. Walk the chosen folder in sorted order with the archive's one exclusion rule (no cache, TRASH,
-     RAW_DUPLICATES, hidden or `._` files, symlinks) and group the non-empty media files by size
-  2. Hash only the files that share a size, in parallel, with xxHash3-128
+     RAW_DUPLICATES, hidden or `._` files, symlinks) and group the non-empty media files by size; per file only
+     the path string and a small fingerprint tuple are kept
+  2. Hash only the files that share a size with xxHash3-128 on 4 threads, submitted in a bounded window
+     (`jobs.bounded_map`: never tens of thousands of futures at once); new hashes go to the cache in batches
+     of 2000 (or every 10 s), so a stopped or interrupted scan resumes from the cache
   3. Group by hash and pick the copy that stays with `scanner.choose_keeper(rule)`
   4. Answer with groups: `{id, hash, size, type, copies: [...], keep}`; each copy carries `capture_ts`
      (EXIF DateTimeOriginal, else birthtime, else mtime), `file_ts`, `hidden`, `path_len` and `name_rank`
@@ -165,10 +173,11 @@ UI Update (render, toast notification)
   Identical bytes mean identical EXIF, so within a group the file date tells the copies apart.
   The UI (`keepSortKey` in duplicates.js) uses the same keys, so switching rules is instant, and the user can
   pick another copy per group.
-- **Honest results:** an empty or cancelled scan answers 200 with the same shape (`cancelled: true`);
-  unreadable folders and files are counted (`errors`, `error_samples`, `complete: false`, progress status
-  `incomplete`); a folder that disappears mid-scan (disk unplugged) gives 503. The route is a plain `def`, so
-  progress and cancel answer while it runs, and only one scan runs at a time (409 otherwise).
+- **Honest results:** unreadable folders and files are counted (`errors`, `error_samples`, `complete: false`);
+  a folder that disappears mid-scan fails the job, and an unplugged vault makes it wait and run again, so a
+  scan that missed files because of the disk is never `done`. The result is stored (`job_results`) and served
+  again after a reload, leaving out copies that were moved since. One scan runs at a time; a second one waits
+  in the queue (`scan_folder` answers 409 instead).
 - **Smart Caching:** `file_hashes` rows carry their algorithm (`algo`) and are only used while the file's
   inode, size, mtime_ns and ctime_ns are unchanged (ctime cannot be set back, so an in-place edit that
   restores the mtime is still noticed). Rows from before migration 6 are simply rehashed. The cache is read in
@@ -557,7 +566,35 @@ CREATE TABLE show_settings (
     path TEXT PRIMARY KEY,
     enabled BOOLEAN DEFAULT 1
 );
+
+-- Background jobs (migration 8): progress, checkpoint and a small summary per job
+CREATE TABLE jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,                 -- 'dup_scan', 'hashing', 'thumbnails'
+    params TEXT NOT NULL DEFAULT '{}',  -- JSON
+    status TEXT NOT NULL,               -- queued, running, paused, waiting_for_vault,
+                                        -- cancelled, failed, done, interrupted
+    processed INTEGER NOT NULL DEFAULT 0,
+    total INTEGER,                      -- NULL while still counting
+    message TEXT, error TEXT,
+    checkpoint TEXT, summary TEXT,      -- JSON
+    created_at REAL NOT NULL, updated_at REAL NOT NULL, started_at REAL, finished_at REAL
+);
+CREATE INDEX idx_jobs_status ON jobs(status);
+CREATE INDEX idx_jobs_type ON jobs(type, id);
+-- The full result of a finished job, zlib-compressed JSON (kept for the newest few per type)
+CREATE TABLE job_results (
+    job_id INTEGER PRIMARY KEY REFERENCES jobs(id),
+    encoding TEXT NOT NULL,             -- 'json+zlib'
+    data BLOB NOT NULL
+);
 ```
+
+The database runs in WAL mode (readers never wait for the writer) with `busy_timeout` 10 s and one
+connection per thread; every method runs inside `with self._connect()`, which commits or rolls back, so a
+failed call never leaves a transaction open. Before each use the database file is stat'ed: gone means
+`OperationalError` (503 "Archief niet bereikbaar"), and a different file (the disk was mounted again) gets
+a fresh connection.
 
 ---
 
@@ -565,7 +602,7 @@ CREATE TABLE show_settings (
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| Duplicate scan (one folder) | depends on size | Size pre-filter, then parallel xxHash3 (cache read in one query) |
+| Duplicate scan, ~94k files (synthetic, SSD) | 6.2 s cold, 1.4 s warm | Phase 1: 73.6 s / 13.8 s. Background job; `/api/health` stays under 30 ms meanwhile; peak RSS ~175-225 MB (was ~960 MB) |
 | Thumbnail generation | 50-100ms | Per image with PIL |
 | Thumbnail cache hit | <10ms | Validated by mtime |
 | Video frame extraction | 100-300ms | Via ffmpeg |
@@ -574,9 +611,9 @@ CREATE TABLE show_settings (
 | Initial page load | <1s | Lazy loading, deferred data |
 
 **Optimization Strategies:**
-1. **Hash Caching:** Stat-based invalidation (size + mtime)
+1. **Hash Caching:** Trusted only while inode, size, mtime_ns and ctime_ns are unchanged; read in one query, written in batches
 2. **Background Prefetch:** Multi-stage prioritization, requestIdleCallback
-3. **Concurrent Processing:** ThreadPoolExecutor for multi-core scanning
+3. **Concurrent Processing:** Bounded ThreadPoolExecutor windows inside background jobs; blocking routes run in the threadpool
 4. **Lazy Rendering:** IntersectionObserver for thumbnail loading
 5. **Virtual Scrolling:** Only render visible items
 6. **Streaming Responses:** SSE for real-time chat
@@ -692,7 +729,8 @@ DataVault/
 │   │   ├── scanner.py                 # File discovery, hashing
 │   │   ├── file_ops.py                # Safe file operations
 │   │   ├── thumbnail.py               # Thumbnail generation
-│   │   ├── progress.py                # Progress tracking
+│   │   ├── jobs.py                    # Background jobs (JobManager)
+│   │   ├── job_types.py               # dup_scan, hashing, thumbnails
 │   │   └── routes/                    # API endpoints
 │   │       ├── folders.py
 │   │       ├── media.py
@@ -740,7 +778,7 @@ DataVault/
 - **Date Extraction & Indexing:** Temporal organization with year-based jumping
 - **Probability-Based Sampling:** ELO rating system for weighted randomness
 - **Recursive Traversal:** Efficient folder scanning with exclusion filters
-- **Progress Tracking:** Multi-phase scanning with cancellation support
+- **Background Jobs:** Multi-phase scanning as resumable jobs with progress, ETA, cancel and pause
 
 ### Performance & Optimization
 - **Cache Strategy:** Stat-based invalidation achieving 90%+ hit rates

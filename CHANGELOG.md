@@ -350,3 +350,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Bestanden: nieuwe knop **Miniaturen maken** maakt op de achtergrond alle ontbrekende
   miniaturen van de geopende map (of, zonder geopende map, van het hele archief, na
   bevestiging).
+- Gemeten op een proefarchief van ruim 106.000 kleine bestanden (94.489 in RAW) op de interne
+  SSD: de duplicatenscan van RAW duurt nu 6,2 s zonder en 1,4 s met opgeslagen controlegetallen
+  (bij de start van fase 2: 73,6 s en 13,8 s). De statuscontrole van de server antwoordt tijdens
+  de scan binnen 0,03 s (voorheen stond de server de hele scan stil), en de server gebruikt
+  tijdens de scan hooguit zo'n 175 tot 225 MB geheugen (voorheen bijna 1 GB).

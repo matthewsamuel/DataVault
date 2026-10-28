@@ -16,6 +16,8 @@ Een lokale media viewer en RAW duplicaten opruimtool voor macOS. Draait op exter
     │   ├── file_ops.py    # Veilige bestandsoperaties
     │   ├── scanner.py     # Bestanden scannen & hashen
     │   ├── thumbnail.py   # Thumbnails genereren
+    │   ├── jobs.py        # Achtergrondtaken (voortgang, pauzeren, hervatten)
+    │   ├── job_types.py   # Duplicatenscan, indexeren, miniaturen
     │   └── routes/        # API endpoints
     ├── frontend/          # HTML/CSS/JS interface
     ├── venv/              # Python virtual environment
@@ -81,11 +83,16 @@ pip install -r requirements.txt
 - Foto's en video's bekijken met thumbnails
 - Volledig scherm met metadata
 
-### RAW Duplicaten
-- Scan RAW map op exacte duplicaten (SHA-256)
-- Visueel raster met paden als tooltip
-- Duplicaten verplaatsen naar RAW_DUPLICATES (structuur behouden)
-- Volledig ongedaan maakbaar via database tracking
+### Duplicaten
+- Scan een map op byte voor byte identieke bestanden (grootte, dan xxHash3; vlak voor elke verplaatsing een volledige vergelijking)
+- Per groep kies je welke kopie blijft (regel of zelf aanklikken)
+- Duplicaten verplaatsen naar RAW_DUPLICATES (structuur behouden), nooit wissen
+- Elke opruimactie is in één keer terug te zetten (Herstellen)
+
+### Achtergrondtaken
+- Duplicaten zoeken, vooraf indexeren en miniaturen maken lopen als taak op de achtergrond
+- Het takenpaneel rechtsonder toont voortgang en resterende tijd, met Pauzeren, Hervatten en Annuleren
+- Blijft bewaard na herladen of herstarten ("onderbroken", hervatbaar); bij een losgekoppelde schijf wacht een taak tot de schijf terug is
 
 ## Veiligheidsgaranties
 
