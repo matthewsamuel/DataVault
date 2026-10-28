@@ -1856,10 +1856,11 @@ kbd {
     padding: var(--space-2xl) var(--page-gutter) var(--space-4xl);
 }
 
+/* Knoppen rechts in de kop staan op de hoogte van de titel, op elke pagina even groot */
 .page-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
+    align-items: flex-start;
     gap: var(--space-lg);
     margin-bottom: var(--space-xl);
 }
@@ -4125,7 +4126,7 @@ a.breadcrumb-item:hover {
     z-index: 10;
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
+    align-items: flex-start;
     gap: var(--space-lg);
     max-width: var(--page-max);
     width: 100%;
@@ -6640,7 +6641,7 @@ button.otd-settings-icon:hover {
 
 .keurer-header {
     align-self: stretch;
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: 0;
 }
 
@@ -7396,7 +7397,7 @@ button.otd-settings-icon:hover {
 
 .tl-header {
     display: flex;
-    align-items: flex-end;
+    align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-lg);
     padding: var(--space-2xl) var(--page-gutter) var(--space-lg);

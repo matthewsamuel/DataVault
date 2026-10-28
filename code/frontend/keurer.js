@@ -27,12 +27,7 @@ function keurerInit() {
     try {
         keurerLoadStats();
 
-        const display = document.getElementById('keurer-folder-display');
-        if (display) {
-            display.textContent = keurerFolder
-                ? keurerShortenPath(keurerFolder)
-                : 'Geen map gekozen';
-        }
+        keurerShowFolder();
 
         // Undo-stapel eerst van de server halen, zodat hij een herlaad overleeft
         keurerLoadHistory().finally(() => {
@@ -1128,14 +1123,21 @@ function keurerConfirmFolderSelection() {
     keurerFolder = keurerSelectedFolderForModal;
     localStorage.setItem('keurer_folder', keurerFolder);
 
-    const display = document.getElementById('keurer-folder-display');
-    if (display) display.textContent = keurerShortenPath(keurerFolder);
+    keurerShowFolder();
 
     keurerCloseFolderPicker();
     keurerLoadFiles();
 }
 
 // ==================== HELPERS ====================
+
+// De gekozen map in de kop, en de knop ernaast: 'Map kiezen' zolang er nog geen is
+function keurerShowFolder() {
+    const display = document.getElementById('keurer-folder-display');
+    if (display) display.textContent = keurerFolder ? keurerShortenPath(keurerFolder) : 'Geen map gekozen';
+    const label = document.getElementById('keurer-folder-button-label');
+    if (label) label.textContent = keurerFolder ? 'Andere map' : 'Map kiezen';
+}
 
 function keurerShortenPath(p) {
     const parts = p.split('/').filter(Boolean);
