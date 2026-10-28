@@ -143,6 +143,17 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Beide thema's halen WCAG AA-contrast voor alle zichtbare tekst; de rooktest controleert dat op elk
   scherm (`tests/ui/a11y_checks.js`).
 
+### Uiterlijk (design system)
+- Alle kleuren, letters, ruimtes, rondingen, schaduwen en bewegingen komen uit de tokens bovenin
+  `frontend/style.css` (tussen `@tokens:start` en `@tokens:end`), voor licht, donker en Auto.
+  Buiten dat blok staat geen enkele kleurcode: `tests/test_frontend_static.py` faalt daarop.
+- Daaronder staan de gedeelde componenten (`.btn`, `.input`, `.select`, `.switch`, `.pill`,
+  `.segmented`, `.card`, `.stat-tile`, `.modal-*`, `.menu`, `.toast`, `.empty-state`, `.skeleton`,
+  `.progress`, `.badge`, `.thumb-tile`, ...). Een nieuw scherm gebruikt alleen die.
+- `http://127.0.0.1:<poort>/styleguide.html` toont ze allemaal, licht en donker naast elkaar.
+- De rooktest bewaart van elk scherm een schermafbeelding in beide thema's (het pad staat in de
+  uitvoer, of zet `DATAVAULT_SMOKE_SHOTS`).
+
 ### Achtergrondtaken
 - Duplicaten zoeken, vooraf indexeren, miniaturen maken en de bibliotheek bijwerken lopen als taak op de achtergrond
 - Het takenpaneel rechtsonder toont voortgang en resterende tijd, met Pauzeren, Hervatten en Annuleren

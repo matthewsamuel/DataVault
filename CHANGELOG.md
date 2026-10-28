@@ -131,6 +131,33 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   het lichte thema wit op wit.
 - Het thema kies je ook met het toetsenbord (menu met pijltjes, of **t**) en in Instellingen.
 
+### Nieuw uiterlijk: modern, met een groen accent
+- De hele app heeft een rustiger, moderner uiterlijk. De gewone systeemletter van de Mac voor alle
+  tekst; de mono-letter alleen nog voor het DATAVAULT-logo, getallen en paden. Geen hoofdletters met
+  extra spatiëring meer, maar gewone zinnen.
+- Het felle neongroen is een rustiger groen dat in beide thema's goed leesbaar is. Het groen staat
+  alleen nog op de belangrijkste knop, het actieve menu-onderdeel, selecties, focus en voortgang.
+- Licht is bijna wit met witte kaarten en zachte schaduwen; donker is diep grijs (niet zwart), met
+  dunne randen en iets lichtere kaarten.
+- Afgeronde hoeken, meer ruimte en overal dezelfde knoppen, invoervelden, keuzelijsten (zonder de
+  systeemknop), schakelaars, filterpillen, kaarten, vensters, menu's en meldingen.
+- Bovenbalk: onderdelen met een groen streepje onder het actieve, een duidelijk zoekveld met de
+  sneltoets **/**, en de themakeuze als een klein menu. Op een smaller scherm past alles nog.
+- Home begint met een begroeting en de datum, daarna "op deze dag" (foto en Spotify naast elkaar),
+  tegels met het aantal foto's, video's en audio en de opslag, en Pasha in chatballonnen met zijn
+  hondenkopje naast elk antwoord.
+- Bestanden: het pad begint bij het archief ("Archief › RAW › 2019") in plaats van bij de schijf.
+  Foto's zijn even grote, afgeronde tegels die licht omhoog komen onder de muis en zacht verschijnen
+  als ze geladen zijn. Mappen en bestanden hebben iconen in plaats van emoji.
+- De viewer toont de foto groot op een donkere achtergrond (ook in het lichte thema), met de gegevens
+  rustig in een paneel rechts en ronde knoppen om te zoomen en te bladeren.
+- Keurer: de foto staat centraal en past in het venster met de knoppen eronder; de sneltoetsen staan
+  eronder als toetsjes. Tijdlijn: de maandkoppen vallen niet meer over de foto's heen.
+- Spotify houdt zijn eigen groen, met iconen in plaats van emoji, en de luistertypes en uitleg in het
+  Nederlands ("Vroege vogel", "Brede ontdekker"). De uitgelichte show heet nu "Verras me".
+- De achtergrondgolven in de mappenkolom zijn weg; alleen Spotify heeft ze nog.
+- Beweging is kort en subtiel, en staat helemaal stil als je in macOS "Beperk beweging" aan hebt.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden
