@@ -8,14 +8,16 @@ type at a time):
                                params {trigger: 'user' | 'schedule'}
     datagatherer.import.<id>   read raw exports: {} registers the existing export folders in
                                place and reads every pending one; {raw_import_id} reads one.
-    datagatherer.watch         copy one export found in a watch folder (Downloads) into the
-                               vault, then queue its import. params {source, path}
+    datagatherer.watch         copy one export into the vault, then queue its import: one found
+                               in a watch folder (Downloads), params {source, path}, or one
+                               picked in the browser, params {source, upload, name}
 
 Every job is idempotent (the record keys), so resume, a second click or an interrupted run
 never adds anything twice. An import that is stopped halfway stays 'importing' and is read
 again (from the start) by the next run. A raw export that cannot be read is marked 'failed'
 with the reason; the others still go on, and the job then reports itself incomplete.
 """
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -25,7 +27,7 @@ from fastapi import HTTPException
 
 from backend.datagatherer import net, raw_store, registry, state
 from backend.datagatherer.base import ConnectorError, GatherContext
-from backend.jobs import JobContext, JobType, VaultUnavailable
+from backend.jobs import JobContext, JobStopped, JobType, VaultUnavailable
 
 SYNC_PREFIX = "datagatherer.sync."
 IMPORT_PREFIX = "datagatherer.import."
@@ -211,12 +213,57 @@ def import_message(connector, result: Dict[str, Any]) -> str:
 
 # ---------- watch: an export from Downloads into the vault ----------
 
+UPLOAD_STAGING = "datagatherer-upload"
+
+
+def upload_staging(config) -> Path:
+    """Where an export picked in the browser waits for its copy into the vault: the app's own cache folder."""
+    return config.CACHE_FOLDER / UPLOAD_STAGING
+
+
+def drop_upload(config, token: str) -> None:
+    """Remove one staged upload (the app's own temporary copy in its cache folder, never an archive file)."""
+    folder = upload_staging(config) / token
+    try:
+        for entry in os.scandir(folder):
+            os.unlink(entry.path)
+        os.rmdir(folder)
+    except OSError:
+        pass
+
+
+def _staged_file(config, token: Any, name: Any) -> Path:
+    """The staged upload of params {upload, name}; only a plain folder and file name in the staging folder."""
+    if not isinstance(token, str) or not isinstance(name, str) or not token or not name:
+        raise HTTPException(status_code=400, detail="Onbekende upload")
+    for part in (token, name):
+        if "/" in part or part.startswith(".") or any(ord(c) < 32 or ord(c) == 127 for c in part):
+            raise HTTPException(status_code=400, detail="Onbekende upload")
+    path = upload_staging(config) / token / name
+    if path.is_symlink() or not path.is_file():
+        raise HTTPException(status_code=400, detail="Deze upload is er niet (meer); kies het bestand opnieuw")
+    return path
+
+
 def watch_type(config, db, get_jobs: Callable[[], Any]) -> JobType:
+    """
+    Copy one export into the vault, then queue its import. Two ways in: a file in a watch
+    folder (params {source, path}: the Downloads watcher or 'In Downloads zoeken') or a file
+    picked in the browser (params {source, upload, name}: staged by the upload route in the
+    app's cache folder, removed once it is in the vault or the job was cancelled).
+    """
     from backend.datagatherer import daemon
 
     def prepare(params: Dict[str, Any]) -> Dict[str, Any]:
         connector = registry.get(params.get("source") or "")
-        if connector is None or not connector.has("export_watch"):
+        if connector is None:
+            raise HTTPException(status_code=400, detail="Onbekende bron")
+        if "upload" in params:
+            if not connector.has("import"):
+                raise HTTPException(status_code=400, detail=f"{connector.name} kan geen bestand inlezen")
+            _staged_file(config, params.get("upload"), params.get("name"))
+            return {"source": connector.id, "upload": params["upload"], "name": params["name"]}
+        if not connector.has("export_watch"):
             raise HTTPException(status_code=400, detail="Onbekende bron")
         path = params.get("path")
         if not isinstance(path, str) or not daemon.in_watch_folder(config, Path(path)):
@@ -225,10 +272,33 @@ def watch_type(config, db, get_jobs: Callable[[], Any]) -> JobType:
 
     def run(ctx: JobContext) -> Dict[str, Any]:
         _vault(config)
+        upload = ctx.params.get("upload")
+        keep_staged = False
+        try:
+            return _copy(ctx, upload)
+        except JobStopped as e:
+            keep_staged = e.reason != "cancel"       # paused or shutting down: resumed later
+            raise
+        except VaultUnavailable:
+            keep_staged = True
+            raise
+        finally:
+            if upload and not keep_staged and config.VAULT_ROOT.is_dir():
+                drop_upload(config, upload)
+
+    def _copy(ctx: JobContext, upload) -> Dict[str, Any]:
         connector = registry.get(ctx.params["source"])
-        src = Path(ctx.params["path"])
-        if not src.is_file():
-            raise GatherFailed("Het bestand staat niet meer in Downloads")
+        if upload:
+            try:
+                src = _staged_file(config, upload, ctx.params.get("name"))
+            except HTTPException as e:
+                raise GatherFailed(e.detail)
+            origin = "upload"
+        else:
+            src = Path(ctx.params["path"])
+            origin = "downloads"
+            if not src.is_file():
+                raise GatherFailed("Het bestand staat niet meer in Downloads")
         names = raw_store.read_zip_names(src)
         kind = connector.detect(src, names)
         if kind is None:
@@ -239,19 +309,23 @@ def watch_type(config, db, get_jobs: Callable[[], Any]) -> JobType:
             ctx.check()
             ctx.progress(done, size * 2, f"Kopiëren naar het archief: {src.name}")
 
-        raw, created = raw_store.archive_file(config, db, connector, kind, src, "downloads", check=check)
+        raw, created = raw_store.archive_file(config, db, connector, kind, src, origin, check=check,
+                                              original_name=src.name)
         state.close_requests(db, connector.id, "arrived", raw_import_id=raw["id"])
+        import_job = None
         if raw["status"] != "imported":
-            get_jobs().start(import_type_name(connector.id), {"raw_import_id": raw["id"]})
+            job, _ = get_jobs().start(import_type_name(connector.id), {"raw_import_id": raw["id"]})
+            import_job = job["id"]
         ctx.progress(size * 2, size * 2, f"Gekopieerd naar het archief: {Path(raw['path']).name}" if created
                      else "Deze export stond al in het archief")
         return {"source": connector.id, "raw_import_id": raw["id"], "created": created, "path": raw["path"],
-                "original": str(src), "complete": True, "errors": 0}
+                "original": None if upload else str(src), "import_job": import_job, "complete": True, "errors": 0}
 
     return JobType(WATCH_TYPE, "Export naar het archief kopiëren", prepare, run,
-                   summarize=lambda r: {k: r.get(k) for k in ("source", "raw_import_id", "created", "complete", "errors")},
+                   summarize=lambda r: {k: r.get(k) for k in ("source", "raw_import_id", "created", "import_job",
+                                                              "complete", "errors")},
                    results_to_keep=5, jobs_to_keep=10,
-                   describe=lambda p: Path(p.get("path") or "").name)
+                   describe=lambda p: p.get("name") or Path(p.get("path") or "").name)
 
 
 def build(config, db, get_jobs: Callable[[], Any]) -> List[JobType]:

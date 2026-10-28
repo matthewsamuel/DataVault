@@ -16,7 +16,8 @@ POST   /api/datagatherer/requests/{rid}/dismiss
 GET    /api/datagatherer/sources/{id}/candidates       exports of this source in the watch folders
 POST   /api/datagatherer/sources/{id}/candidates/import  {path}: copy that one into the vault and read it
 POST   /api/datagatherer/sources/{id}/upload?name=     the request body is an export file (picked in
-                                                       the browser): copied into the vault, then read
+                                                       the browser): checked, then a job copies it into
+                                                       the vault and reads it
 GET    /api/datagatherer/network-log?source&limit      every request DataGatherer made (or refused)
 GET    /api/datagatherer/launchd                       the optional launchd agent
 POST   /api/datagatherer/launchd/install | /uninstall  only on a click in Instellingen
@@ -35,6 +36,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from backend.datagatherer import cards, daemon, keychain, launchd, oauth, raw_store, registry, state
+from backend.datagatherer import jobs as gather_jobs
 from backend.datagatherer.base import CATEGORIES, ConnectorError, GatherContext
 from backend.datagatherer.jobs import WATCH_TYPE, import_type_name, sync_type_name
 from backend.jobs import JobError
@@ -318,20 +320,24 @@ def import_candidate(source_id: str, body: Any = Body(...)):
 @router.post("/sources/{source_id}/upload")
 async def upload(source_id: str, request: Request, name: str = ""):
     """
-    An export picked in the browser: the body is the file. It is streamed into a temporary file
-    in the app's cache folder in the vault (never the nearly full internal disk), recognised,
-    then archived like a download (copied into its dated folder, so the raw store has one way
-    in) and read. Async only to receive the stream: every disk step runs in the thread pool.
+    An export picked in the browser: the body is the file. It is streamed into its own
+    temporary folder in the app's cache folder in the vault (never the nearly full internal
+    disk), under its real name so it is recognised like a download, and checked. Copying it
+    into its dated folder in the archive and reading it run as a job (datagatherer.watch,
+    with progress and cancel), so the raw store has one way in. Async only to receive the
+    stream: every disk step runs in the thread pool.
     """
     connector = _connector(source_id)
     if not connector.has("import"):
         raise HTTPException(status_code=400, detail=f"{connector.name} kan geen bestand inlezen")
     base = os.path.basename(name or "")
-    if not base or base.startswith(".") or len(base) > 200 or not base.lower().endswith(daemon.EXPORT_SUFFIXES):
+    if (not base or base.startswith(".") or len(base) > 200 or any(ord(c) < 32 or ord(c) == 127 for c in base)
+            or not base.lower().endswith(daemon.EXPORT_SUFFIXES)):
         raise HTTPException(status_code=400, detail="Kies een exportbestand (.zip of .json)")
-    temp = await run_in_threadpool(_upload_temp, base)
+    token, temp = await run_in_threadpool(_upload_temp, base)
+    started = False
     try:
-        out = await run_in_threadpool(open, temp, "wb")
+        out = await run_in_threadpool(open, temp, "xb")
         size, buffer = 0, bytearray()
         try:
             async for chunk in request.stream():
@@ -347,44 +353,26 @@ async def upload(source_id: str, request: Request, name: str = ""):
             await run_in_threadpool(out.close)
         if size == 0:
             raise HTTPException(status_code=400, detail="Het bestand is leeg")
-        return await run_in_threadpool(_archive_upload, connector, temp, base)
+        kind = await run_in_threadpool(lambda: connector.detect(temp, raw_store.read_zip_names(temp)))
+        if kind is None:
+            raise HTTPException(status_code=400, detail=f"{base} is geen export van {connector.name}")
+        response = await run_in_threadpool(_start, WATCH_TYPE, {"source": connector.id, "upload": token, "name": base})
+        started = True
+        return response
     finally:
-        await run_in_threadpool(_drop_temp, temp)
+        if not started:
+            await run_in_threadpool(gather_jobs.drop_upload, config, token)
 
 
 UPLOAD_BUFFER = 4 * 1024 * 1024
 
 
-def _upload_temp(base: str) -> Path:
-    staging = config.CACHE_FOLDER / "datagatherer-upload"
+def _upload_temp(base: str):
+    """(token, path): a fresh folder of its own in the app's cache folder, with the file under its real name."""
+    staging = gather_jobs.upload_staging(config)
     staging.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(dir=staging, suffix="-" + base)
-    os.close(fd)
-    return Path(name)
-
-
-def _drop_temp(temp: Path) -> None:
-    """The temporary upload in the app's own cache folder (never an archive file)."""
-    try:
-        os.unlink(temp)
-    except OSError:
-        pass
-
-
-def _archive_upload(connector, temp: Path, base: str) -> Dict[str, Any]:
-    kind = connector.detect(temp, raw_store.read_zip_names(temp))
-    if kind is None:
-        raise HTTPException(status_code=400, detail=f"{base} is geen export van {connector.name}")
-    try:
-        raw, created = raw_store.archive_file(config, db, connector, kind, temp, "upload", original_name=base)
-    except raw_store.RawStoreError as e:
-        raise HTTPException(status_code=507, detail=str(e))
-    state.close_requests(db, connector.id, "arrived", raw_import_id=raw["id"])
-    job = None
-    if raw["status"] != "imported":
-        job, _ = jobs.start(import_type_name(connector.id), {"raw_import_id": raw["id"]})
-    return {"raw_import_id": raw["id"], "created": created, "path": raw["path"], "job": job,
-            "message": None if created else "Deze export stond al in het archief"}
+    folder = Path(tempfile.mkdtemp(dir=staging, prefix="upload-"))
+    return folder.name, folder / base
 
 
 @router.get("/network-log")

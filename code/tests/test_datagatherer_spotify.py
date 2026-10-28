@@ -33,12 +33,17 @@ def _wait(app, job_id, timeout=30):
 
 
 def _upload(client, app, path: Path, name=None):
+    """Upload an export like the browser does; wait for its copy job and the import it starts.
+    Returns the copy job's result ({created, raw_import_id, import_job, ...})."""
     r = client.post(f"/api/datagatherer/sources/spotify/upload?name={name or path.name}", content=path.read_bytes())
-    assert r.status_code == 200, r.text
-    data = r.json()
-    if data["job"]:
-        assert _wait(app, data["job"]["id"])["status"] == "done"
-    return data
+    assert r.status_code in (200, 201), r.text
+    job = r.json()["job"]
+    assert job["type"] == "datagatherer.watch"
+    assert _wait(app, job["id"])["status"] == "done"
+    result = app.state.jobs.result(job["id"])
+    if result["import_job"]:
+        result["import"] = _wait(app, result["import_job"])
+    return result
 
 
 def _plays(app, source=None, merged_only=False):
@@ -123,13 +128,41 @@ def test_a_broken_export_is_marked_failed_and_the_rest_still_reads(client, app, 
     bad.parent.mkdir()
     with zipfile.ZipFile(bad, "w") as zf:
         zf.writestr("x/Streaming_History_Audio_2020.json", "[{\"ts\": ")
-    r = client.post("/api/datagatherer/sources/spotify/upload?name=my_spotify_data.zip", content=bad.read_bytes())
-    job = _wait(app, r.json()["job"]["id"])
+    done = _upload(client, app, bad)
+    job = done["import"]
     assert job["status"] == "done" and job["summary"]["complete"] is False and job["summary"]["errors"] == 1
-    raw = state.get_raw(app.state.db, r.json()["raw_import_id"])
+    raw = state.get_raw(app.state.db, done["raw_import_id"])
     assert raw["status"] == "failed" and "geen geldig JSON" in raw["error"]
     assert client.post("/api/datagatherer/sources/spotify/upload?name=notes.txt", content=b"hallo").status_code == 400
     assert client.post("/api/datagatherer/sources/spotify/upload?name=x.zip", content=b"").status_code == 400
+
+
+def test_a_loose_history_file_can_be_uploaded_and_the_upload_runs_as_a_job(client, app, tmp_path):
+    """F-F3 and F-F7: a bare StreamingHistory*.json or Streaming_History_Audio_*.json is recognised
+    by its real name; copying runs as a job; the staged copy in the cache folder is removed."""
+    from backend.datagatherer import jobs as gather_jobs
+    staging = gather_jobs.upload_staging(app.state.config)
+    account = tmp_path / "StreamingHistory_music_0.json"
+    account.write_text(json.dumps([legacy_play(T0, "Los", "Band")]))
+    extended = tmp_path / "Streaming_History_Audio_2023_1.json"
+    extended.write_text(json.dumps([extended_play(T0 + 3600, "Ook los", "Band", uri="spotify:track:los")]))
+    for path in (account, extended):
+        done = _upload(client, app, path)
+        assert done["created"] is True and done["import"]["status"] == "done"
+        raw = state.get_raw(app.state.db, done["raw_import_id"])
+        assert raw["origin"] == "upload" and Path(raw["path"]).name == path.name and raw["status"] == "imported"
+    assert {r[2] for r in _plays(app)} >= {"Los", "Ook los"}
+    assert list(staging.iterdir()) == []
+    # Refused before any job: not an export, a control character in the name, an empty body
+    r = client.post("/api/datagatherer/sources/spotify/upload?name=StreamingHistory_x.json", content=b'{"geen": "lijst"}')
+    assert r.status_code == 400 and "geen export van Spotify" in r.json()["error"]["message"]
+    assert client.post("/api/datagatherer/sources/spotify/upload?name=%00.zip", content=b"PK").status_code == 400
+    assert client.post("/api/datagatherer/sources/spotify/upload?name=a%0Ab.json", content=b"[]").status_code == 400
+    assert list(staging.iterdir()) == []
+    # A staged upload can only be named, never a path elsewhere
+    for params in ({"source": "spotify", "upload": "../x", "name": "a.zip"},
+                   {"source": "spotify", "upload": "upload-x", "name": "../../etc/passwd"}):
+        assert client.post("/api/jobs", json={"type": "datagatherer.watch", "params": params}).status_code == 400
 
 
 # ---------- the dashboard reads the merged plays ----------

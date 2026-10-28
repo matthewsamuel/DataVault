@@ -386,7 +386,7 @@ function dgPickFile(src) {
         const file = input.files && input.files[0];
         input.remove();
         if (!file) return;
-        showToast(`${src.name}: bestand inlezen`, `${file.name} wordt naar het archief gekopieerd…`, 'info');
+        showToast(`${src.name}: bestand inlezen`, `${file.name} wordt naar DataVault gestuurd…`, 'info');
         try {
             const res = await fetch(`${API_BASE}/api/datagatherer/sources/${encodeURIComponent(src.id)}/upload?name=${encodeURIComponent(file.name)}`, {
                 method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
@@ -394,8 +394,8 @@ function dgPickFile(src) {
             const data = await res.json().catch(() => null);
             if (!res.ok) throw new ApiError(apiErrorMessage(data, `Serverfout (${res.status})`), res.status);
             if (data.job) dgAfterJob(data.job);
-            showToast(`${src.name}: bestand inlezen`, data.message || 'Gekopieerd naar het archief; het wordt nu ingelezen.',
-                data.created ? 'success' : 'info');
+            showToast(`${src.name}: bestand inlezen`,
+                'Het wordt naar het archief gekopieerd en daarna ingelezen; de voortgang staat op de kaart.', 'info');
         } catch (err) {
             toastFetchError(`${file.name} inlezen mislukt`, err);
         } finally {
