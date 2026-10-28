@@ -4651,6 +4651,11 @@ input:checked+.slider:before {
     color: var(--text-secondary);
 }
 
+/* Houder waar de ene berichtenlijst in hangt (gewone of schermvullende chat) */
+.chat-messages-slot {
+    display: contents;
+}
+
 .chat-messages {
     flex: 1;
     overflow-y: auto;

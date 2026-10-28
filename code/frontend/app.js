@@ -3023,9 +3023,7 @@ function handleChatKeyPressFullscreen(e) {
 function sendChatMessage() {
     return sendChat({
         inputEl: document.getElementById('chat-input'),
-        btn: document.querySelector('.chat-send-btn'),
-        messagesContainer: document.getElementById('chat-messages'),
-        mirrorContainer: null,
+        btn: document.querySelector('#chat-home-slot ~ .chat-input-container .chat-send-btn'),
     });
 }
 
@@ -3033,15 +3031,15 @@ function sendChatMessageFullscreen() {
     return sendChat({
         inputEl: document.getElementById('chat-input-fullscreen'),
         btn: document.querySelector('.chat-fullscreen-modal .chat-send-btn'),
-        messagesContainer: document.getElementById('chat-messages-fullscreen'),
-        mirrorContainer: document.getElementById('chat-messages'),
     });
 }
 
 // Stuurt het bericht en toont het antwoord terwijl het binnenkomt. Alles wat het model
-// schrijft komt als tekst (textContent) op het scherm, nooit als HTML. Met een
-// mirrorContainer (schermvullende chat) wordt het gesprek ook in de gewone chat bijgewerkt.
-async function sendChat({ inputEl, btn, messagesContainer, mirrorContainer }) {
+// schrijft komt als tekst (textContent) op het scherm, nooit als HTML. Er is één
+// berichtenlijst (#chat-messages); die verhuist tussen de gewone en de schermvullende chat,
+// dus antwoorden en foto's van acties staan altijd in de chat die je ziet.
+async function sendChat({ inputEl, btn }) {
+    const messagesContainer = document.getElementById('chat-messages');
     const message = inputEl.value.trim();
     if (!message) return;
 
@@ -3052,7 +3050,6 @@ async function sendChat({ inputEl, btn, messagesContainer, mirrorContainer }) {
     const userMsg = createEl('div', { class: 'chat-message user-message' },
         createEl('div', { class: 'message-bubble message-text', text: message }));
     messagesContainer.appendChild(userMsg);
-    if (mirrorContainer) mirrorContainer.appendChild(userMsg.cloneNode(true));
 
     window.chatHistory.push({ role: 'user', content: message });
     // Houd context klein: max 10 berichten (5 user + 5 assistant)
@@ -3065,21 +3062,14 @@ async function sendChat({ inputEl, btn, messagesContainer, mirrorContainer }) {
     const aiMsg = chatLoadingBubble();
     const bubble = aiMsg.firstChild;
     messagesContainer.appendChild(aiMsg);
-    const mirrorMsg = mirrorContainer ? aiMsg.cloneNode(true) : null;
-    if (mirrorMsg) mirrorContainer.appendChild(mirrorMsg);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
     const showText = (text) => {
-        for (const b of [bubble, mirrorMsg && mirrorMsg.firstChild]) {
-            if (!b) continue;
-            b.classList.add('message-text');
-            b.textContent = text;
-        }
+        bubble.classList.add('message-text');
+        bubble.textContent = text;
     };
     const showError = (text) => {
-        for (const b of [bubble, mirrorMsg && mirrorMsg.firstChild]) {
-            if (b) b.replaceChildren(createEl('span', { style: 'color: var(--danger)', text }));
-        }
+        bubble.replaceChildren(createEl('span', { style: 'color: var(--danger)', text }));
     };
 
     let fullText = '';
@@ -3146,7 +3136,7 @@ async function sendChat({ inputEl, btn, messagesContainer, mirrorContainer }) {
 function openChatFullscreen() {
     const modal = document.getElementById('chat-fullscreen-modal');
     if (modal) {
-        syncChatMessages('to-fullscreen');
+        moveChatMessages('chat-fullscreen-slot');
         modal.classList.add('active');
         document.addEventListener('keydown', handleFullscreenEscape);
         setTimeout(() => {
@@ -3159,26 +3149,25 @@ function openChatFullscreen() {
 function closeChatFullscreen() {
     const modal = document.getElementById('chat-fullscreen-modal');
     if (modal) {
-        syncChatMessages('to-home');
+        moveChatMessages('chat-home-slot');
         modal.classList.remove('active');
         document.removeEventListener('keydown', handleFullscreenEscape);
     }
 }
 
 function handleFullscreenEscape(e) {
-    if (e.key === 'Escape') {
+    // Escape in de viewer (die boven de chat opent) sluit eerst alleen de viewer
+    if (e.key === 'Escape' && !isViewerOpen()) {
         closeChatFullscreen();
     }
 }
 
-// Kopieert de berichten als DOM-knopen (niet via innerHTML, dat tekst opnieuw als HTML zou lezen)
-function syncChatMessages(direction) {
-    const homeContainer = document.getElementById('chat-messages');
-    const fullscreenContainer = document.getElementById('chat-messages-fullscreen');
-    if (!homeContainer || !fullscreenContainer) return;
-
-    const [from, to] = direction === 'to-fullscreen'
-        ? [homeContainer, fullscreenContainer]
-        : [fullscreenContainer, homeContainer];
-    to.replaceChildren(...[...from.childNodes].map(node => node.cloneNode(true)));
+// Verhuist de ene berichtenlijst (dezelfde DOM-knopen, met hun klikgedrag) naar een houder
+function moveChatMessages(slotId) {
+    const messages = document.getElementById('chat-messages');
+    const slot = document.getElementById(slotId);
+    if (messages && slot && messages.parentElement !== slot) {
+        slot.appendChild(messages);
+        messages.scrollTop = messages.scrollHeight;
+    }
 }

@@ -416,6 +416,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   tweede verzoek (ook in de Keurer). Tijdens een slideshow schuiven de pijltjestoetsen in het
   verplaatsvenster de show niet meer door, en wordt na het verplaatsen precies die dia uit de
   show gehaald.
+- Schermvullende chat: er is nu één berichtenlijst die tussen de gewone en de schermvullende
+  chat verhuist. Foto's die Pasha toont verschijnen in de chat die je ziet, blijven staan als
+  je terugschakelt en blijven aanklikbaar. Een foto uit de chat opent boven de chat, en Escape
+  sluit dan eerst alleen de foto.
 - Meldingen (toasts) staan nu altijd bovenop, ook boven de viewer en de slideshow.
 
 ### Shows

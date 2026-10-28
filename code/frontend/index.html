@@ -124,10 +124,14 @@
                                     <i class="fas fa-expand"></i>
                                 </button>
                             </div>
-                            <div class="chat-messages" id="chat-messages">
-                                <div class="chat-message ai-message">
-                                    <div class="message-bubble">
-                                        Woof! Ik ben Pasha, jouw DataVault-assistent. Je kunt me vragen stellen over je bestanden of Spotify-gegevens!
+                            <!-- Eén berichtenlijst: bij volledig scherm verhuist #chat-messages naar
+                                 #chat-fullscreen-slot en bij sluiten terug (app.js) -->
+                            <div class="chat-messages-slot" id="chat-home-slot">
+                                <div class="chat-messages" id="chat-messages">
+                                    <div class="chat-message ai-message">
+                                        <div class="message-bubble">
+                                            Woof! Ik ben Pasha, jouw DataVault-assistent. Je kunt me vragen stellen over je bestanden of Spotify-gegevens!
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1025,9 +1029,7 @@
                         <i class="fas fa-compress"></i>
                     </button>
                 </div>
-                <div class="chat-messages" id="chat-messages-fullscreen">
-                    <!-- Messages shared with home chat -->
-                </div>
+                <div class="chat-messages-slot" id="chat-fullscreen-slot"></div>
                 <div class="chat-input-container">
                     <input type="text" id="chat-input-fullscreen" class="chat-input" placeholder="Type a message..."
                         onkeypress="handleChatKeyPressFullscreen(event)">
