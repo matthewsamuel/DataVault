@@ -85,8 +85,15 @@ TEXT_IDLE_SECONDS = 900.0         # the text model (about 1.7 GB in memory) is l
 QUERY_CACHE = 128                 # text queries whose vector is kept
 RANKING_CACHE = 16                # rankings kept for paging
 MAX_RANKED = 5000                 # a query never ranks more than this many photos
-MIN_SCORE = 0.05                  # results below this cosine are 'weak' ...
-SCORE_SPREAD = 0.06               # ... and so are those this far below the best one
+# The relevance cut (measured on the labelled set, scripts/eval_semantic_search.py): a result
+# is 'strong' when its cosine is at least MIN_SCORE, at most SCORE_SPREAD below the best one,
+# and SCORE_Z standard deviations above the mean of the selection (a real match stands out
+# from the rest; a query of nonsense lifts nothing out of the crowd). On the set that keeps
+# 90% of the right photos at 70% precision; the rest is one click away (include_weak).
+MIN_SCORE = 0.05
+SCORE_SPREAD = 0.06
+SCORE_Z = 2.0
+SCORE_Z_MIN_COUNT = 30            # with fewer photos the spread says too little
 MAX_QUERY_CHARS = 200
 
 
@@ -212,8 +219,7 @@ def model_info(config, spec: Optional[ModelSpec] = None) -> Dict[str, Any]:
 
 
 def not_installed_message(config) -> str:
-    size = round(current_model().size / 1_000_000)
-    return (f"Het zoekmodel is nog niet geïnstalleerd. Installeer het (eenmalig, ongeveer {size} MB) "
+    return (f"Het zoekmodel is nog niet geïnstalleerd. Installeer het (eenmalig, ongeveer {_mb(current_model().size)} MB) "
             "in Instellingen > Slim zoeken, of met: venv/bin/python scripts/download_models.py")
 
 
@@ -329,7 +335,8 @@ def download_model(config, spec: Optional[ModelSpec] = None, progress: Callable[
 
 
 def _mb(n: int) -> str:
-    return f"{n / 1_000_000:,.0f}".replace(",", ".")
+    """Megabytes as the page shows them (formatBytes in app.js: 1 MB = 1024 x 1024 bytes)."""
+    return f"{n / 1024 / 1024:,.0f}".replace(",", ".")
 
 
 # ---------- the encoder ----------
@@ -875,15 +882,17 @@ def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: D
     if exclude is not None:
         keep &= ids != exclude
     ids, scores = ids[keep], scores[keep]
+    cut = MIN_SCORE
+    if len(scores):
+        cut = max(cut, float(scores.max()) - SCORE_SPREAD)
+        if len(scores) >= SCORE_Z_MIN_COUNT:
+            cut = max(cut, float(scores.mean() + SCORE_Z * scores.std()))
     if len(ids) > MAX_RANKED:
         top = np.argpartition(-scores, MAX_RANKED - 1)[:MAX_RANKED]
         ids, scores = ids[top], scores[top]
     order = np.argsort(-scores, kind="stable")
     ids, scores = ids[order], scores[order]
-    strong = 0
-    if len(scores):
-        cut = max(MIN_SCORE, float(scores[0]) - SCORE_SPREAD)
-        strong = int(np.searchsorted(-scores, -cut, side="right"))
+    strong = int(np.searchsorted(-scores, -cut, side="right")) if len(scores) else 0
     ranking = {"ids": ids, "scores": scores, "strong": strong}
     with _rankings_lock:
         _rankings[cache_key] = ranking
