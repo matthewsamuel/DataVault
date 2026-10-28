@@ -521,3 +521,16 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - "Op deze dag" doet per bezoek een begrensde hoeveelheid werk (eerst wat de app al weet, daarna
   hooguit 300 mappen of 2 seconden) in plaats van soms het hele archief door te lopen. Het toont
   alleen foto's en video's, nooit meer een muziekbestand als grijs vlak.
+
+### Spotify
+- De Spotify-geschiedenis wordt nog maar één keer ingelezen en bewaard tot er een exportbestand
+  bijkomt of verandert. Voorheen werd bij elke jaarwissel, elk chatbericht en elk bezoek aan Home
+  de hele export opnieuw gelezen (seconden werk bij een grote export).
+- Staan zowel de gewone export (Account Data) als de uitgebreide export (Extended Streaming
+  History) in de map, dan wordt een nummer niet meer dubbel geteld. Ook een tweede kopie van
+  hetzelfde exportbestand telt niet dubbel.
+- De langste "binge" en "op deze dag" hangen niet meer af van de volgorde van de bestanden.
+  Twee verschillende nummers in dezelfde minuut blijven allebei in "op deze dag" staan.
+- Een jaar met weinig muziek toont geen artiesten met 0 keer afgespeeld meer, en een ongeldig
+  jaar geeft een foutmelding in plaats van stil alle jaren.
+- De chat kent nu je totale luistertijd (die kwam door een fout nooit in de context).

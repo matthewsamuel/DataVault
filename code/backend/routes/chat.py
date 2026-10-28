@@ -79,18 +79,18 @@ def get_vault_context() -> str:
         except Exception:
             pass
 
-    # Spotify top artiesten
+    # Spotify top artiesten (uit de cache van spotify.py: alleen de eerste keer wordt geparsed)
     try:
         from backend.routes.spotify import parse_spotify_data
         data = parse_spotify_data()
         top_artists = data.get('top_artists', [])[:5]
         if top_artists:
-            total_min = round(data.get('total_ms', 0) / 60000)
+            total_min = int(data.get('total_minutes', 0))
             lines.append(f"Spotify top artiesten: {as_prompt_data([a['name'] for a in top_artists])}")
             if total_min > 0:
                 lines.append(f"Totaal Spotify luistertijd: {total_min:,} minuten")
     except Exception as e:
-        pass
+        print(f"Spotify-context voor de chat mislukt: {e}")
 
     return '\n'.join(lines)
 

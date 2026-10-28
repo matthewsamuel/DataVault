@@ -1,20 +1,53 @@
+"""
+DataVault Dashboard - Spotify statistics
+
+The streaming history export(s) in <vault>/data are parsed once into a sorted list of
+plays and kept in memory until an export file is added, removed or changed (its size or
+mtime), SPOTIFY-CHAT-3/PERF-9. Every statistic (per year, on this day, the chat's
+summary) is computed from that list, and the last few answers are cached too.
+
+Both export formats may be present (Account Data 'StreamingHistory*.json' and Extended
+'Streaming_History_Audio_*.json'): a legacy play that the extended export also has
+(same minute, track and artist) is counted once (SPOTIFY-CHAT-4).
+"""
 import json
+import threading
+from collections import OrderedDict, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import APIRouter, Query
-from collections import defaultdict
-from datetime import datetime
-from typing import Optional
+from typing import List, NamedTuple, Optional, Tuple
+
+from fastapi import APIRouter, HTTPException
 from backend.config import Config
 
 router = APIRouter()
 config: Config = None
 
+_lock = threading.Lock()
+_plays_cache: dict = {"key": None, "plays": []}
+_stats_cache: "OrderedDict[tuple, dict]" = OrderedDict()
+STATS_CACHE_SIZE = 32
+
+
 def init_router(cfg: Config):
     global config
     config = cfg
+    with _lock:
+        _plays_cache.update(key=None, plays=[])
+        _stats_cache.clear()
 
-def get_spotify_files():
-    """Find all Spotify streaming history files recursively"""
+
+class Play(NamedTuple):
+    utc: datetime        # when the play ended, UTC
+    local: datetime      # the same moment in local time, without tzinfo
+    track: str
+    artist: str
+    ms: int
+    platform: Optional[str]
+
+
+def get_spotify_files() -> List[Path]:
+    """All Spotify streaming history files below <vault>/data, sorted by path"""
     if not config:
         return []
         
@@ -30,19 +63,121 @@ def get_spotify_files():
         for name in names:
             if name.endswith('.json') and ('Streaming_History_Audio' in name or 'StreamingHistory' in name):
                 files.append(Path(root) / name)
-    return files
+    return sorted(files)
+
+
+def _files_key(files: List[Path]) -> tuple:
+    key = []
+    for f in files:
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        key.append((str(f), st.st_size, st.st_mtime_ns))
+    return tuple(key)
+
+
+def _parse_file(file_path: Path):
+    """Yield (utc datetime, track, artist, ms, platform, extended?) for every usable play."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"Error reading {file_path}: {e}")
+        return
+    if not isinstance(data, list):
+        return
+    for play in data:
+        if not isinstance(play, dict):
+            continue
+        # Extended history fields, with the standard (legacy) names as fallback
+        ts_str = play.get('ts') or play.get('endTime')
+        ms_played = play.get('ms_played') or play.get('msPlayed') or 0
+        track_name = play.get('master_metadata_track_name') or play.get('trackName')
+        artist_name = play.get('master_metadata_album_artist_name') or play.get('artistName')
+        if not isinstance(ms_played, (int, float)) or ms_played < 1000:  # Skip < 1s glitches
+            continue
+        if not isinstance(track_name, str) or not isinstance(artist_name, str) or not isinstance(ts_str, str):
+            continue
+        try:
+            if 'T' in ts_str:
+                # Extended: "2023-01-23T08:52:56Z"
+                utc = datetime.fromisoformat(ts_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+                extended = True
+            else:
+                # Legacy: "2023-01-23 08:52", UTC in Spotify's exports
+                utc = datetime.strptime(ts_str, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+                extended = False
+        except (ValueError, OverflowError):
+            continue
+        platform = play.get('platform')
+        yield utc, track_name, artist_name, int(ms_played), platform if isinstance(platform, str) else None, extended
+
+
+def load_plays() -> Tuple[tuple, List[Play]]:
+    """
+    Every play of every export, oldest first (ties by track and artist, so the order never
+    depends on the order of the files), each counted once. Cached until a file changes.
+    """
+    files = get_spotify_files()
+    key = _files_key(files)
+    with _lock:
+        if _plays_cache["key"] == key:
+            return key, _plays_cache["plays"]
+
+    extended, legacy = [], []
+    seen = set()
+    for file_path in files:
+        for utc, track, artist, ms, platform, is_extended in _parse_file(file_path):
+            exact = (utc, track, artist, ms)
+            if exact in seen:
+                continue  # the same export twice (a copy in another folder)
+            seen.add(exact)
+            (extended if is_extended else legacy).append((utc, track, artist, ms, platform))
+
+    # A legacy play the extended export also has: same track and artist, ending within a minute
+    minutes = {(int(utc.timestamp() // 60), track, artist) for utc, track, artist, _, _ in extended}
+    for utc, track, artist, ms, platform in legacy:
+        minute = int(utc.timestamp() // 60)
+        if any((minute + d, track, artist) in minutes for d in (-1, 0, 1)):
+            continue
+        extended.append((utc, track, artist, ms, platform))
+
+    extended.sort(key=lambda p: (p[0], p[1], p[2]))
+    plays = [Play(utc, utc.astimezone().replace(tzinfo=None), track, artist, ms, platform)
+             for utc, track, artist, ms, platform in extended]
+    with _lock:
+        _plays_cache.update(key=key, plays=plays)
+        _stats_cache.clear()
+    return key, plays
+
 
 def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[tuple] = None):
     """
-    Parse Spotify JSON files and aggregate stats.
+    Spotify stats from the cached plays.
     year_filter: int year (e.g. 2023) or None for all time
     date_filter: tuple (month, day) for "On This Day" or None
     """
-    files = get_spotify_files()
-    
+    key, plays = load_plays()
+    today = datetime.now().date()
+    cache_key = (key, year_filter, date_filter, today)
+    with _lock:
+        cached = _stats_cache.get(cache_key)
+        if cached is not None:
+            _stats_cache.move_to_end(cache_key)
+            return cached
+    result = _aggregate(plays, year_filter, date_filter, today.year)
+    with _lock:
+        _stats_cache[cache_key] = result
+        while len(_stats_cache) > STATS_CACHE_SIZE:
+            _stats_cache.popitem(last=False)
+    return result
+
+
+def _aggregate(plays: List[Play], year_filter: Optional[int], date_filter: Optional[tuple], current_year: int):
     stats = {
         'total_ms': 0,
-        'artists': defaultdict(lambda: {'ms': 0, 'count': 0, 'tracks': set(), 'first_seen': None}),
+        'artists': defaultdict(lambda: {'ms': 0, 'count': 0, 'tracks': set()}),
         'tracks': defaultdict(lambda: {'ms': 0, 'count': 0, 'artist': '', 'name': ''}),
         'hourly_activity': defaultdict(int), # 0-23
         'monthly_activity': defaultdict(int), # 1-12
@@ -52,10 +187,13 @@ def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[
         'on_this_day': [], # List of tracks played on this day
         'daily_ms': defaultdict(int) # "YYYY-MM-DD" -> ms for record day
     }
-    
+    # First play per artist over ALL years (for 'discoveries'); kept apart, so an artist
+    # without plays in the chosen year never shows up with 0 plays (LIVE-PROBE-25)
+    first_seen = {}
     available_years = set()
+    total_plays = 0
     
-    # Context state for binge tracking
+    # Context state for binge tracking (plays are in time order, see load_plays)
     prev_track = None
     current_binge_count = 0
     current_binge_track = None
@@ -64,147 +202,70 @@ def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[
     max_binge_count = 0
     max_binge_track = None
     max_binge_artist = None
-    for file_path in files:
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                try:
-                    data = json.load(f)
-                except json.JSONDecodeError:
-                    continue
-                    
-                if not isinstance(data, list):
-                    continue
+    for play in plays:
+        dt = play.local
+        track_name, artist_name, ms_played = play.track, play.artist, play.ms
+        play_year = dt.year
+        available_years.add(play_year)
+        if artist_name not in first_seen:
+            first_seen[artist_name] = dt
 
-                for play in data:
-                    # Handle different formats (Extended vs Standard)
-                    
-                    # Extended history fields
-                    ts_str = play.get('ts') # "2023-01-23T08:52:56Z"
-                    ms_played = play.get('ms_played', 0)
-                    track_name = play.get('master_metadata_track_name')
-                    artist_name = play.get('master_metadata_album_artist_name')
-                    platform = play.get('platform')
-                    
-                    # Standard history fields fallback (legacy format)
-                    if not ts_str:
-                        ts_str = play.get('endTime') # "2023-01-23 08:52"
-                    if not ms_played:
-                        ms_played = play.get('msPlayed', 0)
-                    if not track_name:
-                        track_name = play.get('trackName')
-                    if not artist_name:
-                        artist_name = play.get('artistName')
-                    
-                    if ms_played < 1000: # Skip < 1s glitches
-                        continue
-                        
-                    if not track_name or not artist_name or not ts_str:
-                        continue
+        # On This Day Filter
+        if date_filter:
+            target_month, target_day = date_filter
+            if dt.month == target_month and dt.day == target_day:
+                # Per-jaar: alleen dat jaar; all-time: alle jaren behalve het huidige
+                if (play_year == year_filter) if year_filter else (play_year != current_year):
+                    stats['on_this_day'].append({
+                        'track': track_name,
+                        'artist': artist_name,
+                        'year': play_year,
+                        'time': dt.strftime("%H:%M"),
+                        'ms': ms_played
+                    })
 
-                    # Parse timestamp logic
-                    dt = None
-                    try:
-                        # 1. Extended Format: "2023-01-23T08:52:56Z"
-                        if ts_str and 'T' in ts_str:
-                             dt_utc = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-                             # Convert to local timezone
-                             dt = dt_utc.astimezone()
-                        # 2. Legacy Format: "2023-01-23 08:52" (Assumed to be local or UTC? Usually UTC in Spotify exports, but treating as local for safety if no Z)
-                        elif ts_str:
-                             # Legacy might be local or UTC, we assume it's UTC and convert, or just parse.
-                             # If we assume it's UTC:
-                             dt_naive = datetime.strptime(ts_str, "%Y-%m-%d %H:%M")
-                             from datetime import timezone
-                             dt_utc = dt_naive.replace(tzinfo=timezone.utc)
-                             dt = dt_utc.astimezone()
-                    except ValueError:
-                        pass
-                        
-                    if not dt:
-                        continue
-                        
-                    # Remove tzinfo so the rest of the logic works with naive local datetimes
-                    dt = dt.replace(tzinfo=None)
-                            
-                    play_year = dt.year
-                    available_years.add(play_year)
-                    
-                    # Track absolute first seen BEFORE any year filtering
-                    if not stats['artists'][artist_name]['first_seen'] or dt < stats['artists'][artist_name]['first_seen']:
-                          stats['artists'][artist_name]['first_seen'] = dt
-                    
-                    # On This Day Filter
-                    if date_filter:
-                        target_month, target_day = date_filter
-                        current_year = datetime.now().year
-                        if dt.month == target_month and dt.day == target_day:
-                            if year_filter:
-                                # Per-jaar: toon enkel tracks van dat specifieke jaar
-                                if play_year == year_filter:
-                                    stats['on_this_day'].append({
-                                        'track': track_name,
-                                        'artist': artist_name,
-                                        'year': play_year,
-                                        'time': dt.strftime("%H:%M"),
-                                        'ms': ms_played
-                                    })
-                            else:
-                                # All-time: toon alle jaren behalve het huidige jaar
-                                if play_year != current_year:
-                                    stats['on_this_day'].append({
-                                        'track': track_name,
-                                        'artist': artist_name,
-                                        'year': play_year,
-                                        'time': dt.strftime("%H:%M"),
-                                        'ms': ms_played
-                                    })
-                            
-                    # Filter by year if requested
-                    if year_filter and play_year != year_filter:
-                        continue
-                    
-                    # Aggregate
-                    stats['total_ms'] += ms_played
-                    stats['daily_ms'][dt.strftime("%Y-%m-%d")] += ms_played
-                    
-                    stats['artists'][artist_name]['ms'] += ms_played
-                    stats['artists'][artist_name]['count'] += 1
-                    stats['artists'][artist_name]['tracks'].add(track_name)
-                    
-                    track_key = f"{track_name} - {artist_name}"
-                    stats['tracks'][track_key]['ms'] += ms_played
-                    stats['tracks'][track_key]['count'] += 1
-                    stats['tracks'][track_key]['artist'] = artist_name
-                    stats['tracks'][track_key]['name'] = track_name
-                    
-                    # Binge Logic
-                    if track_key == prev_track:
-                        current_binge_count += 1
-                    else:
-                        if current_binge_count > max_binge_count and current_binge_count > 1:
-                            max_binge_count = current_binge_count
-                            max_binge_track = current_binge_track
-                            max_binge_artist = current_binge_artist
-                        current_binge_count = 1
-                        current_binge_track = track_name
-                        current_binge_artist = artist_name
-                        prev_track = track_key
-                    
-                    stats['hourly_activity'][dt.hour] += 1
-                    stats['monthly_activity'][dt.month] += 1
-                    if platform:
-                        # Clean up platform names if needed
-                        stats['platform_usage'][platform] += 1
-                        
-                    # Skip Rate proxy (assuming < 30s is a skip for most songs)
-                    if ms_played < 30000:
-                        stats['total_skips'] += 1
-                    else:
-                        stats['total_completions'] += 1
-
-        except Exception as e:
-            print(f"Error reading {file_path}: {e}")
+        # Filter by year if requested
+        if year_filter and play_year != year_filter:
             continue
+
+        # Aggregate
+        total_plays += 1
+        stats['total_ms'] += ms_played
+        stats['daily_ms'][dt.strftime("%Y-%m-%d")] += ms_played
+
+        stats['artists'][artist_name]['ms'] += ms_played
+        stats['artists'][artist_name]['count'] += 1
+        stats['artists'][artist_name]['tracks'].add(track_name)
+
+        track_key = f"{track_name} - {artist_name}"
+        stats['tracks'][track_key]['ms'] += ms_played
+        stats['tracks'][track_key]['count'] += 1
+        stats['tracks'][track_key]['artist'] = artist_name
+        stats['tracks'][track_key]['name'] = track_name
+
+        # Binge Logic
+        if track_key == prev_track:
+            current_binge_count += 1
+        else:
+            if current_binge_count > max_binge_count and current_binge_count > 1:
+                max_binge_count = current_binge_count
+                max_binge_track = current_binge_track
+                max_binge_artist = current_binge_artist
+            current_binge_count = 1
+            current_binge_track = track_name
+            current_binge_artist = artist_name
+            prev_track = track_key
+
+        stats['hourly_activity'][dt.hour] += 1
+        stats['monthly_activity'][dt.month] += 1
+        if play.platform:
+            stats['platform_usage'][play.platform] += 1
+
+        # Skip Rate proxy (assuming < 30s is a skip for most songs)
+        if ms_played < 30000:
+            stats['total_skips'] += 1
+        else:
+            stats['total_completions'] += 1
 
     # Post-process for JSON response
     
@@ -230,10 +291,9 @@ def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[
         
     # Top Artists
     top_artists = sorted(
-        [{'name': k, 'ms': v['ms'], 'count': v['count'], 'unique_tracks': len(v['tracks']), 'first_seen': v['first_seen']} 
+        [{'name': k, 'ms': v['ms'], 'count': v['count'], 'unique_tracks': len(v['tracks']), 'first_seen': first_seen.get(k)}
          for k, v in stats['artists'].items()],
-        key=lambda x: x['ms'], 
-        reverse=True
+        key=lambda x: (-x['ms'], x['name'])
     )
     
     # 1. Mainstream vs Obscure (Top 5% artists listen share vs rest)
@@ -276,8 +336,7 @@ def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[
     top_tracks = sorted(
         [{'name': v['name'], 'artist': v['artist'], 'ms': v['ms'], 'count': v['count']} 
          for k, v in stats['tracks'].items()],
-        key=lambda x: x['count'], # Sort tracks by play count usually
-        reverse=True
+        key=lambda x: (-x['count'], -x['ms'], x['name'], x['artist'])  # most played first
     )[:50]
     
     total_actions = stats['total_skips'] + stats['total_completions']
@@ -288,7 +347,7 @@ def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[
         'available_years': sorted(list(available_years)),
         'total_minutes': int(stats['total_ms'] / 60000),
         'total_hours': int(stats['total_ms'] / 3600000),
-        'total_plays': sum(a['count'] for a in top_artists), # Approx
+        'total_plays': total_plays,
         'top_artists': top_artists[:10], # Return top 10 for UI
         'top_tracks': top_tracks[:10],
         'hourly_activity': [stats['hourly_activity'].get(h, 0) for h in range(24)],
@@ -296,10 +355,12 @@ def parse_spotify_data(year_filter: Optional[int] = None, date_filter: Optional[
         'platform_usage': stats['platform_usage'],
         'listening_dna': listening_dna,
         'skip_rate': round(skip_rate, 1),
-        'on_this_day': (lambda entries: sorted(
-            {(e['year'], e['time']): e for e in entries}.values(),
-            key=lambda x: x['time']  # Sorteer op tijdstip (HH:MM), niet op jaar
-        ))(stats['on_this_day']),
+        # Each play once, also two different tracks in the same minute (SPOTIFY-CHAT-13);
+        # sorted by time of day (HH:MM), then year, track and artist
+        'on_this_day': sorted(
+            {(e['year'], e['time'], e['track'], e['artist']): e for e in stats['on_this_day']}.values(),
+            key=lambda x: (x['time'], x['year'], x['track'], x['artist'])
+        ),
         'new_insights': {
              'mainstream_score': mainstream_score,
              'mainstream_percent': mainstream_percent,
@@ -326,7 +387,8 @@ def get_stats(year: Optional[str] = None):
         try:
             year_int = int(year)
         except ValueError:
-            pass
+            raise HTTPException(status_code=400, detail="Ongeldig jaar: gebruik een jaartal of 'all'")
+        if not 1900 <= year_int <= 9999:
+            raise HTTPException(status_code=400, detail="Ongeldig jaar: gebruik een jaartal of 'all'")
             
-    data = parse_spotify_data(year_int, date_filter)
-    return data
+    return parse_spotify_data(year_int, date_filter)
