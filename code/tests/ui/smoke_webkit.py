@@ -150,6 +150,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("files: 'Archief' in the breadcrumb", lambda: page.click("#breadcrumb .breadcrumb-root"), 0.6)
             if "RAW" not in grid_folders() or page.evaluate("currentFolder") != "":
                 problems.append("files: 'Archief' in the breadcrumb did not go back to the archive folders")
+            # 'Archief' while a folder is still loading: the breadcrumb and the tree follow the
+            # last choice (the archive root), not the folder that was still on its way
+            step("files: 'Archief' while a folder still loads", lambda: page.evaluate(
+                f"selectFolder({json.dumps(str(vault / 'RAW' / '2019' / 'zomer vakantie'))}); showArchiveRoot()"), 0.8)
+            superseded = page.evaluate("[document.getElementById('breadcrumb').textContent.trim(), currentFolder,"
+                                       " document.querySelectorAll('#folder-tree .folder-item.selected').length]")
+            if superseded != ["Archief", "", 0] or "RAW" not in grid_folders():
+                problems.append(f"files: a folder that finished loading after 'Archief' took the breadcrumb or tree back ({superseded})")
 
             # Files: a folder with a subfolder, open a file, browse, move dialog, close
             folder = str(vault / "RAW" / "misc")

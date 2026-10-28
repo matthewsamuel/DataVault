@@ -475,7 +475,9 @@ function collapseAllFolders() {
 
 async function selectFolder(path) {
     currentFolder = path;
-    await loadMedia(path);
+    // Koos de gebruiker intussen iets anders (een andere map, 'Archief'), dan hoort het
+    // kruimelpad en de boom bij die keuze, niet bij deze
+    if (!(await loadMedia(path))) return;
     revealFolderInSidebar(path);
     updateBreadcrumb(path);
 }
@@ -592,6 +594,8 @@ function updateBreadcrumb(path) {
 
 let mediaLoadSeq = 0;   // alleen het antwoord van de laatst gekozen map telt
 
+// Geeft true als dit antwoord (of de foutmelding) getoond is, false als intussen een andere
+// map of het archiefbegin gekozen is
 async function loadMedia(folder) {
     const seq = ++mediaLoadSeq;
     const grid = document.getElementById('media-grid');
@@ -601,19 +605,21 @@ async function loadMedia(folder) {
     }, 150);
     try {
         const data = await fetchJSON(`${API_BASE}/api/media?folder=${encodeURIComponent(folder)}`);
-        if (seq !== mediaLoadSeq) return;
+        if (seq !== mediaLoadSeq) return false;
         currentMedia = data.files;
         filteredMedia = [...currentMedia];
         gridFocusIndex = 0;
 
         applySortAndRender();
+        return true;
     } catch (error) {
-        if (seq !== mediaLoadSeq) return;
+        if (seq !== mediaLoadSeq) return false;
         currentMedia = [];
         filteredMedia = [];
         gridItems = [];
         grid.replaceChildren(errorState('Deze map kon niet geladen worden', error, () => loadMedia(folder)));
         toastFetchError('Bestanden laden mislukt', error);
+        return true;
     } finally {
         clearTimeout(slow);
     }
