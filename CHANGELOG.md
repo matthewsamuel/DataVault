@@ -23,6 +23,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   ook een foto die op zijn plek bewerkt is. Pauzeren, hervatten en annuleren werken zoals bij elke
   taak; wat al gelezen was, wordt bij hervatten overgeslagen. Wordt de schijf losgekoppeld, dan
   wacht de ronde en gaat hij vanzelf verder als de schijf terug is.
+- Wordt een ronde onderbroken (app afgesloten, geannuleerd, gepauzeerd of schijf losgekoppeld), dan
+  maakt de volgende ronde hem af: een map telt pas als bijgewerkt als alles eronder gelezen is. Een
+  map die even niet te lezen was, wordt de volgende keer opnieuw geprobeerd, en tot dan gebruikt de
+  tijdlijn voor die plek de schijf zelf.
 - Verplaatst de app een bestand (Verplaatsen in de viewer, Keurer, duplicaten, en het terugzetten
   daarvan), dan gaan de bibliotheek, de Shows-waardering en een Keurer-"houden" meteen mee naar de
   nieuwe plek. Een waardering raakt dus niet meer kwijt door een verplaatsing.
