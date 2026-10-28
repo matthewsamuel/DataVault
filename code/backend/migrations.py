@@ -149,12 +149,28 @@ def _m004_keurer_keep_move_history(conn: sqlite3.Connection):
         conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'keurer_decisions'", (old_seq,))
 
 
+def _m005_keurer_keep_delete_history(conn: sqlite3.Connection):
+    """
+    Migration 4 still let a new 'delete' on a path replace an earlier 'delete'
+    row (e.g. a new file appeared at the same path and was trashed too), and with
+    it the only record of where the first file went in TRASH. From now on only
+    'keep' rows are unique per path; delete and move rows always stay.
+    Only the index changes: no row is touched.
+    """
+    conn.execute("DROP INDEX IF EXISTS idx_keurer_path_folder")
+    conn.execute(
+        "CREATE UNIQUE INDEX idx_keurer_keep_path_folder ON keurer_decisions(path, folder) "
+        "WHERE decision = 'keep'"
+    )
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
     (2, "keurer_undo_paths", _m002_keurer_undo_paths),
     (3, "keurer_dest_fingerprint", _m003_keurer_dest_fingerprint),
     (4, "keurer_keep_move_history", _m004_keurer_keep_move_history),
+    (5, "keurer_keep_delete_history", _m005_keurer_keep_delete_history),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

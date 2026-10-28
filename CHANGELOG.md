@@ -57,6 +57,11 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   je dat, dan blijft het eerdere verplaatsen gewoon ongedaan te maken. Voorheen verdween die
   undo stilletjes. Database-migratie 4 herbouwt hiervoor de beslissingentabel; alle
   beslissingen blijven met hun eigen nummer bewaard en vooraf wordt een back-up gemaakt.
+- Hetzelfde geldt nu ook voor weggooien: komt er een nieuw bestand op de plek van een eerder
+  weggegooid bestand en gooi je dat ook weg, dan blijven beide acties ongedaan te maken (de
+  oudste eerst). Voorheen verdween de undo van het eerste bestand, dat dan onvindbaar in de
+  prullenmand bleef staan. Database-migratie 5 past hiervoor alleen een index aan; alle
+  beslissingen, streaks en ratings blijven behouden en vooraf wordt een back-up gemaakt.
 
 ### Opgeruimd
 - Verwijderd: de kapotte vault-brede duplicatenscan (`/api/raw_duplicates/scan` en

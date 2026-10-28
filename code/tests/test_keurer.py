@@ -377,3 +377,76 @@ def test_migration_4_rebuild_keeps_every_row_id_and_counter(tmp_path, monkeypatc
     newer = db.record_keurer_decision("/v/RAW/weg.jpg", "/v/RAW", "delete", "/v/TRASH/weg.jpg", 1, 2)
     assert [r["decision"] for r in db.get_recent_keurer_decisions(limit=2)] == ["delete", "move"]
     assert db.get_keurer_decision(new_id) is None and db.get_keurer_decision(newer)
+
+
+def test_second_delete_on_same_path_keeps_the_first_delete_undoable(client, config, inbox):
+    """A new file at a trashed file's path is trashed too: both stay recorded and undoable."""
+    photo = inbox / "IMG_0002.JPG"
+    data = photo.read_bytes()
+    first = _decide(client, photo, "delete").json()["id"]
+    photo.write_bytes(b"nieuwe foto, zelfde naam")  # e.g. a stale second tab, or a new import
+    second = _decide(client, photo, "delete").json()["id"]
+
+    history = client.get("/api/keurer/history").json()["entries"]
+    assert [e["id"] for e in history] == [second, first]
+    assert (config.TRASH_FOLDER / "IMG_0002_DUP_001.JPG").read_bytes() == b"nieuwe foto, zelfde naam"
+
+    # Undo the older one first: the original photo comes back
+    r = client.post("/api/keurer/undo", json={"id": first})
+    assert r.status_code == 200, r.text
+    assert photo.read_bytes() == data
+    # The newer one now reports the occupied place instead of overwriting
+    assert client.post("/api/keurer/undo", json={"id": second}).status_code == 409
+    assert (config.TRASH_FOLDER / "IMG_0002_DUP_001.JPG").exists()
+
+
+def test_keep_after_keep_still_replaces_and_delete_replaces_keep(client, config, inbox):
+    photo = inbox / "IMG_0002.JPG"
+    _decide(client, photo, "keep")
+    _decide(client, photo, "keep")
+    assert client.get("/api/keurer/stats").json()["total"] == 1
+    _decide(client, photo, "delete")
+    with _db(config) as conn:
+        rows = conn.execute("SELECT decision FROM keurer_decisions WHERE path = ?", (str(photo),)).fetchall()
+    assert rows == [("delete",)]
+
+
+def test_migration_5_keeps_every_row_and_relaxes_only_the_index(tmp_path, monkeypatch):
+    """Ratings, streak, duplicate undo data and all Keurer rows (ids, undo fields) survive migration 5."""
+    from backend import migrations
+    db_path = tmp_path / "datavault.db"
+    make_legacy_db(db_path)
+    monkeypatch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:4])
+    assert migrations.migrate(db_path) == [1, 2, 3, 4]
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("INSERT INTO keurer_decisions (path, folder, decision, dest_path, dest_ino, dest_size) "
+                     "VALUES ('/v/RAW/weg.jpg', '/v/RAW', 'delete', '/v/TRASH/weg.jpg', 77, 1234)")
+        conn.execute("INSERT INTO keurer_decisions (path, folder, decision, dest_path, dest_ino, dest_size) "
+                     "VALUES ('/v/RAW/weg.jpg', '/v/RAW', 'move', '/v/library/weg.jpg', 78, 99)")
+        seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'keurer_decisions'").fetchone()[0]
+        before = conn.execute("SELECT * FROM keurer_decisions ORDER BY id").fetchall()
+    monkeypatch.undo()
+
+    db = Database(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION
+        assert conn.execute("SELECT * FROM keurer_decisions ORDER BY id").fetchall() == before
+        assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'keurer_decisions'").fetchone()[0] == seq
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert len(list((tmp_path / migrations.BACKUP_DIR_NAME).glob("datavault-v4-*.db"))) == 1
+
+    stats = db.get_keurer_stats()
+    assert stats["streak"] == 3 and stats["total"] == 61
+    assert db.get_rating("/v/RAW/a.jpg") == 1150
+    assert db.get_delete_operations("run-1")[0]["dst_path"] == "/v/RAW_DUPLICATES/b.jpg"
+
+    # A second delete on the same path no longer replaces the first one's undo record
+    newer = db.record_keurer_decision("/v/RAW/weg.jpg", "/v/RAW", "delete", "/v/TRASH/weg_DUP_001.jpg", 79, 5)
+    assert newer > seq
+    rows = [(r["decision"], r["dest_path"]) for r in db.get_recent_keurer_decisions(limit=3)]
+    assert rows == [("delete", "/v/TRASH/weg_DUP_001.jpg"), ("move", "/v/library/weg.jpg"),
+                    ("delete", "/v/TRASH/weg.jpg")]
+    # 'keep' rows are still unique per path at the database level
+    db.record_keurer_decision("/v/RAW/z.jpg", "/v/RAW", "keep")
+    with sqlite3.connect(str(db_path)) as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO keurer_decisions (path, folder, decision) VALUES ('/v/RAW/z.jpg', '/v/RAW', 'keep')")

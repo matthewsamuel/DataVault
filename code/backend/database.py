@@ -275,17 +275,23 @@ class Database:
     ) -> int:
         """
         Sla een houd/verwijder/verplaats-beslissing op. Een houd/verwijder-beslissing
-        vervangt een eerdere houd/verwijder-beslissing voor hetzelfde pad; verplaats-
-        beslissingen blijven altijd staan (migratie 4), zodat hun undo niet verloren gaat.
+        vervangt alleen een eerdere houd-beslissing voor hetzelfde pad (die heeft niets
+        om terug te zetten). Verwijder- en verplaats-beslissingen blijven altijd staan
+        (migraties 4 en 5), zodat hun undo nooit verloren gaat.
         dest_path is waar het bestand nu staat (TRASH of doelmap), nodig voor undo;
         dest_ino en dest_size identificeren dat bestand (een rename houdt de inode).
         Geeft het id van de beslissing terug.
         """
         conn = self._get_connection()
         cursor = conn.cursor()
+        if decision in ("keep", "delete"):
+            cursor.execute(
+                "DELETE FROM keurer_decisions WHERE path = ? AND folder = ? AND decision = 'keep'",
+                (path, folder),
+            )
         cursor.execute(
             """
-            INSERT OR REPLACE INTO keurer_decisions
+            INSERT INTO keurer_decisions
                 (path, folder, decision, dest_path, dest_ino, dest_size, decided_at)
             VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
