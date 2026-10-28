@@ -249,6 +249,28 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   scrolt in een laag venster binnen het venster, met de voetnoot altijd heel in beeld. In het
   themamenu zie je ook na openen met de muis welke keuze de pijltjes gemarkeerd hebben.
 
+### Slim zoeken: foto's vinden op wat erop staat
+- Zoek in je foto's en video's op wat erop staat, gewoon in het Nederlands (of Engels): "hond op het
+  strand", "verjaardagstaart", "zonsondergang boven zee", "sneeuw in de bergen". Typ in het zoekveld
+  bovenaan en druk op Enter, of druk op **s**: het zoekvenster zoekt in de hele bibliotheek, met de
+  keuze **Slim zoeken** of **Bestandsnaam**, filters op foto's of video's en een periode, en de beste
+  resultaten eerst. Met de pijltjes loop je door de resultaten, Enter opent ze in de viewer en Esc
+  brengt je terug naar de resultaten.
+- In de viewer zoekt **Vergelijkbaar** (toets **v**) foto's die op de getoonde foto lijken.
+- Alles gebeurt op deze Mac: je foto's en zoekopdrachten gaan nergens heen. Het zoekmodel (ongeveer
+  926 MB) wordt alleen gedownload als je in **Instellingen > Slim zoeken** op **Zoekmodel installeren**
+  klikt; de app vraagt eerst en laat zien waar het vandaan komt. Daarna herkent de app je foto's op de
+  achtergrond (op de grafische chip zo'n 70 foto's per seconde, en daarna alleen nieuwe of gewijzigde
+  foto's); de voortgang staat in het takenpaneel, en pauzeren, hervatten en annuleren werken zoals bij
+  elke taak. Zoeken in 100.000 foto's duurt ongeveer een tiende seconde.
+- Zonder zoekmodel werkt alles zoals eerst, en zegt het zoekvenster hoe je het installeert. Zoeken op
+  bestandsnaam in de hele bibliotheek werkt altijd.
+- Een verplaatste foto blijft gewoon vindbaar, en een foto die naar de prullenmand ging, verschijnt niet
+  meer in de resultaten.
+- Gekozen na een eerlijke vergelijking van vijf zoekmodellen op 179 echte foto's met 50 Nederlandse en
+  Engelse zoekopdrachten: het gekozen model (SigLIP 2) zet bij 49 van de 50 Nederlandse zoekopdrachten
+  een goede foto bovenaan en bij alle 50 in de top 5. Een model dat alleen Engels kent, deed dat bij 33.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden

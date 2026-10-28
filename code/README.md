@@ -18,8 +18,11 @@ Een lokale media viewer en RAW duplicaten opruimtool voor macOS. Draait op exter
     │   ├── thumbnail.py   # Thumbnails genereren
     │   ├── jobs.py        # Achtergrondtaken (voortgang, pauzeren, hervatten)
     │   ├── job_types.py   # Duplicatenscan, indexeren, miniaturen
+    │   ├── semantic.py    # Slim zoeken: zoekmodel, herkennen, zoeken
     │   └── routes/        # API endpoints
     ├── frontend/          # HTML/CSS/JS interface
+    ├── models/            # Gedownloade zoekmodellen (niet in git; alleen na "installeren")
+    ├── scripts/           # download_models.py, eval_semantic_search.py
     ├── venv/              # Python virtual environment
     ├── config.json        # Vault paden configuratie
     ├── requirements.txt   # Python dependencies
@@ -63,6 +66,8 @@ Kopieer `code/config.example.json` naar `code/config.json` en stel de vault-pade
   "cache_folder": "/Volumes/T7/vault/.datavault_cache"
 }
 ```
+
+Optioneel: `"models_folder"` (waar het zoekmodel van Slim zoeken staat; standaard `code/models`).
 
 ## Installatie (eerste keer)
 
@@ -111,6 +116,93 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Een bestand dat weg is, wordt eerst verborgen en pas aan het eind van een ronde uit de index
   gehaald. De index leest alleen; hij verplaatst of wist nooit een bestand.
 - `DATAVAULT_AUTO_INDEX=0` zet het automatisch bijwerken uit (de tests doen dat).
+
+### Slim zoeken (zoeken op wat er op een foto staat)
+- Zoek foto's en video's op inhoud, in het Nederlands of Engels: "hond op het strand",
+  "verjaardagstaart", "zonsondergang boven zee". Enter in het zoekveld bovenaan (of de toets `s`)
+  opent het zoekvenster voor de hele bibliotheek, met de keuze **Slim zoeken** of **Bestandsnaam**,
+  filters op soort en periode, en de resultaten op volgorde van hoe goed ze passen (pijltjes, Enter
+  opent de viewer). In de viewer zoekt **Vergelijkbaar** (`v`) foto's die op de getoonde foto lijken.
+- Alles draait op deze Mac (`backend/semantic.py`, `routes/search.py`): onnxruntime + tokenizers +
+  numpy, geen torch, geen cloud. De app downloadt nooit zelf iets: het zoekmodel (ongeveer 926 MB)
+  komt alleen binnen via de knop **Zoekmodel installeren** in Instellingen (die eerst vraagt en de bron
+  en grootte toont) of met
+  ```bash
+  cd code
+  venv/bin/python scripts/download_models.py          # --list toont alleen bestanden, bronnen en grootte
+  ```
+  Elk bestand is vastgepind op een revisie en wordt met SHA-256 gecontroleerd; een afgebroken download
+  gaat verder waar hij was. De modellen staan in `code/models/` (op de T7, niet in git) of in de map
+  die `"models_folder"` in `config.json` noemt.
+- Na de installatie (en na elk bijwerken van de bibliotheek) bekijkt de taak **Foto's herkennen voor
+  Slim zoeken** elke nieuwe of gewijzigde foto en video één keer (video: het beeld op 1 s). Hij leest
+  de miniatuur (en maakt die als hij er nog niet is), schrijft per foto een vector van 768 getallen
+  (float16) in de database (migratie 40, `semantic_embeddings`, op `media.id`: een verplaatste foto
+  houdt zijn vector) en is te pauzeren, hervatten en annuleren; bij een losgekoppelde schijf wacht hij.
+- Zonder model werkt de rest gewoon; Slim zoeken zegt dan hoe je het installeert, en zoeken op
+  bestandsnaam werkt al.
+
+**Het model.** SigLIP 2 base, patch 16, 224 px (Google, Apache-2.0), meertalig. Het beeldmodel is de
+fp32-ONNX van immich-app (draait via Core ML op de grafische chip), het tekstmodel de fp16-ONNX van
+onnx-community (draait op de processor); beide geven dezelfde vectoren (cosinus 0,99999). Gekozen na
+een meting op een eigen gelabelde set (`scripts/semantic_eval/`: 179 foto's, 149 met open licentie van
+Wikimedia Commons plus 30 macOS-achtergronden; 50 zoekopdrachten in het Nederlands en Engels, met het
+juiste antwoord erbij). Opnieuw meten: `venv/bin/python scripts/eval_semantic_search.py --images <map>`.
+
+| Kandidaat (op de processor) | NL R@1 | NL R@5 | NL MRR | NL mAP | EN R@1 | EN mAP | beelden/s | tekst |
+|---|---|---|---|---|---|---|---|---|
+| OpenAI CLIP ViT-B/32 (alleen Engels) | 0,66 | 0,78 | 0,72 | 0,63 | 0,94 | 0,92 | 37 | 17 ms |
+| idem + vertalen met qwen2.5:3b (Ollama) | 0,74 | 0,88 | 0,80 | 0,74 | 0,94 | 0,93 | 37 | 175 ms |
+| clip-ViT-B-32-multilingual-v1 + ViT-B/32 | 0,80 | 0,92 | 0,85 | 0,79 | 0,94 | 0,92 | 34 | 3 ms |
+| XLM-RoBERTa base + ViT-B/32 (LAION-5B) | 0,98 | 1,00 | 0,99 | 0,94 | 0,96 | 0,93 | 35 | 33 ms |
+| SigLIP 2 B/32, 256 px | 0,96 | 1,00 | 0,98 | 0,92 | 0,98 | 0,95 | 21 | 30 ms |
+| **SigLIP 2 B/16, 224 px (gekozen)** | **0,98** | **1,00** | **0,99** | **0,93** | **0,98** | **0,96** | 10 (GPU 65-75) | 35 ms |
+
+R@k: aandeel zoekopdrachten met een goede foto op plek 1 of in de top 5; MRR: gemiddelde 1/plek van de
+eerste goede foto; mAP: hoe hoog álle goede foto's staan. Op onze set zijn XLM-R en SigLIP 2 B/16
+gelijk; op de grote openbare test (Crossmodal-3600, 3600 foto's, door Immich gemeten) is SigLIP 2 B/16
+duidelijk beter: Nederlands 75,3 tegen 70,8, Engels 84,9 tegen 76,9. Met de grafische chip is hij ook
+snel genoeg. Varianten: fp16 geeft dezelfde volgorde als fp32 (NL mAP 0,931 tegen 0,930); int8 kost
+het Nederlands het meest (tekstmodel int8: NL mAP 0,73) en is dus niet gebruikt. De miniatuur (300 px)
+in plaats van het origineel geeft dezelfde R@1, R@5 en MRR (mAP 0,924 tegen 0,931) en is vele malen
+sneller te lezen. Vertalen via Ollama hielp weinig ("hond" werd "honduras").
+
+**Snelheid** (M3 Pro, 36 GB):
+
+| Meting | Resultaat |
+|---|---|
+| Herkennen, miniaturen al aanwezig, grafische chip | 71 foto's/s (1.524 foto's in 21 s) |
+| Herkennen, miniaturen nog te maken van 12 MP-JPEG's | 26 foto's/s |
+| Herkennen op de processor (minder dan 1.000 wachtende foto's) | ~10 foto's/s |
+| Core ML laden | eerste keer ~4 min (vertalen naar de grafische chip, daarna bewaard), daarna ~70 s |
+| `/api/health` tijdens het herkennen | p50 1,6 ms, p95 2,4 ms |
+| Zoeken, 100.000 foto's, nieuwe zoekopdracht | 66 ms (met filters ook ~65 ms) |
+| Vergelijkbare foto's, 100.000 foto's | 31 ms |
+| Volgende pagina of dezelfde zoekopdracht | 0,3 ms op de server |
+| Eerste zoekopdracht na het starten (model en 100.000 vectoren laden) | 1,4 s; trager als de T7 druk is |
+| Geheugen | tekstmodel ~1,7 GB (na 15 min niet zoeken weer vrij), vectoren 150 MB per 100.000 foto's |
+
+Het zoekveld laadt het model al zodra het focus krijgt, zodat de eerste zoekopdracht meestal direct is.
+Een resultaat telt als "goed" als de score minstens 0,05 is, hooguit 0,06 onder de beste ligt en twee
+standaardafwijkingen boven het gemiddelde van de selectie (op de set: 90% van de goede foto's, 70%
+precisie); de rest staat achter **Meer foto's die minder goed passen**.
+
+**API** (filters zoals `/api/library/media`: `kind`, `date_from`, `date_to`, `folder`, `recursive`,
+`camera`, `has_gps`, `min_rating`, `orientation`):
+- `GET /api/search/semantic?q=…&offset=&limit=&include_weak=` → `{total, ranked, next_offset, items:
+  [mediarij + score], took_ms, indexed, pending}` (409 zonder model)
+- `GET /api/search/similar?path=…` (of `id=`), `GET /api/search/filename?q=…`, `GET /api/search/status`,
+  `POST /api/search/warm`; installeren en herkennen zijn taken: `{type: 'model_download'}` en
+  `{type: 'semantic'}`.
+
+**Voor de assistent (en andere Python-code):**
+```python
+from backend import semantic
+hits = semantic.search_photos(db, config, "hond op het strand", filters={"kind": "photo"}, limit=20)
+# [{id, path, name, kind, taken, ..., score}, ...] beste eerst; semantic.NotReady als het model ontbreekt
+```
+`semantic.search_text(...)` en `semantic.search_similar(db, config, media_id, ...)` geven ook `total`
+en paging.
 
 ### Herstelcentrum
 - Eén lijst (tab **Herstel**, sneltoets 8) van alles wat de app in het archief verplaatste: Keurer
