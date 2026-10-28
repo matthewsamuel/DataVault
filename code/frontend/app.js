@@ -188,18 +188,16 @@ async function loadShows() {
     // Normale laadprocedure
     container.innerHTML = '<div class="loading-spinner"></div>';
     try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Failed to load shows');
-        const stories = await response.json();
+        const stories = await fetchJSON(url);
         _prefetchCache[url] = Promise.resolve(stories);
         renderShows(stories);
     } catch (e) {
         console.error('Error loading shows:', e);
-        container.innerHTML = `
+        container.innerHTML = html`
             <div class="error-state">
                 <i class="fas fa-exclamation-triangle"></i>
-                <p>Could not load shows. Please check your connection.</p>
-                <button class="btn btn-secondary" onclick="loadShows()">Try Again</button>
+                <p>Shows laden mislukt: ${e.message}</p>
+                <button class="btn btn-secondary" onclick="loadShows()">Opnieuw proberen</button>
             </div>
         `;
     }
@@ -339,10 +337,7 @@ function shuffleShows() {
 async function playFolderShow(showObj) {
     try {
         // Fetch files for this folder
-        const response = await fetch(`${API_BASE}/api/shows/folder-content?path=${encodeURIComponent(showObj.path)}`);
-        if (!response.ok) throw new Error("Failed to fetch folder content");
-
-        const files = await response.json();
+        const files = await fetchJSON(`${API_BASE}/api/shows/folder-content?path=${encodeURIComponent(showObj.path)}`);
 
         if (files && files.length > 0) {
             startShow({
@@ -353,8 +348,7 @@ async function playFolderShow(showObj) {
             showToast('Empty', 'No media found in this folder', 'warning');
         }
     } catch (e) {
-        console.error("Error playing folder:", e);
-        showToast('Error', 'Could not load folder content', 'error');
+        toastFetchError('Show starten mislukt', e);
     }
 }
 
@@ -362,10 +356,7 @@ async function playFolderShow(showObj) {
 
 async function loadFolders() {
     try {
-        const response = await fetch(`${API_BASE}/api/folders`);
-        if (!response.ok) throw new Error('Failed to load folders');
-
-        const data = await response.json();
+        const data = await fetchJSON(`${API_BASE}/api/folders`);
         folderTree = data.folders;
 
         // Load expanded state from localStorage
@@ -376,8 +367,7 @@ async function loadFolders() {
 
         renderSidebarFolderTree();
     } catch (error) {
-        console.error('Error loading folders:', error);
-        showToast('Error', 'Failed to load folders', 'error');
+        toastFetchError('Mappen laden mislukt', error);
     }
 }
 
@@ -473,17 +463,13 @@ function updateBreadcrumb(path) {
 
 async function loadMedia(folder) {
     try {
-        const response = await fetch(`${API_BASE}/api/media?folder=${encodeURIComponent(folder)}`);
-        if (!response.ok) throw new Error('Failed to load media');
-
-        const data = await response.json();
+        const data = await fetchJSON(`${API_BASE}/api/media?folder=${encodeURIComponent(folder)}`);
         currentMedia = data.files;
         filteredMedia = [...currentMedia];
 
         applySortAndRender();
     } catch (error) {
-        console.error('Error loading media:', error);
-        showToast('Error', 'Failed to load media files', 'error');
+        toastFetchError('Bestanden laden mislukt', error);
     }
 }
 
@@ -1375,8 +1361,18 @@ document.addEventListener('keydown', (e) => {
 
 function showToast(title, message, type = 'info') {
     const container = document.getElementById('toast-container');
+    // Dezelfde melding nog in beeld (bijv. tien mislukte miniaturen): niet opstapelen, alleen langer tonen
+    const same = [...container.children].find(t => t.dataset.title === String(title) && t.dataset.message === String(message));
+    if (same) {
+        same.style.opacity = '1';
+        clearTimeout(same._hideTimer);
+        same._hideTimer = setTimeout(() => hideToast(same), 3000);
+        return;
+    }
     const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
+    toast.className = `toast ${type} toast-${type}`;
+    toast.dataset.title = String(title);
+    toast.dataset.message = String(message);
     // Titel en melding zijn tekst: ze bevatten vaak bestandsnamen of een foutmelding van de server
     toast.append(
         createEl('div', { class: 'toast-header' },
@@ -1387,10 +1383,112 @@ function showToast(title, message, type = 'info') {
     container.appendChild(toast);
 
     // Auto remove after 3s
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    toast._hideTimer = setTimeout(() => hideToast(toast), 3000);
+}
+
+function hideToast(toast) {
+    toast.style.opacity = '0';
+    toast._hideTimer = setTimeout(() => toast.remove(), 300);
+}
+
+// Eén manier om een mislukt verzoek te melden (FRONTEND-ERR-1): de melding van de server in
+// een toast. Is het archief weg, dan zegt de banner bovenin dat al; geen toast erbij.
+function toastFetchError(title, err) {
+    if (err && err.code === 'vault_unavailable') {
+        console.warn(title, err.message);
+        return;
+    }
+    console.error(title, err);
+    showToast(title, (err && err.message) || String(err), 'error');
+}
+
+// ==================== ARCHIEF- EN SYSTEEMSTATUS ====================
+// De T7 kan elk moment los raken. De pagina vraagt /api/health af en toe (vaker zolang het
+// archief weg is), toont dan een banner en laadt alles opnieuw zodra de schijf terug is:
+// zonder herstart van de server. Ontbrekende hulpmiddelen (ffmpeg, HEIC, Ollama of het
+// chatmodel) staan rustig in een melding linksonder die je kunt wegklikken.
+const STATUS_POLL_MS = 15000;
+const STATUS_POLL_OFFLINE_MS = 3000;
+let vaultAvailable = true;
+let statusTimer = null;
+
+async function checkServerStatus() {
+    clearTimeout(statusTimer);
+    try {
+        const res = await fetch(`${API_BASE}/api/health`, { cache: 'no-store' });
+        if (res.ok) {
+            const health = await res.json();
+            setVaultAvailable(health.vault_available !== false, health.vault_message);
+            renderCapabilityNotices(health.notices || []);
+        }
+    } catch (_) { /* server even weg (herstart): volgende keer opnieuw */ }
+    statusTimer = setTimeout(checkServerStatus, vaultAvailable ? STATUS_POLL_MS : STATUS_POLL_OFFLINE_MS);
+}
+
+function setVaultAvailable(available, message) {
+    const banner = document.getElementById('vault-banner');
+    if (!available) {
+        if (banner) {
+            banner.querySelector('.vault-banner-text').textContent =
+                message || 'Archief niet bereikbaar (schijf losgekoppeld?)';
+            banner.hidden = false;
+        }
+        vaultAvailable = false;
+        return;
+    }
+    if (banner) banner.hidden = true;
+    if (!vaultAvailable) {
+        vaultAvailable = true;
+        showToast('Archief', 'Het archief is weer bereikbaar', 'success');
+        reloadAfterVaultReturn();
+    }
+}
+
+// Alles wat zonder archief leeg of met een fout bleef, opnieuw laden
+function reloadAfterVaultReturn() {
+    loadFolders();
+    const active = document.querySelector('.nav-tab.active');
+    const view = active ? active.dataset.view : 'home';
+    if (view === 'home') fetchHomeWidgets();
+    else if (view === 'viewer' && currentFolder) loadMedia(currentFolder);
+    else if (view === 'shows') loadShows();
+    else if (view === 'spotify') loadSpotifyStats();
+    loadChatModels();
+}
+
+// Een verzoek kreeg 'archief niet bereikbaar' (zie fetchJSON in api.js): meteen tonen en vaker kijken
+window.addEventListener('datavault:vault-unavailable', () => {
+    if (vaultAvailable) setVaultAvailable(false);
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(checkServerStatus, STATUS_POLL_OFFLINE_MS);
+});
+
+function noticeKey(notices) {
+    return notices.map(n => `${n.code}:${n.message}`).sort().join('|');
+}
+
+function renderCapabilityNotices(notices) {
+    const box = document.getElementById('capability-notice');
+    if (!box) return;
+    let dismissed = null;
+    try { dismissed = localStorage.getItem('dismissedNotices'); } catch (_) { /* privé-venster */ }
+    if (notices.length === 0 || dismissed === noticeKey(notices)) {
+        box.hidden = true;
+        return;
+    }
+    const close = createEl('button', { class: 'capability-notice-close', title: 'Verbergen', 'aria-label': 'Verbergen' }, '\u00d7');
+    close.addEventListener('click', () => {
+        try { localStorage.setItem('dismissedNotices', noticeKey(notices)); } catch (_) { /* niet bewaard */ }
+        box.hidden = true;
+    });
+    box.replaceChildren(
+        createEl('div', { class: 'capability-notice-head' },
+            createEl('i', { class: 'fas fa-info-circle' }),
+            createEl('strong', { text: 'Niet alles werkt' }), close),
+        ...notices.map(n => createEl('div', { class: 'capability-notice-item' },
+            createEl('div', { class: 'capability-notice-title', text: n.title }),
+            createEl('div', { class: 'capability-notice-text', text: n.message }))));
+    box.hidden = false;
 }
 
 // ==================== UTILS ====================
@@ -1405,8 +1503,7 @@ function copyToClipboard(text) {
 async function fetchHomeWidgets() {
     // 1. Storage
     try {
-        const res = await fetch(`${API_BASE}/api/stats/storage`);
-        const data = await res.json();
+        const data = await fetchJSON(`${API_BASE}/api/stats/storage`);
         if (data.total_gb) {
             document.querySelector('.storage-loading').style.display = 'none';
             document.querySelector('.storage-stats').style.display = 'block';
@@ -1421,7 +1518,7 @@ async function fetchHomeWidgets() {
             else if (data.percent_used > 75) bar.classList.add('warning');
         }
     } catch (e) {
-        document.querySelector('.storage-loading').textContent = 'Failed to load storage';
+        document.querySelector('.storage-loading').textContent = `Opslag laden mislukt: ${e.message}`;
     }
 
     // 2. Photo OTD
@@ -1429,8 +1526,7 @@ async function fetchHomeWidgets() {
 
     // 3. Spotify OTD
     try {
-        const res = await fetch(`${API_BASE}/api/stats/spotify-on-this-day`);
-        const data = await res.json();
+        const data = await fetchJSON(`${API_BASE}/api/stats/spotify-on-this-day`);
         const loading = document.getElementById('spotify-otd-loading');
         const content = document.getElementById('spotify-otd-content');
 
@@ -1451,7 +1547,7 @@ async function fetchHomeWidgets() {
             content.innerHTML = '<div class="storage-text">No tracks played on this day.</div>';
         }
     } catch (e) {
-        document.getElementById('spotify-otd-loading').textContent = 'Failed to load';
+        document.getElementById('spotify-otd-loading').textContent = `Laden mislukt: ${e.message}`;
     }
 }
 
@@ -1780,6 +1876,7 @@ document.addEventListener('DOMContentLoaded', () => {
     switchMainView('home');
     fetchHomeWidgets();
     loadChatModels();
+    checkServerStatus();
 
     // Start background prefetch na 1.5s zodat de initiële pagina eerst volledig laadt
     scheduleBackgroundPrefetch();
@@ -1921,11 +2018,11 @@ async function storageNavigateToPath(folderPath) {
 
     try {
         const params = folderPath ? `?folder_path=${encodeURIComponent(folderPath)}` : '';
-        const res = await fetch(`${API_BASE}/api/stats/storage-breakdown-nested${params}`);
-        const data = await res.json();
-
-        if (!res.ok || data.error) {
-            list.innerHTML = '<li>Fout bij laden van data.</li>';
+        let data;
+        try {
+            data = await fetchJSON(`${API_BASE}/api/stats/storage-breakdown-nested${params}`);
+        } catch (err) {
+            list.replaceChildren(createEl('li', { text: `Fout bij laden: ${err.message}` }));
             loading.style.display = 'none';
             content.style.display = 'block';
             return;
@@ -1981,8 +2078,8 @@ async function storageNavigateToPath(folderPath) {
         });
 
         if (folderPath) {
-            const filesRes = await fetch(`${API_BASE}/api/stats/largest-files?folder_path=${encodeURIComponent(folderPath)}&limit=20`);
-            const filesData = await filesRes.json();
+            const filesData = await fetchJSON(`${API_BASE}/api/stats/largest-files?folder_path=${encodeURIComponent(folderPath)}&limit=20`)
+                .catch(err => { toastFetchError('Grootste bestanden laden mislukt', err); return {}; });
 
             if (filesData.files) {
                 filesData.files.forEach(file => {
@@ -2447,15 +2544,17 @@ class CinematicPlayer {
         }
 
         try {
-            await fetch(`${API_BASE}/api/shows/vote`, {
+            await fetchJSON(`${API_BASE}/api/shows/vote`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ path: file.path, vote: type })
             });
         } catch (e) {
-            console.error("Vote failed:", e);
-            // Revert on failure
+            // Niet bewaard: de oude waardering terug, ook op het scherm
             file.rating = oldRating;
+            const badge = metaEl && metaEl.querySelector('.elo-rating-badge');
+            if (badge) badge.innerHTML = html`<i class="fas fa-star"></i> ELO: ${oldRating}`;
+            toastFetchError('Stem niet bewaard', e);
         }
     }
 

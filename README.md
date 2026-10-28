@@ -56,7 +56,9 @@ DataVault Dashboard is a full-featured web application for organizing, analyzing
 - **Background Prefetch** — Smart multi-stage prefetching (Spotify all-time → shows → per-year data) with promise-based caching
 - **Background Jobs** — Duplicate scans, hashing and thumbnail pre-generation run as jobs in a worker thread (`backend/jobs.py`, `/api/jobs`): progress with ETA, cancel, pause and resume, persisted in SQLite so they survive a reload; a job left running by a stopped server comes back as `interrupted`, and one whose vault is unplugged waits for it and continues
 - **Never Blocking the Server** — Every route that touches the disk, a subprocess or SQLite is a plain `def` (threadpool); only the chat routes are `async` (they await Ollama). SQLite runs in WAL mode with one connection per thread and a busy timeout
-- **Graceful Error Handling** — Corrupt files skipped silently, cross-device moves detected, partial failures reported with details
+- **Graceful Error Handling** — Corrupt files skipped silently, cross-device moves detected, partial failures reported with details. Every error answer has one shape, `{"error": {"code", "message"}, "detail"}` (`backend/errors.py`; `detail` keeps the old field), and the frontend reads it through `fetchJSON` (api.js) and shows it with one toast helper (`toastFetchError`); identical toasts are not stacked
+- **Unplugged Disk** — Every route that reads the archive depends on `errors.require_vault` and answers 503 `vault_unavailable` while the vault is gone; an `OSError` or database error halfway through a request becomes the same 503 when the vault turned out to be gone. The page shows a banner ("Archief niet bereikbaar"), polls `/api/health` every 3 s until the disk is back and then reloads what it shows, without a server restart. The app also starts without the disk: routers are always initialised and the database opens (and migrates) lazily on the first request after the vault appears (`Database(prepare=...)`, `db.when_ready`), without ever creating folders under `/Volumes`
+- **Capabilities** — `/api/health` reports `capabilities` (ffmpeg, ffprobe, pillow_heif, sips, and the chat: Ollama reachable, installed models, chosen model) and Dutch `notices` for what is missing; the page shows them in a small notice bottom left that can be dismissed
 - **Security Hardening** — No CORS, trusted hosts only (127.0.0.1/localhost), a per-process session token on every state-changing request, one central path check (`resolve_in_vault`) and one exclusion rule for every walk over the archive
 
 ---
@@ -198,7 +200,7 @@ UI Update (render, toast notification)
   A file that took the original place is never overwritten: the restored file then gets
   `name_RESTORED_001.ext`. Only restored files are forgotten; the rest stays recorded for a later attempt.
   The database lives on the vault disk: while it is unplugged, every database error answers 503
-  "Archief niet bereikbaar (schijf losgekoppeld?)" (app-wide handler in `main.py`) instead of a 500.
+  "Archief niet bereikbaar (schijf losgekoppeld?)" (app-wide handler in `backend/errors.py`) instead of a 500.
 
 **Code Example:**
 ```python

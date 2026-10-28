@@ -8,11 +8,18 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=40">
+    <link rel="stylesheet" href="style.css?v=41">
 </head>
 
 <body>
     <div id="app">
+        <!-- Archief niet bereikbaar (de T7 is los): app.js toont dit en laadt alles opnieuw zodra de schijf terug is -->
+        <div class="vault-banner" id="vault-banner" role="alert" hidden>
+            <i class="fas fa-plug"></i>
+            <span class="vault-banner-text">Archief niet bereikbaar (schijf losgekoppeld?)</span>
+            <span class="vault-banner-hint">Sluit de schijf aan; de app gaat vanzelf verder.</span>
+        </div>
+
         <!-- Top Navigation -->
         <nav class="top-nav">
             <div class="nav-brand" onclick="restartServer()" title="Server herstarten" style="cursor:pointer;">DataVault</div>
@@ -1012,6 +1019,9 @@
 
     <!-- Toast Container -->
     <!-- Achtergrondtaken: voortgang, pauzeren, hervatten, annuleren (jobs.js) -->
+    <!-- Wat op deze Mac ontbreekt (ffmpeg, HEIC, Ollama of het chatmodel); weg te klikken -->
+    <div class="capability-notice" id="capability-notice" role="status" hidden></div>
+
     <div class="job-dock" id="job-dock" role="region" aria-label="Achtergrondtaken" hidden></div>
 
     <div class="toast-container" id="toast-container">
@@ -1051,11 +1061,11 @@
     <script src="api.js?v=2"></script>
     <script src="dom.js?v=1"></script>
     <script src="folder-tree.js?v=3"></script>
-    <script src="app.js?v=46"></script>
+    <script src="app.js?v=47"></script>
     <script src="jobs.js?v=2"></script>
     <script src="duplicates.js?v=20"></script>
     <script src="keurer.js?v=12"></script>
-    <script src="timeline.js?v=6"></script>
+    <script src="timeline.js?v=7"></script>
     <script src="wave-background.js?v=3"></script>
     <script src="resizable-sidebar.js?v=1"></script>
 </body>

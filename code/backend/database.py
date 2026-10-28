@@ -7,7 +7,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set, Tuple, Iterator
+from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Iterator
 from datetime import datetime
 import time
 import uuid
@@ -34,22 +34,84 @@ class Database:
     was mounted again) the thread opens a fresh connection instead of using a stale one.
     """
     
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, prepare: Optional[Callable[[], None]] = None):
+        """
+        prepare: called before the database is first opened; it makes the cache folder and
+        raises when the vault is not there. With prepare the database opens lazily
+        (SCAN-DUP-DB-12, MEDIA-THUMBS-TIMELINE-16): an app started while the disk is not
+        mounted comes up anyway, answers 503, and opens (and migrates) the database on the
+        first request after the disk is back, without a restart and without ever making
+        folders under /Volumes. Without prepare the parent folder is made and the database
+        opens at once (tests, scripts).
+        """
         self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._prepare = prepare
+        self._ready = False
+        self._ready_lock = threading.RLock()
+        self._on_ready: List[Callable[[], None]] = []
         self._local = threading.local()
         self._open_lock = threading.Lock()
         self._open: Dict[int, Tuple[threading.Thread, sqlite3.Connection]] = {}
-        self._init_db()
-    
+        if prepare is None:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._ensure_ready()
+        else:
+            try:
+                self._ensure_ready()
+            except sqlite3.OperationalError:
+                pass  # opened on first use once the vault is there
+
+    @property
+    def ready(self) -> bool:
+        return self._ready
+
+    def when_ready(self, callback: Callable[[], None]) -> None:
+        """Run callback once the database is open: now, or right after it first opens."""
+        with self._ready_lock:
+            if not self._ready:
+                self._on_ready.append(callback)
+                return
+        callback()
+
+    def _ensure_ready(self) -> None:
+        """Open the database for the first time: prepare, migrate, WAL, then the callbacks."""
+        if self._ready:
+            return
+        with self._ready_lock:
+            if self._ready:
+                return
+            if self._prepare is not None:
+                try:
+                    self._prepare()
+                except OSError as e:
+                    raise sqlite3.OperationalError(f"unable to open database file: {e}") from e
+            try:
+                self._init_db()
+            except sqlite3.Error:
+                raise
+            except OSError as e:
+                raise sqlite3.OperationalError(f"unable to open database file: {e}") from e
+            self._ready = True
+            callbacks, self._on_ready = self._on_ready, []
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception as e:
+                print(f"Database ready callback failed: {e}")
+
     def _init_db(self):
         """Create or upgrade the schema via numbered migrations (see migrations.py)"""
         migrations.migrate(self.db_path)
-        with self._connect() as conn:
+        conn = sqlite3.connect(str(self.db_path), timeout=BUSY_TIMEOUT_MS / 1000)
+        try:
             # Persistent in the file: every later connection is in WAL mode too
             conn.execute("PRAGMA journal_mode=WAL")
+        finally:
+            conn.close()
 
     def _thread_connection(self) -> sqlite3.Connection:
+        if not self._ready:
+            self._ensure_ready()
         try:
             st = os.stat(self.db_path)
         except OSError as e:

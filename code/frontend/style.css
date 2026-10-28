@@ -1410,6 +1410,85 @@ body::before {
 
 /* ==================== TOAST NOTIFICATIONS ==================== */
 
+/* ==================== ARCHIEF- EN SYSTEEMSTATUS ==================== */
+
+.vault-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 16px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.vault-banner[hidden],
+.capability-notice[hidden] {
+    display: none;
+}
+
+.vault-banner-hint {
+    font-weight: 400;
+    opacity: 0.9;
+}
+
+.capability-notice {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    z-index: 9000;
+    max-width: min(360px, calc(100vw - 32px));
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--warning);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.capability-notice-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+
+.capability-notice-head i {
+    color: var(--warning);
+}
+
+.capability-notice-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.capability-notice-item + .capability-notice-item {
+    margin-top: 6px;
+}
+
+.capability-notice-title {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.capability-notice-text {
+    word-break: break-word;
+}
+
+.toast.warning {
+    border-left: 3px solid var(--warning);
+}
+
 #toast-container {
     position: fixed;
     top: var(--space-lg);

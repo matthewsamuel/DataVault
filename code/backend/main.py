@@ -2,15 +2,14 @@
 DataVault Dashboard - FastAPI Application
 """
 from contextlib import asynccontextmanager
-from fastapi import APIRouter, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pathlib import Path
 from typing import Optional
 import os
-import sqlite3
+import shutil
 import threading
 import uuid
 
@@ -26,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend import file_ops, restart, security, thumbnail
+from backend import errors, file_ops, restart, security, thumbnail
 from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs
@@ -95,36 +94,33 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
 
         # Validate paths (but don't fail if T7 not mounted)
         path_status = config.validate_paths()
-
         if not path_status["vault_root"]:
             _say("WARNING: Vault root not found. Is T7 mounted?")
             _say(f"Expected path: {config.VAULT_ROOT}")
+            _say("The app starts anyway and opens the archive as soon as the disk is there.")
         else:
             _say(f"Vault root found: {config.VAULT_ROOT}")
 
-            # Ensure cache directories exist
-            config.ensure_cache_dirs()
-            config.ensure_duplicates_folder()
-            # Old-style thumbnails (made before EXIF rotation, path-only key) and stored
-            # placeholders are made again on demand; clear them out in the background
-            threading.Thread(target=thumbnail.prune_thumbnail_cache, args=(config.THUMB_CACHE_PATH,),
-                             name="thumb-prune", daemon=True).start()
-
-        # Initialize database
-        db = Database(config.DB_PATH)
+        # The database lives in the vault's cache folder: it opens now when the vault is
+        # there, otherwise on the first request after the disk comes back (no restart)
+        db = Database(config.DB_PATH, prepare=_vault_preparer(config))
         app.state.db = db
-        _say(f"Database initialized: {config.DB_PATH}")
+        if db.ready:
+            _say(f"Database initialized: {config.DB_PATH}")
 
         # Background jobs (scans, hashing, thumbnails); what a previous run left
         # running can only be resumed by hand
         job_manager = JobManager(db, config, build_job_types(config, db, on_dup_scan_done=duplicates.remember_scan))
-        interrupted = job_manager.recover()
-        if interrupted:
-            _say(f"{interrupted} background job(s) were interrupted; resume them in the job dock")
+        db.when_ready(lambda: _recover_jobs(job_manager))
+        # Old-style thumbnails (made before EXIF rotation, path-only key) and stored
+        # placeholders are made again on demand; clear them out in the background
+        db.when_ready(lambda: threading.Thread(
+            target=thumbnail.prune_thumbnail_cache, args=(config.THUMB_CACHE_PATH,),
+            name="thumb-prune", daemon=True).start())
         app.state.jobs = job_manager
         jobs.init_router(job_manager)
 
-        # Initialize routes with config and database
+        # Initialize routes with config and database: always, also without the vault
         folders.init_router(config)
         media.init_router(config, db)
         duplicates.init_router(config, db)
@@ -146,19 +142,20 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         _say(traceback.format_exc())
 
     app.state.config = config
-    app.add_exception_handler(sqlite3.OperationalError, _database_error)
+    errors.install(app)
 
-    # Register routes
-    app.include_router(folders.router)
-    app.include_router(media.router)
-    app.include_router(duplicates.router)
+    # Register routes; every route that reads the archive answers 503 while it is unplugged
+    vault = [Depends(errors.require_vault)]
+    app.include_router(folders.router, dependencies=vault)
+    app.include_router(media.router, dependencies=vault)
+    app.include_router(duplicates.router, dependencies=vault)
     app.include_router(jobs.router, tags=["jobs"])
-    app.include_router(spotify.router, prefix="/api/spotify", tags=["spotify"])
-    app.include_router(shows.router, prefix="/api/shows", tags=["shows"])
+    app.include_router(spotify.router, prefix="/api/spotify", tags=["spotify"], dependencies=vault)
+    app.include_router(shows.router, prefix="/api/shows", tags=["shows"], dependencies=vault)
     app.include_router(chat.router, tags=["chat"])
-    app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
-    app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"])
-    app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"])
+    app.include_router(stats.router, prefix="/api/stats", tags=["stats"], dependencies=vault)
+    app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"], dependencies=vault)
+    app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 
@@ -170,20 +167,26 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     return app
 
 
-VAULT_UNREACHABLE = "Archief niet bereikbaar (schijf losgekoppeld?)"
+# Kept here as well: routes import it from backend.main
+VAULT_UNREACHABLE = errors.VAULT_UNREACHABLE
 
 
-def _database_error(request: Request, exc: sqlite3.OperationalError) -> JSONResponse:
-    """
-    The database lives in the vault's cache folder, so an unplugged disk makes every
-    database query fail. Answer that with a clear 503 instead of a bare 500.
-    """
-    config = request.app.state.config
-    if config is None or not config.VAULT_ROOT.is_dir() or not config.DB_PATH.parent.is_dir():
-        return JSONResponse(status_code=503, content={"detail": VAULT_UNREACHABLE})
-    import traceback
-    _say("".join(traceback.format_exception(exc)))
-    return JSONResponse(status_code=500, content={"detail": f"Databasefout: {exc}"})
+def _vault_preparer(config):
+    """What must be true before the database may be opened: the vault is there and the cache folder exists."""
+    def prepare():
+        if not config.VAULT_ROOT.is_dir():
+            raise FileNotFoundError(f"vault not found: {config.VAULT_ROOT}")
+        # _make_dir never creates the vault root itself (nothing under /Volumes)
+        config._make_dir(config.CACHE_FOLDER)
+        config._make_dir(config.THUMB_CACHE_PATH)
+        config.ensure_duplicates_folder()
+    return prepare
+
+
+def _recover_jobs(job_manager) -> None:
+    interrupted = job_manager.recover()
+    if interrupted:
+        _say(f"{interrupted} background job(s) were interrupted; resume them in the job dock")
 
 
 core_router = APIRouter()
@@ -205,12 +208,17 @@ def restart_server():
 
 @core_router.get("/api/health")
 def health_check(request: Request):
-    """Health check endpoint"""
+    """
+    Health check: is the vault there, and what can this Mac do (capabilities). 'notices'
+    lists in Dutch what does not work and how to fix it; the page shows them quietly.
+    """
     config = request.app.state.config
     if not config:
         raise HTTPException(status_code=503, detail="Configuration not loaded")
 
     path_status = config.validate_paths()
+    db = request.app.state.db
+    caps = capabilities()
 
     return {
         "status": "running",
@@ -219,8 +227,40 @@ def health_check(request: Request):
         "pid": os.getpid(),
         "vault_available": path_status["vault_root"],
         "vault_path": str(config.VAULT_ROOT),
-        "paths": path_status
+        "vault_message": None if path_status["vault_root"] else VAULT_UNREACHABLE,
+        "database_ready": bool(db is not None and db.ready),
+        "paths": path_status,
+        "capabilities": caps,
+        "notices": capability_notices(caps),
     }
+
+
+def capabilities() -> dict:
+    """Optional tools the app uses (all local): checked on every call, the chat check is cached."""
+    return {
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "ffprobe": shutil.which("ffprobe") is not None,
+        "pillow_heif": thumbnail.HEIF_SUPPORT,
+        "sips": shutil.which("sips") is not None,
+        "chat": chat.chat_capability(),
+    }
+
+
+def capability_notices(caps: dict) -> list:
+    notices = []
+    if not caps["ffmpeg"]:
+        notices.append({"code": "ffmpeg", "title": "ffmpeg ontbreekt",
+                        "message": "Video's krijgen geen miniatuur. Installeer het met: brew install ffmpeg"})
+    if not caps["pillow_heif"]:
+        notices.append({"code": "pillow_heif", "title": "HEIC-ondersteuning ontbreekt",
+                        "message": "iPhone-foto's (HEIC) krijgen geen miniatuur. Installeer het met: "
+                                   "venv/bin/pip install -r requirements.txt"})
+    chat_caps = caps["chat"]
+    if chat_caps["message"]:
+        notices.append({"code": "chat_model" if chat_caps["reachable"] else "ollama",
+                        "title": "Chat werkt niet" if not chat_caps["reachable"] else "Chatmodel ontbreekt",
+                        "message": chat_caps["message"]})
+    return notices
 
 if __name__ == "__main__":
     import uvicorn

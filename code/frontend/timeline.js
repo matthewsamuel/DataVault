@@ -95,12 +95,10 @@
     // ── Folder Loading ────────────────────────────────────
     async function loadTimelineFolders() {
         try {
-            const res = await fetch(`${API_BASE}/api/timeline/folders`);
-            if (!res.ok) throw new Error('Failed to load folders');
-            const data = await res.json();
+            const data = await fetchJSON(`${API_BASE}/api/timeline/folders`);
             tlFolderTree = data.folders || [];
         } catch (e) {
-            console.error('Timeline: error loading folders', e);
+            toastFetchError('Tijdlijn: mappen laden mislukt', e);
             tlFolderTree = [];
         }
     }
@@ -245,13 +243,7 @@
             // Eén parameter per map: een mapnaam mag een komma bevatten
             const params = new URLSearchParams();
             [...tlSelectedFolders].forEach(folder => params.append('folders', folder));
-            const res = await fetch(`${API_BASE}/api/timeline/scan?${params}`);
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(apiErrorMessage(err, `Serverfout (${res.status})`));
-            }
-
-            const data = await res.json();
+            const data = await fetchJSON(`${API_BASE}/api/timeline/scan?${params}`);
             tlFiles = timelineFilesFrom(data);
             if (data.skipped && data.skipped.length) {
                 showToast('Tijdlijn', `${data.skipped.length} gekozen map(pen) niet gevonden en overgeslagen`, 'warning');

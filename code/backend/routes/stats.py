@@ -27,14 +27,8 @@ def init_router(cfg: Config, database=None):
 
 @router.get("/storage")
 def get_storage_stats() -> Dict[str, Any]:
-    if not config:
-        return {"error": "Config not loaded"}
-        
-    vault_path = config.VAULT_ROOT
-    if not vault_path.exists():
-         return {"error": "Vault path does not exist"}
-         
-    total, used, free = shutil.disk_usage(vault_path)
+    # A missing vault is a 503 before this runs (errors.require_vault)
+    total, used, free = shutil.disk_usage(config.VAULT_ROOT)
     
     return {
         "total_gb": round(total / (2**30), 2),
@@ -100,68 +94,43 @@ def _stats_folder(folder_path: Optional[str]) -> Path:
 
 @router.get("/storage-breakdown")
 def get_storage_breakdown() -> Dict[str, Any]:
-    if not config:
-        return {"error": "Config not loaded"}
-        
-    vault_path = config.VAULT_ROOT
-    if not vault_path.exists():
-         return {"error": "Vault path does not exist"}
-         
     # Calculate sizes for immediate subdirectories using `du` for speed
-    try:
-        return {"breakdown": _du_breakdown(vault_path, _subfolder_names(vault_path))}
-    except Exception as e:
-        return {"error": str(e)}
+    vault_path = config.VAULT_ROOT
+    return {"breakdown": _du_breakdown(vault_path, _subfolder_names(vault_path))}
 
 @router.get("/storage-breakdown-nested")
 def get_storage_breakdown_nested(folder_path: str = None) -> Dict[str, Any]:
     """Get storage breakdown for a specific folder and its subfolders."""
-    if not config:
-        return {"error": "Config not loaded"}
-
     target_path = _stats_folder(folder_path)
-
-    try:
-        breakdown = _du_breakdown(target_path, _subfolder_names(target_path))
-        return {"breakdown": breakdown, "path": folder_path or "/"}
-    except Exception as e:
-        return {"error": str(e)}
+    breakdown = _du_breakdown(target_path, _subfolder_names(target_path))
+    return {"breakdown": breakdown, "path": folder_path or "/"}
 
 @router.get("/largest-files")
 def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[str, Any]:
     """Get largest files in a specific folder."""
-    if not config:
-        return {"error": "Config not loaded"}
-
-    vault_path = config.VAULT_ROOT.resolve()
+    vault_path = config.VAULT_ROOT
     target_path = _stats_folder(folder_path)
+    limit = max(1, min(limit, 200))
 
     files_with_sizes = []
+    for root, _, files in walk_archive(target_path, config):
+        for filename in files:
+            file_path = Path(root) / filename
+            try:
+                size_bytes = file_path.stat().st_size
+            except OSError:
+                continue
+            size_mb = round(size_bytes / (1024 * 1024), 2)
+            if size_mb > 0:
+                files_with_sizes.append({
+                    "name": filename,
+                    "path": str(file_path.relative_to(vault_path)),
+                    "size_mb": size_mb,
+                    "size_gb": round(size_mb / 1024, 2)
+                })
 
-    try:
-        for root, _, files in walk_archive(target_path, config):
-            for filename in files:
-                file_path = Path(root) / filename
-                try:
-                    size_bytes = file_path.stat().st_size
-                    size_mb = round(size_bytes / (1024 * 1024), 2)
-
-                    if size_mb > 0:
-                        rel_path = str(file_path.relative_to(vault_path))
-                        files_with_sizes.append({
-                            "name": filename,
-                            "path": rel_path,
-                            "size_mb": size_mb,
-                            "size_gb": round(size_mb / 1024, 2)
-                        })
-                except Exception:
-                    pass
-
-        sorted_files = sorted(files_with_sizes, key=lambda x: x['size_mb'], reverse=True)[:limit]
-        return {"files": sorted_files, "path": folder_path or "/"}
-
-    except Exception as e:
-        return {"error": str(e)}
+    sorted_files = sorted(files_with_sizes, key=lambda x: x['size_mb'], reverse=True)[:limit]
+    return {"files": sorted_files, "path": folder_path or "/"}
 
 # "On this day" and photos-by-date use the capture date (backend/media_dates.py) and a
 # bounded amount of work per request (MEDIA-THUMBS-TIMELINE-10, PERF-14): first what the
@@ -317,19 +286,18 @@ def get_spotify_on_this_day() -> Dict[str, Any]:
     now = datetime.now()
     date_filter = (now.month, now.day)
     
-    try:
-         data = parse_spotify_data(None, date_filter)
-         tracks = data.get('on_this_day', [])
-         if tracks:
-              now_minutes = now.hour * 60 + now.minute
-              def time_to_minutes(t):
-                  h, m = map(int, t['time'].split(':'))
-                  return h * 60 + m
-              closest = min(tracks, key=lambda t: abs(time_to_minutes(t) - now_minutes))
-              return {"track": closest}
-         return {"track": None}
-    except Exception as e:
-         return {"error": str(e)}
+    data = parse_spotify_data(None, date_filter)
+    tracks = data.get('on_this_day', [])
+    if not tracks:
+        return {"track": None}
+    now_minutes = now.hour * 60 + now.minute
+
+    def time_to_minutes(t):
+        h, m = map(int, t['time'].split(':'))
+        return h * 60 + m
+
+    closest = min(tracks, key=lambda t: (abs(time_to_minutes(t) - now_minutes), t['year'], t['track']))
+    return {"track": closest}
 
 @router.get("/photos-by-date")
 def get_photos_by_date(date: str) -> Dict[str, Any]:

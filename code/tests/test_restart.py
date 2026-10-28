@@ -75,8 +75,9 @@ def test_failed_spawn_can_be_retried(client, no_real_restart, monkeypatch):
     def broken(pid, argv, cwd):
         raise OSError("no fork")
     monkeypatch.setattr(restart, "_spawn_helper", broken)
-    with pytest.raises(OSError):
-        client.post("/api/restart")
+    # An OSError is answered with the one error shape (backend/errors.py), not a bare 500
+    r = client.post("/api/restart")
+    assert r.status_code == 500 and r.json()["error"]["code"] == "io_error"
     assert restart._restart_scheduled is False and no_real_restart["exit"] == []
 
 

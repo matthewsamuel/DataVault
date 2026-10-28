@@ -549,3 +549,21 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   "Scan starten" voor de gekozen map, en pas na je klik start de scan als achtergrondtaak.
 - Foto's zoeken of tonen vanuit de chat geeft bij een fout een melding in de chat, in plaats van
   stil te verdwijnen.
+
+### Schijf los, foutmeldingen en wat er op deze Mac ontbreekt
+- Is de archiefschijf (T7) niet aangesloten of raakt hij los, dan toont de app bovenin een rode
+  balk "Archief niet bereikbaar". Zodra de schijf terug is, verdwijnt de balk en laadt de app
+  vanzelf opnieuw wat je zag, zonder de server te herstarten.
+- Elk onderdeel dat het archief nodig heeft, geeft dan dezelfde duidelijke melding. Voorheen kreeg
+  je afhankelijk van de plek "niet gevonden", een lege lijst, "0 foto's" of een serverfout. Ook
+  als de schijf midden in een verzoek wegvalt, komt die melding.
+- De app start nu ook als de schijf nog niet aangesloten is. Voorheen bleef dan alles kapot tot
+  een herstart, ook nadat de schijf er weer was. De database wordt geopend zodra de schijf er is,
+  en de app maakt nooit zelf mappen aan op de plek van de schijf.
+- Alle foutmeldingen van de server hebben nu dezelfde vorm, en de pagina toont ze op één manier:
+  in gewone taal, met de reden. Dezelfde melding stapelt zich niet meer op. Opslag, "op deze dag",
+  Shows, stemmen in een slideshow en het opslagoverzicht melden nu een fout in plaats van stil
+  leeg te blijven of te doen alsof het gelukt is.
+- Ontbreekt er iets op deze Mac (ffmpeg voor video-miniaturen, HEIC-ondersteuning, Ollama of het
+  gekozen chatmodel), dan staat er linksonder een rustige melding met hoe je het oplost. Die kun
+  je wegklikken.

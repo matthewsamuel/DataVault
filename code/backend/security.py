@@ -54,8 +54,9 @@ class SessionTokenMiddleware:
                     sent = value
                     break
             if not secrets.compare_digest(sent, self.token):
+                message = "Ongeldige of ontbrekende sessiesleutel; herlaad de pagina"
                 response = JSONResponse(
-                    {"detail": "Ongeldige of ontbrekende sessiesleutel; herlaad de pagina"},
+                    {"error": {"code": "session_token", "message": message}, "detail": message},
                     status_code=403,
                     headers={AUTH_FAILED_HEADER: "token"},
                 )
