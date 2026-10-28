@@ -6,6 +6,7 @@ GET  /api/series                 one page of series (strictness, sort, offset, l
 POST /api/series/keep            keep some photos of a series, move the others to
                                  RAW_DUPLICATES/near-duplicates (one recovery action)
 POST /api/series/keep-all        keep every photo of a series: it is not shown again
+POST /api/series/reviews/undo    {key}: show that one series again (undo of keep-all)
 POST /api/series/reviews/reset   show the series decided on with keep-all again
 
 The comparison itself runs as a job: POST /api/jobs {type: 'phash'}. Exact byte copies
@@ -125,6 +126,18 @@ def keep_all(body: Any = Body(...)) -> Dict[str, Any]:
     if len(set(members)) < 2 or near_dups.find_series(db, members) is None:
         raise HTTPException(status_code=409, detail="Deze foto's vormen geen reeks (meer); vernieuw de lijst")
     return {"key": near_dups.record_review(db, members, "keep_all")}
+
+
+@router.post("/reviews/undo")
+def undo_review(body: Any = Body(...)) -> Dict[str, Any]:
+    """{key}: the series kept with keep-all is shown again (the key keep-all answered)."""
+    key = body.get("key") if isinstance(body, dict) else None
+    if not isinstance(key, str) or not 1 <= len(key) <= 64:
+        raise HTTPException(status_code=400, detail="key moet de sleutel van een reeks zijn")
+    shown = near_dups.undo_review(db, key)
+    if not shown:
+        raise HTTPException(status_code=404, detail="Deze reeks staat niet (meer) bij de behouden reeksen")
+    return {"shown_again": shown}
 
 
 @router.post("/reviews/reset")

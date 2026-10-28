@@ -715,6 +715,22 @@ def test_keep_all_hides_a_series_until_it_changes_and_reset_shows_it_again(clien
     assert client.get("/api/series/status").json()["reviewed"] == 0
 
 
+def test_keep_all_can_be_undone_right_away(client, vault):
+    _index(client)
+    _run(client)
+    burst = _with(_series(client), "burst_00.jpg")[0]
+    r = client.post("/api/series/keep-all", json={"members": [m["id"] for m in burst["members"]]})
+    key = r.json()["key"]
+    assert key == burst["key"] and not _with(_series(client), "burst_00.jpg")
+    r = client.post("/api/series/reviews/undo", json={"key": key})
+    assert r.status_code == 200 and r.json()["shown_again"] == 1
+    assert _with(_series(client), "burst_00.jpg")[0]["key"] == key
+    assert client.get("/api/series/status").json()["reviewed"] == 0
+    assert client.post("/api/series/reviews/undo", json={"key": key}).status_code == 404
+    for bad in ({}, {"key": 5}, {"key": ""}, {"key": "x" * 65}, []):
+        assert client.post("/api/series/reviews/undo", json=bad).status_code == 400
+
+
 def test_series_are_paged_and_sorted(client, vault):
     folder = vault / "RAW/2024/veel"
     folder.mkdir(parents=True)

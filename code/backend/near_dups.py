@@ -1100,6 +1100,14 @@ def record_review(db, ids: Iterable[int], decision: str) -> str:
     return key
 
 
+def undo_review(db, key: str) -> int:
+    """Forget one decision ('Alles behouden' right after it was made): the series is shown again."""
+    with db._connect() as conn:
+        n = conn.execute("DELETE FROM near_dup_reviews WHERE key = ?", (key,)).rowcount
+    _bump()
+    return n
+
+
 def reset_reviews(db) -> int:
     with db._connect() as conn:
         n = conn.execute("DELETE FROM near_dup_reviews").rowcount
