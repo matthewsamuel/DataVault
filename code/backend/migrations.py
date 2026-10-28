@@ -393,6 +393,39 @@ def _m012_recovery_actions(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_recovery_actions_created ON recovery_actions(created_at)")
 
 
+def _m020_smart_albums(conn: sqlite3.Connection):
+    """
+    Smart albums (backend/smart_albums.py): a saved filter over the media index, shown
+    with its count in Albums. An album is a live query (filters is the JSON of
+    backend/library_filters.py): it never copies, moves or changes a file.
+    builtin names a default album (smart_albums.DEFAULTS, added once by the app, not
+    here; the user can hide or delete them, and 'Standaardalbums terugzetten' adds them
+    again). Only a new table: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS smart_albums (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            filters TEXT NOT NULL,
+            sort TEXT NOT NULL,
+            icon TEXT,
+            builtin TEXT UNIQUE,
+            hidden INTEGER NOT NULL DEFAULT 0,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+
+def _m021_keurer_path_index(conn: sqlite3.Connection):
+    """
+    An index on keurer_decisions(path): the library filter 'Keurer: nog niet beoordeeld'
+    asks per file whether any decision names its path. Only an index: no row is touched.
+    """
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_keurer_path ON keurer_decisions(path)")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -407,6 +440,8 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (10, "app_settings", _m010_app_settings),
     (11, "media_index", _m011_media_index),
     (12, "recovery_actions", _m012_recovery_actions),
+    (20, "smart_albums", _m020_smart_albums),
+    (21, "keurer_path_index", _m021_keurer_path_index),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
