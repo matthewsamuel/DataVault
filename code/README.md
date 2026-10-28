@@ -198,13 +198,18 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   `embedding` in de naam; een nieuwe cache meldt zich met `backup.register_rebuildable(naam)`), daarna
   VACUUM, `PRAGMA integrity_check`, gzip (en teruglezen), en pas dan krijgt hij zijn naam
   (`datavault-JJJJMMDD-UUMMSS[-handmatig].db.gz`), met een harde link zodat er nooit iets wordt
-  overschreven. De `media`-tabel zelf blijft erin: albums en andere gegevens wijzen naar `media.id`.
-  `gunzip -k` geeft een gewone SQLite-database.
+  overschreven. Op een schijf zonder harde links (exFAT/FAT, een USB-stick) wordt het een nieuw
+  bestand dat alleen gemaakt kan worden als de naam vrij is (`O_EXCL`), daarna weggeschreven
+  (`fsync`) en met sha256 vergeleken (`backup._copy_new`). De `media`-tabel zelf blijft erin: albums
+  en andere gegevens wijzen naar `media.id`. `gunzip -k` geeft een gewone SQLite-database.
+- Fouten zijn Nederlandse zinnen (`backup._reason`): een back-upmap zonder schrijfrechten wordt vóór
+  het kopiëren gemeld, met de map en de sleutel `backup_folder`.
 - Waarom compact: met een index van 100.000 foto's is de database 109 MB; de back-up is 62 MB zonder
   de caches en 6,7 MB gecomprimeerd (gemeten: 1 s om te maken, 0,25 s om uit te pakken en te
   controleren). Elf back-ups passen zo ruim op een volle interne schijf.
 - Rotatie: de nieuwste van elk van de laatste 7 dagen en van de laatste 4 ISO-weken blijven, plus de
-  5 nieuwste veiligheidskopieën van vóór een herstel. Alleen bestanden met precies die namen in de
+  5 nieuwste handmatige (`KEEP_MANUAL`; een tweede **Nu back-uppen** op dezelfde dag haalt de eerste
+  niet weg) en de 5 nieuwste veiligheidskopieën van vóór een herstel. Alleen bestanden met precies die namen in de
   back-upmap worden ooit verwijderd.
 - **Terugzetten** (met de app gestopt):
   ```bash
@@ -212,6 +217,9 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   venv/bin/python restore_backup.py                 # lijst van back-ups, nieuwste eerst
   venv/bin/python restore_backup.py <naam of pad>   # vraagt 'ja'; --ja slaat dat over
   ```
+  Draait de app met een andere config dan `code/config.json` (`DATAVAULT_CONFIG`), zet er dan
+  `--config <pad>` achter; Instellingen toont de opdracht al zo (`backup.restore_command(config)`),
+  zodat hij nooit bij een andere database uitkomt.
   Het script controleert de back-up (integrity_check, bekend schema), weigert zolang er een
   DataVault-server draait of de app de database open heeft (een gedeelde vergrendeling naast de
   database), bewaart de huidige database helemaal als `datavault-voor-herstel-….db.gz` en zet pas
@@ -232,14 +240,27 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   foto's daarna nog veranderde. Het aantal vergelijkingen van een foto wordt uit die geschiedenis
   geteld. Paden in de geschiedenis gaan mee bij verplaatsen (`media_index._carry_user_data`).
 - Paren (`elo.choose_pair`): de eerste foto met voorkeur voor weinig vergelijkingen (gewicht
-  1/(1+n)²), de tegenstander uit de 8 foto's met de dichtstbijzijnde score. Nooit het paar dat net in
-  beeld was of net vergeleken is, nooit dezelfde grootte (een kopie) of een reeks (zelfde map,
-  EXIF-tijd binnen 2 s); bijna-duplicaten op beeld meldt een latere stap met
-  `elo.register_near_duplicate_check(fn)`. RAW-bestanden doen niet mee (de browser toont ze niet).
-  De foto's komen uit de media-index als die klaar is, anders uit een wandeling (60 s bewaard).
-  Uitgeschakelde Shows-mappen doen niet mee.
-- Routes: `GET /api/shows/compare/pair?folder=&prev=&prev=`, `POST /api/shows/compare {a, b, winner,
-  folder}`, `POST /api/shows/compare/undo {id}` en `GET /api/shows/leaderboard?folder=&limit=`.
+  1/(1+n)²), de tegenstander uit de 8 foto's met de dichtstbijzijnde score. Bij gelijke scores (een
+  nieuwe bibliotheek: bijna alles 1000) begint het zoeken op een willekeurige plek in dat blok en
+  beslist bij gelijke afstand een muntworp, anders kwamen steeds de alfabetisch eerste foto's.
+  Nooit het paar dat net in beeld was of net vergeleken is, nooit dezelfde grootte (een kopie) en
+  nooit twee foto's uit één reeks (`elo.mark_series`: per map op EXIF- of video-tijd gesorteerd; een
+  reeks loopt door zolang elke foto binnen 2 s na de vorige komt, dus ook frame 1 en 5 van een
+  burst). Bijna-duplicaten op beeld meldt een latere stap met `elo.register_near_duplicate_check(fn)`.
+  RAW-bestanden doen niet mee (de browser toont ze niet). De foto's komen uit de media-index als die
+  klaar is (een map die de index nog niet kent: uit een wandeling, en de index wordt bijgewerkt),
+  anders uit een wandeling (60 s bewaard). Uitgeschakelde Shows-mappen doen niet mee.
+- Andere collecties dan mappen (albums) haken in met `elo.register_scope('album', resolve)`, waarbij
+  `resolve(waarde)` `{title, paths}` geeft (of None). De routes nemen dan `scope=album:<waarde>` in
+  plaats van `folder`, en de geschiedenis bewaart `album:<waarde>` als scope. In de keuzelijst van
+  het venster komen ze met `registerEloScopes(label, () => [{value: 'album:7', text}])` (elo.js).
+- Routes: `GET /api/shows/compare/pair?folder=|scope=&prev=&prev=`, `POST /api/shows/compare {a, b,
+  winner, folder|scope}`, `POST /api/shows/compare/undo {id}` (antwoordt ook de voortgang `stats`
+  van de collectie) en `GET /api/shows/leaderboard?folder=|scope=&limit=`.
+- Toetsen in het venster: een ingedrukt gehouden toets telt één keer, en zolang het volgende paar
+  laadt telt geen keuze. Na het opnieuw tekenen blijft de focus op dezelfde kant (`eloSetBody`).
+  Na Tab of Enter krijgt het venster `.is-keyboard`, en dan heeft wat de focus heeft altijd een ring
+  (WebKit geeft `:focus-visible` niet bij focus die met de hand verplaatst wordt).
 
 ### Achtergrondtaken
 - Duplicaten zoeken, vooraf indexeren, miniaturen maken en de bibliotheek bijwerken lopen als taak op de achtergrond

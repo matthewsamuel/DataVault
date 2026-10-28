@@ -260,14 +260,23 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   klein: wat de app zelf opnieuw kan opbouwen (hashes, datums, de mappenlijst van de index,
   scanresultaten, later beeldvectoren) zit er niet in, en hij is gecomprimeerd. Een index van
   100.000 foto's: ongeveer 7 MB in plaats van 109 MB, in een seconde.
-- Bewaard blijven de laatste back-up van elk van de laatste 7 dagen en van de laatste 4 weken;
-  oudere gaan weg. Alleen de eigen back-upbestanden worden ooit opgeruimd.
-- **Instellingen > Back-ups** toont de laatste back-up, wanneer de volgende komt, de map, hoeveel er
-  bewaard zijn en een mislukte poging. Met **Nu back-uppen** maak je er meteen een.
+- Bewaard blijven de laatste back-up van elk van de laatste 7 dagen en van de laatste 4 weken, en je
+  5 nieuwste handmatige: maak je op één dag twee keer een back-up (bijvoorbeeld vóór iets
+  spannends en daarna nog eens), dan blijven ze allebei. Oudere gaan weg. Alleen de eigen
+  back-upbestanden worden ooit opgeruimd.
+- Een back-upmap op een USB-stick of schijf met exFAT werkt ook (die kent geen harde links; de
+  back-up wordt dan als nieuw bestand gemaakt dat nooit iets overschrijft, en opnieuw vergeleken).
+- **Instellingen > Back-ups** toont de laatste back-up, wanneer de volgende komt (de app kijkt elk
+  uur; staat er nog geen, dan zie je hoe laat de volgende controle is), de map, hoeveel er bewaard
+  zijn en een mislukte poging, in gewone taal: een map waarin de app niet mag schrijven wordt
+  meteen zo genoemd, met wat je eraan doet. Met **Nu back-uppen** maak je er meteen een; het scherm
+  springt daarbij niet meer.
 - Terugzetten gaat met `restore_backup.py` in Terminal, met de app gestopt (draait hij nog, dan
   weigert het script). Het bewaart eerst de huidige database helemaal als
   "datavault-voor-herstel-…" en zet pas dan de back-up terug; er wordt nooit iets overschreven. De
-  stappen staan ook in Instellingen, met de opdrachten om te kopiëren.
+  stappen staan ook in Instellingen, met de opdrachten om te kopiëren. Draait de app met een eigen
+  instellingenbestand, dan noemt die opdracht het ook (`--config`), zodat hij altijd déze database
+  terugzet.
 
 ### Shows: "Welke is mooier?"
 - Nieuw bij Shows: **Welke is mooier?** Twee foto's naast elkaar, jij kiest de mooiste. Kies met
@@ -282,9 +291,16 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   beweegt maximaal 32 punten per keuze, daarna 16, zodat één verrassende keuze niet alles omgooit.
   Geen score zakt onder de 100.
 - De paren zijn gekozen om snel een goede volgorde te krijgen: eerst foto's die nog weinig
-  vergeleken zijn, tegen foto's met een vergelijkbare score. Nooit twee keer achter elkaar hetzelfde
-  paar, en nooit twee foto's die (bijna) hetzelfde zijn: een kopie, of foto's uit dezelfde reeks
-  (binnen 2 seconden in dezelfde map genomen).
+  vergeleken zijn, tegen foto's met een vergelijkbare score, uit de hele collectie (ook in een
+  nieuwe bibliotheek, waar alle scores nog gelijk zijn). Nooit twee keer achter elkaar hetzelfde
+  paar, en nooit twee foto's die (bijna) hetzelfde zijn: een kopie, of twee foto's uit dezelfde
+  reeks, hoe lang die ook is (in dezelfde map, elke foto binnen 2 seconden na de vorige).
+- Een ingedrukt gehouden toets, of een tweede toets terwijl het volgende paar laadt, telt niet: je
+  kiest nooit hetzelfde paar twee keer of een paar dat je nog niet zag. Kies je met Tab en Enter,
+  dan blijven de toetsen daarna werken, en alles wat je met Tab bereikt heeft een zichtbare
+  focusring. Na terugdraaien klopt de voortgang onderin weer; bij een andere collectie begint de
+  teller opnieuw, en Overslaan staat uit als er geen paar is.
+- Een map die net is aangemaakt (nog niet in de bibliotheek-index) doet meteen mee.
 - **Ranglijst** (tabblad in hetzelfde venster): de best gewaardeerde foto's van de collectie, met
   hoeveel vergelijkingen ze wonnen.
 - Elke vergelijking wordt bewaard met beide scores ervoor en erna, dus terugdraaien zet beide scores
