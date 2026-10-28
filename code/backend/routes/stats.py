@@ -11,7 +11,7 @@ import subprocess
 import time
 import unicodedata
 
-from backend import file_ops, media_dates
+from backend import file_ops, media_dates, media_index
 from backend.config import Config, is_photo, media_type
 from backend.paths import ArchiveFilter, excluded_folders, resolve_in_vault, scan_dir, walk_archive
 from backend.routes.spotify import parse_spotify_data
@@ -132,7 +132,9 @@ def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[str, Any
     sorted_files = sorted(files_with_sizes, key=lambda x: x['size_mb'], reverse=True)[:limit]
     return {"files": sorted_files, "path": folder_path or "/"}
 
-# "On this day" and photos-by-date use the capture date (backend/media_dates.py) and a
+# "On this day" and photos-by-date use the capture date (backend/media_dates.py). Once
+# the media index has finished a pass (backend/media_index.py) they are one query on it,
+# each hit checked against the disk (still there, unchanged). Before that they do a
 # bounded amount of work per request (MEDIA-THUMBS-TIMELINE-10, PERF-14): first what the
 # date cache already knows (checked against the disk), then a walk in random order that
 # stops at enough hits, a number of folders or a time budget. Dates read on the way are
@@ -231,6 +233,33 @@ def _walk_for_dates(roots: List[Path], matches, limit: int, max_folders: int, se
     return True
 
 
+def _index_hits(filters: Dict[str, Any], roots: List[Path], limit: int, sort: str) -> Optional[Dict[str, Tuple[float, str]]]:
+    """
+    Up to limit photos and videos from the media index that are still on disk as indexed,
+    or None when the index cannot answer (no finished pass yet, database unreachable).
+    """
+    if db is None or not media_index.usable(db):
+        return None
+    filters = {**filters, "kind": ["photo", "video"]}
+    if not any(root == config.VAULT_ROOT for root in roots):
+        filters["folders"] = [str(r) for r in roots]
+    try:
+        rows = media_index.query(db, filters, sort=sort, limit=limit * 3)
+    except sqlite3.Error:
+        return None
+    found: Dict[str, Tuple[float, str]] = {}
+    for row in rows:
+        if len(found) >= limit:
+            break
+        try:
+            st = os.lstat(row["path"])
+        except OSError:
+            continue
+        if stat_module.S_ISREG(st.st_mode) and st.st_size == row["size"] and st.st_mtime_ns == row["mtime_ns"]:
+            found[row["path"]] = (row["taken"], row["taken_source"])
+    return found
+
+
 def _dated_item(path: str, ts: float, source: str) -> Dict[str, Any]:
     p = Path(path)
     return {
@@ -273,11 +302,15 @@ def get_photo_on_this_day(allowed_folders: Optional[List[str]] = Query(None)) ->
         dt = datetime.fromtimestamp(ts)
         return dt.month == now.month and dt.day == now.day and dt.year != now.year
 
-    found: Dict[str, Tuple[float, str]] = {}
-    rows = [r for r in _cache_rows(getattr(db, "media_dates_on_day", None), now.month, now.day)
-            if datetime.fromtimestamp(r[3]).year != now.year]
-    _known_hits(rows, roots, OTD_LIMIT, found)
-    complete = _walk_for_dates(roots, matches, OTD_LIMIT, OTD_MAX_FOLDERS, OTD_SECONDS, found)
+    found = _index_hits({"month_day": (now.month, now.day), "exclude_year": now.year}, roots,
+                        OTD_LIMIT, sort="random")
+    complete = True
+    if found is None:
+        found = {}
+        rows = [r for r in _cache_rows(getattr(db, "media_dates_on_day", None), now.month, now.day)
+                if datetime.fromtimestamp(r[3]).year != now.year]
+        _known_hits(rows, roots, OTD_LIMIT, found)
+        complete = _walk_for_dates(roots, matches, OTD_LIMIT, OTD_MAX_FOLDERS, OTD_SECONDS, found)
     photos = sorted((_dated_item(p, ts, src) for p, (ts, src) in found.items()),
                     key=lambda item: (item["year"], item["timestamp"]))[:OTD_LIMIT]
     return {"photos": photos, "complete": complete or len(found) >= OTD_LIMIT}
@@ -314,10 +347,13 @@ def get_photos_by_date(date: str) -> Dict[str, Any]:
     end = (target + timedelta(days=1)).timestamp()
     roots = [config.VAULT_ROOT]
 
-    found: Dict[str, Tuple[float, str]] = {}
-    _known_hits(_cache_rows(getattr(db, "media_dates_between", None), start, end), roots, BY_DATE_LIMIT, found)
-    complete = _walk_for_dates(roots, lambda ts: start <= ts < end, BY_DATE_LIMIT,
-                               BY_DATE_MAX_FOLDERS, BY_DATE_SECONDS, found)
+    found = _index_hits({"date_from": start, "date_to": end}, roots, BY_DATE_LIMIT, sort="taken")
+    complete = True
+    if found is None:
+        found = {}
+        _known_hits(_cache_rows(getattr(db, "media_dates_between", None), start, end), roots, BY_DATE_LIMIT, found)
+        complete = _walk_for_dates(roots, lambda ts: start <= ts < end, BY_DATE_LIMIT,
+                                   BY_DATE_MAX_FOLDERS, BY_DATE_SECONDS, found)
     photos = sorted((_dated_item(p, ts, src) for p, (ts, src) in found.items()),
                     key=lambda item: item["timestamp"])[:BY_DATE_LIMIT]
     return {"photos": photos, "complete": complete or len(found) >= BY_DATE_LIMIT}

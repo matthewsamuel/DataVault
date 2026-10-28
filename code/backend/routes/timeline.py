@@ -4,10 +4,16 @@ The photo timeline: every photo and video of the chosen folders, ordered by capt
 date (backend/media_dates.py: EXIF or the video's own date, else birthtime, else mtime).
 
 The scan answers in a compact form (one short row per file, paths relative to the
-vault) and is cached per folder selection until a folder below it changes (its mtime:
-a file added, removed or renamed), MEDIA-THUMBS-TIMELINE-12/PERF-6. Only a complete
-scan is cached: when a folder or file could not be read, or the vault went away during
-the scan, the answer says complete: false and the next request scans again.
+vault), a page at a time when the client asks for one (offset, limit).
+
+It comes from the media index (backend/media_index.py) when the index matches the disk
+for the chosen folders (every folder below them still has the mtime it was indexed
+with): a few SQL queries, no walk. Otherwise (no finished index pass yet, or something
+changed since) it walks the folders as before and asks for an index pass. The walk's
+answer is cached per folder selection until a folder below it changes (its mtime: a
+file added, removed or renamed), MEDIA-THUMBS-TIMELINE-12/PERF-6. Only a complete scan
+is cached: when a folder or file could not be read, or the vault went away during the
+scan, the answer says complete: false and the next request scans again.
 """
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
@@ -20,7 +26,7 @@ import os
 import threading
 
 from backend.config import Config, MEDIA_EXTENSIONS, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS
-from backend import media_dates
+from backend import media_dates, media_index
 from backend.paths import ArchiveFilter, scan_dir, vault_folder_or_none, walk_archive
 
 router = APIRouter()
@@ -29,9 +35,10 @@ router = APIRouter()
 config: Config = None
 db = None
 
-# Cached scan answers: {selection: (folder mtimes, JSON bytes)}, newest last
+# Cached walk answers: {selection: (folder mtimes, payload)}, newest last
 SCAN_CACHE_SIZE = 4
-_scan_cache: "OrderedDict[Tuple[str, ...], Tuple[Tuple[Tuple[str, int], ...], bytes]]" = OrderedDict()
+_scan_cache: "OrderedDict[Tuple[str, ...], Tuple[Tuple[Tuple[str, int], ...], Dict[str, Any]]]" = OrderedDict()
+MAX_PAGE = 50000
 _scan_cache_lock = threading.Lock()
 
 TYPE_CODES = {"photo": "p", "video": "v"}
@@ -114,8 +121,54 @@ def _unchanged(folders: Tuple[Tuple[str, int], ...]) -> bool:
     return True
 
 
-def _scan_payload(roots: List[Path]) -> Tuple[bytes, Tuple[Tuple[str, int], ...], bool]:
-    """(JSON answer, folder mtimes, complete). Only a complete answer may be cached."""
+def _summary(rows: List[Tuple[int, int, int]]) -> Tuple[Dict[int, Dict[int, int]], Dict[int, int]]:
+    """date_index {year: {month: count}} and year_boundaries {year: index of its first row}."""
+    date_index: Dict[int, Dict[int, int]] = defaultdict(dict)
+    year_boundaries: Dict[int, int] = {}
+    seen = 0
+    for year, month, n in rows:
+        date_index[year][month] = date_index[year].get(month, 0) + n
+        year_boundaries.setdefault(year, seen)
+        seen += n
+    return dict(date_index), year_boundaries
+
+
+def _index_payload(roots: List[Path], offset: int, limit: Optional[int]) -> Dict[str, Any]:
+    """The answer from the media index: one page of rows, the counts of the whole selection."""
+    filters = {"kind": ["photo", "video"], "folders": [str(r) for r in roots]}
+    vault = str(config.VAULT_ROOT).rstrip("/") + "/"
+    histogram = media_index.date_histogram(db, filters)
+    date_index, year_boundaries = _summary(histogram)
+    total = sum(n for _, _, n in histogram)
+    rows = []
+    sources: Dict[str, int] = defaultdict(int)
+    for taken, path, size, kind, source in media_index.timeline_page(db, roots, offset, limit):
+        rows.append([round(taken, 3), path[len(vault):] if path.startswith(vault) else path, size,
+                     TYPE_CODES.get(kind, "p"), media_dates.SOURCES.get(source, "m")])
+    with db._connect() as conn:
+        where, args = media_index._where(filters)
+        for source, n in conn.execute(f"SELECT taken_source, COUNT(*) FROM media m WHERE {where} "
+                                      "GROUP BY taken_source", args):
+            sources[media_dates.SOURCES.get(source, "m")] += n
+    return {
+        "total": total,
+        "root": str(config.VAULT_ROOT),
+        "columns": ["timestamp", "path", "size", "type", "date_source"],
+        "rows": rows,
+        "date_index": date_index,
+        "year_boundaries": year_boundaries,
+        "date_sources": dict(sources),
+        "folders": [str(r) for r in roots],
+        "skipped": [],
+        "complete": True,
+        "errors": 0,
+        "source": "index",
+        "version": f"i{media_index.generation()}",
+    }
+
+
+def _scan_payload(roots: List[Path]) -> Tuple[Dict[str, Any], Tuple[Tuple[str, int], ...], bool]:
+    """(answer, folder mtimes, complete) of a walk. Only a complete answer may be cached."""
     errors: List[str] = []
     files, folders = _walk_media(roots, errors)
     dates = media_dates.capture_dates(files, db, read_errors=errors, vault_root=config.VAULT_ROOT)
@@ -159,23 +212,49 @@ def _scan_payload(roots: List[Path]) -> Tuple[bytes, Tuple[Tuple[str, int], ...]
         "skipped": [],
         "complete": complete,
         "errors": len(errors),
+        "source": "walk",
+        "version": f"w{hash(tuple(folders)) & 0xFFFFFFFF:x}",
     }
-    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    return body, tuple(folders), complete
+    return payload, tuple(folders), complete
+
+
+def _walk_answer(roots: List[Path]) -> Dict[str, Any]:
+    key = tuple(str(r) for r in roots)
+    with _scan_cache_lock:
+        cached = _scan_cache.get(key)
+    if cached is not None and _unchanged(cached[0]):
+        return cached[1]
+    payload, folder_mtimes, complete = _scan_payload(roots)
+    with _scan_cache_lock:
+        if complete:
+            _scan_cache[key] = (folder_mtimes, payload)
+            _scan_cache.move_to_end(key)
+            while len(_scan_cache) > SCAN_CACHE_SIZE:
+                _scan_cache.popitem(last=False)
+        else:
+            _scan_cache.pop(key, None)
+    return payload
 
 
 @router.get("/scan")
 def timeline_scan(
-    folders: List[str] = Query(..., description="Folder paths, one 'folders' parameter per folder")
+    folders: List[str] = Query(..., description="Folder paths, one 'folders' parameter per folder"),
+    offset: int = Query(0, ge=0),
+    limit: Optional[int] = Query(None, ge=1, le=MAX_PAGE),
 ):
     """
-    Scan the chosen folders for photos and videos, ordered by capture date (oldest first).
+    The photos and videos of the chosen folders, ordered by capture date (oldest first).
 
     One 'folders' parameter per folder (a folder name may contain a comma,
-    MEDIA-THUMBS-TIMELINE-13). Answer: {total, root, columns, rows, date_index,
-    year_boundaries, date_sources, folders, skipped, complete, errors}; each row is
-    [timestamp, path relative to root, size, 'p'|'v', date source code]. complete is
-    false (errors counts the folders and files) when something could not be read.
+    MEDIA-THUMBS-TIMELINE-13). offset and limit ask for one page of rows (no limit: all
+    of them). Answer: {total, root, columns, rows, offset, next_offset, date_index,
+    year_boundaries, date_sources, folders, skipped, complete, errors, source, version};
+    each row is [timestamp, path relative to root, size, 'p'|'v', date source code].
+    total, date_index and year_boundaries always describe the whole selection;
+    next_offset is null on the last page. source is 'index' or 'walk'; when version
+    differs between pages, the selection changed in between and the client starts over.
+    complete is false (errors counts the folders and files) when something could not
+    be read.
     """
     roots, skipped = selected_roots(folders)
     if not roots:
@@ -183,27 +262,21 @@ def timeline_scan(
             raise HTTPException(status_code=404, detail="Geen van de gekozen mappen bestaat (nog) in het archief")
         raise HTTPException(status_code=400, detail="Geen mappen gekozen")
 
-    key = tuple(str(r) for r in roots)
-    with _scan_cache_lock:
-        cached = _scan_cache.get(key)
-    if cached is not None and _unchanged(cached[0]):
-        body = cached[1]
+    if db is not None and media_index.fresh_for(db, roots):
+        data = _index_payload(roots, offset, limit)
     else:
-        body, folder_mtimes, complete = _scan_payload(roots)
-        with _scan_cache_lock:
-            if complete:
-                _scan_cache[key] = (folder_mtimes, body)
-                _scan_cache.move_to_end(key)
-                while len(_scan_cache) > SCAN_CACHE_SIZE:
-                    _scan_cache.popitem(last=False)
-            else:
-                _scan_cache.pop(key, None)
-
+        # The index is not there yet or behind the disk: walk now, and bring it up to date
+        media_index.request_update()
+        payload = _walk_answer(roots)
+        data = dict(payload)
+        end = None if limit is None else offset + limit
+        if offset or end is not None:
+            data["rows"] = payload["rows"][offset:end]
+    data["offset"] = offset
+    data["next_offset"] = offset + len(data["rows"]) if offset + len(data["rows"]) < data["total"] else None
     if skipped:
-        # Rare; the cached body stays the same for every request
-        data = json.loads(body)
         data["skipped"] = skipped
-        body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return Response(content=body, media_type="application/json")
 
 

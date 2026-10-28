@@ -470,3 +470,186 @@ def test_the_auto_indexer_runs_on_start_and_when_the_vault_returns(config_file, 
         jobs = index_jobs()
         assert len(jobs) == 2 and jobs[0]["status"] == "done", jobs
     assert app.state.auto_index._thread is not None and not app.state.auto_index._thread.is_alive()
+
+
+# ---------- the timeline, on this day and photos by date from the index ----------
+
+from datetime import datetime  # noqa: E402
+
+from helpers import timeline_files  # noqa: E402
+from test_exclusions import DAY, planted  # noqa: E402,F401
+
+
+def _scan(client, *folders, **params):
+    r = client.get("/api/timeline/scan", params={"folders": [str(f) for f in folders], **params})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_the_timeline_from_the_index_matches_the_walk(client, config):
+    roots = [config.VAULT_ROOT / "RAW", config.VAULT_ROOT / "library"]
+    walked = _scan(client, *roots)
+    assert walked["source"] == "walk"
+    _index(client)
+    indexed = _scan(client, *roots)
+    assert indexed["source"] == "index"
+    for key in ("total", "rows", "date_index", "year_boundaries", "date_sources", "complete", "next_offset"):
+        assert indexed[key] == walked[key], key
+
+
+def test_the_timeline_pages_give_every_row_once(client, config):
+    _index(client)
+    whole = _scan(client, config.VAULT_ROOT)
+    assert whole["source"] == "index" and whole["next_offset"] is None
+    rows, offset, version = [], 0, None
+    while offset is not None:
+        page = _scan(client, config.VAULT_ROOT, offset=offset, limit=7)
+        assert page["total"] == whole["total"] and page["date_index"] == whole["date_index"]
+        assert page["offset"] == offset and len(page["rows"]) <= 7
+        version = version or page["version"]
+        assert page["version"] == version
+        rows += page["rows"]
+        offset = page["next_offset"]
+    assert rows == whole["rows"]
+    assert client.get("/api/timeline/scan", params={"folders": [str(config.VAULT_ROOT)], "limit": 0}).status_code == 422
+
+
+def test_the_walk_pages_too_while_there_is_no_index(client, config):
+    whole = _scan(client, config.VAULT_ROOT / "RAW")
+    page = _scan(client, config.VAULT_ROOT / "RAW", offset=5, limit=5)
+    assert page["source"] == "walk" and page["rows"] == whole["rows"][5:10] and page["next_offset"] == 10
+
+
+def test_a_change_on_disk_makes_the_timeline_walk_and_ask_for_a_pass(client, config, monkeypatch):
+    from backend import media_index
+    asked = []
+    monkeypatch.setattr(media_index, "_updater", lambda: asked.append(1))
+    _index(client)
+    assert _scan(client, config.VAULT_ROOT / "library")["source"] == "index" and not asked
+    _photo(config.VAULT_ROOT / "library/Familie/nieuw.jpg", (5, 5, 5), "nieuw", "2012:12:12 12:00:00")
+    data = _scan(client, config.VAULT_ROOT / "library")
+    assert data["source"] == "walk" and asked
+    assert str(config.VAULT_ROOT / "library/Familie/nieuw.jpg") in {f["path"] for f in timeline_files(data)}
+    _index(client)
+    data = _scan(client, config.VAULT_ROOT / "library")
+    assert data["source"] == "index"
+    assert str(config.VAULT_ROOT / "library/Familie/nieuw.jpg") in {f["path"] for f in timeline_files(data)}
+
+
+def test_a_folder_that_could_not_be_listed_keeps_the_timeline_on_the_walk(client, config):
+    _index(client)
+    locked = config.VAULT_ROOT / "RAW/2022/bursts"
+    os.chmod(locked, 0)
+    try:
+        _index(client, full=True)
+    finally:
+        os.chmod(locked, 0o755)
+    assert _scan(client, config.VAULT_ROOT / "RAW")["source"] == "walk"
+    assert _scan(client, config.VAULT_ROOT / "library")["source"] == "index"
+
+
+def test_on_this_day_and_photos_by_date_come_from_the_index(client, config, monkeypatch):
+    from backend.routes import stats
+    now = datetime.now()
+    try:
+        day = now.replace(year=now.year - 7, hour=9, minute=0, second=0, microsecond=0)
+    except ValueError:
+        day = now.replace(year=now.year - 7, day=28, hour=9, minute=0, second=0, microsecond=0)
+    folder = config.VAULT_ROOT / "library/Vandaag"
+    _photo(folder / "jarig.jpg", (1, 1, 1), "x", day.strftime("%Y:%m:%d %H:%M:%S"))
+    _photo(folder / "gisteren.jpg", (1, 1, 1), "x", "2001:01:01 01:00:00"
+           if now.strftime("%m-%d") != "01-01" else "2001:02:02 01:00:00")
+    _index(client)
+    # The walk is never needed now: a budget of zero folders still finds it
+    monkeypatch.setattr(stats, "_walk_for_dates", lambda *a, **k: pytest.fail("walked the disk"))
+    data = client.get("/api/stats/photo-on-this-day").json()
+    assert {p["name"] for p in data["photos"]} >= {"jarig.jpg"} and data["complete"] is True
+    assert all(p["type"] in ("photo", "video") for p in data["photos"])
+    only = client.get("/api/stats/photo-on-this-day", params={"allowed_folders": [str(config.VAULT_ROOT / "RAW")]}).json()
+    assert "jarig.jpg" not in {p["name"] for p in only["photos"]}
+    by_date = client.get("/api/stats/photos-by-date", params={"date": day.strftime("%Y-%m-%d")}).json()
+    assert [p["name"] for p in by_date["photos"]] == ["jarig.jpg"] and by_date["photos"][0]["date_source"] == "exif"
+    # A hit whose file is gone (or changed) since the pass is not shown
+    (folder / "jarig.jpg").unlink()
+    assert client.get("/api/stats/photos-by-date", params={"date": day.strftime("%Y-%m-%d")}).json()["photos"] == []
+
+
+def test_the_index_never_shows_excluded_files(client, config, planted, monkeypatch):
+    import backend.routes.stats as stats_mod
+    result = _index(client)
+    assert result["complete"]
+    paths = {str(config.VAULT_ROOT / p) for p in _paths(config)}
+    for name, p in planted["hidden"].items():
+        assert str(p) not in paths, name
+    for name, p in planted["visible"].items():
+        assert str(p) in paths, name
+
+    class FakeNow(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return DAY.replace(year=2026)
+    monkeypatch.setattr(stats_mod, "datetime", FakeNow)
+    found = {p["path"] for p in client.get("/api/stats/photo-on-this-day").json()["photos"]}
+    assert found and found <= {str(p) for p in planted["visible"].values()}
+
+
+# ---------- the query layer ----------
+
+def test_query_filters_sort_and_page(client, config):
+    from backend import media_index
+    _index(client)
+    db = client.app.state.db
+    root = str(config.VAULT_ROOT)
+    _rate(config, STRAND, 1400, 5)
+    _rate(config, "library/Familie/opa.jpg", 900, 3)
+
+    def names(filters=None, **kw):
+        return [r["name"] for r in media_index.query(db, filters, **kw)]
+
+    everything = media_index.count(db)
+    assert everything == len(_paths(config))
+    assert set(names({"kind": "video"})) <= {"clip één.mp4", "kapot.mp4"}
+    assert names({"kind": "audio"}) == ["toon 🎵.mp3"]
+    assert set(names({"ext": [".png", "heic"]})) <= {"🎂 taart.png", "IMG_4001.heic", "fake.heic"}
+    july = names({"date_from": datetime(2019, 7, 14).timestamp(), "date_to": datetime(2019, 7, 15).timestamp()})
+    assert set(july) == {"strand 001.jpg", "IMG_0002.JPG", "strand 001 kopie.jpg", "dup van strand.jpg"}
+    assert set(names({"folder": f"{root}/library"})) == set(names({"folders": [f"{root}/library"]}))
+    assert names({"folder": f"{root}/RAW/misc", "recursive": False, "kind": "photo"}, sort="name")[:2] == [
+        "UPPER.JPEG", "corrupt.jpg"]
+    assert "diep bestand.jpeg" in names({"folder": f"{root}/RAW/misc"})
+    assert set(names({"camera": "apple iphone 11"})) == {"koffie é à ü.jpg"}
+    assert set(names({"camera": "iPhone 7"})) == {"portret.jpg"}
+    gps = set(names({"has_gps": True}))
+    assert {"strand 001.jpg", "IMG_0002.JPG"} <= gps and "opa.jpg" not in gps
+    assert set(names({"bbox": (52, 4, 53, 5)})) == {"strand 001.jpg", "strand 001 kopie.jpg", "dup van strand.jpg"}
+    assert names({"min_rating": 1000}) == ["strand 001.jpg"]
+    rated = media_index.query(db, {"min_rating": 1000})[0]
+    assert (rated["rating"], rated["votes"]) == (1400, 5)
+    assert names({"orientation": "portrait"}) == ["portret.jpg"]
+    assert "strand 001.jpg" in names({"orientation": "landscape"})
+    by_size = media_index.query(db, sort="-size", limit=3)
+    assert [r["size"] for r in by_size] == sorted([r["size"] for r in by_size], reverse=True)
+    page1, page2 = names(sort="path", limit=5), names(sort="path", offset=5, limit=5)
+    assert page1 + page2 == names(sort="path", limit=10)
+    histogram = media_index.date_histogram(db, {"kind": "photo"})
+    assert (2019, 7, 4) in histogram
+    with pytest.raises(ValueError):
+        media_index.query(db, sort="sql; drop")
+    with pytest.raises(ValueError):
+        media_index.query(db, {"orientation": "schuin"})
+
+
+def test_library_media_route(client, config):
+    assert client.get("/api/library/media").json() == {"ready": False, "total": 0, "offset": 0,
+                                                         "limit": 100, "items": []}
+    _index(client)
+    data = client.get("/api/library/media", params={"kind": "photo", "date_from": "2019-07-14",
+                                                    "date_to": "2019-07-14", "has_gps": True,
+                                                    "folder": "RAW", "sort": "name"}).json()
+    assert data["ready"] is True and data["total"] == 4
+    assert [i["name"] for i in data["items"]][0] == "IMG_0002.JPG"
+    assert client.get("/api/library/media", params={"folder": "../.."}).status_code == 403
+    assert client.get("/api/library/media", params={"sort": "nope"}).status_code == 400
+    assert client.get("/api/library/media", params={"orientation": "nope"}).status_code == 400
+    assert client.get("/api/library/media", params={"date_from": "14-07-2019"}).status_code == 400
+    assert client.get("/api/library/media", params={"kind": "doc"}).status_code == 400
