@@ -132,6 +132,8 @@ async function seriesLoadStatus() {
         const status = await fetchJSON(`${API_BASE}/api/series/status`);
         seriesState.status = status;
         seriesRenderStatus();
+        // Het lege scherm hangt af van de stand (nog niet vergeleken, of echt niets gevonden)
+        if (seriesState.loaded && !seriesState.items.length && !seriesState.loading) seriesRender();
         if (status.job && status.job.id !== seriesState.jobId) seriesFollowJob(status.job.id);
     } catch (err) {
         document.getElementById('series-status-text').textContent = err.code === 'vault_unavailable'
@@ -319,7 +321,8 @@ function seriesRender() {
     const status = seriesState.status;
     const shown = seriesState.items.length;
     summary.hidden = false;
-    document.getElementById('series-summary-text').textContent = seriesState.total
+    const compared = !status || status.analysed > 0 || !status.pending;
+    document.getElementById('series-summary-text').textContent = !compared ? '' : seriesState.total
         ? `${formatNumberNl(seriesState.total)} ${seriesState.total === 1 ? 'reeks' : 'reeksen'} · ${formatNumberNl(seriesState.photos)} foto's`
         : 'Geen reeksen';
     if (!shown) {

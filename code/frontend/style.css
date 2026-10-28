@@ -4360,6 +4360,10 @@ a.breadcrumb-item:hover {
     color: var(--text-primary);
 }
 
+.series-summary-text:empty {
+    display: none;
+}
+
 .series-strictness-help {
     flex: 1 1 280px;
     color: var(--text-secondary);
