@@ -159,9 +159,11 @@ class ScanFolderGone(Exception):
 
 
 def _scan_message(result: Dict[str, Any]) -> str:
-    text = f"Klaar: {len(result['groups'])} groepen, {result['duplicates_found']} duplicaten"
-    if result["errors"]:
-        text += f" ({result['errors']} leesfout(en): onvolledig)"
+    groups, found, errors = len(result["groups"]), result["duplicates_found"], result["errors"]
+    text = (f"Klaar: {groups} {'groep' if groups == 1 else 'groepen'}, "
+            f"{found} {'duplicaat' if found == 1 else 'duplicaten'}")
+    if errors:
+        text += f" ({errors} {'leesfout' if errors == 1 else 'leesfouten'}: onvolledig)"
     return text
 
 

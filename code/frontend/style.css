@@ -7723,7 +7723,8 @@ button.otd-settings-icon:hover {
     bottom: var(--space-lg);
     z-index: 2500;
     width: min(360px, calc(100vw - 32px));
-    max-height: min(60vh, 520px);
+    /* Nooit een groot deel van de pagina: de lijst scrolt binnen het paneel */
+    max-height: min(40vh, 360px);
     display: flex;
     flex-direction: column;
     background-color: var(--surface-overlay);
@@ -7776,6 +7777,7 @@ button.otd-settings-icon:hover {
 
 .job-dock-body {
     overflow-y: auto;
+    min-height: 0;
     padding: var(--space-xs) 0;
     display: flex;
     flex-direction: column;
@@ -7951,6 +7953,44 @@ button.otd-settings-icon:hover {
 .job-dismiss:hover {
     color: var(--text-primary);
     background: var(--surface-hover);
+}
+
+/* Eerder afgeronde taken samen op één regel */
+.job-folded {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    padding: var(--space-xs) var(--space-sm) var(--space-xs) var(--space-md);
+    border-top: 1px solid var(--border-overlay);
+}
+
+.job-folded-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-xs) var(--space-xs);
+    background: none;
+    border: none;
+    border-radius: var(--radius-xs);
+    color: var(--text-secondary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.job-folded-toggle i {
+    width: 12px;
+    color: var(--text-tertiary);
+    font-size: var(--fs-2xs);
+}
+
+.job-folded-toggle:hover {
+    color: var(--text-primary);
+}
+
+.job-folded-toggle:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
 }
 
 /* Bibliotheek (media-index): onderaan het paneel, of als smalle balk zonder taken */

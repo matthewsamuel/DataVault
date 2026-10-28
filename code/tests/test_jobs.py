@@ -791,3 +791,11 @@ def test_undecodable_files_are_counted_apart_and_do_not_make_a_run_incomplete(cl
         os.chmod(locked, 0o644)
     assert job["summary"]["errors"] == 1 and job["summary"]["complete"] is False
     assert "1 mislukt" in job["message"]
+
+
+def test_the_scan_message_counts_in_proper_dutch():
+    from backend.job_types import _scan_message
+    one = {"groups": [{}], "duplicates_found": 1, "errors": 1}
+    many = {"groups": [{}, {}], "duplicates_found": 3, "errors": 0}
+    assert _scan_message(one) == "Klaar: 1 groep, 1 duplicaat (1 leesfout: onvolledig)"
+    assert _scan_message(many) == "Klaar: 2 groepen, 3 duplicaten"

@@ -34,7 +34,9 @@ const jobDock = {
     finishedHandlers: [],    // functies(job) als een taak deze sessie klaar, mislukt of gestopt is
     changeHandlers: [],      // functies(job) bij elke opgehaalde stand van elke taak
     timer: null,
-    collapsed: false,
+    collapsed: false,        // ingeklapt door de gebruiker terwijl er iets loopt (bewaard)
+    idleOpen: false,         // zonder iets dat aandacht vraagt is het paneel dicht, tenzij hier open
+    showFinished: false,     // de eerder afgeronde taken uitgevouwen
     dismissed: new Set(),
     error: null,
     library: null,           // /api/library/status, of null zolang onbekend
@@ -329,7 +331,6 @@ function renderJobDock() {
     const active = visible.filter(j => JOB_ACTIVE.has(j.status)).length;
     const library = createLibraryLine();
     dock.hidden = !visible.length && !jobDock.error && !library;
-    dock.classList.toggle('collapsed', jobDock.collapsed);
     // Zonder taken alleen de regel van de bibliotheek, als smalle balk
     const compact = !visible.length && !jobDock.error;
     dock.classList.toggle('compact', compact);
@@ -338,18 +339,52 @@ function renderJobDock() {
         return;
     }
 
-    const title = active ? `Taken (${active} bezig)` : `Taken (${visible.length})`;
+    // Afgerond (klaar of geannuleerd) vraagt geen aandacht meer: is er verder niets, dan klapt
+    // het paneel vanzelf in, zodat het niets van de pagina bedekt
+    const finished = visible.filter(j => j.status === 'done' || j.status === 'cancelled');
+    const open = visible.filter(j => !finished.includes(j));
+    const idle = !open.length && !jobDock.error;
+    const collapsed = idle ? !jobDock.idleOpen : jobDock.collapsed;
+    dock.classList.toggle('collapsed', collapsed);
+
+    const title = active ? `Taken (${active} bezig)`
+        : idle ? `${finished.length} ${finished.length === 1 ? 'taak' : 'taken'} klaar` : `Taken (${visible.length})`;
     const header = createEl('button', {
         class: 'job-dock-header',
-        'aria-expanded': jobDock.collapsed ? 'false' : 'true',
-        onClick: () => { jobDock.collapsed = !jobDock.collapsed; saveJobDockPrefs(); renderJobDock(); },
+        'aria-expanded': collapsed ? 'false' : 'true',
+        onClick: () => {
+            if (idle) jobDock.idleOpen = !jobDock.idleOpen;
+            else { jobDock.collapsed = !jobDock.collapsed; saveJobDockPrefs(); }
+            renderJobDock();
+        },
     },
         createEl('span', { class: 'job-dock-title', text: title }),
-        createEl('i', { class: `fas ${jobDock.collapsed ? 'fa-chevron-up' : 'fa-chevron-down'} job-dock-toggle`, 'aria-hidden': 'true' }));
+        createEl('i', { class: `fas ${collapsed ? 'fa-chevron-up' : 'fa-chevron-down'} job-dock-toggle`, 'aria-hidden': 'true' }));
+
+    // Van de afgeronde taken staat de nieuwste er helemaal; de rest samen op één regel
+    const older = finished.slice(1);
+    const items = open.concat(finished.slice(0, 1)).map(createJobItem);
+    if (older.length) {
+        items.push(createEl('div', { class: 'job-folded' },
+            createEl('button', {
+                class: 'job-folded-toggle',
+                'aria-expanded': jobDock.showFinished ? 'true' : 'false',
+                onClick: () => { jobDock.showFinished = !jobDock.showFinished; renderJobDock(); },
+            },
+                createEl('i', { class: `fas ${jobDock.showFinished ? 'fa-chevron-down' : 'fa-chevron-right'}`, 'aria-hidden': 'true' }),
+                createEl('span', { text: `${older.length} eerder klaar` })),
+            createEl('button', {
+                class: 'btn btn-ghost btn-small',
+                text: 'Alles verbergen',
+                title: 'Verberg alle afgeronde taken uit dit paneel',
+                onClick: () => { finished.forEach(j => jobDock.dismissed.add(j.id)); saveJobDockPrefs(); renderJobDock(); },
+            })));
+        if (jobDock.showFinished) items.push(...older.map(createJobItem));
+    }
 
     const body = createEl('div', { class: 'job-dock-body' },
         jobDock.error ? createEl('div', { class: 'job-dock-error', text: `Taken niet op te halen: ${jobDock.error}` }) : null,
-        visible.map(createJobItem));
+        items);
     dock.replaceChildren(header, body);
     if (library) dock.appendChild(library);
 }
