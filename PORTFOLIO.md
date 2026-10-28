@@ -596,32 +596,21 @@ frontend/
    )
    ```
 
-2. **Weighted Sampling Algorithm**
-   - Probability of selection proportional to rating
-   - Higher-rated files appear more frequently
-   - Statistical distribution: ELO-based weighting
+2. **Weighted Sampling Without Replacement (Efraimidis-Spirakis)**
+   - Every photo and video below the show's folder is a candidate (no "first 500 files" cut-off)
+   - Each file appears at most once; a higher rating makes it likely to come earlier
+   - Weight = rating^1.5; the walk only lists names, a file is stat'ed once it is picked
    
    ```python
-   def weighted_sample(files: List[Dict], k: int) -> List[Dict]:
-       """Sample files based on ELO rating weights"""
-       if not files:
-           return []
-       
-       k = min(k, len(files))
-       
-       # Calculate weights: (rating - min_rating) + 1 to avoid zero weights
-       ratings = [f.get('rating', 1000) for f in files]
-       min_rating = min(ratings)
-       
-       weights = [r - min_rating + 1 for r in ratings]
-       total_weight = sum(weights)
-       
-       # Random.choices: sampling with replacement, probability-weighted
-       probabilities = [w / total_weight for w in weights]
-       
-       sampled = random.choices(files, weights=probabilities, k=k)
-       return sampled
+   def weighted_order(paths, ratings, k=None):
+       """Weighted random sample WITHOUT replacement: key = random() ** (1 / weight),
+       the k largest keys win, in that order."""
+       k = len(paths) if k is None else min(k, len(paths))
+       keyed = ((random.random() ** (1.0 / show_weight(ratings.get(p, 1000))), p) for p in paths)
+       return [p for _, p in heapq.nlargest(k, keyed)]
    ```
+   - Folder show: the whole folder in weighted order (at most 2000 files); Feeling Lucky: 50
+     files drawn the same way from the whole library. Audio is never part of a show.
 
 3. **Slideshow Control**
    - Auto-advance with configurable interval (default 3s)
@@ -632,7 +621,7 @@ frontend/
 **Technical Achievements:**
 - ELO rating system incentivizes engagement with favorites
 - Probability-weighted random selection improves UX compared to uniform randomness
-- Efficient sampling using Python's random.choices()
+- No repeats and no missing photos: sampling without replacement in O(n log k) with heapq
 
 ---
 

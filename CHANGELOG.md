@@ -392,3 +392,18 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - De oude scanopdracht (`/api/duplicates/scan_folder`, niet meer door het scherm gebruikt) gaf
   een serverfout als je de scan intussen in het takenpaneel pauzeerde. Nu krijg je een
   duidelijke melding met het nummer van de taak, die je in het takenpaneel kunt hervatten.
+
+### Shows
+- Een mapshow toont nu elke foto en video uit de map precies één keer, in een willekeurige
+  volgorde waarin foto's met een hogere waardering eerder komen. Voorheen werd er getrokken
+  "met teruglegging": ongeveer een derde van de foto's kwam nooit langs en andere twee of drie
+  keer.
+- Mapshows en "Feeling Lucky" kijken nu naar álle bestanden, niet alleen naar de eerste 500.
+  Feeling Lucky houdt nu ook rekening met je stemmen.
+- Geluidsbestanden komen niet meer in een slideshow. Video's die de browser kan afspelen
+  (mp4, m4v, mov, webm) spelen af; andere videoformaten tonen hun miniatuur, en een video die
+  toch niet afspeelt blijft niet hangen maar gaat door naar de volgende dia. Lukt een foto niet
+  (bijv. RAW), dan toont de dia de miniatuur.
+- De lijst met shows: de map `library` zelf is geen show meer, een map met alleen submappen
+  (en bijv. een `.DS_Store`) wordt wel een show met een voorbeeld uit een submap, en één map die
+  niet te lezen is laat niet meer alle volgende shows stilletjes verdwijnen.

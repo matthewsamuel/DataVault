@@ -323,13 +323,19 @@ if (distance > 50) {
 
 **Solution:**
 - **ELO-Style Ratings:** Each file has rating (baseline 1000); updated via user votes
-- **Weighted Random Sampling:** Probability proportional to rating
-- **Probability Calculation:**
+- **Weighted Random Order Without Repeats:** every photo and video below a show's folder is a
+  candidate; each gets the key `random() ** (1 / rating^1.5)` and the largest keys come first
+  (Efraimidis-Spirakis), so a liked photo tends to come early, and no photo is repeated or left
+  out. A folder show plays at most 2000 files, Feeling Lucky draws 50 from the whole library.
   ```python
-  weights = [rating - min_rating + 1 for rating in all_ratings]
-  probabilities = [w / sum(weights) for w in weights]
-  sampled = random.choices(files, weights=probabilities, k=20)
+  keyed = ((random.random() ** (1.0 / show_weight(ratings.get(p, 1000))), p) for p in paths)
+  order = [p for _, p in heapq.nlargest(k, keyed)]
   ```
+- **What a show plays:** photos and videos only (no audio). Videos the browser can play
+  (mp4, m4v, mov, webm) play as video; other formats show their thumbnail as a still.
+- **Show list:** every folder below `library` with photos or videos somewhere inside (not
+  `library` itself); the preview comes from its own files, or from its subfolders. An
+  unreadable folder is skipped on its own.
 - **Slideshow Controls:** Auto-advance (configurable interval), manual prev/next, pause/resume
 - **Folder Filtering:** Exclude folders via enable/disable settings stored in database
 

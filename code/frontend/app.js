@@ -2171,10 +2171,20 @@ async function toggleSettingsFolder(path, enabled) {
 
 // ==================== CINEMATIC PLAYER ====================
 
+// Video's die de browser zelf kan afspelen; andere formaten (avi, mkv, mts, ...) toont de
+// slideshow als stilstaand beeld (de miniatuur). Audio heeft geen beeld en komt er niet in.
+const SLIDE_VIDEO_TYPES = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
+
+function slidePlaysAsVideo(file) {
+    const ext = (file.name || '').split('.').pop().toLowerCase();
+    const mime = SLIDE_VIDEO_TYPES[ext];
+    return !!mime && document.createElement('video').canPlayType(mime) !== '';
+}
+
 class CinematicPlayer {
     constructor(story) {
         this.story = story;
-        this.files = story.files || [];
+        this.files = (story.files || []).filter(f => f && (f.type === 'photo' || f.type === 'video'));
         this.currentIndex = 0;
         this.isPlaying = true;
         this.timer = null;
@@ -2368,8 +2378,7 @@ class CinematicPlayer {
         const slide = document.createElement('div');
         slide.className = 'cinematic-slide';
 
-        const fileName = file.name || '';
-        const isVideo = fileName.toLowerCase().match(/\.(mp4|mov|webm)$/);
+        const isVideo = file.type === 'video' && slidePlaysAsVideo(file);
 
         if (isVideo) {
             // Videos: no loop, play fully before advancing
@@ -2383,13 +2392,27 @@ class CinematicPlayer {
 
             // When video finishes, advance to next slide
             video.addEventListener('ended', () => {
-                if (this.isPlaying) this.next();
+                if (this.isPlaying && this.files[this.currentIndex] === file) this.next();
+            });
+            // Kan de browser hem toch niet afspelen: niet blijven hangen, door naar de volgende
+            video.addEventListener('error', () => {
+                if (this.isPlaying && this.files[this.currentIndex] === file) setTimeout(() => this.next(), 1500);
             });
 
             slide.appendChild(video);
         } else {
+            // Foto (of een video die de browser niet afspeelt: dan de miniatuur). Lukt het
+            // origineel niet (bijv. RAW of HEIC buiten Safari), dan ook de miniatuur.
             const kbEffect = Math.random() > 0.5 ? 'ken-burns-in' : 'ken-burns-out';
-            slide.innerHTML = html`<img src="${vaultFileUrl('file', file.path)}" class="cinematic-media ${kbEffect}">`;
+            const img = createEl('img', {
+                class: `cinematic-media ${kbEffect}`,
+                src: vaultFileUrl(file.type === 'video' ? 'thumb' : 'file', file.path),
+            });
+            img.addEventListener('error', () => {
+                const thumb = vaultFileUrl('thumb', file.path);
+                if (!img.src.endsWith(thumb)) img.src = thumb;
+            }, { once: true });
+            slide.appendChild(img);
         }
 
         container.appendChild(slide);
@@ -2439,6 +2462,11 @@ ${file.size ? html`<span style="margin-left: 15px;"><i class="fas fa-hdd"></i> $
 
 function startShow(story) {
     if (activeShow) activeShow.close();
+    const playable = (story.files || []).some(f => f && (f.type === 'photo' || f.type === 'video'));
+    if (!playable) {
+        showToast('Leeg', "Geen foto's of video's in deze show", 'warning');
+        return;
+    }
     activeShow = new CinematicPlayer(story);
 }
 
