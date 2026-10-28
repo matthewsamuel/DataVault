@@ -452,3 +452,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   honderden); de klok bij Spotify "Op deze dag" en de wisselende foto's op de homepage lopen
   alleen nog als je dat tabblad open hebt. De tijdlijn toont na het verkleinen of vergroten van
   het venster in een ander tabblad weer het juiste aantal kolommen.
+
+### Opgeruimd (frontend)
+- Verwijderd: het ongebruikte `folder-nav.js` (een oude kopie van de mappenboom-navigatie), de
+  elf ongebruikte `... Background Removed.png`-afbeeldingen (ca. 2,6 MB) en ongeveer 14 kB
+  CSS voor onderdelen die niet meer bestaan (de drie verschillende versies van de schakelaar
+  zijn er nu één).

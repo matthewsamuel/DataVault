@@ -1846,8 +1846,6 @@ function closeDnaModal() {
 
 // ==================== STORAGE MODAL ====================
 
-let storageNavigationStack = [];
-
 const folderIcons = {
     'aftermovies': 'fa-film',
     'library': 'fa-book',
@@ -1864,7 +1862,6 @@ function getFolderIcon(folderName) {
 }
 
 async function openStorageModal() {
-    storageNavigationStack = [];
     await storageNavigateToPath(null);
 }
 
@@ -2066,11 +2063,6 @@ function closeInsightModal() {
 }
 
 // ==================== SHOWS SETTINGS ====================
-
-let settingsData = {
-    folders: [],
-    loading: false
-};
 
 async function openSettingsModal() {
     // create modal if not exists
