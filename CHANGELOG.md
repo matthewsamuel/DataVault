@@ -439,3 +439,13 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - De lijst met shows: de map `library` zelf is geen show meer, een map met alleen submappen
   (en bijv. een `.DS_Store`) wordt wel een show met een voorbeeld uit een submap, en één map die
   niet te lezen is laat niet meer alle volgende shows stilletjes verdwijnen.
+
+### Thema en zuinigheid
+- De bewegende achtergrond (zijbalk en Spotify) draait alleen nog als hij in beeld is, staat
+  stil als "Beperk beweging" in de systeeminstellingen aan staat, en tekent hoogstens zo'n 30
+  beelden per seconde met veel minder lijnen. Voorheen liep hij altijd door, ook in een ander
+  tabblad, met tot ~35.000 punten per beeld.
+- De Keurer liet per beoordeelde kaart twee luisteraars achter (na honderden kaarten
+  honderden); de klok bij Spotify "Op deze dag" en de wisselende foto's op de homepage lopen
+  alleen nog als je dat tabblad open hebt. De tijdlijn toont na het verkleinen of vergroten van
+  het venster in een ander tabblad weer het juiste aantal kolommen.

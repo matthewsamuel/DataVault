@@ -1,7 +1,15 @@
 /**
  * Vanilla JS Wave Background for Sidebar
  * Animated SVG waves with simplex noise and mouse interaction
+ *
+ * Kosten beperkt: de animatie loopt alleen als de achtergrond echt in beeld is (niet in een
+ * verborgen tab of weergave), staat stil bij "beweging beperken" in de systeeminstellingen,
+ * tekent hoogstens ~30 beelden per seconde en nooit meer dan MAX_POINTS punten.
  */
+
+const WAVE_MAX_POINTS = 3000;   // punten per achtergrond, hoe groot de container ook is
+const WAVE_MIN_GAP = 16;        // px tussen lijnen en tussen punten
+const WAVE_FRAME_MS = 33;       // ~30 fps
 
 class WaveBackground {
     constructor(container) {
@@ -24,6 +32,9 @@ class WaveBackground {
         this.noiseGen = null;
         this.rafId = null;
         this.bounding = null;
+        this.inView = false;
+        this.lastFrame = -Infinity;
+        this.reducedMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
 
         this.init();
     }
@@ -46,10 +57,41 @@ class WaveBackground {
         this.resizeObserver = new ResizeObserver(() => this.onResize());
         this.resizeObserver.observe(this.container);
 
-        this.container.addEventListener('mousemove', (e) => this.onMouseMove(e));
+        this.onMouseMove = this.onMouseMove.bind(this);
+        this.container.addEventListener('mousemove', this.onMouseMove);
 
-        // Start animation
-        this.tick(0);
+        // Alleen animeren wat te zien is: display:none of buiten beeld telt als niet zichtbaar
+        this.updateRunning = this.updateRunning.bind(this);
+        this.intersectionObserver = new IntersectionObserver((entries) => {
+            this.inView = entries.some(entry => entry.isIntersecting);
+            this.updateRunning();
+        });
+        this.intersectionObserver.observe(this.container);
+        document.addEventListener('visibilitychange', this.updateRunning);
+        if (this.reducedMotion && this.reducedMotion.addEventListener) {
+            this.reducedMotion.addEventListener('change', this.updateRunning);
+        }
+
+        // Eén stilstaand beeld; de animatie start zodra de container in beeld komt
+        this.drawStill();
+    }
+
+    shouldAnimate() {
+        return this.inView && !document.hidden && !(this.reducedMotion && this.reducedMotion.matches);
+    }
+
+    updateRunning() {
+        if (this.shouldAnimate()) {
+            if (!this.rafId) this.rafId = requestAnimationFrame((t) => this.tick(t));
+        } else if (this.rafId) {
+            cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+        }
+    }
+
+    drawStill() {
+        this.movePoints(0);
+        this.drawLines();
     }
 
     createSVG() {
@@ -87,9 +129,12 @@ class WaveBackground {
         this.paths.forEach(path => path.remove());
         this.paths = [];
 
-        // Spacing for wave lines - tighter for more coverage
-        const xGap = 10;
-        const yGap = 10;
+        // Spacing for wave lines: wider on large containers, so the point count stays capped
+        let gap = Math.max(WAVE_MIN_GAP, Math.ceil(Math.sqrt((width * height) / WAVE_MAX_POINTS)));
+        const count = (g) => (Math.ceil(width / g) + 4) * (Math.ceil(height / g) + 2);
+        while (count(gap) > WAVE_MAX_POINTS) gap++;
+        const xGap = gap;
+        const yGap = gap;
 
         // Extend to full width with padding
         const totalLines = Math.ceil(width / xGap) + 4;  // Extra lines for full coverage
@@ -124,11 +169,6 @@ class WaveBackground {
             path.setAttribute('stroke-width', strokeWidth.toString());
             path.setAttribute('opacity', opacity.toString());
 
-            // Add subtle glow effect to some lines
-            if (i % 5 === 0) {
-                path.style.filter = 'drop-shadow(0 0 2px var(--accent))';
-            }
-
             this.svg.appendChild(path);
             this.paths.push(path);
             this.lines.push(points);
@@ -138,6 +178,7 @@ class WaveBackground {
     onResize() {
         this.setSize();
         this.setLines();
+        if (!this.rafId) this.drawStill();
     }
 
     onMouseMove(e) {
@@ -220,6 +261,14 @@ class WaveBackground {
     }
 
     tick(time) {
+        this.rafId = null;
+        if (!this.shouldAnimate()) return;
+        if (time - this.lastFrame < WAVE_FRAME_MS) {
+            this.rafId = requestAnimationFrame((t) => this.tick(t));
+            return;
+        }
+        this.lastFrame = time;
+
         // Smooth mouse movement
         this.mouse.sx += (this.mouse.x - this.mouse.sx) * 0.1;
         this.mouse.sy += (this.mouse.y - this.mouse.sy) * 0.1;
@@ -292,8 +341,14 @@ class WaveBackground {
 
     destroy() {
         if (this.rafId) cancelAnimationFrame(this.rafId);
+        this.rafId = null;
         if (this.svg) this.svg.remove();
         if (this.resizeObserver) this.resizeObserver.disconnect();
+        if (this.intersectionObserver) this.intersectionObserver.disconnect();
+        document.removeEventListener('visibilitychange', this.updateRunning);
+        if (this.reducedMotion && this.reducedMotion.removeEventListener) {
+            this.reducedMotion.removeEventListener('change', this.updateRunning);
+        }
         this.container.removeEventListener('mousemove', this.onMouseMove);
     }
 }

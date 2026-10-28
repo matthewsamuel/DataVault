@@ -149,6 +149,9 @@ function switchMainView(view) {
     // Clear search
     document.getElementById('global-search').value = '';
 
+    if (view !== 'spotify') stopSpotifyClock();
+    homeOtdCycle(view === 'home');
+
     // Load data based on view
     if (view === 'spotify') {
         loadSpotifyStats();
@@ -1449,6 +1452,18 @@ async function openPhotoOTD(filePath) {
 
 // ==================== PHOTO OTD SETTINGS ====================
 let otdCycleInterval = null;
+let otdCycleStep = null;    // wisselt naar de volgende foto; null als er niets te wisselen valt
+
+// De foto's van "op deze dag" wisselen alleen terwijl Home open is (en de tab zichtbaar)
+function homeOtdCycle(active) {
+    if (otdCycleInterval) {
+        clearInterval(otdCycleInterval);
+        otdCycleInterval = null;
+    }
+    if (active && otdCycleStep) {
+        otdCycleInterval = setInterval(() => { if (!document.hidden && otdCycleStep) otdCycleStep(); }, 4000);
+    }
+}
 
 async function loadPhotoOtdWidget() {
     try {
@@ -1459,10 +1474,8 @@ async function loadPhotoOtdWidget() {
         loading.style.display = 'flex';
         content.style.display = 'none';
 
-        if (otdCycleInterval) {
-            clearInterval(otdCycleInterval);
-            otdCycleInterval = null;
-        }
+        otdCycleStep = null;
+        homeOtdCycle(false);
 
         let otdAllowedFolders = JSON.parse(localStorage.getItem('otdAllowedFolders') || '[]');
         const query = otdAllowedFolders.length > 0 ? `?allowed_folders=${encodeURIComponent(otdAllowedFolders.join(','))}` : '';
@@ -1489,11 +1502,12 @@ async function loadPhotoOtdWidget() {
 
             if (data.photos.length > 1) {
                 let currentOtd = 0;
-                otdCycleInterval = setInterval(() => {
+                otdCycleStep = () => {
                     const images = content.querySelectorAll('.otd-large-image');
                     const overlays = content.querySelectorAll('.otd-large-overlay');
                     if (images.length === 0) {
-                        clearInterval(otdCycleInterval);
+                        homeOtdCycle(false);
+                        otdCycleStep = null;
                         return;
                     }
                     images[currentOtd].classList.remove('active');
@@ -1503,7 +1517,8 @@ async function loadPhotoOtdWidget() {
 
                     images[currentOtd].classList.add('active');
                     overlays[currentOtd].style.display = 'flex';
-                }, 4000); // 4 seconds interval
+                };
+                homeOtdCycle(!document.getElementById('section-home').classList.contains('hidden'));
             }
         } else {
             content.innerHTML = '<div class="storage-text" style="display:flex;height:100%;align-items:center;justify-content:center;">No photos from this day in past years.</div>';
@@ -2706,14 +2721,15 @@ function renderSpotifyStats(data) {
         otdDateEl.textContent = now.toLocaleDateString('nl-NL', opts);
     }
     if (otdClockEl) {
-        // Clear any existing interval
-        if (window._otdClockInterval) clearInterval(window._otdClockInterval);
+        stopSpotifyClock();
         const tickClock = () => {
             const n = new Date();
             otdClockEl.textContent = n.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         };
         tickClock();
-        window._otdClockInterval = setInterval(tickClock, 1000);
+        if (!document.getElementById('section-spotify').classList.contains('hidden')) {
+            window._otdClockInterval = setInterval(tickClock, 1000);
+        }
     }
     if (!otdContainer || !otdList) {
         // (pagina zonder "Op deze dag"-blok)

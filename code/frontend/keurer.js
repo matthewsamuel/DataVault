@@ -999,10 +999,21 @@ function keurerSetupDrag(card) {
         }
     }
 
-    // Muis
-    card.addEventListener('mousedown', e => { e.preventDefault(); onStart(e.clientX, e.clientY); });
-    window.addEventListener('mousemove', e => { if (dragging) onMove(e.clientX, e.clientY); });
-    window.addEventListener('mouseup', onEnd);
+    // Muis: de window-luisteraars bestaan alleen tijdens het slepen. Zo blijft er per
+    // beoordeelde kaart niets achter (geen stapel luisteraars, geen vastgehouden kaarten).
+    function onMouseMove(e) { onMove(e.clientX, e.clientY); }
+    function onMouseUp() {
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        onEnd();
+    }
+    card.addEventListener('mousedown', e => {
+        e.preventDefault();
+        onStart(e.clientX, e.clientY);
+        if (!dragging) return;
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+    });
 
     // Touch
     card.addEventListener('touchstart', e => onStart(e.touches[0].clientX, e.touches[0].clientY), { passive: true });

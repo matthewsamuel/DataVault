@@ -28,6 +28,7 @@
     let tlRenderedRange = { start: -1, end: -1 };
     let tlScrollContainer = null;
     let tlContentEl = null;
+    let tlLayoutCols = 0;               // columns the current layout was built with
 
     let tlSliderDragging = false;
     let tlScrollTicking = false;
@@ -56,6 +57,8 @@
 
         // Prevent re-initialization when switching back to timeline tab
         if (tlInitialized) {
+            // Window resized while the tab was hidden: rebuild with the real width
+            if (tlFiles.length > 0 && getColumns() !== tlLayoutCols) recomputeLayout();
             // Just re-render in case of resize
             if (tlFiles.length > 0) {
                 tlRenderedRange = { start: -1, end: -1 };
@@ -72,7 +75,10 @@
         container.addEventListener('scroll', onTimelineScroll, { passive: true });
 
         // Recompute cols on resize
-        window.addEventListener('resize', debounce(recomputeLayout, 200));
+        // (not while the tab is hidden: its width is 0 then, which would mean 2 columns)
+        window.addEventListener('resize', debounce(() => {
+            if (tlScrollContainer && tlScrollContainer.clientWidth > 0 && tlFiles.length > 0) recomputeLayout();
+        }, 200));
 
         // Load folder tree for picker
         await loadTimelineFolders();
@@ -342,6 +348,7 @@
 
     function recomputeLayout() {
         const cols = getColumns();
+        tlLayoutCols = cols;
         tlLayoutRows = [];
         let top = 0;
 

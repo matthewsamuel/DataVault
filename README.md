@@ -111,7 +111,7 @@ frontend/
 ├── keurer.js                  # Photo curator UI, swipe detection, undo history
 ├── duplicates.js              # Duplicate groups, keep rules, cleanup dialog, Herstellen (undo)
 ├── timeline.js                # Timeline UI, virtual scrolling, slider navigation
-├── wave-background.js         # Animated background effect
+├── wave-background.js         # Animated background (only while visible; still with reduced motion)
 ├── resizable-sidebar.js       # Interactive folder tree sidebar
 └── vendor/                    # Font Awesome 6.4.0 and JetBrains Mono, with licenses (no CDN)
 ```
