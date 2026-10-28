@@ -7,8 +7,9 @@ starts its own server on a free port (DATAVAULT_TESTING=1, DATAVAULT_CONFIG poin
 that vault) and stops it again at the end.
 
 It also drives the app with the keyboard (tabs, the shortcut overview, the Files grid and the
-viewer, focus going back where it was), moves a file and puts it back from the Herstelcentrum,
-checks Instellingen, and runs a11y_checks.js on every screen in the light and the dark theme:
+viewer, Tab staying inside every window, focus going back where it was, Keurer keys that never
+act from the theme menu or the search field), moves a file and puts it back from the
+Herstelcentrum, checks Instellingen and the storage window, and runs a11y_checks.js on every screen in the light and the dark theme:
 all visible text must reach WCAG AA contrast and every control must have a name.
 
 Not collected by pytest (the name does not start with test_). Run it from the repo root
@@ -164,6 +165,19 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 if not ok:
                     problems.append(message)
 
+            def expect_focus_trapped(overlay_id, name, presses=8):
+                """Shift+Tab and Tab, one at a time: focus must stay on something inside the window.
+                (Safari skips buttons on a native Tab, so a trap that leaves Tab to the browser leaks.)"""
+                where = ("(() => { const a = document.activeElement; const o = document.getElementById("
+                         + json.dumps(overlay_id) + "); return a && a !== document.body && o.contains(a) ? "
+                         "'in' : 'OUT ' + (a ? a.tagName + '#' + a.id + '.' + a.className : 'none'); })()")
+                for key in ["Shift+Tab"] * presses + ["Tab"] * presses:
+                    page.keyboard.press(key)
+                    at = page.evaluate(where)
+                    if at != "in":
+                        problems.append(f"{name}: {key} moved the focus out of the window ({at})")
+                        return
+
             fullscreen_open = "document.getElementById('chat-fullscreen-modal').classList.contains('active')"
             photo = str(next(f for f in sorted((vault / "RAW" / "misc").resolve().iterdir())
                              if f.suffix == ".jpg" and not f.name.startswith(".")))
@@ -203,10 +217,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.evaluate("document.getElementById('global-search').value = ''; handleGlobalSearch('')")
             step("keys: ? opens the overview", lambda: page.keyboard.press("?"), 0.4)
             expect(page.is_visible("#shortcut-help"), "keys: ? did not open the shortcut overview")
-            for _ in range(25):
-                page.keyboard.press("Tab")
-            expect(page.evaluate("document.getElementById('shortcut-help').contains(document.activeElement)"),
-                   "keys: Tab left the shortcut overview")
+            expect_focus_trapped("shortcut-help", "keys: shortcut overview")
             step("keys: Escape closes the overview", lambda: page.keyboard.press("Escape"), 0.3)
             expect(not page.is_visible("#shortcut-help"), "keys: Escape did not close the overview")
 
@@ -219,10 +230,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.evaluate(f"focusGridCard({first_file})")
             step("grid: Enter opens the viewer", lambda: page.keyboard.press("Enter"), 0.6)
             expect(page.evaluate("isViewerOpen()"), "grid: Enter did not open the viewer")
-            for _ in range(15):
-                page.keyboard.press("Tab")
-            expect(page.evaluate("document.getElementById('modal-viewer').contains(document.activeElement)"),
-                   "viewer: Tab left the viewer")
+            expect_focus_trapped("modal-viewer", "viewer")
             step("grid: Escape closes the viewer", lambda: page.keyboard.press("Escape"), 0.4)
             expect(page.evaluate("document.activeElement.dataset.gridIndex") == str(first_file),
                    f"viewer: focus did not go back to the card ({page.evaluate(active_id)})")
@@ -250,6 +258,57 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("document.documentElement.dataset.theme") == "dark", "settings: theme not set")
             page.check("input[data-theme-choice='auto']")
 
+            # Keurer: arrows in the theme menu move through the menu, not a file; typing a space
+            # in the search does not open the preview; on the page itself the arrows still decide
+            keurer_state = "[keurerIndex, keurerHistory.length, document.getElementById('modal-keurer-move')" \
+                           ".classList.contains('active'), keurerPreviewOpen]"
+            step("keurer: open a folder", lambda: (
+                page.keyboard.press("6"),
+                page.evaluate(f"keurerSelectedFolderForModal = {json.dumps(folder)}; keurerConfirmFolderSelection()"),
+                page.wait_for_selector("#keurer-card-area .keurer-card", timeout=10000)), 0.8)
+            before = page.evaluate(keurer_state)
+            keurer_file = page.evaluate("keurerFileQueue[keurerIndex].path")
+            step("keurer: theme menu with the keyboard", lambda: (
+                page.focus("#theme-button"), page.keyboard.press("Enter")), 0.3)
+            expect(page.evaluate("document.activeElement.classList.contains('theme-option')"),
+                   "keurer: the theme menu did not take the focus")
+            step("keurer: arrows in the theme menu", lambda: [
+                page.keyboard.press(key) for key in ("ArrowRight", "ArrowDown", "ArrowUp", "ArrowLeft", "End", "Home")], 1.0)
+            expect(page.evaluate(keurer_state) == before and Path(keurer_file).exists(),
+                   f"keurer: arrows in the theme menu acted on the Keurer ({page.evaluate(keurer_state)} != {before})")
+            step("keurer: Escape closes the theme menu", lambda: page.keyboard.press("Escape"), 0.3)
+            expect(page.evaluate("document.activeElement.id") == "theme-button", "keurer: focus not back on the theme button")
+            step("keurer: arrow on the theme button", lambda: page.keyboard.press("ArrowRight"), 0.8)
+            expect(page.evaluate(keurer_state) == before and Path(keurer_file).exists(),
+                   "keurer: an arrow on the theme button decided on a file")
+            step("keurer: / and typing a space", lambda: (
+                page.keyboard.press("/"), page.keyboard.type("a b")), 0.5)
+            expect(page.input_value("#global-search") == "a b" and page.evaluate(keurer_state) == before,
+                   f"keurer: typing in the search was taken as Keurer keys ({page.input_value('#global-search')!r})")
+            page.keyboard.press("Escape")
+            page.evaluate("document.getElementById('global-search').value = ''; handleGlobalSearch('')")
+            step("keurer: ArrowLeft on the page keeps", lambda: page.keyboard.press("ArrowLeft"), 1.0)
+            after_keep = page.evaluate(keurer_state)
+            expect(after_keep[1] == before[1] + 1, f"keurer: ArrowLeft on the page made no decision ({after_keep})")
+            step("keurer: ArrowDown undoes it", lambda: page.keyboard.press("ArrowDown"), 1.0)
+            undone = page.evaluate(keurer_state)
+            expect(undone[1] == before[1] and Path(keurer_file).exists(),
+                   f"keurer: ArrowDown did not undo the decision ({undone} vs {before})")
+
+            # Storage per folder: the list starts at the top (nothing cut off) and fills the width
+            step("storage: open the window", lambda: (
+                page.evaluate("switchMainView('home'); openStorageModal()"),
+                page.wait_for_selector("#storage-breakdown-content", state="visible", timeout=10000)), 0.8)
+            storage = page.evaluate("""(() => {
+                const body = document.querySelector('#modal-storage-details .modal-body');
+                const first = [...body.children].find(c => c.getClientRects().length);
+                return { top: first.getBoundingClientRect().top - body.getBoundingClientRect().top,
+                         width: first.getBoundingClientRect().width, room: body.clientWidth };
+            })()""")
+            expect(storage["top"] >= 0 and storage["width"] > storage["room"] * 0.8,
+                   f"storage: the list is cut off or narrow ({storage})")
+            step("storage: close", lambda: page.keyboard.press("Escape"), 0.3)
+
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
@@ -269,6 +328,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # Shows: Manage Sources and the Feeling Lucky slideshow
             step("shows: manage sources", lambda: (page.click(".nav-tab[data-view='shows']"),
                                                    page.click("text=Bronnen beheren")), 1.0)
+            expect_focus_trapped("modal-show-settings", "shows: sources window")
             step("shows: close sources", lambda: page.evaluate("closeSettingsModal()"), 0.3)
             if page.query_selector(".shows-hero"):
                 step("shows: slideshow", lambda: page.click(".shows-hero"), 1.5)
