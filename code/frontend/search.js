@@ -53,6 +53,21 @@ async function searchFetchStatus() {
     return searchState.status;
 }
 
+// Het zoekmodel alvast laden (een paar seconden de eerste keer) zodra iemand gaat zoeken:
+// als het zoekveld focus krijgt of het venster opent, niet pas bij de eerste zoekopdracht
+let searchWarmedAt = 0;
+
+function searchWarm() {
+    if (Date.now() - searchWarmedAt < 60000) return;
+    searchWarmedAt = Date.now();
+    fetch(`${API_BASE}/api/search/warm`, { method: 'POST' }).catch(() => {});
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const field = document.getElementById('global-search');
+    if (field) field.addEventListener('focus', searchWarm);
+});
+
 // ==================== HET VENSTER ====================
 
 function buildSearchOverlay() {
@@ -145,7 +160,7 @@ function openSearch(query = '', { mode = null } = {}) {
     input.focus();
     searchRenderMode();
     searchRenderFilters();
-    fetch(`${API_BASE}/api/search/warm`, { method: 'POST' }).catch(() => {});   // het model alvast laden
+    searchWarm();
     searchFetchStatus().then(() => searchRun());
 }
 
