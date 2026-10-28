@@ -12,7 +12,8 @@ Both export formats may be present (Account Data 'StreamingHistory*.json' and Ex
 """
 import json
 import threading
-from collections import OrderedDict, defaultdict
+import unicodedata
+from collections import Counter, OrderedDict, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple
@@ -114,6 +115,11 @@ def _parse_file(file_path: Path):
         yield utc, track_name, artist_name, int(ms_played), platform if isinstance(platform, str) else None, extended
 
 
+def _same_track(name: str) -> str:
+    """A track name as both export formats can be compared on."""
+    return unicodedata.normalize("NFC", name or "").strip().casefold()
+
+
 def load_plays() -> Tuple[tuple, List[Play]]:
     """
     Every play of every export, oldest first (ties by track and artist, so the order never
@@ -135,11 +141,16 @@ def load_plays() -> Tuple[tuple, List[Play]]:
             seen.add(exact)
             (extended if is_extended else legacy).append((utc, track, artist, ms, platform))
 
-    # A legacy play the extended export also has: same track and artist, ending within a minute
-    minutes = {(int(utc.timestamp() // 60), track, artist) for utc, track, artist, _, _ in extended}
+    # A legacy play the extended export also has: the same track, ending within a minute.
+    # Not the artist: legacy has the track's artist, extended the album artist ('Various
+    # Artists' on a compilation), so they differ for the same play. Each extended play
+    # covers at most one legacy play, so a track played twice in a row stays two plays.
+    available = Counter((int(utc.timestamp() // 60), _same_track(track)) for utc, track, _, _, _ in extended)
     for utc, track, artist, ms, platform in legacy:
-        minute = int(utc.timestamp() // 60)
-        if any((minute + d, track, artist) in minutes for d in (-1, 0, 1)):
+        minute, name = int(utc.timestamp() // 60), _same_track(track)
+        match = next(((minute + d, name) for d in (0, -1, 1) if available[(minute + d, name)] > 0), None)
+        if match is not None:
+            available[match] -= 1
             continue
         extended.append((utc, track, artist, ms, platform))
 

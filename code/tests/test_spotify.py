@@ -110,3 +110,24 @@ def test_the_chat_gets_the_total_listening_time(app, export):
            [_extended(f"2023-01-0{d}T10:00:00Z", "T", "A", ms=600000) for d in range(1, 4)])
     context = chat.get_vault_context()
     assert "Totaal Spotify luistertijd: 30 minuten" in context
+
+
+def test_a_legacy_play_matches_even_when_the_artist_fields_differ(client, export):
+    # Extended names the album artist, legacy the track's artist: still the same plays
+    extended = [_extended("2023-04-01T09:00:10Z", "Feestnummer", "Various Artists"),
+                _extended("2023-04-01T09:30:05Z", "Duet", "Zangeres")]
+    legacy = [_legacy("2023-04-01 09:00", "Feestnummer", "DJ Echt"),
+              _legacy("2023-04-01 09:30", "Duet", "Zangeres feat. Zanger")]
+    _write(export, "Streaming_History_Audio_2023.json", extended)
+    _write(export / "account", "StreamingHistory_music_0.json", legacy)
+    data = client.get("/api/spotify/stats", params={"year": "all"}).json()
+    assert data["total_plays"] == 2
+
+
+def test_one_extended_play_covers_only_one_legacy_play(client, export):
+    # Played twice within a minute, but the extended export (a shorter period) has only one
+    _write(export, "Streaming_History_Audio_2023.json", [_extended("2023-04-02T09:00:20Z", "Kort", "A", ms=20000)])
+    _write(export / "account", "StreamingHistory_music_0.json",
+           [_legacy("2023-04-02 09:00", "Kort", "A", ms=20000), _legacy("2023-04-02 09:01", "Kort", "A", ms=20000)])
+    data = client.get("/api/spotify/stats", params={"year": "all"}).json()
+    assert data["total_plays"] == 2

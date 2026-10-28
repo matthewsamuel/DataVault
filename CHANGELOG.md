@@ -536,6 +536,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Staan zowel de gewone export (Account Data) als de uitgebreide export (Extended Streaming
   History) in de map, dan wordt een nummer niet meer dubbel geteld. Ook een tweede kopie van
   hetzelfde exportbestand telt niet dubbel.
+- Die vergelijking kijkt nu naar het nummer en de tijd, niet meer naar de artiest: de twee
+  exports noemen bij verzamelalbums en samenwerkingen een andere artiest ("Various Artists"
+  tegenover de echte artiest), waardoor zulke nummers toch dubbel telden. Speel je een nummer
+  twee keer kort na elkaar, dan blijven het twee keer.
 - De langste "binge" en "op deze dag" hangen niet meer af van de volgorde van de bestanden.
   Twee verschillende nummers in dezelfde minuut blijven allebei in "op deze dag" staan.
 - Een jaar met weinig muziek toont geen artiesten met 0 keer afgespeeld meer, en een ongeldig
