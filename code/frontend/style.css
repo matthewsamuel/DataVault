@@ -4668,6 +4668,11 @@ a.breadcrumb-item:hover {
     color: var(--spotify-text);
 }
 
+/* Op het groene vlak van het gekozen type is tertiair te licht (AA) */
+.dna-type-item.active .type-info span {
+    color: var(--text-secondary);
+}
+
 .type-info {
     display: flex;
     flex-direction: column;

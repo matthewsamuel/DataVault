@@ -408,6 +408,16 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     if theme == "light":
                         for control in page.evaluate("__unnamedControls()"):
                             problems.append(f"unnamed control on {view}: {control}")
+                # The Spotify windows (DNA and an explanation) too
+                for name, opener, closer in (("spotify-dna", "showDnaExplanation()", "closeDnaModal()"),
+                                             ("spotify-uitleg", "showInsightExplanation('record_day')", "closeInsightModal()")):
+                    page.evaluate(f"switchMainView('spotify'); {opener}")
+                    page.wait_for_timeout(500)
+                    page.screenshot(path=str(shots / f"{name}_{theme}.png"))
+                    page.add_script_tag(path=str(A11Y_CHECKS))
+                    for fail in page.evaluate("__contrastFailures()"):
+                        problems.append(f"contrast {theme} {name}: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+                    page.evaluate(closer)
             print(f"  ok      contrast and names checked on {len(VIEWS)} screens in 2 themes")
             print(f"          screenshots: {shots}")
             page.evaluate("setTheme('auto')")
