@@ -240,6 +240,20 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # Move window: with a folder highlighted, Enter on Annuleren or × closes it and moves nothing
             moved_src, second_src = page.evaluate("[gridFiles()[0].path, gridFiles()[1].path]")
             move_open = "document.getElementById('modal-move-file').classList.contains('active')"
+            # The folder the arrows are on is visible (ring) and is what the button would move to
+            step("move: arrows highlight a folder", lambda: (
+                page.evaluate("openMediaModal(gridFiles()[0])"), page.keyboard.press("m"),
+                page.wait_for_timeout(400), page.keyboard.press("ArrowDown")), 0.4)
+            marked = page.evaluate("""(() => {
+                const node = document.querySelector('#move-folder-tree .move-folder-node.keyboard-focus');
+                return node && { ring: getComputedStyle(node).outlineStyle, path: node.dataset.path,
+                                 chosen: selectedMoveFolder, ready: !document.getElementById('btn-confirm-move').disabled };
+            })()""")
+            expect(marked and marked["ring"] != "none" and marked["path"] == marked["chosen"] and marked["ready"],
+                   f"move: the highlighted folder is not visible or not the one the button moves to ({marked})")
+            page.keyboard.press("Escape")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
             for name, button in (("Annuleren", "#modal-move-file .move-modal-footer .btn-secondary"),
                                  ("×", "#modal-move-file .modal-close")):
                 step(f"move: Enter on {name}", lambda button=button: (

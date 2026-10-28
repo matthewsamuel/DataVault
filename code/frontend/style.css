@@ -1403,10 +1403,16 @@ textarea.input {
     cursor: pointer;
 }
 
-.menu-item:hover,
-.menu-item:focus-visible {
+.menu-item:hover {
     background-color: var(--surface-hover);
     outline: none;
+}
+
+/* Met het toetsenbord: dezelfde groene ring als elke andere knop */
+.menu-item:focus-visible {
+    background-color: var(--surface-active);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 .menu-item .menu-check {
@@ -2156,10 +2162,15 @@ button.nav-brand {
     cursor: pointer;
 }
 
-.theme-option:hover,
-.theme-option:focus-visible {
+.theme-option:hover {
     background-color: var(--surface-hover);
     outline: none;
+}
+
+.theme-option:focus-visible {
+    background-color: var(--surface-active);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 /* Vinkje voor de huidige keuze (Font Awesome check) */
@@ -3154,6 +3165,13 @@ a.breadcrumb-item:hover {
 
 .move-folder-node:hover {
     background: var(--surface-hover);
+}
+
+/* De map die met de pijltjes gemarkeerd is (folder-tree.js), zoals .folder-item */
+.move-folder-node.keyboard-focus {
+    background-color: var(--surface-active);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 .move-folder-node.selected {
@@ -8087,9 +8105,10 @@ button.otd-settings-icon:hover {
     margin-bottom: var(--space-md);
 }
 
+/* Vaste breedte voor de toetsen: de uitleg begint in elke groep op dezelfde plek */
 .shortcut-group dl {
     display: grid;
-    grid-template-columns: max-content 1fr;
+    grid-template-columns: 112px minmax(0, 1fr);
     gap: var(--space-sm) var(--space-md);
     align-items: baseline;
 }

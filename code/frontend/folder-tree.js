@@ -244,6 +244,7 @@ function initFolderTreeKeyNav(config) {
         containerId,
         itemSelector = '.folder-item',
         onSelect,
+        onHighlight,
         onClose,
         onConfirm,
         chevronSelector = '.folder-chevron',
@@ -301,6 +302,7 @@ function initFolderTreeKeyNav(config) {
         if (highlightIndex >= 0 && highlightIndex < items.length) {
             items[highlightIndex].classList.add('keyboard-focus');
             items[highlightIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            if (onHighlight) onHighlight(items[highlightIndex]);
         }
     }
 
@@ -438,13 +440,13 @@ function activateFolderTreeModal(opts) {
         itemSelector = '.folder-item',
         childrenSelector = '.folder-children',
         invertCollapse = false,
-        onSelect, onConfirm, onClose,
+        onSelect, onHighlight, onConfirm, onClose,
         focusSelector,
     } = opts;
 
     const nav = initFolderTreeKeyNav({
         containerId, itemSelector, childrenSelector, invertCollapse,
-        onSelect, onConfirm, onClose,
+        onSelect, onHighlight, onConfirm, onClose,
     });
 
     const modal = document.getElementById(modalId);

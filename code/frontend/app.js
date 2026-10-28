@@ -1347,6 +1347,7 @@ function openMoveFileModal(fileData = null) {
             const path = item.dataset.path;
             if (path) selectMoveDestination(path);
         },
+        onHighlight: (item) => { if (item.dataset.path) previewMoveDestination(item.dataset.path, true); },
         onConfirm: () => { if (selectedMoveFolder) confirmMoveFile(); },
         onClose: closeMoveFileModal,
     }).nav;
@@ -1391,6 +1392,16 @@ function renderMoveFolderTreeUI() {
 
 function selectMoveDestination(path) {
     if (moveInFlight || !fileToMove) return;
+    previewMoveDestination(path, false);
+    // Re-render to show selection highlight
+    renderMoveFolderTreeUI();
+}
+
+// De gekozen doelmap tonen (links 'Naar', de knop aan) zonder de boom opnieuw te tekenen: ook
+// voor de map die met de pijltjes gemarkeerd is, zodat Enter en de knop hetzelfde doen als
+// wat je ziet. quiet: geen melding als het de huidige map is (bij pijltjes)
+function previewMoveDestination(path, quiet) {
+    if (moveInFlight || !fileToMove) return;
     selectedMoveFolder = path;
     const btn = document.getElementById('btn-confirm-move');
 
@@ -1399,7 +1410,7 @@ function selectMoveDestination(path) {
 
     if (path === currentDir) {
         btn.disabled = true;
-        showToast('Verplaatsen', 'Het bestand staat al in deze map', 'warning');
+        if (!quiet) showToast('Verplaatsen', 'Het bestand staat al in deze map', 'warning');
     } else {
         btn.disabled = false;
     }
@@ -1413,9 +1424,8 @@ function selectMoveDestination(path) {
         destPath.title = path;
         destDisplay.style.display = '';
     }
-
-    // Re-render to show selection highlight
-    renderMoveFolderTreeUI();
+    document.querySelectorAll('#move-folder-tree .move-folder-node').forEach(node =>
+        node.classList.toggle('selected', node.dataset.path === path));
 }
 
 async function confirmMoveFile() {
