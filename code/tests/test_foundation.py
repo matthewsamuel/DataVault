@@ -101,8 +101,8 @@ def test_legacy_database_keeps_ratings_streak_and_undo_data(tmp_path):
     assert db.get_folder_status("/v/library/Oud") is False
     run = db.get_last_delete_run()
     assert run["run_id"] == "run-1"
-    assert db.get_delete_operations("run-1") == [
-        {"src_path": "/v/RAW/b.jpg", "dst_path": "/v/RAW_DUPLICATES/b.jpg"}
+    assert [(op["src_path"], op["dst_path"]) for op in db.get_delete_operations("run-1")] == [
+        ("/v/RAW/b.jpg", "/v/RAW_DUPLICATES/b.jpg")
     ]
     stats = db.get_keurer_stats()
     assert stats["streak"] == 3

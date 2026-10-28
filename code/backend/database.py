@@ -201,7 +201,7 @@ class Database:
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT src_path, dst_path
+            SELECT id, src_path, dst_path
             FROM delete_operations
             WHERE run_id = ?
             ORDER BY id
@@ -210,9 +210,41 @@ class Database:
         conn.close()
         
         return [
-            {"src_path": row[0], "dst_path": row[1]}
+            {"id": row[0], "src_path": row[1], "dst_path": row[2]}
             for row in results
         ]
+    
+    def get_delete_runs(self) -> List[Dict[str, Any]]:
+        """All delete runs, newest first"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT run_id, timestamp, total_files
+            FROM delete_runs
+            ORDER BY timestamp DESC, rowid DESC
+        """)
+        results = cursor.fetchall()
+        conn.close()
+        return [
+            {"run_id": row[0], "timestamp": row[1], "total_files": row[2]}
+            for row in results
+        ]
+    
+    def delete_delete_operation(self, op_id: int):
+        """Forget one restored file of a run; the run itself goes once it is empty"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT run_id FROM delete_operations WHERE id = ?", (op_id,))
+        row = cursor.fetchone()
+        cursor.execute("DELETE FROM delete_operations WHERE id = ?", (op_id,))
+        if row:
+            cursor.execute("""
+                DELETE FROM delete_runs
+                WHERE run_id = ?
+                  AND NOT EXISTS (SELECT 1 FROM delete_operations WHERE run_id = ?)
+            """, (row[0], row[0]))
+        conn.commit()
+        conn.close()
     
     # Keurer methods
 
@@ -369,14 +401,3 @@ class Database:
             "streak": streak,
             "goal_reached_today": today >= 20,
         }
-
-    def delete_run(self, run_id: str):
-        """Delete a run and its operations (after successful undo)"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("DELETE FROM delete_operations WHERE run_id = ?", (run_id,))
-        cursor.execute("DELETE FROM delete_runs WHERE run_id = ?", (run_id,))
-        
-        conn.commit()
-        conn.close()

@@ -94,3 +94,56 @@ def test_delete_single_never_overwrites_in_raw_duplicates(client, vault):
     assert r.json()["was_conflict"] is True
     assert occupied.read_bytes() == b"EARLIER DUPLICATE"
     assert r.json()["dst_path"].endswith("strand 001 kopie_DUP_001.jpg")
+
+
+def _pair(vault, name, data):
+    """An original in library/ and an identical copy in RAW/misc/."""
+    keeper = vault / "library" / f"orig_{name}"
+    dup = vault / "RAW" / "misc" / name
+    keeper.write_bytes(data)
+    dup.write_bytes(data)
+    return keeper, dup
+
+
+def test_undo_last_passes_over_a_run_whose_file_is_gone(client, vault):
+    k1, d1 = _pair(vault, "d1.jpg", b"eerste")
+    k2, d2 = _pair(vault, "d2.jpg", b"tweede")
+    assert _delete_single(client, d1, k1).status_code == 200
+    assert _delete_single(client, d2, k2).status_code == 200
+    moved2 = vault / "RAW_DUPLICATES" / "misc" / "d2.jpg"
+    elsewhere = vault / "library" / "handmatig_d2.jpg"
+    os.rename(moved2, elsewhere)  # the user tidied RAW_DUPLICATES by hand (test vault)
+
+    r = client.post("/api/raw_duplicates/undo_last")
+    assert r.status_code == 200, r.text
+    assert r.json()["restored"] == 1
+    assert d1.read_bytes() == b"eerste"  # the older run is reachable again
+
+    r = client.post("/api/raw_duplicates/undo_last")
+    assert r.status_code == 404  # nothing left to restore, and no endless 'restored: 0'
+
+    # If the file comes back to RAW_DUPLICATES, its run can still be undone
+    os.rename(elsewhere, moved2)
+    r = client.post("/api/raw_duplicates/undo_last")
+    assert r.status_code == 200 and r.json()["restored"] == 1
+    assert d2.read_bytes() == b"tweede"
+
+
+def test_undo_last_keeps_records_of_files_it_could_not_restore(client, vault, monkeypatch):
+    from backend.routes import duplicates
+
+    k1, d1 = _pair(vault, "d1.jpg", b"eerste")
+    assert _delete_single(client, d1, k1).status_code == 200
+    real_move = duplicates.move_no_overwrite
+
+    def failing_move(*args, **kwargs):
+        raise duplicates.FileOperationError("schijf vergrendeld")
+
+    monkeypatch.setattr(duplicates, "move_no_overwrite", failing_move)
+    r = client.post("/api/raw_duplicates/undo_last").json()
+    assert r["restored"] == 0 and r["errors"]
+
+    monkeypatch.setattr(duplicates, "move_no_overwrite", real_move)
+    r = client.post("/api/raw_duplicates/undo_last")
+    assert r.status_code == 200 and r.json()["restored"] == 1
+    assert d1.read_bytes() == b"eerste"

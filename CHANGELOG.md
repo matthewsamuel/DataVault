@@ -74,3 +74,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   RAW_DUPLICATES, TRASH of de cache worden geweigerd. (Voorheen kon één verzoek de hele
   RAW-map verplaatsen.)
 - Een geweigerd verzoek laat geen lege "verwijder-run" meer achter in de undo-geschiedenis.
+- "Laatste ongedaan maken" voor duplicaten liep vast als de bestanden van de laatste actie niet
+  meer in RAW_DUPLICATES stonden (bijv. handmatig opgeruimd): oudere acties waren dan nooit meer
+  terug te zetten. Zo'n actie wordt nu overgeslagen (en blijft bewaard, voor als de bestanden
+  terugkomen). Bestanden die niet teruggezet konden worden, blijven geregistreerd voor een
+  volgende poging in plaats van uit de geschiedenis te verdwijnen.

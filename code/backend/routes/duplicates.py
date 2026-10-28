@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import os
+import stat
 
 from backend.config import Config, validate_path_in_vault
 from backend.file_ops import (
@@ -74,75 +75,106 @@ async def get_duplicates_endpoint() -> Dict[str, Any]:
         "duplicates": last_scan_results
     }
 
+def _paths_allowed(op: Dict[str, Any]) -> bool:
+    """Re-validate what the database says before moving anything."""
+    return (
+        is_inside(Path(op["dst_path"]), config.DUPLICATES_FOLDER)
+        and validate_path_in_vault(Path(op["src_path"]), config.VAULT_ROOT)
+        and _in_protected_folder(Path(op["src_path"])) is None
+    )
+
+
+def _still_there(op: Dict[str, Any]) -> bool:
+    """The moved file is still a regular file at its RAW_DUPLICATES location."""
+    try:
+        return stat.S_ISREG(os.lstat(op["dst_path"]).st_mode)
+    except OSError:
+        return False
+
+
+def _restorable(op: Dict[str, Any]) -> bool:
+    return _paths_allowed(op) and _still_there(op)
+
+
 @router.post("/api/raw_duplicates/undo_last")
 def undo_last_delete_endpoint() -> Dict[str, Any]:
     """
-    Undo the most recent delete operation.
-    Moves files back from RAW_DUPLICATES to RAW.
+    Undo the most recent delete run that still has something to restore.
+    Moves files back from RAW_DUPLICATES to where they came from.
+    
+    A run whose files are all gone from RAW_DUPLICATES (e.g. moved by hand) is
+    passed over instead of blocking every older run; its records are kept, so it
+    becomes restorable again if the files come back. Restored files are removed
+    from the run; files that failed stay recorded for a later attempt.
     """
     if not config:
         raise HTTPException(status_code=500, detail="Configuration not initialized")
     
-    # Get last delete run
-    last_run = db.get_last_delete_run()
-    
-    if not last_run:
-        raise HTTPException(status_code=404, detail="No delete operations to undo")
-    
-    run_id = last_run["run_id"]
-    operations = db.get_delete_operations(run_id)
-    
-    if not operations:
-        raise HTTPException(status_code=404, detail="No operations found for last run")
-    
-    restored = 0
-    skipped = 0
-    errors = []
-    
-    for op in operations:
-        # Note: src_path is the ORIGINAL location (in RAW)
-        # dst_path is where we moved it (in RAW_DUPLICATES)
-        # For undo, we move FROM dst_path BACK TO src_path
+    with ARCHIVE_LOCK:
+        runs = db.get_delete_runs()
+        if not runs:
+            raise HTTPException(status_code=404, detail="No delete operations to undo")
         
-        dst_path = Path(op["dst_path"])  # Current location
-        src_path = Path(op["src_path"])  # Original location
+        run_id = None
+        operations = []
+        for run in runs:
+            ops = db.get_delete_operations(run["run_id"])
+            if any(_restorable(op) for op in ops):
+                run_id, operations = run["run_id"], ops
+                break
         
-        # Re-validate what the database says before moving anything
-        if not is_inside(dst_path, config.DUPLICATES_FOLDER) or not validate_path_in_vault(src_path, config.VAULT_ROOT):
-            errors.append(f"Refused to restore {dst_path}: path outside RAW_DUPLICATES or vault")
-            skipped += 1
-            continue
+        if run_id is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Nothing left to restore: the moved files are no longer in RAW_DUPLICATES"
+            )
         
-        # Skip if file no longer exists at destination
-        if dst_path.is_symlink() or not dst_path.is_file():
-            skipped += 1
-            continue
+        restored = 0
+        skipped = 0
+        errors = []
         
-        try:
-            # Move back; if the original location is taken, use name_RESTORED_001.ext
-            restored_path = move_no_overwrite(dst_path, src_path, suffix_prefix="RESTORED")
+        for op in operations:
+            # src_path is the ORIGINAL location, dst_path is where it went (in RAW_DUPLICATES).
+            # For undo, we move FROM dst_path BACK TO src_path
+            dst_path = Path(op["dst_path"])  # Current location
+            src_path = Path(op["src_path"])  # Original location
+            
+            if not _paths_allowed(op):
+                errors.append(f"Refused to restore {dst_path}: path outside RAW_DUPLICATES or vault")
+                skipped += 1
+                continue
+            
+            # Skip if file no longer exists at destination
+            if not _still_there(op):
+                skipped += 1
+                continue
+            
+            try:
+                # Move back; if the original location is taken, use name_RESTORED_001.ext
+                restored_path = move_no_overwrite(dst_path, src_path, suffix_prefix="RESTORED")
+            
+            except CrossDeviceError as e:
+                errors.append(f"CRITICAL: Cross-device move blocked for {dst_path}: {str(e)}")
+                skipped += 1
+                continue
+            
+            except FileOperationError as e:
+                errors.append(f"Failed to restore {dst_path}: {str(e)}")
+                skipped += 1
+                continue
+            
+            except Exception as e:
+                errors.append(f"Unexpected error restoring {dst_path}: {str(e)}")
+                skipped += 1
+                continue
+            
+            db.delete_delete_operation(op["id"])
             
             # Invalidate hash cache
             db.invalidate_hash(dst_path)
             db.invalidate_hash(restored_path)
             
             restored += 1
-        
-        except CrossDeviceError as e:
-            errors.append(f"CRITICAL: Cross-device move blocked for {dst_path}: {str(e)}")
-            skipped += 1
-
-        except FileOperationError as e:
-            errors.append(f"Failed to restore {dst_path}: {str(e)}")
-            skipped += 1
-
-        except Exception as e:
-            errors.append(f"Unexpected error restoring {dst_path}: {str(e)}")
-            skipped += 1
-    
-    # Delete run record after successful undo
-    if restored > 0:
-        db.delete_run(run_id)
     
     return {
         "run_id": run_id,
