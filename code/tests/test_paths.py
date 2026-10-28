@@ -314,6 +314,12 @@ def test_shows_settings_and_vote_only_accept_vault_paths(client, vault, outside)
     assert client.get("/api/shows/settings").json()["disabled_folders"] == [str(vault / "library" / "Familie")]
     assert client.post("/api/shows/vote", json={"path": str(outside / "secret.jpg"), "vote": "up"}).status_code == 403
     assert client.post("/api/shows/vote", json={"path": str(vault / STRAND), "vote": "up"}).status_code == 200
+    # R-2.1b-4: no rating rows for names that are not an existing regular file
+    os.symlink(vault / STRAND, vault / "RAW/misc/link.jpg")
+    for missing in ["RAW/misc/nonexist.jpg", str(vault / "RAW/misc/nonexist.jpg"), "RAW/misc", "RAW/misc/link.jpg"]:
+        assert client.post("/api/shows/vote", json={"path": missing, "vote": "up"}).status_code == 404, missing
+    from backend.database import Database
+    assert list(Database(client.app.state.config.DB_PATH).get_all_ratings()) == [str(vault / STRAND)]
 
 
 def test_keurer_refuses_outside_and_internal_folders(client, vault, outside, config):

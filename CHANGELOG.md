@@ -57,6 +57,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   van hoe de naam binnenkwam.
 - De eigen bestanden van de app (de database en de miniaturen-cache) worden niet meer als foto
   geserveerd en kunnen nergens meer gekozen worden.
+- Stemmen in Shows op een pad dat geen bestaand bestand is (een tikfout, een map of een
+  snelkoppeling) wordt geweigerd, zodat er geen ratings voor niet-bestaande bestanden meer in de
+  database belanden.
 - Het opslagoverzicht werkt nu ook als er een map is waarvan de naam met een streepje begint
   (bijv. `-h`); voorheen gaf het hele overzicht dan een fout.
 

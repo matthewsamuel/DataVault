@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from pathlib import Path
 from typing import List, Dict, Any
+import os
 import random
+import stat
 from backend.config import Config, is_media_file, is_video
 from backend.paths import ArchiveFilter, resolve_in_vault, scan_dir, walk_archive
 
@@ -291,7 +293,15 @@ async def vote_file(payload: Dict[str, Any]):
     if not path or not isinstance(path, str) or vote not in ("up", "down"):
         raise HTTPException(status_code=400, detail="Missing or invalid path/vote")
 
-    path = str(resolve_in_vault(path, config))
+    target = resolve_in_vault(path, config)
+    # Only an existing regular file gets a rating (no rows for typos, folders or symlinks)
+    try:
+        is_file = stat.S_ISREG(os.lstat(target).st_mode)
+    except OSError:
+        is_file = False
+    if not is_file:
+        raise HTTPException(status_code=404, detail="Bestand niet gevonden")
+    path = str(target)
 
     current_rating = db.get_rating(path)
     change = 50 if vote == "up" else -50
