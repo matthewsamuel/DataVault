@@ -1000,25 +1000,38 @@ function keurerSetupDrag(card) {
 
 // ==================== TOETSENBORD ====================
 
+// Mogen de Keurer-toetsen (pijltjes, spatie) nu iets doen? Alleen als de toets voor de Keurer
+// bedoeld is: niet tijdens typen, niet in het themamenu of een ander menu of venster, en niet als
+// een ander deel van het scherm de toets al afhandelde. Een pijltje beslist over een bestand en
+// verplaatst het, dus bij twijfel: niets doen.
+function keurerKeyIsForKeurer(e, key) {
+    if (e.defaultPrevented) return false;
+    const themeMenu = document.getElementById('theme-dropdown');
+    if (themeMenu && themeMenu.classList.contains('open')) return false;
+    const el = document.activeElement;
+    if (isTypingTarget(e.target) || isTypingTarget(el)) return false;
+    if (!el || el === document.body || el === document.documentElement) return true;
+    if (el.closest('#section-keurer, #keurer-preview-overlay')) return true;
+    // Net op het tabblad geklikt: de focus staat in het hoofdmenu. Pijltjes doen daar niets
+    // anders; spatie zou een ander tabblad openen, dus alleen op het Keurer-tabblad zelf.
+    const tab = el.closest('.nav-tabs [data-view]');
+    if (tab) return key !== 'Space' || tab.dataset.view === 'keurer';
+    return false;
+}
+
 document.addEventListener('keydown', function (e) {
     const section = document.getElementById('section-keurer');
     if (!section || !section.classList.contains('active')) return;
     // Het sneltoetsenoverzicht (?) ligt erboven: geen beslissing achter het venster
     if (document.querySelector('.dv-overlay.active')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
 
     const moveModalActive = document.getElementById('modal-keurer-move').classList.contains('active');
 
-    // Enter in move-modal: bevestig verplaatsen
+    // Enter in move-modal: bevestig verplaatsen (ook vanuit het zoekveld van het venster)
     if (e.key === 'Enter' && moveModalActive) {
         e.preventDefault();
         if (keurerMoveSelectedFolder) keurerConfirmMove();
-        return;
-    }
-
-    // Spatie: toggle preview (niet als move-modal open is)
-    if (e.code === 'Space' && !moveModalActive) {
-        e.preventDefault();
-        keurerTogglePreview();
         return;
     }
 
@@ -1028,12 +1041,21 @@ document.addEventListener('keydown', function (e) {
         if (moveModalActive)   { keurerCloseMoveModal(); return; }
     }
 
-    // Andere toetsen: niet in modals of inputs of preview
-    if (document.querySelector('.modal.active')) return;
-    if (keurerPreviewOpen) return;
-    const tag = document.activeElement && document.activeElement.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    // Andere toetsen: niet in vensters, niet tijdens typen, niet in menu's
+    if (moveModalActive || document.querySelector('.modal.active')) return;
+    const space = e.code === 'Space' || e.key === ' ';
+    const arrow = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key);
+    if (!space && !arrow) return;
+    if (!keurerKeyIsForKeurer(e, space ? 'Space' : e.key)) return;
 
+    // Spatie: preview open of dicht
+    if (space) {
+        e.preventDefault();
+        keurerTogglePreview();
+        return;
+    }
+
+    if (keurerPreviewOpen) return;
     if (e.key === 'ArrowLeft')        { e.preventDefault(); keurerDecideKeep(); }
     else if (e.key === 'ArrowRight')  { e.preventDefault(); keurerDecideDelete(); }
     else if (e.key === 'ArrowUp')     { e.preventDefault(); keurerDecideMove(); }

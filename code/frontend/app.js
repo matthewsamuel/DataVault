@@ -153,8 +153,16 @@ document.addEventListener('keydown', (e) => {
         e.preventDefault();
         e.stopPropagation();
         closeThemeDropdown(true);
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight'
+        || e.key === 'Home' || e.key === 'End') {
+        // Deze toetsen zijn voor het menu: niet ook voor de Keurer, het raster of de viewer erachter
         e.preventDefault();
+        e.stopPropagation();
+        if (e.key === 'Home' || e.key === 'End') {
+            options[e.key === 'Home' ? 0 : options.length - 1].focus();
+            return;
+        }
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
         const step = e.key === 'ArrowDown' ? 1 : -1;
         options[(at + step + options.length) % options.length].focus();
     } else if (e.key === 'Tab') {
