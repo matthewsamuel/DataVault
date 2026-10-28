@@ -107,7 +107,8 @@ def test_hashes_are_stable_and_survive_resizing_and_recompression(tmp_path):
     _scene(7, (256, 192)).save(tmp_path / "golden.png")
     golden = near_dups.analyse(str(tmp_path / "golden.png"))
     assert (golden["dhash"], golden["phash"]) == (0xC1CCCCCCCBCBCFF3, 0xA2D64D6988B59D33)
-    assert near_dups.ALGO_VERSION == 1
+    assert golden["sharpness"] == pytest.approx(49.449, abs=0.01)    # measured at 512 px (version 2)
+    assert near_dups.ALGO_VERSION == 2
 
 
 def test_signed_storage_round_trips_every_64_bit_value():
@@ -341,6 +342,39 @@ def test_the_sharp_photo_beats_its_blurred_copy_and_the_order_is_fixed(client, v
     assert set(members["a scherp.jpg"]["breakdown"]) == {"sharpness", "resolution", "exposure", "choice"}
     again = _with(_series(client, "normaal"), "a scherp.jpg")[0]
     assert again == series
+
+
+def test_a_scaled_down_copy_never_scores_sharper_than_its_original(client, vault):
+    folder = vault / "RAW/2024/kust"
+    folder.mkdir(parents=True)
+    base = _scene(57, (1600, 1200))
+    base.save(folder / "kust.jpg", quality=92)
+    base.resize((800, 600), Image.Resampling.LANCZOS).save(folder / "kust half.jpg", quality=70)
+    base.resize((400, 300), Image.Resampling.LANCZOS).save(folder / "kust klein.jpg", quality=60)
+    base.filter(ImageFilter.GaussianBlur(1.5)).save(folder / "kust wazig.jpg", quality=92)
+    # Measured at one size, the small copy is as soft as it is (at its own 400 px it looked sharper)
+    small = near_dups.analyse(str(folder / "kust klein.jpg"))["sharpness"]
+    assert small < near_dups.analyse(str(folder / "kust.jpg"))["sharpness"]
+    _index(client)
+    _run(client)
+    series = _with(_series(client, "ruim"), "kust.jpg")[0]
+    members = {m["name"]: m for m in series["members"]}
+    assert set(members) == {"kust.jpg", "kust half.jpg", "kust klein.jpg", "kust wazig.jpg"}
+    sharp = {name: m["breakdown"]["sharpness"] for name, m in members.items()}
+    assert sharp["kust.jpg"] == near_dups.POINTS["sharpness"]
+    assert sharp["kust half.jpg"] <= sharp["kust.jpg"] and sharp["kust klein.jpg"] < sharp["kust.jpg"]
+    assert sharp["kust wazig.jpg"] < sharp["kust.jpg"]
+    assert members["kust.jpg"]["best"]
+
+    # Directly: a smaller member is capped at the sharpest bigger one, a same-size one is not
+    def member(i, w, sharpness):
+        return {"id": i, "path": f"/v/{i}.jpg", "size": 100, "width": w, "height": w * 3 // 4,
+                "sharpness": sharpness, "clip_low": 0.0, "clip_high": 0.0, "keurer_keep": False,
+                "rating": None, "votes": 0}
+    group = [member(1, 1600, 100.0), member(2, 800, 130.0), member(3, 1600, 60.0)]
+    near_dups.score_members(group)
+    assert group[1]["breakdown"]["sharpness"] == group[0]["breakdown"]["sharpness"] == 40
+    assert group[2]["breakdown"]["sharpness"] < 40 and group[0]["best"]
 
 
 def test_quality_score_weighs_exposure_and_the_users_own_choice():

@@ -48,7 +48,8 @@ from backend import thumbnail  # noqa: F401  (registers the HEIC opener)
 
 PHASH_JOB = "phash"
 ALGO = "dhash+phash/dct32"
-ALGO_VERSION = 1              # bump when analyse() changes: every photo is analysed again
+ALGO_VERSION = 2              # bump when analyse() changes: every photo is analysed again
+                              # (2: sharpness of small photos measured at ANALYSE_SIZE too)
 ANALYSE_SIZE = 512            # the photo is analysed at most this many pixels wide or high
 HASH_BITS = 64
 
@@ -110,6 +111,23 @@ def _open_small(path: str) -> Image.Image:
     return img
 
 
+def _at_analyse_size(grey: Image.Image) -> Image.Image:
+    """
+    Sharpness is measured with the long side at ANALYSE_SIZE for every photo: a small photo
+    is scaled up first. Measured at its own size, a 400 px copy has steeper edges per pixel
+    than its 1600 px original and would look sharper; scaled up it looks as soft as it is.
+    """
+    w, h = grey.size
+    if max(w, h) >= ANALYSE_SIZE:
+        return grey
+    scale = ANALYSE_SIZE / max(w, h)
+    return grey.resize((max(3, round(w * scale)), max(3, round(h * scale))), Image.Resampling.BILINEAR)
+
+
+def _laplacian(g: np.ndarray) -> np.ndarray:
+    return 4 * g[1:-1, 1:-1] - g[:-2, 1:-1] - g[2:, 1:-1] - g[1:-1, :-2] - g[1:-1, 2:]
+
+
 def analyse(path: str) -> Dict[str, Any]:
     """
     The fingerprint and quality figures of one photo. Raises Undecodable for a file that
@@ -118,7 +136,7 @@ def analyse(path: str) -> Dict[str, Any]:
     img = _open_small(path)
     grey = img.convert("L")
     g = np.asarray(grey, dtype=np.float32)
-    lap = 4 * g[1:-1, 1:-1] - g[:-2, 1:-1] - g[2:, 1:-1] - g[1:-1, :-2] - g[1:-1, 2:]
+    lap = _laplacian(np.asarray(_at_analyse_size(grey), dtype=np.float32))
     rgb = np.asarray(img, dtype=np.float32)
     h2, w2 = rgb.shape[0] // 2, rgb.shape[1] // 2
     quarters = [rgb[:h2, :w2], rgb[:h2, w2:], rgb[h2:, :w2], rgb[h2:, w2:]]
@@ -962,12 +980,29 @@ def sorted_series(structure: Dict[str, Any], sort: str) -> List[Dict[str, Any]]:
 POINTS = {"sharpness": 40, "resolution": 25, "exposure": 15, "choice": 20}
 
 
+def _fair_sharpness(members: List[Dict[str, Any]]) -> List[float]:
+    """
+    The sharpness of each member, never above that of a member with more pixels: the
+    photos of a series show the same thing, so a smaller one is a scaled-down copy and
+    cannot hold more detail than its source. (Measured at one size, recompression
+    noise can make such a copy look a little sharper; it then ties with its source.)
+    """
+    pixels = [(m["width"] or 0) * (m["height"] or 0) for m in members]
+    out = []
+    for m, own in zip(members, pixels):
+        sharp = m["sharpness"] or 0.0
+        bigger = [b["sharpness"] or 0.0 for b, p in zip(members, pixels) if p > own]
+        out.append(min(sharp, max(bigger)) if bigger else sharp)
+    return out
+
+
 def score_members(members: List[Dict[str, Any]]) -> None:
     """Adds score, breakdown and best to every member (dicts with the fields of _member_rows)."""
-    max_sharp = max((m["sharpness"] or 0.0) for m in members) or 0.0
+    sharpness = _fair_sharpness(members)
+    max_sharp = max(sharpness) or 0.0
     max_pixels = max((m["width"] or 0) * (m["height"] or 0) for m in members) or 0
-    for m in members:
-        sharp = POINTS["sharpness"] * ((m["sharpness"] or 0.0) / max_sharp) ** 0.5 if max_sharp > 0 else POINTS["sharpness"]
+    for m, fair in zip(members, sharpness):
+        sharp = POINTS["sharpness"] * (fair / max_sharp) ** 0.5 if max_sharp > 0 else POINTS["sharpness"]
         pixels = (m["width"] or 0) * (m["height"] or 0)
         resolution = POINTS["resolution"] * pixels / max_pixels if max_pixels else POINTS["resolution"]
         clipped = (m["clip_low"] or 0.0) + (m["clip_high"] or 0.0)

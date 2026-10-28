@@ -120,6 +120,9 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   gelijk zijn). Een groep van meer dan 48 foto's komt in delen, op tijdsvolgorde.
 - Score (0-100, binnen de reeks, deterministisch): scherpte 40, resolutie 25, belichting 15, jouw
   keuze 20 (Keurer "houden" 12, Shows-waardering tot 8); gelijke stand: grootste bestand, dan pad.
+  Scherpte wordt bij elke foto gemeten met de lange zijde op 512 px (een kleinere foto wordt eerst
+  vergroot; `ALGO_VERSION` 2), en een foto telt nooit scherper dan een foto uit dezelfde reeks met
+  meer pixels: een verkleinde kopie kan niet meer detail hebben dan zijn bron.
 - Bevestigen verplaatst de rest met `move_no_overwrite` naar
   `RAW_DUPLICATES/near-duplicates/<pad onder RAW>`, als één actie per reeks in het Herstelcentrum
   (`recovery.ActionRecorder`, soort `near_dup`). De server controleert vooraf dat de foto's één
