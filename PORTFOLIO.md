@@ -886,8 +886,12 @@ def run(ctx: JobContext):                       # a job type's handler
   starting the same job twice returns the first.
 - If the handler fails, or finishes, while `VAULT_ROOT` is gone, the job goes to `waiting_for_vault`,
   polls, and runs again from its checkpoint (hashes and thumbnails already made are skipped through
-  their caches). A job is only `done` when it finished with the vault present. A final state that
-  could not be saved (the database is on the vault disk) is written once the disk is back.
+  their caches). A job is only `done` when it finished with the vault present, and a run that hit a
+  read error while the vault was gone is redone even when the disk is back by its end. A final state
+  that could not be saved (the database is on the vault disk) is written once the disk is back.
+- The thumbnail and hashing jobs keep what earlier runs did in their checkpoint (`made_before`,
+  `hashed_before`), so the final summary covers every run of the job. Each job carries `has_result`,
+  so the dock only offers a stored result that has not been pruned.
 - On start-up, jobs left `running`, `queued` or `waiting_for_vault` become `interrupted`; on shutdown
   the worker stops at its next check and the job is left `interrupted`, ready to resume.
 - The frontend (`jobs.js`) shows a job dock with progress bar, ETA (from a 30 s window of progress

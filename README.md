@@ -383,6 +383,7 @@ Listening time: 45,000 minutes
 **Solution:**
 - **Lazy Thumbnail Generation:** JPEG thumbnails (300x300, quality 85) generated on first access
 - **Cache Validation:** Thumbnails valid if mtime > original file mtime; auto-regenerated if file changes
+- **Placeholders never stand in for a photo:** a file that cannot be read right now (disk unplugged, no permission) gets a shared placeholder, never one cached under its own name. The thumbnail job (`/api/jobs` type `thumbnails`) never writes placeholders: an unreadable or undecodable photo or video counts as an error, a cached placeholder for a photo is made again (`thumbnail.is_placeholder` compares the exact placeholder bytes), and videos without ffmpeg are skipped as `no_ffmpeg`
 - **Format Conversion:** Pillow handles HEIF (with pillow-heif), RAW, JPEG, PNG, etc.; converts to RGB as needed
 - **Video Frame Extraction:** ffmpeg extracts frame at 1s mark (or first frame if shorter)
 - **Concurrent Processing:** ThreadPoolExecutor for multi-core hash/thumbnail operations
