@@ -620,7 +620,8 @@ registerSettingsSection({
         body.append(
             settingsRow('Status', 'Geïnstalleerd'),
             settingsRow('Herkend', recognised),
-            settingsRow('Nog te doen', job ? (job.message || 'Bezig…') : formatNumberNl(status.pending)));
+            settingsRow('Nog te doen', job ? (job.message || 'Bezig…')
+                : status.pending ? `${formatNumberNl(status.pending)} foto\u2019s en video\u2019s` : 'Niets: alles is bij'));
         if (status.per_second) {
             body.append(settingsRow('Snelheid', `${formatNumberNl(status.per_second)} per seconde`
                 + (status.device === 'gpu' ? ' (grafische chip)' : status.device === 'cpu' ? ' (processor)' : '')));
