@@ -537,3 +537,75 @@ def test_bounded_map_never_holds_more_than_its_window():
     gen = jobs.bounded_map(work, range(10_000), workers=2, window=4)
     next(gen)
     gen.close()
+
+
+# ==================== RESUME WHILE A WORKER IS STILL ENDING ====================
+
+def _test_manager(client, run):
+    manager = jobs.JobManager(client.app.state.db, client.app.state.config,
+                              [jobs.JobType("proef", "Proef", prepare=lambda p: p, run=run)])
+    return manager
+
+
+def test_resume_while_the_paused_worker_is_still_cleaning_up_keeps_the_new_run(client, monkeypatch):
+    """R23-2: the old worker's cleanup must not drop the run resume() just started."""
+    release = threading.Event()
+
+    def run(ctx):
+        while not release.is_set():
+            ctx.check()
+            time.sleep(0.01)
+        return {"klaar": True}
+
+    manager = _test_manager(client, run)
+    written, resumed = threading.Event(), threading.Event()
+    real = manager._finish_stopped
+
+    def slow_finish(live):
+        real(live)              # PAUSED is in the database...
+        written.set()
+        resumed.wait(5)         # ...but the worker has not left _live yet
+
+    monkeypatch.setattr(manager, "_finish_stopped", slow_finish)
+    job, _ = manager.start("proef", {})
+    assert manager.wait(job["id"], statuses=(jobs.QUEUED,), timeout=5)["status"] == "running"
+    old = manager._live[job["id"]]
+    manager.pause(job["id"])
+    assert written.wait(5)
+    assert manager.resume(job["id"])["status"] in (jobs.QUEUED, jobs.RUNNING)
+    resumed.set()
+    old.thread.join(5) if old.thread else None
+    time.sleep(0.1)
+    new = manager._live.get(job["id"])
+    assert new is not None and new is not old and new.thread is not None
+    assert manager.get(job["id"])["status"] == jobs.RUNNING
+    # Still one run of this type: a second job of it waits
+    other, _ = manager.start("proef", {"ander": 1})
+    time.sleep(0.1)
+    assert manager.get(other["id"])["status"] == jobs.QUEUED
+    assert manager.cancel(job["id"])["stopping"] is True
+    assert manager.wait(job["id"], statuses=(jobs.QUEUED, jobs.RUNNING), timeout=5)["status"] == jobs.CANCELLED
+    release.set()
+    assert manager.wait(other["id"], statuses=(jobs.QUEUED, jobs.RUNNING), timeout=5)["status"] == jobs.DONE
+    manager.shutdown()
+
+
+def test_cancel_while_the_paused_worker_is_still_cleaning_up_closes_the_job(client, monkeypatch):
+    def run(ctx):
+        while True:
+            ctx.check()
+            time.sleep(0.01)
+
+    manager = _test_manager(client, run)
+    written, go_on = threading.Event(), threading.Event()
+    real = manager._finish_stopped
+    monkeypatch.setattr(manager, "_finish_stopped", lambda live: (real(live), written.set(), go_on.wait(5)))
+    job, _ = manager.start("proef", {})
+    manager.wait(job["id"], statuses=(jobs.QUEUED,), timeout=5)
+    manager.pause(job["id"])
+    assert written.wait(5)
+    assert manager.cancel(job["id"])["status"] == jobs.CANCELLED
+    go_on.set()
+    time.sleep(0.2)
+    assert manager.get(job["id"])["status"] == jobs.CANCELLED and job["id"] not in manager._live
+    manager.shutdown()

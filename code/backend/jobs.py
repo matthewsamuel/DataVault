@@ -459,13 +459,14 @@ class JobManager:
         with self._lock:
             if self._closed:
                 raise JobError(503, "De server stopt; probeer het zo opnieuw")
-            if job_id in self._live:
-                job = self._live[job_id].row
-                if job["status"] in ACTIVE:
-                    return self._public(job, self._live[job_id])
+            # A worker that just stopped is still in _live until its cleanup ran: its row
+            # in memory is the newest; the resumed run gets a _Live of its own
+            ending = self._live.get(job_id)
+            if ending is not None and ending.row["status"] in ACTIVE:
+                return self._public(ending.row, ending)
             self._flush_unsaved()
-            unsaved = self._unsaved.get(job_id)
-            row = dict(unsaved.row) if unsaved else self._db_get(job_id)
+            known = self._unsaved.get(job_id) or ending
+            row = dict(known.row) if known else self._db_get(job_id)
             if row is None:
                 raise JobError(404, "Deze taak bestaat niet (meer)")
             if row["status"] not in RESUMABLE:
@@ -486,19 +487,21 @@ class JobManager:
     def _stop(self, job_id: int, reason: str) -> Dict[str, Any]:
         with self._lock:
             live = self._live.get(job_id)
-            if live is None:
+            if live is None or live.row["status"] not in ACTIVE:
+                # Nothing runs (a worker that just stopped only has its cleanup left)
                 self._flush_unsaved()
                 unsaved = self._unsaved.get(job_id)
-                row = unsaved.row if unsaved else self._db_get(job_id)
+                known = unsaved or live
+                row = known.row if known else self._db_get(job_id)
                 if row is None:
                     raise JobError(404, "Deze taak bestaat niet (meer)")
                 if reason == "cancel" and row["status"] in (PAUSED, INTERRUPTED):
                     # Nothing runs: just close it
                     row.update(status=CANCELLED, updated_at=time.time(), finished_at=time.time(),
                                message="Geannuleerd")
-                    if unsaved:
-                        self._persist(unsaved)
-                        if not unsaved.dirty:
+                    if known:
+                        self._persist(known)
+                        if unsaved and not unsaved.dirty:
                             self._unsaved.pop(job_id, None)
                     else:
                         self._db_write(row)
@@ -662,10 +665,13 @@ class JobManager:
                 return
         finally:
             with self._lock:
-                self._live.pop(live.row["id"], None)
+                job_id = live.row["id"]
+                # resume() may already have put a new run of this job in its place
+                if self._live.get(job_id) is live:
+                    del self._live[job_id]
+                    if live.dirty:
+                        self._unsaved[job_id] = live
                 live.thread = None
-                if live.dirty:
-                    self._unsaved[live.row["id"]] = live
             self.db.release_thread()
             self._prune(live.row["type"])
             with self._lock:

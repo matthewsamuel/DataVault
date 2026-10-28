@@ -368,3 +368,7 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Na pauzeren, onderbreken of wachten op de schijf telt de eindmelding van Miniaturen maken en
   Vooraf indexeren ook mee wat eerdere rondes van dezelfde taak al gedaan hadden (voorheen
   stond er bijvoorbeeld "0 nieuw, 3000 waren er al").
+- Takenpaneel: een taak die je hervatte op het moment dat hij net gepauzeerd werd, liep soms
+  verder zonder dat de app hem nog volgde (niet meer te annuleren, en een tweede taak van
+  dezelfde soort kon tegelijk starten). Annuleren in datzelfde moment liet de taak op
+  "Gepauzeerd" staan. Beide kan niet meer.
