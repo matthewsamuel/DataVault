@@ -29,11 +29,16 @@ follow moves like the ratings do (media_index._carry_user_data).
 
 Pairs (choose_pair): the first photo is drawn with a preference for photos with few
 comparisons (weight 1 / (1 + games)^2); its opponent comes from the photos nearest to it
-in rating (the closest NEIGHBOURS, the least compared of those most likely). Never the
-pair that was just shown or compared, and never two photos that are (nearly) the same:
-the same file size (an exact copy), or a burst (same folder, capture times from EXIF or the
-video itself at most BURST_SECONDS apart). A later perceptual-hash feature adds its own
-test with register_near_duplicate_check(fn).
+in rating (the closest NEIGHBOURS, the least compared of those most likely). Photos with
+the same rating (in a fresh library: nearly all of them, at 1000) are equally near, so the
+walk starts at a random place among them and picks a random side at every tie; otherwise
+the opponents would always be the alphabetically first photos. Never the pair that was
+just shown or compared, and never two photos that are (nearly) the same: the same file size
+(an exact copy), or one series (mark_series: in one folder, sorted by the capture time from
+EXIF or the video itself, a series goes on as long as each photo follows the previous one
+within BURST_SECONDS, so the first and the fifth frame of a burst one second apart are one
+series too). A later perceptual-hash feature adds its own test with
+register_near_duplicate_check(fn).
 """
 import bisect
 import os
@@ -53,7 +58,7 @@ K_SETTLE_GAMES = 30
 
 NEIGHBOURS = 8             # the opponent comes from this many photos nearest in rating
 PAIR_ATTEMPTS = 24         # first photos tried before giving up on a pair
-BURST_SECONDS = 2.0        # capture times this close (same folder) count as a burst
+BURST_SECONDS = 2.0        # a series (same folder) goes on while photos follow within this
 
 # Photos a browser can show at full size; RAW files have no picture of their own there
 # (and usually sit next to a JPEG of the same moment, which would be a near-duplicate)
@@ -272,16 +277,48 @@ def _size(candidate: Dict[str, Any]) -> Optional[int]:
     return size if size and size > 0 else None
 
 
+def _own_time(candidate: Dict[str, Any]) -> Optional[float]:
+    """The capture time the photo itself carries (EXIF or video), not a file date."""
+    if candidate.get("taken") is None or candidate.get("taken_source") not in ("exif", "video"):
+        return None
+    return candidate["taken"]
+
+
+def mark_series(candidates: Sequence[Dict[str, Any]]) -> None:
+    """
+    Give every candidate a 'series' key: photos in one folder whose own capture times follow
+    each other within BURST_SECONDS share one (a burst of any length, frame after frame);
+    any other photo gets None. Changes the dicts in place.
+    """
+    by_folder: Dict[str, List[Dict[str, Any]]] = {}
+    for c in candidates:
+        c["series"] = None
+        if _own_time(c) is not None:
+            by_folder.setdefault(os.path.dirname(c["path"]), []).append(c)
+    number = 0
+    for folder, items in by_folder.items():
+        items.sort(key=lambda c: c["taken"])
+        for before, item in zip(items, items[1:]):
+            if item["taken"] - before["taken"] <= BURST_SECONDS:
+                if before["series"] is None:
+                    number += 1
+                    before["series"] = number
+                item["series"] = before["series"]
+
+
 def near_duplicate(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
-    """Exact copies (same size), bursts (same folder, own capture times within BURST_SECONDS)
-    and whatever a registered check finds."""
+    """Exact copies (same size), one series (see mark_series; for two photos without a
+    'series' key: same folder, own capture times within BURST_SECONDS) and whatever a
+    registered check finds."""
     size_a, size_b = _size(a), _size(b)
     if size_a is not None and size_a == size_b:
         return True
-    if (a.get("taken") is not None and b.get("taken") is not None
-            and a.get("taken_source") in ("exif", "video") and b.get("taken_source") in ("exif", "video")
+    if a.get("series") is not None and a.get("series") == b.get("series"):
+        return True
+    time_a, time_b = _own_time(a), _own_time(b)
+    if (time_a is not None and time_b is not None
             and os.path.dirname(a["path"]) == os.path.dirname(b["path"])
-            and abs(a["taken"] - b["taken"]) <= BURST_SECONDS):
+            and abs(time_a - time_b) <= BURST_SECONDS):
         return True
     for check in _near_duplicate_checks:
         try:
@@ -298,11 +335,14 @@ def choose_pair(candidates: Sequence[Dict[str, Any]], avoid: Iterable[Iterable[s
     """
     Two candidates to compare (each a dict with at least path, rating and games), in random
     left/right order, or None when no pair is allowed. avoid: pairs (of paths) that must not
-    come now (the pair just shown or compared).
+    come now (the pair just shown or compared). Candidates without a 'series' key get one
+    (mark_series); pass them marked to save that work.
     """
     rng = rng or random
     if len(candidates) < 2:
         return None
+    if any("series" not in c for c in candidates):
+        mark_series(candidates)
     avoid_set = {frozenset(pair) for pair in avoid}
     by_rating = sorted(candidates, key=lambda c: (c["rating"], c["path"]))
     ratings = [c["rating"] for c in by_rating]
@@ -315,21 +355,31 @@ def choose_pair(candidates: Sequence[Dict[str, Any]], avoid: Iterable[Iterable[s
         if first["path"] in tried:
             continue
         tried.add(first["path"])
-        options = _neighbours(first, by_rating, ratings, avoid_set, near_dup)
+        options = _neighbours(first, by_rating, ratings, avoid_set, near_dup, rng)
         if options:
             second = rng.choices(options, [1.0 / (1 + c["games"]) for c in options])[0]
             return (first, second) if rng.random() < 0.5 else (second, first)
     return None
 
 
-def _neighbours(first, by_rating, ratings, avoid_set, near_dup) -> List[Dict[str, Any]]:
-    """The NEIGHBOURS allowed candidates nearest to first in rating (walking out both ways)."""
-    at = bisect.bisect_left(ratings, first["rating"])
+def _neighbours(first, by_rating, ratings, avoid_set, near_dup, rng=random) -> List[Dict[str, Any]]:
+    """The NEIGHBOURS allowed candidates nearest to first in rating, walking out both ways
+    from a random place among the photos with first's rating (by_rating is sorted by rating
+    and path, so starting at the edge of that block would always give the same, alphabetically
+    first, photos). An equal distance on both sides is a coin toss."""
+    low = bisect.bisect_left(ratings, first["rating"])
+    high = bisect.bisect_right(ratings, first["rating"])
+    at = rng.randint(low, high)
     left, right = at - 1, at
     options: List[Dict[str, Any]] = []
     while len(options) < NEIGHBOURS and (left >= 0 or right < len(by_rating)):
-        take_left = right >= len(by_rating) or (
-            left >= 0 and first["rating"] - ratings[left] <= ratings[right] - first["rating"])
+        if right >= len(by_rating):
+            take_left = True
+        elif left < 0:
+            take_left = False
+        else:
+            below, above = first["rating"] - ratings[left], ratings[right] - first["rating"]
+            take_left = below < above or (below == above and rng.random() < 0.5)
         if take_left:
             cand, left = by_rating[left], left - 1
         else:

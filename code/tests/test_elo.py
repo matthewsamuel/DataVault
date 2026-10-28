@@ -287,22 +287,85 @@ def test_never_the_same_pair_twice_in_a_row():
 
 
 def test_copies_and_bursts_are_never_paired():
-    cands = _cands(6)
+    cands = _cands(10)
     cands[1]["size"] = cands[0]["size"]                     # an exact copy of 0
-    for c, t in zip(cands[2:5], (100.0, 101.5, 103.0)):     # a burst in one folder
-        c.update(taken=t, taken_source="exif")
-    cands[5].update(taken=101.0, taken_source="mtime")      # file dates do not count
+    burst = cands[2:7]                                      # a series of 5 frames, 1 s apart
+    for i, c in enumerate(burst):
+        c.update(taken=100.0 + i, taken_source="exif")
+    cands[7].update(taken=101.0, taken_source="mtime")      # file dates do not count
+    cands[8].update(taken=107.5, taken_source="exif")       # 3.5 s after the last frame: its own photo
+    cands[9].update(taken=102.0, taken_source="video")
+    cands[9]["path"] = "/v/q/clip.jpg"                      # same moment, other folder
     assert elo.near_duplicate(cands[0], cands[1])
-    assert elo.near_duplicate(cands[2], cands[3]) and elo.near_duplicate(cands[3], cands[4])
-    assert not elo.near_duplicate(cands[2], cands[4])       # 3 s apart
-    assert not elo.near_duplicate(cands[2], cands[5])
-    other_folder = dict(cands[3], path="/v/q/x.jpg")
-    assert not elo.near_duplicate(cands[2], other_folder)
+    # Without the series marks only neighbours count; with them the whole chain is one series
+    assert not elo.near_duplicate(burst[0], burst[4])
+    elo.mark_series(cands)
+    assert len({c["series"] for c in burst}) == 1 and burst[0]["series"] is not None
+    assert all(elo.near_duplicate(a, b) for a in burst for b in burst if a is not b)
+    assert cands[7]["series"] is None and cands[8]["series"] is None and cands[9]["series"] is None
+    assert not elo.near_duplicate(burst[0], cands[7])
+    assert not elo.near_duplicate(burst[4], cands[8])
+    assert not elo.near_duplicate(burst[2], cands[9])
     rng = random.Random(4)
-    for _ in range(300):
+    pairs = set()
+    for _ in range(400):
         a, b = elo.choose_pair(cands, rng=rng)
         assert not elo.near_duplicate(a, b)
+        assert not (a in burst and b in burst), (a["path"], b["path"])
+        pairs.add(frozenset((a["path"], b["path"])))
+    assert len(pairs) > 20
+    # Unmarked candidates are marked by choose_pair itself
+    fresh = _cands(5)
+    for i, c in enumerate(fresh):
+        c.update(taken=50.0 + i, taken_source="exif")
+    assert elo.choose_pair(fresh, rng=rng) is None
     assert elo.choose_pair(cands[:2]) is None
+
+
+def test_with_equal_ratings_the_opponents_come_from_the_whole_list():
+    # A fresh library: every photo at 1000. The opponent must not always be one of the
+    # alphabetically first photos (it was: by_rating is sorted by rating, then path).
+    cands = _cands(400)
+    rng = random.Random(7)
+    seen = {}
+    for _ in range(2000):
+        for c in elo.choose_pair(cands, rng=rng):
+            seen[c["path"]] = seen.get(c["path"], 0) + 1
+    assert len(seen) > 380
+    first_eight = sum(seen.get(c["path"], 0) for c in cands[:8])
+    assert first_eight < 4000 * 8 / 400 * 3, first_eight          # at most 3x their fair share
+    assert max(seen.values()) < 40
+
+    # Twenty folders, with Elo updates as a user would make them: no folder takes over
+    cands = [{"path": f"/v/{2000 + i // 50}/{i % 50:03d}.jpg", "rating": 1000, "games": 0,
+              "size": 5000 + i, "taken": None, "taken_source": None} for i in range(1000)]
+    rng = random.Random(8)
+    per_folder = {}
+    for _ in range(300):
+        a, b = elo.choose_pair(cands, rng=rng)
+        for c in (a, b):
+            folder = c["path"].split("/")[2]
+            per_folder[folder] = per_folder.get(folder, 0) + 1
+        new_a, new_b, _, _ = elo.elo_update(a["rating"], b["rating"], "a", a["games"], b["games"])
+        a.update(rating=new_a, games=a["games"] + 1)
+        b.update(rating=new_b, games=b["games"] + 1)
+    assert len(per_folder) == 20
+    assert max(per_folder.values()) < 600 * 3 / 20, per_folder    # under 3x the fair share
+
+
+def test_the_frames_of_a_burst_are_never_shown_side_by_side(client, app, vault):
+    from test_media_index import _index
+    from fixtures.vault_builder import BURST
+    _index(client, full=False)           # the index knows the EXIF capture times
+    folder = (vault / BURST[0]).resolve().parent
+    frames = {(vault / rel).resolve().name for rel in BURST}
+    seen = set()
+    for _ in range(60):
+        pair = client.get("/api/shows/compare/pair", params={"folder": str(folder)}).json()["pair"]
+        names = {p["name"] for p in pair}
+        assert len(names & frames) <= 1, names
+        seen |= names
+    assert seen - frames                 # the other photo in that folder does come
 
 
 def test_a_registered_check_also_rules_pairs_out(monkeypatch):
