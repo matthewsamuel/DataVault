@@ -9152,6 +9152,14 @@ button.otd-settings-icon:hover {
     flex: 1;
 }
 
+/* Het label blijft bij zijn keuzelijst, ook als de rij afbreekt */
+.albums-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-left: auto;
+}
+
 .albums-sort-label {
     font-size: var(--fs-xs);
     color: var(--text-secondary);
