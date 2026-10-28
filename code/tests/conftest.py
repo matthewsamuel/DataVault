@@ -54,6 +54,16 @@ def app(config_file):
 
 @pytest.fixture
 def client(app):
+    """Like the real frontend: every request carries the session token (see api.js)."""
+    from fastapi.testclient import TestClient
+    with TestClient(app) as c:
+        c.headers["X-DataVault-Token"] = c.get("/api/session").json()["token"]
+        yield c
+
+
+@pytest.fixture
+def anon_client(app):
+    """A client without the session token, like another website or a curl one-liner."""
     from fastapi.testclient import TestClient
     with TestClient(app) as c:
         yield c

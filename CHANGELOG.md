@@ -30,6 +30,19 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   "de andere kopie" van een foto wegzetten: de controle dat het origineel er nog is en het
   verplaatsen gebeuren in één ononderbroken stap.
 
+### Beveiliging van de app
+- Andere websites kunnen de app niet meer aansturen of uitlezen. Voorheen kon elke website die
+  je open had via de browser je mappen opvragen, foto's downloaden en zelfs bestanden laten
+  verplaatsen. Nu:
+  - geeft de server geen CORS-toestemming meer aan andere sites (de app zelf draait op hetzelfde
+    adres en heeft dat niet nodig);
+  - antwoordt de server alleen op `127.0.0.1` en `localhost` (bescherming tegen zogeheten
+    DNS-rebinding);
+  - moet elk verzoek dat iets wijzigt (verplaatsen, Keurer, duplicaten, stemmen, instellingen,
+    herstarten) een geheime sessiesleutel meesturen die alleen de eigen pagina kan ophalen.
+    De pagina doet dat automatisch (nieuw bestand `api.js`); na een herstart van de server
+    haalt hij vanzelf de nieuwe sleutel op.
+
 ### Foto Keurer
 - Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het
   bestand naartoe ging (prullenmand of doelmap). Undo stuurt alleen nog het nummer van de

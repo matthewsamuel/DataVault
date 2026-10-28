@@ -3,7 +3,7 @@ DataVault Dashboard - FastAPI Application
 """
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pathlib import Path
 from typing import Optional
 import os
@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend import file_ops
+from backend import file_ops, security
 from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline
 
 
@@ -41,14 +41,12 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         },
     )
 
-    # CORS for local development
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # No CORS: the frontend is served same-origin, so no other website may read the API.
+    # Every state-changing request needs this process's session token (see backend/security.py).
+    app.state.session_token = security.new_session_token()
+    app.add_middleware(security.SessionTokenMiddleware, token=app.state.session_token)
+    # Added last = outermost: a foreign Host header (DNS rebinding) is refused first
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=security.allowed_hosts())
 
     config = None
     try:
@@ -108,6 +106,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
     app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"])
     app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"])
+    app.include_router(security.router)
     app.include_router(core_router)
 
     # Serve frontend static files — MOET als allerlaatste staan, anders vangt het API-routes op
