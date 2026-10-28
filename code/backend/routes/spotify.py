@@ -72,7 +72,7 @@ def get_spotify_files() -> List[Path]:
     files = []
     for root, _, names in walk_archive(spotify_data_root, config):
         for name in names:
-            if name.endswith('.json') and ('Streaming_History_Audio' in name or 'StreamingHistory' in name):
+            if name.endswith('.json') and name.startswith(('Streaming_History_Audio', 'StreamingHistory')):
                 files.append(Path(root) / name)
     return sorted(files)
 
@@ -146,19 +146,27 @@ def _from_database(files: Optional[List[Path]] = None) -> bool:
         read = spotify_store.imported_exports(db)
     except sqlite3.Error:
         return False
-    return all(_read_into_database(f, read) for f in (get_spotify_files() if files is None else files))
+    folders: dict = {}
+    return all(_read_into_database(f, read, folders) for f in (get_spotify_files() if files is None else files))
 
 
-def _read_into_database(path: Path, read: dict) -> bool:
-    """Is this export file inside an export DataGatherer read (path -> imported_at) after its last change?"""
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return True     # gone: the file parser would not read it either
+def _read_into_database(path: Path, read: dict, folders: dict) -> bool:
+    """Is this export file inside an export DataGatherer read, with the folder as it is now?"""
+    from backend.datagatherer import raw_store
+    from backend.datagatherer.connectors.spotify import Spotify
     for candidate in (path, *path.parents):
-        imported_at = read.get(str(candidate))
-        if imported_at is not None:
-            return mtime <= imported_at
+        entry = read.get(str(candidate))
+        if entry is None:
+            continue
+        is_folder, fingerprint = entry
+        if not is_folder:
+            return True
+        if candidate not in folders:
+            try:
+                folders[candidate] = raw_store.folder_fingerprint(candidate, Spotify.folder_patterns)[0]
+            except OSError:
+                folders[candidate] = None
+        return folders[candidate] == fingerprint
     return False
 
 

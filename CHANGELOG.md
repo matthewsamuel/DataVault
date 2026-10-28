@@ -309,6 +309,11 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   knoppen van een kaart blijven op één regel, een filter kiezen met het toetsenbord houdt de focus,
   lege schermen hebben een knop om verder te gaan, en de teksten zijn overal Nederlands
   ("luisterbeurten", "API-sleutel", "19 sep 2023", "meestal binnen 2 dagen").
+- Een export die je in een al ingelezen map uitpakt wordt herkend: de kaart biedt dan Inlezen aan
+  (ook altijd in het menu Meer) en de Spotify-pagina blijft zolang op de bestanden.
+- Een paar dagen niet luisteren geldt niet meer als gat; alleen het stuk tussen een export en je
+  eerste latere nummer kan echt ontbreken.
+- Een geannuleerde upload laat geen tijdelijke kopie meer achter.
 
 ## Fase 2 – Stabiliseren
 

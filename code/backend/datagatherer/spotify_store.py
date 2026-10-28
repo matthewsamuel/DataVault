@@ -354,12 +354,12 @@ def has_plays(db) -> bool:
                 or conn.execute("SELECT 1 FROM spotify_api_plays LIMIT 1").fetchone() is not None)
 
 
-def imported_exports(db) -> Dict[str, float]:
-    """{path: imported_at} of every Spotify export (folder or file) that was read completely."""
+def imported_exports(db) -> Dict[str, Tuple[bool, Optional[str]]]:
+    """{path: (is_folder, fingerprint)} of every Spotify export (folder or file) that was read completely."""
     with db._connect() as conn:
-        rows = conn.execute("SELECT path, imported_at FROM dg_raw_imports WHERE source_id = ? AND status = 'imported' "
-                            "AND imported_at IS NOT NULL", (SOURCE_ID,)).fetchall()
-    return {path: at for path, at in rows}
+        rows = conn.execute("SELECT path, is_folder, fingerprint FROM dg_raw_imports WHERE source_id = ? "
+                            "AND status = 'imported' AND imported_at IS NOT NULL", (SOURCE_ID,)).fetchall()
+    return {path: (bool(folder), fp) for path, folder, fp in rows}
 
 
 def data_version(db) -> tuple:
@@ -416,8 +416,10 @@ def coverage(db) -> Dict[str, Any]:
     export_until = max([w[1] / 1000 for w in windows] + [e["last"] for e in exports]) if (windows or exports) else None
     # Exports: their periods (a period an export covers is complete), merged
     export_spans = _spans([(w[0] / 1000, w[1] / 1000) for w in windows] + [(e["first"], e["last"]) for e in exports])
-    # API and Last.fm: plays close together form a span; a long silence between them is a hole
-    estimated_spans = _spans([(t, t) for t in estimated_ts])
+    # API and Last.fm: one span from the first to the last play. A quiet spell between two plays
+    # is a holiday, not missing data, so only the stretch between an export and the first later
+    # play can be a hole (the sync flags a possible gap itself).
+    estimated_spans = [[estimated_ts[0], estimated_ts[-1]]] if estimated_ts else []
     estimated_since = None
     if estimated_spans:
         after = [lo for lo, hi in estimated_spans if export_until is None or hi > export_until]

@@ -25,6 +25,7 @@ its handler finished while the vault was there: partial work is never 'done'.
 On app start, jobs left running, queued or waiting become 'interrupted'.
 """
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -33,6 +34,8 @@ from collections import deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Any, Callable, Deque, Dict, Iterable, Iterator, List, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 QUEUED = "queued"
 RUNNING = "running"
@@ -137,6 +140,7 @@ class JobType:
     results_to_keep: int = 5                                 # stored results of this type
     describe: Optional[Callable[[Dict[str, Any]], str]] = None   # what it works on, for the dock
     jobs_to_keep: Optional[int] = None                       # finished jobs of this type kept (None: no own limit)
+    on_cancel: Optional[Callable[[Dict[str, Any]], None]] = None   # params of a job cancelled without (or after) running: clean up
 
 
 class _Live:
@@ -507,6 +511,7 @@ class JobManager:
                     # Nothing runs: just close it
                     row.update(status=CANCELLED, updated_at=time.time(), finished_at=time.time(),
                                message="Geannuleerd")
+                    self._cancelled_unrun(row)
                     if known:
                         self._persist(known)
                         if unsaved and not unsaved.dirty:
@@ -523,6 +528,7 @@ class JobManager:
                                 message="Geannuleerd" if reason == "cancel" else "Gepauzeerd")
                 if reason == "cancel":
                     live.row["finished_at"] = time.time()
+                    self._cancelled_unrun(live.row)
                 self._persist(live)
                 if live.dirty:
                     self._unsaved[job_id] = live
@@ -532,6 +538,15 @@ class JobManager:
             live.row["message"] = "Wordt geannuleerd..." if reason == "cancel" else "Wordt gepauzeerd..."
             live.wake.set()
             return self._public(live.row, live)
+
+    def _cancelled_unrun(self, row: Dict[str, Any]) -> None:
+        """A job was cancelled while no worker had it: let its type clean up what it left behind."""
+        job_type = self.types.get(row["type"])
+        if job_type and job_type.on_cancel:
+            try:
+                job_type.on_cancel(row["params"])
+            except Exception:
+                log.exception("Cleanup of cancelled job %s failed", row.get("id"))
 
     def _schedule(self, job_type: str) -> None:
         """Start the oldest queued job of this type when none of that type is running. Caller holds _lock."""

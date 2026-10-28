@@ -340,6 +340,7 @@ def watch_type(config, db, get_jobs: Callable[[], Any]) -> JobType:
                    summarize=lambda r: {k: r.get(k) for k in ("source", "raw_import_id", "created", "import_job",
                                                               "complete", "errors")},
                    results_to_keep=5, jobs_to_keep=10,
+                   on_cancel=lambda p: drop_upload(config, p["upload"]) if isinstance(p.get("upload"), str) else None,
                    describe=lambda p: p.get("name") or Path(p.get("path") or "").name)
 
 

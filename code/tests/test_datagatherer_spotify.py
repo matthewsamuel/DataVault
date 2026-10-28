@@ -575,3 +575,86 @@ def test_a_single_scrobble_object_is_read_too(client, app):
     net.set_transport_factory(lambda: httpx.MockTransport(fake.handler))
     _lastfm_ready(client)
     assert _lastfm_sync(client, app)["summary"]["added"] == 1
+
+
+# ---------- review fixes: a changed folder, quiet spells, cancelled uploads ----------
+
+def _spotify_card(client):
+    return next(c for c in client.get("/api/datagatherer/sources").json()["sources"] if c["id"] == "spotify")
+
+
+def test_a_changed_export_folder_is_offered_as_inlezen_and_clears_after_reading(client, app, export):
+    from backend.datagatherer import cards
+    from backend.routes import spotify
+    _write(export, "Streaming_History_Audio_2023.json", [_old_style(T0 + i * 600, f"T{i}", "A") for i in range(5)])
+    _wait(app, client.post("/api/datagatherer/sources/spotify/import").json()["job"]["id"])
+    cards.forget_existing_cache()
+    assert spotify._from_database() and _spotify_card(client)["primary"]["action"] != "import"
+    # The user unzips a newer export into the same folder
+    _write(export, "Streaming_History_Audio_2024.json", [_old_style(T0 + 9e6 + i * 600, f"N{i}", "A") for i in range(3)])
+    cards.forget_existing_cache()
+    assert not spotify._from_database()
+    card = _spotify_card(client)
+    assert card["status"] == "export_binnen" and card["primary"]["action"] == "import"
+    assert client.get("/api/spotify/coverage").json()["waiting_for_import"] is True
+    _wait(app, client.post("/api/datagatherer/sources/spotify/import").json()["job"]["id"])
+    cards.forget_existing_cache()
+    assert spotify._from_database() and _spotify_card(client)["primary"]["action"] != "import"
+    assert "import" in [a["action"] for a in _spotify_card(client)["actions"]]
+
+
+def test_a_new_file_with_an_old_mtime_and_a_copy_name_are_judged_by_the_folder(client, app, export):
+    from backend.routes import spotify
+    _write(export, "Streaming_History_Audio_2023.json", [_old_style(T0 + i * 600, f"T{i}", "A") for i in range(5)])
+    _wait(app, client.post("/api/datagatherer/sources/spotify/import").json()["job"]["id"])
+    assert spotify._from_database()
+    _write(export, "Streaming_History_Audio_2024.json", [_old_style(T0 + 9e6, "Nieuw", "A")])
+    os.utime(export / "Streaming_History_Audio_2024.json", (T0, T0))        # unzip keeps the zip's date
+    assert not spotify._from_database()
+    # Both parsers skip a file that only contains the words
+    (export / "Streaming_History_Audio_2024.json").unlink()
+    _write(export, "Kopie van StreamingHistory0.json", [legacy_play(T0, "Kopie", "X")])
+    assert all("Kopie" not in p.name for p in spotify.get_spotify_files())
+    assert spotify._from_database()
+
+
+def test_a_quiet_spell_between_api_plays_is_not_a_hole(client, app, export, fake_spotify):
+    _write(export, "Streaming_History_Audio_2023.json", [_old_style(T0 + i * 600, f"T{i}", "A") for i in range(5)])
+    _wait(app, client.post("/api/datagatherer/sources/spotify/import").json()["job"]["id"])
+    _connected()
+    day = T0 + 4 * 600
+    fake_spotify.items = [track_item(day + 86400 * d, f"spotify:track:q{d}", f"Q{d}", "B") for d in (1, 2, 9, 10)]
+    assert _sync(client, app)["status"] == "done"
+    cov = client.get("/api/spotify/coverage").json()
+    assert cov["holes"] == []
+    card = _spotify_card(client)
+    assert card["status"] != "gat" and card["primary"]["action"] == "sync"
+
+
+def test_cancelling_a_queued_upload_removes_the_staged_copy(client, app, tmp_path, monkeypatch):
+    import threading
+    from backend.datagatherer import jobs as gather_jobs, raw_store
+    staging = gather_jobs.upload_staging(app.state.config)
+    gate, started = threading.Event(), threading.Event()
+    real = raw_store.archive_file
+
+    def slow(*a, **kw):
+        started.set()
+        gate.wait(10)
+        return real(*a, **kw)
+    monkeypatch.setattr(raw_store, "archive_file", slow)
+    first = tmp_path / "StreamingHistory_music_1.json"
+    first.write_text(json.dumps([legacy_play(T0, "Een", "Band")]))
+    second = tmp_path / "StreamingHistory_music_2.json"
+    second.write_text(json.dumps([legacy_play(T0 + 5, "Twee", "Band")]))
+    try:
+        j1 = client.post("/api/datagatherer/sources/spotify/upload?name=" + first.name, content=first.read_bytes()).json()["job"]
+        assert started.wait(10)
+        j2 = client.post("/api/datagatherer/sources/spotify/upload?name=" + second.name, content=second.read_bytes()).json()["job"]
+        assert any(staging.iterdir())
+        assert client.post(f"/api/jobs/{j2['id']}/cancel").json()["status"] == "cancelled"
+        assert sum(1 for _ in staging.iterdir()) == 1       # only the running upload is staged
+    finally:
+        gate.set()
+    _wait(app, j1["id"])
+    assert list(staging.iterdir()) == []

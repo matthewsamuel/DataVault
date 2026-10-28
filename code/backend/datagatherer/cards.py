@@ -90,7 +90,21 @@ def unread_existing(connector: Connector, gctx: GatherContext) -> List[Path]:
             found = []
         with _existing_lock:
             _existing_cache[connector.id] = (now, found)
-    return [f for f in found if state.raw_by_path(gctx.db, str(f)) is None]
+    return [f for f in found if _unread(connector, gctx, f)]
+
+
+def _unread(connector: Connector, gctx: GatherContext, folder: Path) -> bool:
+    """Not registered yet, or registered but its files changed since it was last read."""
+    raw = state.raw_by_path(gctx.db, str(folder))
+    if raw is None:
+        return True
+    if not raw["is_folder"]:
+        return False
+    try:
+        fingerprint = raw_store.folder_fingerprint(folder, connector.folder_patterns)[0]
+    except OSError:
+        return False
+    return fingerprint != raw["fingerprint"]
 
 
 def forget_existing_cache() -> None:
@@ -217,6 +231,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     if connector.has("export_watch"):
         actions.append("find_downloads")
     if connector.has("import"):
+        actions.append("import")
         actions.append("upload")
     actions = [a for a in dict.fromkeys(actions) if a and a != primary and not (primary == "reconnect" and a == "connect")]
 
