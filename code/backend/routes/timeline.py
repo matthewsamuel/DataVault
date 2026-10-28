@@ -140,6 +140,8 @@ def _index_payload(roots: List[Path], offset: int, limit: Optional[int]) -> Dict
     """The answer from the media index: one page of rows, the counts of the whole selection."""
     filters = {"kind": ["photo", "video"], "folders": [str(r) for r in roots]}
     vault = str(config.VAULT_ROOT).rstrip("/") + "/"
+    # First: a change after this shows as a new version on the next page
+    version = "i" + media_index.selection_version(db, filters)
     histogram = media_index.date_histogram(db, filters)
     date_index, year_boundaries = _summary(histogram)
     total = sum(n for _, _, n in histogram)
@@ -166,7 +168,7 @@ def _index_payload(roots: List[Path], offset: int, limit: Optional[int]) -> Dict
         "complete": True,
         "errors": 0,
         "source": "index",
-        "version": f"i{media_index.generation()}",
+        "version": version,
     }
 
 
@@ -260,7 +262,9 @@ def timeline_scan(
     each row is [timestamp, path relative to root, size, 'p'|'v', date source code].
     total, date_index and year_boundaries always describe the whole selection;
     next_offset is null on the last page. source is 'index' or 'walk'; when version
-    differs between pages, the selection changed in between and the client starts over.
+    differs between pages, the selection changed in between and the client starts over
+    (or, when only the source changed and total and date_index are the same, goes on:
+    both give the same rows).
     complete is false (errors counts the folders and files) when something could not
     be read.
     """

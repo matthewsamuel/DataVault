@@ -78,7 +78,8 @@ ROW_COLUMNS = ("id", "path", "folder", "name") + META_COLUMNS + ("added_at", "in
 MISSING_NEW = 1
 MISSING_CONFIRMED = 2
 
-# Bumped on every write, so a client paging through a result can tell it changed
+# Bumped on every write anywhere in the index (a cheap "something changed"); a client
+# paging through one selection uses selection_version() instead
 _generation = 0
 _generation_lock = threading.Lock()
 
@@ -606,8 +607,10 @@ def record_move(db, config, src, dst) -> None:
         _carry_user_data(conn, src, dst, carry_keep=shown, keurer_dest=True)
         conn.execute("DELETE FROM media WHERE path = ?", (dst,))
         if row is not None:
-            conn.execute("UPDATE media SET path = ?, folder = ?, name = ?, missing = ?, seen_at = ? WHERE id = ?",
-                         (dst, folder, name, 0 if shown else MISSING_NEW, now, row[0]))
+            # (indexed_at too: the row changed, see selection_version)
+            conn.execute("UPDATE media SET path = ?, folder = ?, name = ?, missing = ?, seen_at = ?, "
+                         "indexed_at = ? WHERE id = ?",
+                         (dst, folder, name, 0 if shown else MISSING_NEW, now, now, row[0]))
         elif meta is not None:
             conn.execute(_UPSERT, _row_values(dst, meta, now))
     _bump()
@@ -884,6 +887,21 @@ def date_histogram(db, filters: Optional[Dict[str, Any]] = None) -> List[Tuple[i
             "CAST(strftime('%m', m.taken, 'unixepoch', 'localtime') AS INTEGER) AS mo, COUNT(*) "
             f"FROM media m WHERE {where} AND m.taken IS NOT NULL GROUP BY y, mo ORDER BY y, mo", args).fetchall()
     return [tuple(row) for row in rows]
+
+
+def selection_version(db, filters: Optional[Dict[str, Any]] = None) -> str:
+    """
+    A short tag that changes when the rows matching filters change (a row added,
+    removed, hidden, shown again, re-read or moved), and stays the same for writes
+    elsewhere in the index or a pass that changes nothing. For a client that pages
+    through one selection. Ratings are not part of it.
+    """
+    where, args = _where(filters)
+    with db._connect() as conn:
+        n, ids, newest = conn.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(m.id), 0), COALESCE(MAX(m.indexed_at), 0) FROM media m WHERE {where}",
+            args).fetchone()
+    return f"{n:x}.{ids:x}.{int(newest * 1000):x}"
 
 
 def timeline_page(db, roots: Sequence[Path], offset: int, limit: Optional[int]) -> List[Tuple]:

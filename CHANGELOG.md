@@ -48,7 +48,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   wordt de bibliotheek op de achtergrond bijgewerkt.
 - De tijdlijn laadt per pagina: de eerste 3000 foto's staan er meteen, de rest komt erachteraan
   ("… van … geladen"). Het aantal en de jaren kloppen meteen voor de hele selectie; klik je op een
-  jaar dat nog niet geladen is, dan springt hij erheen zodra het er is.
+  jaar dat nog niet geladen is, dan springt hij erheen zodra het er is. Alleen een verandering in de
+  gekozen mappen laat hem opnieuw beginnen; wordt de bibliotheek elders bijgewerkt, of is hij net
+  klaar terwijl de tijdlijn laadt, dan laadt hij gewoon verder. Kon een map niet gelezen worden, dan
+  wordt voor het verder laden niet elke keer het hele archief opnieuw doorlopen.
 - De tijdlijn tekende bij veel foto's toch elke foto tegelijk (een lijst van 100.000 foto's maakte
   alle 100.000 kaartjes aan, waardoor de pagina minutenlang vastliep). Nu tekent hij alleen wat in
   beeld is.

@@ -218,6 +218,36 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 "document.getElementById('timeline-scroll').scrollTop = 100000"), 0.8)
             expect(page.evaluate("document.querySelectorAll('.tl-photo-card').length") < 300,
                    "timeline: scrolling drew every card")
+
+            # Paging across a switch of source: a first page from the walk (made up here from
+            # the real one, 500 rows) and the rest from the index is the same selection, so the
+            # timeline goes on; a first page whose total differs makes it start over (once)
+            scans = []
+            page.on("request", lambda r: scans.append(r.url) if "/api/timeline/scan" in r.url else None)
+
+            def fake_first_page(change_total):
+                faked = []
+
+                def handle(route):
+                    url = route.request.url
+                    if faked or "offset=0&" not in url:
+                        return route.continue_()
+                    faked.append(url)
+                    response = route.fetch(url=url.replace("limit=3000", "limit=500"))
+                    data = response.json()
+                    data.update(source="walk", version="w-smoke", total=data["total"] + change_total)
+                    route.fulfill(response=response, json=data)
+                return handle
+
+            for change_total, requests, label in ((0, 2, "goes on"), (1, 3, "starts over")):
+                scans.clear()
+                page.route("**/api/timeline/scan*", fake_first_page(change_total))
+                # (wait_for_timeout, not sleep: route handlers only run while Playwright waits)
+                step(f"timeline: walk then index, {label}", lambda: (
+                    page.evaluate("timelineConfirmFolders()"), page.wait_for_timeout(2500)), 0)
+                page.unroute("**/api/timeline/scan*")
+                expect(len(scans) == requests and page.query_selector(".tl-photo-card"),
+                       f"timeline: {len(scans)} scan requests (expected {requests}) when the source switched")
             browser.close()
     finally:
         proc.terminate()

@@ -325,7 +325,9 @@
 
             if (data.next_offset !== null && data.next_offset !== undefined) {
                 // Not awaited: the timeline can be used while the rest arrives
-                loadRemainingPages(seq, data.next_offset, data.version);
+                loadRemainingPages(seq, data.next_offset, {
+                    version: data.version, source: data.source, total: data.total, date_index: data.date_index,
+                });
             }
         } catch (e) {
             console.error('Timeline scan error:', e);
@@ -336,15 +338,28 @@
         tlScanning = false;
     }
 
+    // Zelfde selectie, alleen uit een andere bron (de schijf of de bibliotheek): zelfde
+    // aantal en zelfde verdeling over de maanden, dan zijn het dezelfde rijen
+    function sameSelection(page, first) {
+        return page.source !== first.source && page.total === first.total &&
+            JSON.stringify(page.date_index || {}) === JSON.stringify(first.date_index || {});
+    }
+
     // De rest van de tijdlijn, een pagina tegelijk, achter de eerste pagina aan
-    async function loadRemainingPages(seq, offset, version) {
+    async function loadRemainingPages(seq, offset, first) {
+        let version = first.version;
+        let source = first.source;
         tlPagesLoading = true;
         renderInfoBar();
         try {
             while (offset !== null && offset !== undefined && seq === tlScanSeq) {
                 const page = await fetchJSON(timelineScanUrl(offset, TL_PAGE));
                 if (seq !== tlScanSeq) return;
-                if (page.version !== version) {
+                if (page.version !== version && sameSelection(page, { ...first, source })) {
+                    // Bijv. de bibliotheek is net bijgewerkt: verder met de nieuwe bron
+                    version = page.version;
+                    source = page.source;
+                } else if (page.version !== version) {
                     // De selectie is intussen veranderd (bijv. bijgewerkt): opnieuw vanaf het begin
                     tlPagesLoading = false;
                     scanTimeline();

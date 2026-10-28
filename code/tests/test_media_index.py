@@ -1006,3 +1006,27 @@ def test_a_pass_that_changes_nothing_keeps_the_timeline_version(client, config):
     _photo(config.VAULT_ROOT / "library/Familie/extra.jpg", (5, 5, 5), "x", "2012:12:12 12:00:00")
     _index(client)
     assert _scan(client, config.VAULT_ROOT, limit=5)["version"] != before
+
+
+def test_the_timeline_version_belongs_to_the_selection(client, config):
+    # A write elsewhere in the index does not restart a timeline that is paging
+    from backend import media_index
+    from backend.routes.library import db
+    _index(client)
+    library, raw = config.VAULT_ROOT / "library", config.VAULT_ROOT / "RAW"
+    before = {"library": _scan(client, library, limit=5)["version"], "RAW": _scan(client, raw, limit=5)["version"]}
+    _photo(raw / "misc/elders.jpg", (5, 5, 5), "x", "2012:12:12 12:00:00")
+    _index(client)
+    assert _scan(client, library, limit=5)["version"] == before["library"]
+    assert _scan(client, raw, limit=5)["version"] != before["RAW"]
+    # A move inside the selection changes it (same files, one new path); a move elsewhere does not
+    filters = {"kind": ["photo", "video"], "folders": [str(library)]}
+    version = media_index.selection_version(db, filters)
+    r = client.post("/api/move-file", json={"source_path": str(raw / "misc/elders.jpg"),
+                                            "destination_folder": str(raw / "2021")})
+    assert r.status_code == 200, r.text
+    assert media_index.selection_version(db, filters) == version
+    r = client.post("/api/move-file", json={"source_path": str(library / "Familie/opa.jpg"),
+                                            "destination_folder": str(library / "Reis Italië")})
+    assert r.status_code == 200, r.text
+    assert media_index.selection_version(db, filters) != version
