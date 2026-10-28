@@ -619,7 +619,7 @@ def test_a_failed_sync_says_why_on_the_card_and_dates_read_dutch(client, app):
     cards = {c["id"]: c for c in client.get("/api/datagatherer/sources").json()["sources"]}
     lastfm = cards["lastfm"]
     assert lastfm["status"] == "fout" and lastfm["last_error"].startswith("De API-sleutel klopt niet")
-    assert lastfm["next_step"].startswith("Bijwerken mislukte: De API-sleutel klopt niet")
+    assert lastfm["next_step"].startswith("Bijwerken lukte de laatste keer niet")
     assert lastfm["primary"]["action"] == "sync"
     from backend.datagatherer.cards import _date, _expected
     assert _date(1_695_081_600) == "19 sep 2023"
