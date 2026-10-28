@@ -41,7 +41,9 @@ const SHORTCUT_GROUPS = [
             [['t'], 'Thema wisselen: Auto, Licht, Donker'],
             [['?'], 'Dit overzicht'],
             [['Esc'], 'Bovenste venster sluiten, of uit een invoerveld'],
-            [['Tab'], 'Naar de volgende knop; in een venster blijft Tab binnen het venster'],
+            [['Tab'], 'Naar het volgende onderdeel; in een venster blijft Tab binnen het venster, langs elke knop'],
+            // Safari slaat met Tab buiten vensters knoppen over (instelling van Safari zelf)
+            [['⌥', 'Tab'], 'In Safari: ook langs knoppen op de pagina (of zet in Safari > Instellingen > Geavanceerd de Tab-optie aan)'],
         ],
     },
     {

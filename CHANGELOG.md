@@ -96,6 +96,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   gemarkeerde map.
 - Na **Terugzetten** in het Herstelcentrum blijft de focus in de lijst (op dezelfde of de volgende
   actie) in plaats van naar het begin van de pagina te springen.
+- In Safari gaat Tab op de pagina niet langs knoppen; het overzicht (**?**) noemt nu **⌥ Tab** (of de
+  instelling in Safari > Instellingen > Geavanceerd).
 - Elk venster houdt de focus binnen zich (Tab gaat rond), **Esc** sluit alleen het bovenste venster,
   en daarna staat de focus weer waar hij was: op de foto in het raster of in het chatvak. Na het
   sluiten van een foto die vanuit de chat geopend werd, kun je dus meteen verder typen.

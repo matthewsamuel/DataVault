@@ -132,6 +132,9 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - `1`–`9` of `g` + letter wisselt van tabblad, `/` gaat naar het zoekveld, `t` wisselt het thema, `?`
   toont alle sneltoetsen. Pijltjes, Home/End en PageUp/PageDown bewegen door het raster van Bestanden en
   de tijdlijn; Enter of spatie opent. Geen sneltoets werkt terwijl je typt.
+- In Safari gaat Tab op de pagina zelf niet langs knoppen (zoals **Terugzetten** in het Herstelcentrum);
+  gebruik dan ⌥ Tab, of zet het aan in Safari > Instellingen > Geavanceerd ("Druk op Tab om elk
+  onderdeel op een webpagina te markeren"). In een venster gaat Tab altijd langs elke knop.
 - Elk venster houdt de focus binnen zich, Escape sluit het bovenste, en de focus gaat daarna terug
   waar hij was (`frontend/ui.js`).
 - **Instellingen** (tandwiel, sneltoets 9): thema, taalmodel, bibliotheek, Shows-bronnen. Een nieuw
