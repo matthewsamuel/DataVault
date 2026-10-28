@@ -160,6 +160,17 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   `--border-overlay`; voeg een nieuw zwevend vlak toe aan die regel onder `@tokens:end`.
 - Een venstertitel is `h2.modal-title` met één `<i>` vooraan; paden toon je met
   `archivePath()`/`pathNodes()` (app.js) vanaf het archief, met het volledige pad als `title`.
+- Knoppen rechts in een paginakop staan bovenaan, op de hoogte van de titel (`align-items:
+  flex-start`), in de gewone knopgrootte (geen `.btn-small`).
+- Mono (`--font-mono`) alleen voor getallen en paden; staat een getal in een zin, zet dan alleen
+  het getal in een eigen `<span>` in mono.
+- Een smal venster (onder 900 px) krijgt `--page-gutter: 20px`; gebruik voor kantlijnen altijd
+  `--page-gutter`, nooit een eigen waarde in een media query (de Tijdlijn rekent zijn tegels uit
+  met dezelfde marge). Het menu bovenin schuift dan opzij (`.nav-tabs`).
+- Meldingen (`showToast`) hebben een neutrale titel met een icoon per soort (`TOAST_ICONS`).
+- In het takenpaneel telt een taak die `done` is met `summary.complete === false` (of
+  `summary.errors > 0`) als onvolledig (`jobIncomplete()` in jobs.js, klasse `.job-incomplete`):
+  die blijft open in beeld. Geef een nieuw taaktype dus `complete` en `errors` in zijn samenvatting.
 - `http://127.0.0.1:<poort>/styleguide.html` toont ze allemaal, licht en donker naast elkaar.
 - De rooktest bewaart van elk scherm een schermafbeelding in beide thema's (het pad staat in de
   uitvoer, of zet `DATAVAULT_SMOKE_SHOTS`).

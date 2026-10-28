@@ -184,6 +184,35 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   het venster, en toont van de afgeronde taken alleen de nieuwste; de rest staat op één regel
   ("3 eerder klaar") die je kunt openklappen of in één keer verbergen. Zo bedekt het geen knoppen
   meer. "1 groepen" heet nu "1 groep".
+- Een taak die klaar is maar niet alles kon lezen (bijvoorbeeld een bestand zonder leesrechten),
+  klapt het takenpaneel niet meer weg en verdwijnt niet onder "eerder klaar": hij staat er als
+  "Onvolledig" in de waarschuwingskleur, en de kop zegt "1 onvolledig". Kon de laatste ronde van de
+  bibliotheek (ook een automatische) niet alles lezen, dan staat dat onder de bibliotheekregel.
+- Bestanden begint niet meer met een lege pagina, maar met de bovenste mappen van het archief
+  (data, library, RAW). "Archief" in het pad bovenaan brengt je daar terug, en Backspace in een
+  bovenste map ook. Open je een map via het raster of het pad, dan klapt de mappenkolom mee open en
+  staat die map daar gemarkeerd.
+- De lijstweergave van Bestanden heeft rijen over de hele breedte met een dunne lijn ertussen, en
+  rustige kolommen voor soort, grootte en datum.
+- Het venster Bestand verplaatsen toont "Huidige map" en "Naar" als pad vanaf het archief
+  ("RAW/2019/zomer vakantie"), net als de viewer ernaast.
+- Pasha op volledig scherm: de invoer staat weer onderaan het venster in plaats van midden in een
+  leeg vlak, en de voorbeeldvragen staan er ook.
+- Is de schijf losgekoppeld, dan zeggen de tegels Foto's, Video's en Audio alle drie "Bibliotheek
+  niet bereikbaar".
+- Knoppen rechts in een paginakop staan op de hoogte van de titel en zijn overal even groot. De
+  Keurer zegt "Map kiezen" zolang er nog geen map gekozen is.
+- Meldingen hebben een neutrale titel met een icoon voor het soort melding (gelukt, fout,
+  waarschuwing, info) in de kleur van de balk links.
+- Het sneltoetsenoverzicht is evenwichtiger: "Overal" staat over de hele breedte in twee kolommen,
+  en een toetscombinatie (zoals de vier pijltjes) breekt nooit meer over twee regels.
+- Spotify: topartiesten en topnummers zijn even lang, dus geen leeg vlak meer onder de kortste
+  lijst. De voortgangsbalk van de diavoorstelling is groen.
+- Mono alleen nog voor getallen en paden: "68,1% van deze map" en "Geen" (geen map gekozen) staan
+  in de gewone letter.
+- In een smal venster (onder ca. 900 px, bijvoorbeeld Split View) schuift het menu bovenin opzij in
+  plaats van onder het zoekveld te verdwijnen, en blijven de foto's in de Tijdlijn vierkant en op
+  één lijn met de maandkoppen.
 - De achtergrondgolven in de mappenkolom zijn weg; alleen Spotify heeft ze nog.
 - Beweging is kort en subtiel, en staat helemaal stil als je in macOS "Beperk beweging" aan hebt.
 
