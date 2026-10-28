@@ -11,6 +11,7 @@ synthetic. Nothing here reaches the network or the real Keychain.
 import base64
 import hashlib
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -206,6 +207,40 @@ def test_the_coverage_chip_says_since_when_listening_time_is_estimated(client, a
     from backend.routes import spotify
     assert spotify.parse_spotify_data(for_assistant=True)["total_plays"] == 10
     assert spotify.parse_spotify_data()["total_plays"] == 13
+
+
+def test_the_dashboard_keeps_the_files_until_every_export_file_is_read(client, app, tmp_path, vault, fake_spotify):
+    """F-F1: an upload, a first sync or a stopped first import never shrinks the lifetime statistics."""
+    from backend.routes import spotify
+    total = client.get("/api/spotify/stats", params={"year": "all"}).json()["total_plays"]
+    assert total == 300
+    # One new play through an upload: read into the database, but the existing folder is not
+    one = write_export_zip(tmp_path / "up" / "my_spotify_data.zip", account=[legacy_play(1_720_000_000, "Nieuw", "Band")])
+    _upload(client, app, one)
+    assert spotify_store.has_plays(app.state.db) and not spotify._from_database()
+    cov = client.get("/api/spotify/coverage").json()
+    assert cov["mode"] == "files" and cov["waiting_for_import"] is True and cov["plays"] == total
+    assert client.get("/api/spotify/stats", params={"year": "all"}).json()["total_plays"] == total
+    # A first sync of the API: the same
+    _connected()
+    fake_spotify.items = [track_item(1_730_000_000, "spotify:track:api", "Api", "Band")]
+    assert _sync(client, app)["status"] == "done"
+    assert client.get("/api/spotify/stats", params={"year": "all"}).json()["total_plays"] == total
+    # Inlezen reads the existing folder: now the database has everything (and more)
+    assert _wait(app, client.post("/api/datagatherer/sources/spotify/import").json()["job"]["id"])["status"] == "done"
+    assert spotify._from_database()
+    assert client.get("/api/spotify/coverage").json()["mode"] == "database"
+    assert client.get("/api/spotify/stats", params={"year": "all"}).json()["total_plays"] == total + 2
+    # An import that was stopped halfway ('importing') or a file changed after reading: the files again
+    folder = state.raw_by_path(app.state.db, str(vault / SPOTIFY_FOLDER))
+    state.update_raw(app.state.db, folder["id"], status="importing")
+    assert not spotify._from_database()
+    assert client.get("/api/spotify/stats", params={"year": "all"}).json()["total_plays"] == total
+    state.update_raw(app.state.db, folder["id"], status="imported")
+    assert spotify._from_database()
+    later = time.time() + 60
+    os.utime(vault / SPOTIFY_FOLDER / "Streaming_History_Audio_2023.json", (later, later))
+    assert not spotify._from_database()
 
 
 # ---------- superseding ----------

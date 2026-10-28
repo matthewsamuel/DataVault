@@ -130,13 +130,45 @@ def _same_track(name: str) -> str:
     return unicodedata.normalize("NFC", name or "").strip().casefold()
 
 
-def _from_database() -> bool:
-    """True once DataGatherer has read Spotify plays into the database."""
+def _from_database(files: Optional[List[Path]] = None) -> bool:
+    """
+    True once DataGatherer has read Spotify plays into the database AND every export file
+    the file parser would read lies in an export it has read since that file last changed.
+    Until then the files stay the source: a first sync, a single upload or a stopped first
+    import must never shrink the lifetime statistics to what happens to be in the database.
+    """
     if db is None or not db.ready:
         return False
     from backend.datagatherer import spotify_store
     try:
-        return spotify_store.has_plays(db)
+        if not spotify_store.has_plays(db):
+            return False
+        read = spotify_store.imported_exports(db)
+    except sqlite3.Error:
+        return False
+    return all(_read_into_database(f, read) for f in (get_spotify_files() if files is None else files))
+
+
+def _read_into_database(path: Path, read: dict) -> bool:
+    """Is this export file inside an export DataGatherer read (path -> imported_at) after its last change?"""
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return True     # gone: the file parser would not read it either
+    for candidate in (path, *path.parents):
+        imported_at = read.get(str(candidate))
+        if imported_at is not None:
+            return mtime <= imported_at
+    return False
+
+
+def waiting_for_import() -> bool:
+    """The database has plays, but not every export file is read yet (the dashboard uses the files)."""
+    if db is None or not db.ready:
+        return False
+    from backend.datagatherer import spotify_store
+    try:
+        return spotify_store.has_plays(db) and not _from_database()
     except sqlite3.Error:
         return False
 
@@ -167,9 +199,9 @@ def load_plays(for_assistant: bool = False) -> Tuple[tuple, List[Play]]:
     order of the files), each counted once: from the database once DataGatherer read the
     exports, else from the export files. Cached until the data or a file changes.
     """
-    if _from_database():
-        return _db_plays(for_assistant)
     files = get_spotify_files()
+    if _from_database(files):
+        return _db_plays(for_assistant)
     key = _files_key(files)
     with _lock:
         cached = _plays_cache.get("files")
@@ -441,7 +473,7 @@ def get_coverage():
                 "export_until": c["export_until"], "plays": c["plays"],
                 "sources": {k: v["plays"] for k, v in c["by_source"].items()}}
     _, plays = load_plays()
-    return {"mode": "files", "last": plays[-1].utc.timestamp() if plays else None,
+    return {"mode": "files", "waiting_for_import": waiting_for_import(), "last": plays[-1].utc.timestamp() if plays else None,
             "first": plays[0].utc.timestamp() if plays else None, "estimated_since": None,
             "export_until": plays[-1].utc.timestamp() if plays else None, "plays": len(plays),
             "sources": {"export": len(plays)} if plays else {}}

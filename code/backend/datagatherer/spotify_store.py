@@ -346,6 +346,14 @@ def has_plays(db) -> bool:
                 or conn.execute("SELECT 1 FROM spotify_api_plays LIMIT 1").fetchone() is not None)
 
 
+def imported_exports(db) -> Dict[str, float]:
+    """{path: imported_at} of every Spotify export (folder or file) that was read completely."""
+    with db._connect() as conn:
+        rows = conn.execute("SELECT path, imported_at FROM dg_raw_imports WHERE source_id = ? AND status = 'imported' "
+                            "AND imported_at IS NOT NULL", (SOURCE_ID,)).fetchall()
+    return {path: at for path, at in rows}
+
+
 def data_version(db) -> tuple:
     return state.versions(db, (SOURCE_ID, LASTFM_ID))
 
