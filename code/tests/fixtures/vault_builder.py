@@ -2,8 +2,8 @@
 Builds a disposable test vault with the awkward cases a real archive contains:
 photos with and without EXIF (incl. GPS), PNG, video, audio, exact duplicates,
 a burst series, corrupt/empty/fake files, names with spaces, emoji, accents and
-shell/URL special characters, a symlink pointing outside the vault, a library
-folder for Shows and a Spotify export.
+shell/URL special characters, HTML in file, folder and track names, a symlink
+pointing outside the vault, a library folder for Shows and a Spotify export.
 
 Usable from pytest (build_test_vault) and from the command line:
     python tests/fixtures/vault_builder.py /tmp/some/dir
@@ -25,6 +25,13 @@ STRAND_COPIES = [
     "RAW/misc/.hidden.jpg",
 ]
 BURST = [f"RAW/2022/bursts/burst_{i:02d}.jpg" for i in range(5)]
+
+# Names that must show up as text in the UI and never run as code (both are valid
+# names on macOS: no '/'). The frontend tests check that window.__xss stays unset.
+XSS_FOLDER = "Matthew's <b>Trip</b>"
+XSS_FILE = "xss <img src=x onerror=window.__xss=1>.jpg"
+XSS_TRACK = "<img src=x onerror=window.__xss=2>"
+XSS_PHOTOS = [f"RAW/{XSS_FOLDER}/{XSS_FILE}", f"library/{XSS_FOLDER}/{XSS_FILE}"]
 
 
 def _exif(dt, make="Canon", model="EOS 80D", gps=None):
@@ -116,6 +123,10 @@ def build_test_vault(root: Path, with_media: bool = True) -> Path:
     _photo(root / "library/Reis Italië/venetië.jpg", (60, 60, 180), "venetie", "2023:06:03 10:00:00")
     _photo(root / "library/Familie/opa.jpg", (60, 180, 60), "opa", "2015:12:24 18:00:00")
 
+    # HTML and an apostrophe in folder and file names (RAW for the viewer/Keurer, library for Shows)
+    for rel in XSS_PHOTOS:
+        _photo(root / rel, (200, 30, 120), "xss", "2017:03:03 15:00:00")
+
     if with_media:
         (raw / "video").mkdir(exist_ok=True)
         (raw / "audio").mkdir(exist_ok=True)
@@ -131,8 +142,10 @@ def build_test_vault(root: Path, with_media: bool = True) -> Path:
         {
             "ts": f"2023-0{1 + i % 9}-1{i % 9}T{(i * 7) % 24:02d}:15:00Z",
             "ms_played": 1000 + (i * 7919) % 239000,
-            "master_metadata_track_name": "Don't Stop Me Now" if i % 17 == 0 else f"Track {i % 17}",
-            "master_metadata_album_artist_name": f"Artiest {i % 6}",
+            "master_metadata_track_name": (
+                "Don't Stop Me Now" if i % 17 == 0 else XSS_TRACK if i % 17 == 1 else f"Track {i % 17}"
+            ),
+            "master_metadata_album_artist_name": "Guns N' Roses" if i % 6 == 5 else f"Artiest {i % 6}",
             "master_metadata_album_album_name": f"Album {i % 4}",
             "skipped": i % 5 == 0,
             "reason_end": "fwdbtn" if i % 5 == 0 else "trackdone",

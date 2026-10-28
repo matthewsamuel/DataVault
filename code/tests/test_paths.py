@@ -335,7 +335,7 @@ def test_timeline_scan_skips_outside_folders(client, vault, outside):
     r = client.get("/api/timeline/scan", params={"folders": f"{outside},{vault}/RAW/misc/link_to_outside,/etc"})
     assert r.status_code == 200 and r.json()["total"] == 0
     r = client.get("/api/timeline/scan", params={"folders": f"{outside},{vault}/library"})
-    assert r.json()["total"] == 3
+    assert r.json()["total"] == len(list((vault / "library").rglob("*.jpg")))
 
 
 def test_shows_settings_and_vote_only_accept_vault_paths(client, vault, outside):
