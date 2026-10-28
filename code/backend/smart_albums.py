@@ -10,6 +10,8 @@ file is ever copied, moved or changed.
 The default albums (DEFAULTS) are added once, the first time the app starts with
 this table (app_settings 'smart_albums_defaults'). The user can hide or delete them
 like any album; restore_defaults() adds the missing ones again and shows them all.
+A default whose name the user has given to an album of their own comes back with a
+number after it ("Video's (2)"): two albums never share a name.
 
 Counts: count() of every album for the sidebar is cached per album until the index
 changes (media_index.generation()) or COUNT_SECONDS pass (ratings and Keurer decisions
@@ -42,6 +44,10 @@ DEFAULT_ICON = "fa-images"
 ICONS = ("fa-images", "fa-star", "fa-video", "fa-calendar-xmark", "fa-location-dot", "fa-calendar-day",
          "fa-mobile-screen", "fa-heart", "fa-camera", "fa-mountain-sun", "fa-umbrella-beach", "fa-users",
          "fa-paw", "fa-plane", "fa-music", "fa-folder")
+
+# The name check and the write of an album happen under this lock, so two requests at
+# the same time can never both take one name (the app is one process)
+_write_lock = threading.Lock()
 
 COLUMNS = ("id", "name", "filters", "sort", "icon", "builtin", "hidden", "position", "created_at", "updated_at")
 
@@ -76,16 +82,26 @@ def ensure_defaults(db) -> bool:
     return added > 0
 
 
+def _free_name(conn, name: str) -> str:
+    """name, or "name (2)", "name (3)", ... when an album of the user already has it."""
+    candidate, n = name, 1
+    while _name_taken(conn, candidate):
+        n += 1
+        candidate = f"{name} ({n})"
+    return candidate
+
+
 def _add_defaults(db, unhide: bool) -> int:
     now = time.time()
     added = 0
-    with db._connect() as conn:
+    with _write_lock, db._connect() as conn:
         for position, (key, name, filters, sort, icon) in enumerate(DEFAULTS):
-            cursor = conn.execute(
-                "INSERT OR IGNORE INTO smart_albums (name, filters, sort, icon, builtin, hidden, position, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
-                (name, json.dumps(filters, sort_keys=True), sort, icon, key, position, now, now))
-            added += cursor.rowcount
+            if conn.execute("SELECT 1 FROM smart_albums WHERE builtin = ?", (key,)).fetchone() is None:
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO smart_albums (name, filters, sort, icon, builtin, hidden, position, "
+                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                    (_free_name(conn, name), json.dumps(filters, sort_keys=True), sort, icon, key, position, now, now))
+                added += cursor.rowcount
             if unhide:
                 conn.execute("UPDATE smart_albums SET hidden = 0, updated_at = ? WHERE builtin = ? AND hidden = 1",
                              (now, key))
@@ -150,9 +166,10 @@ def _icon(value: Any) -> str:
 
 
 def _name_taken(conn, name: str, own_id: Optional[int] = None) -> bool:
-    row = conn.execute("SELECT id FROM smart_albums WHERE name = ? COLLATE NOCASE AND id IS NOT ?",
-                       (name, own_id)).fetchone()
-    return row is not None
+    """Another album has this name, ignoring case (also beyond ASCII: 'Één' and 'één' are the same)."""
+    wanted = name.casefold()
+    return any(other.casefold() == wanted
+               for (other,) in conn.execute("SELECT name FROM smart_albums WHERE id IS NOT ?", (own_id,)))
 
 
 def create_album(db, config, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -163,7 +180,7 @@ def create_album(db, config, data: Dict[str, Any]) -> Dict[str, Any]:
     sort = _sort(data.get("sort"))
     icon = _icon(data.get("icon"))
     now = time.time()
-    with db._connect() as conn:
+    with _write_lock, db._connect() as conn:
         if conn.execute("SELECT COUNT(*) FROM smart_albums").fetchone()[0] >= MAX_ALBUMS:
             raise AlbumError(f"Er kunnen hoogstens {MAX_ALBUMS} albums zijn", 409)
         if _name_taken(conn, name):
@@ -197,7 +214,7 @@ def update_album(db, config, album_id: int, data: Dict[str, Any]) -> Dict[str, A
         if not isinstance(data["hidden"], bool):
             raise AlbumError("hidden moet true of false zijn")
         changes["hidden"] = int(data["hidden"])
-    with db._connect() as conn:
+    with _write_lock, db._connect() as conn:
         if conn.execute("SELECT 1 FROM smart_albums WHERE id = ?", (album_id,)).fetchone() is None:
             raise AlbumError("Album niet gevonden", 404)
         if "name" in changes and _name_taken(conn, changes["name"], album_id):

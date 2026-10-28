@@ -541,3 +541,20 @@ def test_a_huge_album_id_is_refused_not_a_server_error(indexed):
             r = getattr(indexed, method)(f"/api/library/albums/{album_id}", **kwargs)
             assert r.status_code == 422, (method, album_id, r.text)
     assert indexed.get(f"/api/library/albums/{2 ** 62}").status_code == 404
+
+
+def test_names_stay_unique_also_for_restored_defaults_and_beyond_ascii(indexed):
+    client = indexed
+    videos = next(a for a in _albums(client)["albums"] if a["builtin"] == "videos")
+    assert client.delete(f"/api/library/albums/{videos['id']}").status_code == 200
+    assert client.post("/api/library/albums", json={"name": "video's", "filters": {"year": 2019}}).status_code == 201
+    restored = client.post("/api/library/albums/defaults").json()
+    assert restored["added"] == 1
+    names = [a["name"] for a in restored["albums"]]
+    assert "Video's (2)" in names and len({n.casefold() for n in names}) == len(names)
+    # Case is ignored beyond ASCII too
+    assert client.post("/api/library/albums", json={"name": "Ünïcode"}).status_code == 201
+    assert client.post("/api/library/albums", json={"name": "ünïcode"}).status_code == 409
+    other = client.post("/api/library/albums", json={"name": "Anders"}).json()
+    assert client.patch(f"/api/library/albums/{other['id']}", json={"name": "ÜNÏCODE"}).status_code == 409
+    assert client.patch(f"/api/library/albums/{other['id']}", json={"name": "anders"}).status_code == 200
