@@ -516,12 +516,24 @@ function updateSummary() {
     const ruleText = dupState.rule === 'folder' && dupState.prefer
         ? `${DUP_RULE_LABELS.folder} "${relativeToScan(dupState.prefer) || dupState.prefer}"`
         : DUP_RULE_LABELS[dupState.rule];
+    // Drie lagen: de twee labels met rechts wat er nu zichtbaar opgeruimd wordt, dan de regel
+    // als één rustige hulpregel
     document.getElementById('dup-legend').replaceChildren(
-        createEl('span', { class: 'dup-legend-keep', text: 'Blijft staan' }), ' ',
-        createEl('span', { class: 'dup-legend-move', text: 'Gaat naar RAW_DUPLICATES' }),
-        ` · Regel: ${ruleText} (${DUP_RULE_HELP[dupState.rule]}). Klik op een kopie om die te bewaren.` +
-        ` Verborgen kopieën gaan altijd als laatste.` +
-        (bytes ? ` Zichtbaar: ${moves} bestanden, ${formatBytes(bytes)}.` : ''));
+        createEl('div', { class: 'dup-legend-row' },
+            createEl('span', { class: 'dup-legend-keep', text: 'Blijft staan' }),
+            createEl('span', { class: 'dup-legend-move', text: 'Gaat naar RAW_DUPLICATES' }),
+            bytes ? createEl('span', { class: 'dup-legend-count' },
+                'Zichtbaar: ', createEl('span', { class: 'dup-legend-num', text: moves.toLocaleString('nl-NL') }),
+                ` ${moves === 1 ? 'bestand' : 'bestanden'}, `,
+                createEl('span', { class: 'dup-legend-num', text: formatBytes(bytes) })) : null),
+        createEl('p', { class: 'dup-legend-help' },
+            createEl('strong', { text: `Regel: ${ruleText}.` }),
+            ` ${capitalizeFirst(DUP_RULE_HELP[dupState.rule])}. Klik op een kopie om die te bewaren; verborgen kopieën gaan altijd als laatste.`));
+}
+
+function capitalizeFirst(text) {
+    const t = String(text || '');
+    return t ? t[0].toUpperCase() + t.slice(1) : t;
 }
 
 // ==================== GROUP CARDS ====================

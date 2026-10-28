@@ -3824,7 +3824,35 @@ a.breadcrumb-item:hover {
     font-size: var(--fs-xs);
     color: var(--text-secondary);
     margin-bottom: var(--space-lg);
-    line-height: 1.9;
+}
+
+.dup-legend-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.dup-legend-count {
+    margin-left: auto;
+    color: var(--text-secondary);
+}
+
+.dup-legend-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.dup-legend-help {
+    margin: var(--space-sm) 0 0;
+    max-width: 88ch;
+    line-height: var(--lh-normal);
+}
+
+.dup-legend-help strong {
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
 }
 
 /* Labels 'blijft' en 'naar RAW_DUPLICATES' (badges) */
