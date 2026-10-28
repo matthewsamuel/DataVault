@@ -767,14 +767,56 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("(document.activeElement.getAttribute('aria-label') || '')").startswith("Hulp"),
                    "datagatherer: focus left the help button after it redrew the card")
             page.keyboard.press("Enter")
-            page.focus(f"{spotify_card} .dg-more > summary")
+            # Every card keeps its main button, 'Meer', help and settings on one line
+            rows = page.evaluate("""[...document.querySelectorAll('.dg-card')].map(c => {
+                const p = c.querySelector('.dg-primary'), t = c.querySelector('.dg-actions-tools');
+                return [c.dataset.source, p && t ? Math.abs(p.getBoundingClientRect().top - t.getBoundingClientRect().top) : -1];
+            })""")
+            expect(all(0 <= gap <= 4 for _, gap in rows), f"datagatherer: an action row wraps {rows}")
+            # A category filter chosen with the keyboard keeps the focus on that pill
+            page.focus("#dg-filters .pill[data-dg-focus='filter-Muziek']")
+            step("datagatherer: Enter on a filter", lambda: page.keyboard.press("Enter"), 0.3)
+            expect(page.evaluate("document.activeElement.dataset.dgFocus || document.activeElement.tagName") == "filter-Muziek",
+                   "datagatherer: the focus left the filter pill")
+            page.evaluate("dgState.filter = 'all'; dgRender()")
+            # 'Meer': Enter opens it on the first item, arrows/Home/End move, Escape closes on the button
+            more_btn = f"{spotify_card} .dg-more-btn"
+            open_menus = "document.querySelectorAll('.dg-more.open').length"
+            page.focus(more_btn)
             step("datagatherer: Enter opens 'Meer'", lambda: page.keyboard.press("Enter"), 0.3)
-            expect(page.evaluate(f"document.querySelector({json.dumps(spotify_card + ' .dg-more')}).open"),
-                   "datagatherer: 'Meer' did not open with Enter")
+            items = page.evaluate(f"[...document.querySelectorAll({json.dumps(spotify_card + ' .dg-more-menu .menu-item')})].map(i => i.textContent.trim())")
+            focus_text = lambda: page.evaluate("document.activeElement.getAttribute('role') === 'menuitem' ? document.activeElement.textContent.trim() : document.activeElement.tagName")
+            expect(page.evaluate(open_menus) == 1 and items and focus_text() == items[0],
+                   f"datagatherer: 'Meer' did not open on its first item ({focus_text()!r}, {items})")
+            page.keyboard.press("ArrowDown")
+            expect(len(items) < 2 or focus_text() == items[1], "datagatherer: ArrowDown in 'Meer' did not move")
+            page.keyboard.press("End")
+            expect(focus_text() == items[-1], "datagatherer: End in 'Meer' did not go to the last item")
+            page.keyboard.press("Home")
+            expect(focus_text() == items[0], "datagatherer: Home in 'Meer' did not go to the first item")
             step("datagatherer: Escape closes 'Meer'", lambda: page.keyboard.press("Escape"), 0.3)
-            expect(not page.evaluate(f"document.querySelector({json.dumps(spotify_card + ' .dg-more')}).open")
-                   and page.evaluate("document.activeElement.tagName") == "SUMMARY",
+            expect(page.evaluate(open_menus) == 0
+                   and page.evaluate("document.activeElement.classList.contains('dg-more-btn')"),
                    "datagatherer: Escape did not close 'Meer' and keep the focus on it")
+            # One menu at a time, and a click next to it closes it
+            page.click(more_btn)
+            page.click(".dg-card[data-source='google_takeout'] .dg-more-btn")
+            expect(page.evaluate(open_menus) == 1, "datagatherer: two 'Meer' menus are open at once")
+            step("datagatherer: a click next to 'Meer' closes it", lambda: page.click("#dg-title"), 0.3)
+            expect(page.evaluate(open_menus) == 0, "datagatherer: 'Meer' stayed open after a click next to it")
+            # A window opened from 'Meer' gives the focus back to 'Meer' when it closes
+            page.focus(more_btn)
+            page.keyboard.press("ArrowDown")
+            for _ in range(len(items)):
+                if focus_text() == "Export aanvragen":
+                    break
+                page.keyboard.press("ArrowDown")
+            step("datagatherer: Export aanvragen from 'Meer'", lambda: page.keyboard.press("Enter"), 0.8)
+            expect(page.is_visible("#dg-export") and page.evaluate(open_menus) == 0,
+                   "datagatherer: 'Export aanvragen' from 'Meer' did not open its window (and close the menu)")
+            step("datagatherer: Escape closes the export window", lambda: page.keyboard.press("Escape"), 0.6)
+            expect(page.evaluate("document.activeElement.classList.contains('dg-more-btn')"),
+                   f"datagatherer: after the window the focus is on {page.evaluate('document.activeElement.tagName')}, not 'Meer'")
             step("datagatherer: the connect window", lambda: page.click(".dg-card[data-source='lastfm'] .dg-primary"), 0.8)
             expect(page.is_visible("#dg-connect"), "datagatherer: Verbinden did not open the connect window")
             expect_focus_trapped("dg-connect", "datagatherer: connect window")
@@ -784,6 +826,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(not page.is_visible("#dg-connect"), "datagatherer: the connect window stayed open after saving")
             expect(page.evaluate("(document.querySelector(\".dg-card[data-source='lastfm'] .dg-primary\") || {}).dataset.action") == "sync",
                    "datagatherer: a connected Last.fm does not offer Bijwerken")
+            # Bijwerken is refused by the test server: the card says why, in a red note under the next step
+            step("datagatherer: Bijwerken Last.fm (refused here)", lambda: page.click(".dg-card[data-source='lastfm'] .dg-primary"), 0.4)
+            try:
+                page.wait_for_selector(".dg-card[data-source='lastfm'] .dg-note-danger", timeout=10000)
+            except PlaywrightError:
+                pass   # reported below
+            note = page.evaluate("(document.querySelector(\".dg-card[data-source='lastfm'] .dg-note-danger\") || {}).textContent || ''")
+            expect("mislukt" in note and "testmodus" in note, f"datagatherer: a failed sync shows no reason on the card ({note!r})")
             step("datagatherer: read the existing Spotify export", lambda: page.click(primary), 0.4)
             try:
                 page.wait_for_function(f"(document.querySelector({json.dumps(primary)}) || {{dataset: {{}}}}).dataset.action !== 'import'",

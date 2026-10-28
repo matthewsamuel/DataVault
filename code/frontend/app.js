@@ -3251,13 +3251,20 @@ async function loadSpotifyCoverage() {
         if (!cov.last) { chip.hidden = true; return; }
         const day = (s) => new Date(s * 1000).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
         chip.replaceChildren();
+        // Het grootste gat (bijv. tussen een oude export en de laatste nummers van de API) noemen we altijd
+        const hole = (cov.holes || []).reduce((big, h) => (!big || h.until - h.from > big.until - big.from ? h : big), null);
         appendChildren(chip, [
-            createEl('i', { class: 'fas fa-calendar-check', 'aria-hidden': 'true' }),
+            createEl('i', { class: `fas ${hole ? 'fa-calendar-xmark' : 'fa-calendar-check'}`, 'aria-hidden': 'true' }),
             createEl('span', {}, 'Bijgewerkt t/m ', createEl('span', { class: 'mono', text: day(cov.last) })),
             cov.estimated_since ? createEl('span', { class: 'spotify-coverage-estimate' },
-                ' · luistertijd na ', createEl('span', { class: 'mono', text: day(cov.estimated_since) }), ' is een schatting') : null,
-            createEl('button', { type: 'button', class: 'link-button spotify-coverage-link', text: 'Bijwerken',
-                onClick: () => switchMainView('datagatherer') })]);
+                ' · schatting vanaf ', createEl('span', { class: 'mono', text: day(cov.estimated_since) })) : null,
+            hole ? createEl('span', { class: 'spotify-coverage-hole' },
+                ' · geen gegevens van ', createEl('span', { class: 'mono', text: day(hole.from) }),
+                ' tot ', createEl('span', { class: 'mono', text: day(hole.until) })) : null,
+            cov.waiting_for_import ? createEl('span', { class: 'spotify-coverage-estimate' },
+                ' · je nieuwste gegevens zijn nog niet ingelezen') : null,
+            createEl('button', { type: 'button', class: 'link-button spotify-coverage-link',
+                text: cov.waiting_for_import ? 'Inlezen' : 'Bijwerken', onClick: () => switchMainView('datagatherer') })]);
         chip.hidden = false;
     } catch (_) {
         chip.hidden = true;   // de statistieken zelf melden een fout al

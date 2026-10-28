@@ -23,6 +23,7 @@ const dgState = {
     openHelp: new Set(),
     refreshTimer: null,
     connectPoll: null,
+    returnFocus: null,
 };
 
 function datagathererInit() {
@@ -72,13 +73,14 @@ function dgRender() {
     const data = dgState.data;
     const box = document.getElementById('dg-groups');
     if (!data || !box) return;
-    // De focus blijft op dezelfde knop als de kaarten opnieuw getekend worden
-    const focused = document.activeElement && box.contains(document.activeElement) ? document.activeElement.dataset.dgFocus : null;
+    // De focus blijft op dezelfde knop als de kaarten of de filters opnieuw getekend worden
+    const focused = dgFocusKey(document.activeElement);
     dgRenderSummary(data.summary);
     dgRenderFilters(data.categories);
     if (!data.sources.length) {
         box.replaceChildren(emptyState({ icon: 'fa-plug', title: 'Nog geen bronnen',
             text: 'Er zijn geen gegevensbronnen geïnstalleerd.' }));
+        dgRestoreFocus(focused);
         return;
     }
     const categories = dgState.filter === 'all' ? data.categories : [dgState.filter];
@@ -90,10 +92,22 @@ function dgRender() {
                 createEl('span', { class: 'dg-group-count mono', text: String(sources.length) })),
             createEl('div', { class: 'dg-grid' }, ...sources.map(dgCard)));
     }));
-    if (focused) {
-        const again = box.querySelector(`[data-dg-focus="${CSS.escape(focused)}"]`);
-        if (again) again.focus();
-    }
+    dgRestoreFocus(focused);
+}
+
+// Welke knop op de pagina de focus heeft, als sleutel die na opnieuw tekenen dezelfde knop vindt
+function dgFocusKey(el) {
+    const page = document.querySelector('.dg-page');
+    if (!el || !page || !page.contains(el)) return null;
+    if (el.dataset.dgFocus) return el.dataset.dgFocus;
+    const more = el.closest('.dg-more');
+    return more ? more.querySelector('.dg-more-btn').dataset.dgFocus : null;
+}
+
+function dgRestoreFocus(key) {
+    if (!key) return;
+    const again = document.querySelector(`.dg-page [data-dg-focus="${CSS.escape(key)}"]`);
+    if (again) again.focus({ preventScroll: true });
 }
 
 function dgSlug(text) {
@@ -107,7 +121,7 @@ function dgRenderSummary(summary) {
     // Altijd het totaal; de rest alleen als het er is
     const parts = [part(summary.total, 'bron', 'bronnen')];
     if (summary.current) parts.push(part(summary.current, 'actueel', 'actueel'));
-    if (summary.behind) parts.push(part(summary.behind, 'achter', 'achter'));
+    if (summary.behind) parts.push(part(summary.behind, 'vraagt aandacht', 'vragen aandacht'));
     if (summary.to_read) parts.push(part(summary.to_read, 'klaar om in te lezen', 'klaar om in te lezen'));
     if (summary.waiting) parts.push(part(summary.waiting, 'wacht op een export', 'wachten op een export'));
     if (summary.not_set) parts.push(part(summary.not_set, 'nog niet ingesteld', 'nog niet ingesteld'));
@@ -178,6 +192,7 @@ function dgCard(src) {
                 createEl('p', { class: 'dg-card-desc', text: src.description }))),
         dgDataBlock(src),
         createEl('p', { class: 'dg-next', text: src.next_step }),
+        src.last_error ? dgNote({ tone: 'danger', text: `Laatste keer bijwerken mislukt (${dgTime(src.last_sync_at)}): ${src.last_error}` }) : null,
         ...src.notes.map(dgNote),
         job ? dgProgress(job) : null,
         dgActionRow(src, job),
@@ -196,11 +211,11 @@ function dgDataBlock(src) {
     if (until) {
         line.append(createEl('span', { class: 'dg-until-label', text: 'Gegevens t/m ' }),
             createEl('span', { class: 'mono dg-until-date', text: until }));
-        if (typeof src.gap_days === 'number') {
-            const behind = src.gap_days > src.stale_days;
+        // 'N dagen achter' staat al op het label; hier alleen 'vandaag' of hoe lang geleden
+        if (typeof src.gap_days === 'number' && src.status !== 'achter') {
             line.append(createEl('span', {
-                class: `dg-gap${behind ? ' is-behind' : ''}`,
-                text: src.gap_days === 0 ? ' · vandaag' : ` · ${dgDays(src.gap_days)} achter`,
+                class: 'dg-gap',
+                text: src.gap_days === 0 ? ' · vandaag' : ` · ${dgDays(src.gap_days)} geleden`,
             }));
         }
     } else {
@@ -235,19 +250,27 @@ function dgCoverageBar(src) {
             style: `left: ${left.toFixed(2)}%; width: ${Math.min(width, 100 - left).toFixed(2)}%`,
         }));
     });
+    const holes = cov.holes || [];
     const estimated = cov.estimated_since ? `; na ${dgDate(cov.estimated_since)} geschat` : '';
-    track.setAttribute('aria-label', `Gegevens van ${dgDate(cov.first)} tot ${dgDate(cov.last)}${estimated}`);
-    const legend = createEl('div', { class: 'dg-coverage-legend' },
+    const gaps = holes.map(h => `; geen gegevens van ${dgDate(h.from)} tot ${dgDate(h.until)}`).join('');
+    track.setAttribute('aria-label', `Gegevens van ${dgDate(cov.first)} tot ${dgDate(cov.last)}${estimated}${gaps}`);
+    const axis = createEl('div', { class: 'dg-coverage-axis' },
         createEl('span', { class: 'mono', text: String(new Date(start * 1000).getFullYear()) }),
-        cov.estimated_since ? createEl('span', { class: 'dg-legend-estimated' },
-            createEl('span', { class: 'dg-legend-swatch', 'aria-hidden': 'true' }),
-            `Luistertijd na ${dgDate(cov.estimated_since)} is een schatting`) : null,
         createEl('span', { text: 'vandaag' }));
-    return createEl('div', { class: 'dg-coverage-wrap' }, track, legend);
+    const legend = createEl('div', { class: 'dg-coverage-legend' },
+        cov.estimated_since ? createEl('span', { class: 'dg-legend-item' },
+            createEl('span', { class: 'dg-legend-swatch is-estimated', 'aria-hidden': 'true' }),
+            createEl('span', {}, 'Luistertijd vanaf ', createEl('span', { class: 'mono', text: dgDate(cov.estimated_since) }),
+                ' is een schatting')) : null,
+        ...holes.map(h => createEl('span', { class: 'dg-legend-item' },
+            createEl('span', { class: 'dg-legend-swatch is-hole', 'aria-hidden': 'true' }),
+            createEl('span', {}, 'Geen gegevens van ', createEl('span', { class: 'mono', text: dgDate(h.from) }),
+                ' tot ', createEl('span', { class: 'mono', text: dgDate(h.until) })))));
+    return createEl('div', { class: 'dg-coverage-wrap' }, track, axis, legend.childElementCount ? legend : null);
 }
 
 function dgNote(note) {
-    const icon = note.tone === 'warning' ? 'fa-triangle-exclamation' : 'fa-circle-info';
+    const icon = { warning: 'fa-triangle-exclamation', danger: 'fa-circle-exclamation' }[note.tone] || 'fa-circle-info';
     return createEl('p', { class: `dg-note dg-note-${note.tone}` },
         createEl('i', { class: `fas ${icon}`, 'aria-hidden': 'true' }),
         createEl('span', { text: note.text, title: note.path || undefined }));
@@ -268,30 +291,10 @@ function dgActionRow(src, job) {
         onClick: (e) => dgDoAction(src, src.primary.action, e.currentTarget),
     }, createEl('i', { class: `fas ${src.primary.icon}`, 'aria-hidden': 'true' }), src.primary.label);
     const row = createEl('div', { class: 'dg-actions' }, primary);
-    if (src.actions.length) {
-        const menu = createEl('div', { class: 'menu dg-more-menu', role: 'menu' },
-            ...src.actions.map(a => createEl('button', {
-                type: 'button', class: 'menu-item', role: 'menuitem', disabled: !!job && a.action !== 'request_export',
-                dataset: { action: a.action },
-                onClick: (e) => { e.currentTarget.closest('details').open = false; dgDoAction(src, a.action, primary); },
-            }, createEl('i', { class: `fas ${a.icon}`, 'aria-hidden': 'true' }), a.label)));
-        const more = createEl('details', { class: 'dg-more' },
-            createEl('summary', { class: 'btn btn-secondary', dataset: { dgFocus: `${src.id}-more` },
-                'aria-label': `Meer acties voor ${src.name}` },
-                'Meer', createEl('i', { class: 'fas fa-chevron-down', 'aria-hidden': 'true' })),
-            menu);
-        more.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && more.open) {
-                e.preventDefault();
-                e.stopPropagation();
-                more.open = false;
-                more.querySelector('summary').focus();
-            }
-        });
-        row.append(more);
-    }
+    if (src.actions.length) row.append(dgMoreMenu(src, job));
     const helpOpen = dgState.openHelp.has(src.id);
-    row.append(createEl('span', { class: 'dg-actions-spacer' }),
+    // Hulp en instellingen blijven samen rechts op de regel (ze vallen nooit los naar een eigen regel)
+    row.append(createEl('div', { class: 'dg-actions-tools' },
         createEl('button', {
             type: 'button', class: 'btn btn-ghost btn-icon', 'aria-label': `Hulp bij ${src.name}`, title: 'Hulp',
             'aria-expanded': String(helpOpen), 'aria-controls': `dg-help-${src.id}`,
@@ -302,9 +305,94 @@ function dgActionRow(src, job) {
             type: 'button', class: 'btn btn-ghost btn-icon', 'aria-label': `Instellingen van ${src.name}`,
             title: 'Instellingen', dataset: { dgFocus: `${src.id}-settings` },
             onClick: () => dgOpenSettings(src.id),
-        }, createEl('i', { class: 'fas fa-sliders', 'aria-hidden': 'true' })));
+        }, createEl('i', { class: 'fas fa-sliders', 'aria-hidden': 'true' }))));
     return row;
 }
+
+// ---------- Het menu 'Meer' (zoals het themamenu: pijltjes, Home/End, Escape, klik ernaast sluit) ----------
+
+function dgMoreMenu(src, job) {
+    const menuId = `dg-more-menu-${src.id}`;
+    const button = createEl('button', {
+        type: 'button', class: 'btn btn-secondary dg-more-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+        'aria-controls': menuId, 'aria-label': `Meer acties voor ${src.name}`, dataset: { dgFocus: `${src.id}-more` },
+        onClick: () => (wrap.classList.contains('open') ? dgCloseMenu(wrap, true) : dgOpenMenu(wrap)),
+        onKeydown: (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                e.stopPropagation();
+                dgOpenMenu(wrap, e.key === 'ArrowUp' ? 'last' : 'first');
+            }
+        },
+    }, 'Meer', createEl('i', { class: 'fas fa-chevron-down', 'aria-hidden': 'true' }));
+    const menu = createEl('div', { class: 'menu dg-more-menu', id: menuId, role: 'menu', hidden: true,
+        'aria-label': `Meer acties voor ${src.name}` },
+        ...src.actions.map(a => createEl('button', {
+            type: 'button', class: 'menu-item', role: 'menuitem', tabindex: '-1',
+            disabled: !!job && a.action !== 'request_export', dataset: { action: a.action },
+            onClick: () => {
+                // Eerst dicht en de focus terug op 'Meer': een venster dat nu opent, geeft hem daar ook terug
+                dgCloseMenu(wrap, true);
+                dgDoAction(src, a.action, null);
+            },
+        }, createEl('i', { class: `fas fa-fw ${a.icon}`, 'aria-hidden': 'true' }), a.label)));
+    const wrap = createEl('div', { class: 'dg-more' }, button, menu);
+    menu.addEventListener('keydown', (e) => dgMenuKey(e, wrap));
+    wrap.addEventListener('focusout', (e) => {
+        if (wrap.classList.contains('open') && !wrap.contains(e.relatedTarget)) dgCloseMenu(wrap, false);
+    });
+    return wrap;
+}
+
+function dgMenuItems(wrap) {
+    return [...wrap.querySelectorAll('.menu-item')].filter(item => !item.disabled);
+}
+
+function dgOpenMenu(wrap, where = 'first') {
+    document.querySelectorAll('.dg-more.open').forEach(other => { if (other !== wrap) dgCloseMenu(other, false); });
+    wrap.classList.add('open');
+    wrap.querySelector('.dg-more-menu').hidden = false;
+    wrap.querySelector('.dg-more-btn').setAttribute('aria-expanded', 'true');
+    const items = dgMenuItems(wrap);
+    if (items.length) items[where === 'last' ? items.length - 1 : 0].focus();
+}
+
+function dgCloseMenu(wrap, returnFocus) {
+    if (!wrap.classList.contains('open')) return;
+    wrap.classList.remove('open', 'keyboard');
+    wrap.querySelector('.dg-more-menu').hidden = true;
+    const button = wrap.querySelector('.dg-more-btn');
+    button.setAttribute('aria-expanded', 'false');
+    if (returnFocus) button.focus();
+}
+
+function dgMenuKey(e, wrap) {
+    const items = dgMenuItems(wrap);
+    const at = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        dgCloseMenu(wrap, true);
+    } else if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+        // Deze toetsen zijn voor het menu, niet voor sneltoetsen of de pagina erachter
+        e.preventDefault();
+        e.stopPropagation();
+        wrap.classList.add('keyboard');
+        if (!items.length || e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
+        if (e.key === 'Home' || e.key === 'End') { items[e.key === 'Home' ? 0 : items.length - 1].focus(); return; }
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        items[(at + step + items.length) % items.length].focus();
+    } else if (e.key === 'Tab') {
+        dgCloseMenu(wrap, false);
+    }
+}
+
+// Een klik naast een open menu sluit het (net als bij het themamenu)
+document.addEventListener('click', (e) => {
+    document.querySelectorAll('.dg-more.open').forEach(wrap => {
+        if (!wrap.contains(e.target)) dgCloseMenu(wrap, false);
+    });
+});
 
 function dgHelpPanel(src) {
     const panel = createEl('div', { class: 'dg-help', id: `dg-help-${src.id}`, hidden: !dgState.openHelp.has(src.id) });
@@ -410,6 +498,7 @@ function dgPickFile(src) {
 
 function dgModal(id, title, icon, body, footer, wide) {
     document.getElementById(id)?.remove();
+    dgState.returnFocus = dgFocusKey(document.activeElement) || dgState.returnFocus;
     const modal = createEl('div', {
         class: 'modal dg-modal', id, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': `${id}-title`,
         onClick: (e) => { if (e.target === modal) dgCloseModal(id); },
@@ -434,10 +523,23 @@ function dgCloseModal(id) {
     modal.classList.remove('active');
     if (id === 'dg-connect') dgStopConnectPoll();
     setTimeout(() => { if (!modal.classList.contains('active')) modal.remove(); }, 250);
+    // ui.js geeft de focus terug aan de knop die het venster opende; is die kaart intussen opnieuw
+    // getekend (een taak liep), dan aan dezelfde knop op de nieuwe kaart
+    const key = dgState.returnFocus;
+    dgState.returnFocus = null;
+    setTimeout(() => {
+        const active = document.activeElement;
+        if (key && !anyOverlayOpen() && (!active || active === document.body || !active.isConnected)) dgRestoreFocus(key);
+    }, 60);
 }
 
 async function dgDetail(id) {
     return fetchJSON(`${API_BASE}/api/datagatherer/sources/${encodeURIComponent(id)}`);
+}
+
+// 'Meestal binnen 2 dagen' of 'Meestal binnen 1 tot 30 dagen' (zoals de kaarten op de server)
+function dgExpected([lo, hi]) {
+    return lo <= 0 || lo === hi ? `Meestal binnen ${dgDays(hi)}` : `Meestal binnen ${lo} tot ${dgDays(hi)}`;
 }
 
 function dgSteps(steps) {
@@ -452,7 +554,7 @@ async function dgOpenExport(id) {
     let kind = detail.export_kinds[0];
     const stepsBox = createEl('div', { class: 'dg-export-steps' });
     const showSteps = () => stepsBox.replaceChildren(
-        createEl('p', { class: 'dg-modal-text', text: `Meestal binnen ${kind.expected_days[0]} tot ${kind.expected_days[1]} dagen klaar. Zo gaat het:` }),
+        createEl('p', { class: 'dg-modal-text', text: `${dgExpected(kind.expected_days)} klaar. Zo gaat het:` }),
         dgSteps(kind.steps));
     const body = [createEl('p', { class: 'dg-modal-text',
         text: `De exportpagina van ${detail.name} opent in je eigen browser. Daar log je zelf in; DataVault ziet je wachtwoord nooit.` })];
@@ -506,14 +608,19 @@ async function dgOpenDownloads(id) {
     dgModal('dg-downloads', `In Downloads zoeken: ${src ? src.name : id}`, 'fa-magnifying-glass', [list], footer);
     try {
         const data = await fetchJSON(`${API_BASE}/api/datagatherer/sources/${encodeURIComponent(id)}/candidates`);
+        const pick = src && src.capabilities.includes('import')
+            ? { label: 'Bestand kiezen', primary: !request, onClick: () => { dgCloseModal('dg-downloads'); dgPickFile(src); } } : null;
         if (!data.folders.length) {
             list.replaceChildren(emptyState({ icon: 'fa-folder-open', title: 'Geen map om in te kijken',
-                text: 'DataVault vindt je map Downloads niet. Kies het bestand met Bestand kiezen.', tone: null }));
+                text: 'DataVault vindt je map Downloads niet. Kies het bestand zelf.', action: pick, tone: null }));
             return;
         }
         if (!data.candidates.length) {
+            const ask = src && !request && src.capabilities.includes('export_request')
+                ? { label: 'Export aanvragen', primary: true, onClick: () => { dgCloseModal('dg-downloads'); dgOpenExport(id); } } : null;
             list.replaceChildren(emptyState({ icon: 'fa-hourglass-half', title: 'Nog geen export gevonden',
-                text: `DataVault keek in ${data.folders.map(f => displayPath(f, 40)).join(', ')}. Een download die nog bezig is, telt pas mee als hij klaar is.` }));
+                text: `DataVault keek in ${data.folders.map(f => displayPath(f, 40)).join(', ')}. Een download die nog bezig is, telt pas mee als hij klaar is.`,
+                action: ask || pick }));
             return;
         }
         list.replaceChildren(createEl('ul', { class: 'dg-candidate-list' }, ...data.candidates.map(c => createEl('li', { class: 'dg-candidate' },
@@ -552,12 +659,31 @@ function dgField(field, idPrefix) {
         placeholder: secret && field.stored ? 'Opgeslagen in de Sleutelhanger (leeg laten om te houden)' : (field.placeholder || ''),
         value: secret ? undefined : (field.value || ''), dataset: { key: field.key, kind: field.kind },
     });
+    const error = createEl('p', { class: 'dg-field-error', id: `${id}-error`, hidden: true });
+    const help = field.help ? createEl('p', { class: 'dg-field-help', id: `${id}-help`, text: field.help }) : null;
+    if (help) input.setAttribute('aria-describedby', help.id);
+    input.addEventListener('input', () => dgFieldError(input, null));
     return createEl('div', { class: 'dg-field' },
         createEl('label', { class: 'dg-field-label', for: id }, field.label,
             secret && field.stored ? createEl('span', { class: 'badge badge-success' },
                 createEl('i', { class: 'fas fa-key', 'aria-hidden': 'true' }), 'In de Sleutelhanger') : null),
-        input,
-        field.help ? createEl('p', { class: 'dg-field-help', text: field.help }) : null);
+        input, error, help);
+}
+
+// Een fout bij een veld: direct onder dat veld, en het veld zegt het ook tegen een schermlezer
+function dgFieldError(input, text) {
+    const error = document.getElementById(`${input.id}-error`);
+    if (!error) return;
+    error.textContent = text || '';
+    error.hidden = !text;
+    const help = document.getElementById(`${input.id}-help`);
+    if (text) {
+        input.setAttribute('aria-invalid', 'true');
+        input.setAttribute('aria-describedby', [error.id, help && help.id].filter(Boolean).join(' '));
+    } else {
+        input.removeAttribute('aria-invalid');
+        if (help) input.setAttribute('aria-describedby', help.id); else input.removeAttribute('aria-describedby');
+    }
 }
 
 async function dgSaveFields(id, fields) {
@@ -624,9 +750,11 @@ async function dgOpenConnect(id) {
     save.addEventListener('click', async () => {
         const missing = fields.filter(f => f.required && !(f.kind === 'secret' && f.stored)
             && !document.getElementById(`dg-connect-${f.key}`).value.trim());
+        fields.forEach(f => dgFieldError(document.getElementById(`dg-connect-${f.key}`), null));
         if (missing.length) {
-            status.textContent = `Vul eerst in: ${missing.map(f => f.label).join(', ')}.`;
-            status.className = 'dg-connect-status is-error';
+            missing.forEach(f => dgFieldError(document.getElementById(`dg-connect-${f.key}`), `${f.label} is nodig.`));
+            status.textContent = '';
+            status.className = 'dg-connect-status';
             document.getElementById(`dg-connect-${missing[0].key}`).focus();
             return;
         }
@@ -694,7 +822,11 @@ async function dgOpenSettings(id) {
         body.push(createEl('h3', { class: 'dg-modal-section', text: 'Gegevens' }),
             createEl('div', { class: 'dg-fields' }, ...plain.map(f => dgField(f, 'dg-settings'))));
     }
-    if (secrets.length) {
+    if (secrets.length && detail.keychain_available === false) {
+        body.push(createEl('h3', { class: 'dg-modal-section', text: 'Sleutels' }),
+            dgNote({ tone: 'warning', text: 'De Sleutelhanger van macOS is niet bereikbaar (vergrendeld, of toegang geweigerd). '
+                + 'Ontgrendel hem, of klik op Sta toe als macOS het vraagt, en open dit venster opnieuw.' }));
+    } else if (secrets.length) {
         body.push(createEl('h3', { class: 'dg-modal-section', text: 'Sleutels' }),
             createEl('p', { class: 'dg-modal-text', text: 'Alleen in de Sleutelhanger van macOS; nooit in het archief of de database.' }),
             ...secrets.map(f => createEl('div', { class: 'settings-row' },
@@ -725,10 +857,11 @@ async function dgOpenSettings(id) {
             createEl('p', { class: 'dg-field-help', text: `Standaard uit. Aan: DataVault maakt zelf verbinding met ${detail.network.hosts.join(' en ')}, zolang de app draait. `
                 + (detail.launchd ? 'Ook als de app dicht is: zet in Instellingen > DataGatherer de achtergrondtaak aan.' : '') }));
     }
+    // Een bron die nooit online gaat, heeft geen netwerklog: alleen het label
     body.push(createEl('h3', { class: 'dg-modal-section', text: 'Netwerk' }),
         createEl('p', { class: 'dg-modal-text' },
             createEl('i', { class: `fas ${detail.network.local ? 'fa-laptop' : 'fa-globe'}`, 'aria-hidden': 'true' }), ` ${detail.network.label}`),
-        dgLogList(detail.network_log, false));
+        detail.network.local ? null : dgLogList(detail.network_log, false, true));
     if (detail.raw_imports.length) {
         body.push(createEl('h3', { class: 'dg-modal-section', text: 'Exports in het archief' }),
             createEl('ul', { class: 'dg-raw-list' }, ...detail.raw_imports.map(r => createEl('li', { class: 'dg-raw' },
@@ -751,8 +884,14 @@ async function dgOpenSettings(id) {
                 dgRefreshSoon();
             } }, createEl('i', { class: 'fas fa-user-slash', 'aria-hidden': 'true' }), 'Vergeet dit account'));
     }
-    footer.push(createEl('span', { class: 'dg-actions-spacer' }),
-        createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Annuleren', onClick: () => dgCloseModal('dg-settings') }),
+    footer.push(createEl('span', { class: 'dg-actions-spacer' }));
+    if (!plain.length && !detail.schedule.available) {
+        footer.push(createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Sluiten', 'data-autofocus': '',
+            onClick: () => dgCloseModal('dg-settings') }));
+        dgModal('dg-settings', `Instellingen: ${detail.name}`, 'fa-sliders', body, footer, true);
+        return;
+    }
+    footer.push(createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Annuleren', onClick: () => dgCloseModal('dg-settings') }),
         createEl('button', { type: 'button', class: 'btn btn-primary', text: 'Opslaan', 'data-autofocus': '',
             onClick: async (e) => {
                 const button = e.currentTarget;
@@ -779,9 +918,12 @@ async function dgOpenSettings(id) {
 
 // ---------- Netwerklog ----------
 
-function dgLogList(entries, withSource) {
+function dgLogList(entries, withSource, compact) {
     if (!entries.length) {
-        return createEl('p', { class: 'dg-modal-text dg-log-empty', text: 'Nog geen verbindingen gemaakt.' });
+        const empty = emptyState({ icon: 'fa-globe', title: 'Nog geen verbindingen',
+            text: 'Zodra je op Verbinden of Bijwerken klikt (of een schema aanzet), staat hier elke verbinding.', tone: null });
+        if (compact) empty.classList.add('empty-state-compact');
+        return empty;
     }
     const outcome = { ok: ['Gelukt', 'badge-success'], refused: ['Geweigerd', 'badge-warning'],
         http_error: ['Fout', 'badge-danger'], error: ['Geen verbinding', 'badge-danger'] };
@@ -790,7 +932,8 @@ function dgLogList(entries, withSource) {
         createEl('span', { class: 'dg-log-time mono', text: dgTime(e.at) }),
         createEl('span', { class: 'dg-log-what' },
             withSource ? createEl('strong', { text: `${e.source_name} ` }) : null,
-            createEl('span', { class: 'mono dg-log-url', text: `${e.method} ${e.host}${e.path || ''}`, title: e.note || '' })),
+            createEl('span', { class: 'mono dg-log-url', text: `${e.method} ${e.host}${e.path || ''}` }),
+            e.note && e.outcome !== 'ok' ? createEl('span', { class: 'dg-log-note', text: e.note }) : null),
         createEl('span', { class: 'dg-log-trigger', text: trigger[e.trigger] || e.trigger }),
         createEl('span', { class: `badge ${(outcome[e.outcome] || ['', ''])[1]}`,
             text: `${(outcome[e.outcome] || [e.outcome])[0]}${e.status ? ` ${e.status}` : ''}` }))));
@@ -871,6 +1014,11 @@ registerSettingsSection({
                     + 'Zonder de T7 doet hij niets.';
             }
             button.disabled = !info.available;
+            if (!info.available) {
+                status.textContent = 'Niet beschikbaar';
+                explain.after(createEl('p', { class: 'dg-field-help dg-settings-note', text: info.message
+                    || 'De achtergrondtaak werkt alleen op een Mac, met DataVault zoals hij geïnstalleerd is.' }));
+            }
             button.textContent = info.installed ? 'Achtergrondtaak uitzetten' : 'Achtergrondtaak aanzetten';
             button.addEventListener('click', async () => {
                 button.disabled = true;

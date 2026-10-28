@@ -8945,15 +8945,16 @@ button.otd-settings-icon:hover {
     color: var(--text-tertiary);
 }
 
+/* 400px: room for the longest main button, 'Meer' and the two icon buttons on one line */
 .dg-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
     gap: var(--space-lg);
     align-items: start;
 }
 
 .skeleton-grid.dg-skeleton {
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
     gap: var(--space-lg);
 }
 
@@ -9056,11 +9057,6 @@ button.otd-settings-icon:hover {
     font-weight: var(--fw-semibold);
 }
 
-.dg-gap.is-behind {
-    color: var(--warning-text);
-    font-weight: var(--fw-medium);
-}
-
 .dg-records {
     font-size: var(--fs-xs);
     color: var(--text-tertiary);
@@ -9091,12 +9087,12 @@ button.otd-settings-icon:hover {
 }
 
 .dg-coverage-seg.is-estimated,
-.dg-legend-swatch {
+.dg-legend-swatch.is-estimated {
     background: repeating-linear-gradient(135deg, var(--accent) 0 3px, transparent 3px 6px);
     box-shadow: inset 0 0 0 1px var(--accent-border);
 }
 
-.dg-coverage-legend {
+.dg-coverage-axis {
     display: flex;
     justify-content: space-between;
     gap: var(--space-sm);
@@ -9104,18 +9100,33 @@ button.otd-settings-icon:hover {
     color: var(--text-tertiary);
 }
 
-.dg-legend-estimated {
-    display: inline-flex;
+/* Onder de jaren, elk op een eigen regel: wat geschat is en waar gegevens ontbreken */
+.dg-coverage-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: var(--fs-2xs);
+    color: var(--text-secondary);
+}
+
+.dg-legend-item {
+    display: flex;
     align-items: center;
     gap: var(--space-xs);
-    text-align: center;
 }
 
 .dg-legend-swatch {
+    flex: none;
     display: inline-block;
     width: 14px;
     height: 8px;
     border-radius: var(--radius-full);
+}
+
+/* Een gat: een stukje lege balk met een rand, zodat het als 'niets' leest */
+.dg-legend-swatch.is-hole {
+    background: var(--surface-active);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
 .dg-next {
@@ -9149,6 +9160,14 @@ button.otd-settings-icon:hover {
     color: var(--warning-text);
 }
 
+.dg-note-danger {
+    background: var(--danger-subtle);
+}
+
+.dg-note-danger i {
+    color: var(--danger-text);
+}
+
 .dg-progress {
     display: flex;
     flex-direction: column;
@@ -9174,25 +9193,25 @@ button.otd-settings-icon:hover {
     flex: 1;
 }
 
+/* Hulp en instellingen: samen rechts, nooit los op een eigen regel */
+.dg-actions-tools {
+    display: flex;
+    flex-shrink: 0;
+    gap: var(--space-xs);
+    margin-left: auto;
+}
+
 .dg-more {
     position: relative;
 }
 
-.dg-more > summary {
-    list-style: none;
-}
-
-.dg-more > summary::-webkit-details-marker {
-    display: none;
-}
-
-.dg-more > summary i {
+.dg-more-btn i {
     font-size: var(--icon-xs);
     color: var(--text-tertiary);
     transition: transform var(--duration-fast) var(--ease-out);
 }
 
-.dg-more[open] > summary i {
+.dg-more.open .dg-more-btn i {
     transform: rotate(180deg);
 }
 
@@ -9201,6 +9220,17 @@ button.otd-settings-icon:hover {
     top: calc(100% + var(--space-xs));
     left: 0;
     min-width: 220px;
+}
+
+.dg-more-menu[hidden] {
+    display: none;
+}
+
+/* Met de muis geopend en dan met pijltjes verder: Safari toont dan geen :focus-visible */
+.dg-more.keyboard .menu-item:focus {
+    background-color: var(--surface-active);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 /* ---------- Hulp ---------- */
@@ -9422,6 +9452,15 @@ button.otd-settings-icon:hover {
     color: var(--danger-text);
 }
 
+.dg-field-error {
+    font-size: var(--fs-xs);
+    color: var(--danger-text);
+}
+
+.dg-field .input[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
 .dg-kind-choice {
     align-self: flex-start;
 }
@@ -9518,6 +9557,14 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
+/* Waarom een verbinding geweigerd werd of mislukte: zichtbaar, niet alleen als tooltip */
+.dg-log-note {
+    display: block;
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+    white-space: normal;
+}
+
 .dg-log-trigger {
     flex: none;
     font-size: var(--fs-xs);
@@ -9580,6 +9627,11 @@ button.otd-settings-icon:hover {
 
 .spotify-coverage .mono {
     color: var(--text-primary);
+}
+
+.spotify-coverage-hole,
+.spotify-coverage-hole .mono {
+    color: var(--warning-text);
 }
 
 .spotify-coverage-link {
