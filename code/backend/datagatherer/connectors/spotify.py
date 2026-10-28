@@ -55,7 +55,9 @@ class Spotify(Connector):
     name = "Spotify"
     icon = "fab fa-spotify"
     category = "Muziek"
-    description = "Wat je beluisterde: de volledige geschiedenis uit je Spotify-export, aangevuld met de laatste nummers via de Spotify-API."
+    order = 10
+    record_label = ("play", "plays")
+    description = "Alles wat je beluisterde: je volledige export, aangevuld met je laatste nummers via de API."
     capabilities = frozenset({"api_sync", "export_request", "export_watch", "import"})
     allowed_hosts = ("accounts.spotify.com", "api.spotify.com")
     raw_folder = "Spotify"
@@ -207,7 +209,8 @@ class Spotify(Connector):
             added += n_added
             seen += n_seen
             kinds[kind] += n_seen
-            ctx.progress(message=f"Spotify inlezen: {files} bestanden, {seen:,} plays".replace(",", "."))
+            ctx.progress(message=f"Spotify inlezen: {files} {'bestand' if files == 1 else 'bestanden'}, "
+                                 f"{seen:,} plays".replace(",", "."))
         if not files:
             raise ConnectorError("Geen Spotify-luistergeschiedenis gevonden in deze export")
         return {"added": added, "seen": seen, "files": files, "kinds": kinds, "covers_from": lo, "covers_until": hi}

@@ -138,8 +138,8 @@ def load() -> Dict[str, Connector]:
 
 
 def connectors() -> List[Connector]:
-    """Every connector, grouped by category in CATEGORIES order, then by name."""
-    return sorted(load().values(), key=lambda c: (CATEGORIES.index(c.category), c.name.casefold()))
+    """Every connector, grouped by category in CATEGORIES order, then by its order and name."""
+    return sorted(load().values(), key=lambda c: (CATEGORIES.index(c.category), c.order, c.name.casefold()))
 
 
 def get(source_id: str) -> Optional[Connector]:

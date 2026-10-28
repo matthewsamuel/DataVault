@@ -50,7 +50,7 @@ _existing_cache: Dict[str, tuple] = {}
 
 
 def _days(n: int) -> str:
-    return f"{n} dag" if n == 1 else f"{n} dagen"
+    return "1 dag" if n == 1 else f"{n:,} dagen".replace(",", ".")
 
 
 def _date(ts: Optional[float]) -> Optional[str]:
@@ -197,6 +197,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         "gap_days": gap_days,
         "stale_days": connector.stale_days,
         "records": cov.records,
+        "record_label": list(connector.record_label),
         "coverage": {
             "first": cov.first, "last": cov.last, "estimated_since": cov.estimated_since,
             "segments": [{"from": a, "until": b, "estimated": e} for a, b, e in cov.segments],

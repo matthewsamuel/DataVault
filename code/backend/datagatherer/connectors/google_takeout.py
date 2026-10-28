@@ -33,7 +33,7 @@ class GoogleTakeout(Connector):
     name = "Google Takeout"
     icon = "fab fa-google"
     category = "Activiteit"
-    description = "Je Google-gegevens (Mijn activiteit, YouTube, Maps, Chrome) uit Takeout-exports."
+    description = "Je Google-gegevens uit Takeout: Mijn activiteit, YouTube, Maps en Chrome."
     capabilities = frozenset({"export_request", "export_watch", "import"})
     raw_folder = "Google"
     existing_folders = ("RAW_google",)

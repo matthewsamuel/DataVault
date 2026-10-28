@@ -112,7 +112,7 @@ def sync_type(config, db, connector) -> JobType:
 
 def sync_message(connector, result: Dict[str, Any]) -> str:
     added = result.get("added", 0)
-    text = f"Klaar: {_plural(added, 'nieuw item', 'nieuwe items')}" if added else "Klaar: niets nieuws"
+    text = f"Klaar: {_plural(added, *connector.record_label)} erbij" if added else "Klaar: niets nieuws"
     if result.get("gap_possible"):
         text += " (mogelijk een gat: meer nieuwe nummers dan Spotify teruggeeft)"
     return text
@@ -189,7 +189,7 @@ def import_type(config, db, connector) -> JobType:
             register_existing(config, db, connector, GatherContext(config, db, connector, job=ctx))
             raw_ids = [r["id"] for r in state.pending_raw(db, connector.id)]
         result = run_import(config, db, connector, raw_ids, ctx)
-        ctx.progress(result["imports"], max(1, len(raw_ids)), import_message(result))
+        ctx.progress(result["imports"], max(1, len(raw_ids)), import_message(connector, result))
         return result
 
     return JobType(import_type_name(connector.id), f"{connector.name} inlezen", prepare, run,
@@ -198,10 +198,11 @@ def import_type(config, db, connector) -> JobType:
                    describe=lambda p: "één export" if p.get("raw_import_id") else "exports in het archief")
 
 
-def import_message(result: Dict[str, Any]) -> str:
+def import_message(connector, result: Dict[str, Any]) -> str:
     if not result["imports"] and not result["errors"]:
         return "Klaar: geen nieuwe exports"
-    text = f"Klaar: {_plural(result['added'], 'nieuw item', 'nieuwe items')} uit {_plural(result['imports'], 'export', 'exports')}"
+    text = (f"Klaar: {_plural(result['added'], *connector.record_label)} erbij uit "
+            f"{_plural(result['imports'], 'export', 'exports')}")
     if result["errors"]:
         text += f" ({_plural(result['errors'], 'export', 'exports')} niet leesbaar)"
     return text

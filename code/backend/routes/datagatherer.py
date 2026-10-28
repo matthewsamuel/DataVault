@@ -82,7 +82,9 @@ def list_sources() -> Dict[str, Any]:
             "total": len(items),
             "current": sum(i["status"] == "actueel" for i in items),
             "behind": sum(i["status"] in ("achter", "fout", "opnieuw_verbinden") for i in items),
-            "waiting": sum(i["status"] in ("wacht_op_export", "export_binnen") for i in items),
+            "to_read": sum(i["status"] == "export_binnen" for i in items),
+            "waiting": sum(i["status"] == "wacht_op_export" for i in items),
+            "not_set": sum(i["status"] == "niet_ingesteld" for i in items),
         },
     }
 
@@ -399,7 +401,8 @@ def get_network_log(source: Optional[str] = None, limit: int = 100) -> Dict[str,
 
 @router.get("/launchd")
 def launchd_status() -> Dict[str, Any]:
-    return {**launchd.status(), "sources": [c.id for c in registry.connectors() if c.launchd]}
+    agents = [c for c in registry.connectors() if c.launchd]
+    return {**launchd.status(), "sources": [c.id for c in agents], "source_names": [c.name for c in agents]}
 
 
 @router.post("/launchd/install")

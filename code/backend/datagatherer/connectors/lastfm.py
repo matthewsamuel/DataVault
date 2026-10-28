@@ -33,7 +33,9 @@ class LastFm(Connector):
     name = "Last.fm"
     icon = "fab fa-lastfm"
     category = "Muziek"
-    description = "Je scrobbles, als vangnet voor Spotify: vult de plays aan die de Spotify-API niet meer teruggeeft."
+    order = 20
+    record_label = ("scrobble", "scrobbles")
+    description = "Je scrobbles: een vangnet voor wat de Spotify-API niet meer teruggeeft."
     capabilities = frozenset({"api_sync"})
     allowed_hosts = ("ws.audioscrobbler.com",)
     raw_folder = "Last.fm"

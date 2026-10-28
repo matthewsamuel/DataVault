@@ -112,6 +112,8 @@ class Connector:
     name: str = ""                    # "Spotify"
     icon: str = ""                    # "fab fa-spotify" (vendored Font Awesome)
     category: str = ""                # one of CATEGORIES
+    order: int = 100                  # place within its category (lower first, then by name)
+    record_label: Tuple[str, str] = ("item", "items")   # what one record is called (one, many)
     description: str = ""             # one Dutch sentence: what this source brings in
     capabilities: frozenset = frozenset()
     allowed_hosts: Tuple[str, ...] = ()   # every host it may ever contact (exact names, https only)
@@ -131,7 +133,7 @@ class Connector:
     @property
     def network_label(self) -> str:
         if "api_sync" in self.capabilities and self.allowed_hosts:
-            return f"Verbindt met {_join(self.allowed_hosts)} wanneer jij klikt of als je het schema aanzet"
+            return f"Verbindt met {_join(self.allowed_hosts)} wanneer jij klikt"
         return "Alleen lokaal: maakt nooit verbinding met internet"
 
     @property
