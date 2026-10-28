@@ -5889,7 +5889,6 @@ button.otd-settings-icon:hover {
     box-shadow: var(--shadow-sm);
     display: flex;
     flex-direction: column;
-    height: 520px;
     overflow: hidden;
 }
 
