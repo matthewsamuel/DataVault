@@ -23,11 +23,27 @@ al bij elke wijziging).
 
 Na een herstart heeft de server een nieuw sessietoken; de pagina haalt dat zelf op.
 
+Loopt er tijdens de herstart nog een lange opdracht (bijv. een tijdlijnscan), dan wacht de oude
+server daar niet eindeloos op: na hoogstens 15 seconden stopt hij toch (nooit midden in het
+verplaatsen van een bestand) en komt de nieuwe server op.
+
+Na een herstart vanuit de app draait de server los van het Terminal-venster van `start.sh`:
+- **Uitvoer (log):** die staat niet meer in dat Terminal-venster maar in
+  `~/Library/Logs/DataVault/server.log` (te openen met de app Console, of
+  `tail -f ~/Library/Logs/DataVault/server.log`). Een ander bestand kies je met de
+  omgevingsvariabele `DATAVAULT_LOG_FILE`. Boven 10 MB wordt het oude log `server.log.1`.
+  Gestart via de DataVault-app blijft de uitvoer gewoon in `/tmp/datavault_server.log`.
+- **Stoppen:** Ctrl+C in het Terminal-venster stopt de herstarte server niet meer (dat venster
+  is alweer terug bij de prompt). Stop hem met `./stop_datavault.sh` (zie hieronder).
+
 ## Alleen stoppen
 
 ```bash
 ./stop_datavault.sh
 ```
+
+Dit werkt ook voor een server die vanuit de app is herstart: het stopt het proces dat op poort
+8000 luistert.
 
 ## Controleren of het werkt
 
