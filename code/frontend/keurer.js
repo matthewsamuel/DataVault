@@ -1011,11 +1011,16 @@ function keurerKeyIsForKeurer(e, key) {
     const el = document.activeElement;
     if (isTypingTarget(e.target) || isTypingTarget(el)) return false;
     if (!el || el === document.body || el === document.documentElement) return true;
-    if (el.closest('#section-keurer, #keurer-preview-overlay')) return true;
-    // Net op het tabblad geklikt: de focus staat in het hoofdmenu. Pijltjes doen daar niets
-    // anders; spatie zou een ander tabblad openen, dus alleen op het Keurer-tabblad zelf.
+    if (el.closest('#section-keurer, #keurer-preview-overlay')) {
+        // Spatie op een knop (Houden, Kies map, ...) drukt die knop in; geen voorbeeld openen
+        if (key === 'Space' && el !== document.getElementById('keurer-card')
+            && el.closest('button, a[href], summary, [role="button"]')) return false;
+        return true;
+    }
+    // Net op het Keurer-tabblad geklikt: de focus staat in het hoofdmenu. Alleen dat tabblad
+    // telt; een pijltje op een ander tabblad (Tijdlijn, ...) is geen beslissing over een foto.
     const tab = el.closest('.nav-tabs [data-view]');
-    if (tab) return key !== 'Space' || tab.dataset.view === 'keurer';
+    if (tab) return tab.dataset.view === 'keurer';
     return false;
 }
 

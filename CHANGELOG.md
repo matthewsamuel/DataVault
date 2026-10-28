@@ -89,7 +89,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - De pijltjes in het themamenu kiezen alleen een thema. Op het Keurer-tabblad beslisten ze ook over
   de foto erachter (naar de prullenmand, terugdraaien, verplaatsen); dat kan niet meer. De Keurer
   reageert op pijltjes en spatie alleen als de focus op de Keurer zelf staat (of nergens, of op het
-  tabblad).
+  Keurer-tabblad). Een pijltje op een ander tabblad (bijvoorbeeld Tijdlijn) beslist niets, en spatie
+  op een Keurer-knop (Houden, Kies map, ...) drukt die knop in in plaats van het voorbeeld te openen.
 - In een venster om een map te kiezen doet Enter op **Annuleren** of **×** wat die knop zegt: het
   venster sluit en er wordt niets verplaatst. Alleen Enter in de mappenlijst of het zoekveld kiest de
   gemarkeerde map.
