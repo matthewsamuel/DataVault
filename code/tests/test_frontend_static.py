@@ -71,9 +71,10 @@ def test_every_main_view_has_a_section_a_menu_entry_and_a_shortcut():
     sources = _sources()
     views = re.search(r"const MAIN_VIEWS = \[([^\]]+)\]", sources["app.js"]).group(1)
     views = re.findall(r"'(\w+)'", views)
-    shortcuts = re.findall(r"\{ view: '(\w+)', key: '(\d)', g: '(\w)'", sources["shortcuts.js"])
+    shortcuts = re.findall(r"\{ view: '(\w+)', key: (?:'(\d)'|null), g: '(\w)'", sources["shortcuts.js"])
     assert [v for v, _, _ in shortcuts] == views
-    assert [k for _, k, _ in shortcuts] == [str(i) for i in range(1, len(views) + 1)]
+    # 1-9 in menu order; a view after the ninth has only its g + letter (key: null)
+    assert [k for _, k, _ in shortcuts] == [str(i) for i in range(1, min(len(views), 9) + 1)] + [""] * max(0, len(views) - 9)
     assert len({g for _, _, g in shortcuts}) == len(views), "two views share a g + letter shortcut"
     for view in views:
         assert f'id="section-{view}"' in sources["index.html"], view
@@ -84,8 +85,19 @@ def test_new_scripts_load_after_the_helpers_they_use():
     index = _sources()["index.html"]
     scripts = [s.split("?")[0] for s in re.findall(r'<script src="([^"]+)"', index)]
     assert scripts.index("ui.js") < scripts.index("app.js")
-    for late in ("recovery.js", "settings.js", "shortcuts.js"):
+    for late in ("recovery.js", "settings.js", "shortcuts.js", "datagatherer.js"):
         assert scripts.index(late) > scripts.index("jobs.js"), late
+    # DataGatherer registers its Instellingen section, so it loads after settings.js
+    assert scripts.index("datagatherer.js") > scripts.index("settings.js")
+
+
+def test_the_datagatherer_page_has_no_code_per_source():
+    """A new source is one Python file: the page knows no connector by name (it reads their metadata)."""
+    from backend.datagatherer import registry
+    js = re.sub(r"/\*.*?\*/|//[^\n]*", "", _sources()["datagatherer.js"], flags=re.S).lower()
+    for connector in registry.connectors():
+        for word in {connector.id, connector.name.lower()}:
+            assert word not in js, word
 
 
 # Colours come from the design tokens (style.css, between @tokens:start and @tokens:end),

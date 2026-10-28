@@ -177,7 +177,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== VIEW SWITCHING ====================
 
-const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings'];
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'datagatherer'];
 
 function currentMainView() {
     return MAIN_VIEWS.find(v => {
@@ -241,6 +241,8 @@ function switchMainView(view) {
         if (typeof recoveryInit === 'function') recoveryInit();
     } else if (view === 'settings') {
         if (typeof settingsInit === 'function') settingsInit();
+    } else if (view === 'datagatherer') {
+        if (typeof datagathererInit === 'function') datagathererInit();
     }
 }
 
@@ -1120,11 +1122,17 @@ function globalSearchKeydown(event) {
 }
 
 // Wat het zoekveld doet, zichtbaar in de plaatshouder en (op andere schermen) de Enter-hint
+// In een smaller venster is het zoekveld korter (er staan meer knoppen rechts): dan een korte tekst
+const SEARCH_COMPACT = window.matchMedia('(max-width: 1240px)');
+SEARCH_COMPACT.addEventListener('change', () => updateSearchFieldForView(currentMainView()));
+document.addEventListener('DOMContentLoaded', () => updateSearchFieldForView(currentMainView()));
+
 function updateSearchFieldForView(view) {
     const input = document.getElementById('global-search');
     if (!input) return;
     const here = view === 'viewer';
-    input.placeholder = here ? 'Zoek in deze map…' : 'Zoek in Bestanden…';
+    input.placeholder = SEARCH_COMPACT.matches ? (here ? 'Zoek in map…' : 'Zoeken…')
+        : (here ? 'Zoek in deze map…' : 'Zoek in Bestanden…');
     input.setAttribute('aria-label', here ? 'Zoek in de geopende map (sneltoets /)'
         : 'Zoek in de geopende map van Bestanden: typ en druk op Enter (sneltoets /)');
     input.closest('.search-field').classList.toggle('search-elsewhere', !here);
@@ -3233,8 +3241,38 @@ function startShow(story) {
 
 let spotifyLoadSeq = 0; // alleen het antwoord op de laatste aanvraag telt (snel van jaar wisselen)
 
+// De regel onder de titel: tot wanneer de gegevens gaan, en sinds wanneer de luistertijd een
+// schatting is (plays van de Spotify-API en Last.fm na de laatste export); met een knop naar DataGatherer
+async function loadSpotifyCoverage() {
+    const chip = document.getElementById('spotify-coverage');
+    if (!chip) return;
+    try {
+        const cov = await fetchJSON(`${API_BASE}/api/spotify/coverage`);
+        if (!cov.last) { chip.hidden = true; return; }
+        const day = (s) => new Date(s * 1000).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
+        chip.replaceChildren();
+        appendChildren(chip, [
+            createEl('i', { class: 'fas fa-calendar-check', 'aria-hidden': 'true' }),
+            createEl('span', {}, 'Bijgewerkt t/m ', createEl('span', { class: 'mono', text: day(cov.last) })),
+            cov.estimated_since ? createEl('span', { class: 'spotify-coverage-estimate' },
+                ' · luistertijd na ', createEl('span', { class: 'mono', text: day(cov.estimated_since) }), ' is een schatting') : null,
+            createEl('button', { type: 'button', class: 'link-button spotify-coverage-link', text: 'Bijwerken',
+                onClick: () => switchMainView('datagatherer') })]);
+        chip.hidden = false;
+    } catch (_) {
+        chip.hidden = true;   // de statistieken zelf melden een fout al
+    }
+}
+
+// Na nieuwe gegevens uit DataGatherer (Spotify, Last.fm): de eerder opgehaalde statistieken gelden niet meer
+window.addEventListener('datavault:data-changed', (e) => {
+    if (!['spotify', 'lastfm'].includes(e.detail && e.detail.source)) return;
+    Object.keys(_prefetchCache).filter(url => url.includes('/api/spotify/')).forEach(url => delete _prefetchCache[url]);
+});
+
 async function loadSpotifyStats() {
     const seq = ++spotifyLoadSeq;
+    loadSpotifyCoverage();
     const loading = document.getElementById('spotify-loading');
     const content = document.getElementById('spotify-content');
     const yearSelect = document.getElementById('spotify-year-select');

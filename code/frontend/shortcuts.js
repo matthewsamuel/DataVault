@@ -29,6 +29,8 @@ const SHORTCUT_VIEWS = [
     { view: 'timeline', key: '7', g: 't', label: 'Tijdlijn' },
     { view: 'recovery', key: '8', g: 'r', label: 'Herstelcentrum' },
     { view: 'settings', key: '9', g: 'i', label: 'Instellingen' },
+    // Geen cijfer meer over (1-9 zijn op): alleen g + letter
+    { view: 'datagatherer', key: null, g: 'a', label: 'DataGatherer' },
 ];
 
 const SHORTCUT_GROUPS = [
