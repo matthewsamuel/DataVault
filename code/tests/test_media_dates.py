@@ -285,7 +285,10 @@ def test_a_scan_while_the_vault_goes_away_is_not_cached(client, vault, monkeypat
     finally:
         away.rename(vault)
     assert r.status_code == 200 and r.json()["complete"] is False
-    assert timeline._scan_cache == {}
+    # Kept only for the rest of its own paging, never as a complete answer
+    assert all(complete is False for _, _, complete, _ in timeline._scan_cache.values())
+    monkeypatch.setattr(media_dates, "capture_dates", real)
+    assert client.get("/api/timeline/scan", params={"folders": [str(folder)]}).json()["complete"] is True
 
 
 def test_a_file_that_cannot_be_read_gets_no_stored_date(client, vault):

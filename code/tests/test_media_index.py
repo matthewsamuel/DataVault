@@ -747,6 +747,35 @@ def test_a_folder_that_could_not_be_listed_keeps_the_timeline_on_the_walk(client
     assert _scan(client, config.VAULT_ROOT / "library")["source"] == "index"
 
 
+def test_paging_an_incomplete_walk_walks_once_per_first_page(client, config, monkeypatch):
+    from backend.routes import timeline
+    locked = config.VAULT_ROOT / "RAW/2022/bursts"
+    walks = []
+    real = timeline._scan_payload
+    monkeypatch.setattr(timeline, "_scan_payload", lambda roots: walks.append(1) or real(roots))
+    os.chmod(locked, 0)
+    try:
+        first = _scan(client, config.VAULT_ROOT / "RAW", limit=4)
+        assert first["source"] == "walk" and first["complete"] is False and first["next_offset"] == 4
+        rows, offset = list(first["rows"]), first["next_offset"]
+        while offset is not None:
+            page = _scan(client, config.VAULT_ROOT / "RAW", offset=offset, limit=4)
+            assert page["version"] == first["version"] and page["complete"] is False
+            rows += page["rows"]
+            offset = page["next_offset"]
+        assert len(rows) == first["total"] > 8 and len(walks) == 1
+        # A new first page tries again what could not be read
+        _scan(client, config.VAULT_ROOT / "RAW", limit=4)
+        assert len(walks) == 2
+        # An answer that is too old is not used for later pages either
+        monkeypatch.setattr(timeline, "INCOMPLETE_SECONDS", 0)
+        _scan(client, config.VAULT_ROOT / "RAW", offset=4, limit=4)
+        assert len(walks) == 3
+    finally:
+        os.chmod(locked, 0o755)
+    assert _scan(client, config.VAULT_ROOT / "RAW", offset=4, limit=4)["complete"] is True
+
+
 def test_on_this_day_and_photos_by_date_come_from_the_index(client, config, monkeypatch):
     from backend.routes import stats
     now = datetime.now()
