@@ -84,8 +84,11 @@ def test_new_scripts_load_after_the_helpers_they_use():
     index = _sources()["index.html"]
     scripts = [s.split("?")[0] for s in re.findall(r'<script src="([^"]+)"', index)]
     assert scripts.index("ui.js") < scripts.index("app.js")
-    for late in ("recovery.js", "settings.js", "shortcuts.js"):
+    for late in ("recovery.js", "settings.js", "shortcuts.js", "elo.js", "backup-settings.js"):
         assert scripts.index(late) > scripts.index("jobs.js"), late
+    # elo.js adds a shortcut group and backup-settings.js a settings section
+    assert scripts.index("elo.js") > scripts.index("shortcuts.js")
+    assert scripts.index("backup-settings.js") > scripts.index("settings.js")
 
 
 # Colours come from the design tokens (style.css, between @tokens:start and @tokens:end),
