@@ -206,8 +206,11 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   waarschuwing, info) in de kleur van de balk links.
 - Het sneltoetsenoverzicht is evenwichtiger: "Overal" staat over de hele breedte in twee kolommen,
   en een toetscombinatie (zoals de vier pijltjes) breekt nooit meer over twee regels.
-- Spotify: topartiesten en topnummers zijn even lang, dus geen leeg vlak meer onder de kortste
-  lijst. De voortgangsbalk van de diavoorstelling is groen.
+- Spotify: topartiesten en topnummers tonen weer alles wat er is (een eerdere versie kortte de
+  langste lijst in tot de lengte van de kortste, waardoor nummers wegvielen). De twee kaarten zijn
+  even hoog; de kortste lijst eindigt met een rustige regel als "Dat zijn alle 6 artiesten in deze
+  periode". De labels onder de tegels staan op één lijn, en in "1,2 uur" staat "uur" in de gewone
+  letter. De voortgangsbalk van de diavoorstelling is groen.
 - Mono alleen nog voor getallen en paden: "68,1% van deze map" en "Geen" (geen map gekozen) staan
   in de gewone letter.
 - In een smal venster (onder ca. 900 px, bijvoorbeeld Split View) schuift het menu bovenin opzij in
@@ -215,6 +218,36 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   één lijn met de maandkoppen.
 - De achtergrondgolven in de mappenkolom zijn weg; alleen Spotify heeft ze nog.
 - Beweging is kort en subtiel, en staat helemaal stil als je in macOS "Beperk beweging" aan hebt.
+- Bestanden: klik je een map aan en meteen daarna op "Archief" (of Backspace), dan blijven het pad
+  bovenaan en de mappenkolom op "Archief" staan, ook als die map pas later klaar is met laden.
+- Bestanden toont geen lege pagina meer als het archief bij het openen niet bereikbaar is, maar
+  "Archief niet bereikbaar" met "Opnieuw proberen" (ook in de mappenkolom); komt de schijf terug,
+  dan verschijnen de mappen vanzelf. Een archief zonder mappen zegt "Het archief is leeg".
+- Bestanden: in de lijst staan mappen en bestanden op dezelfde lijn (icoon, naam, soort, grootte,
+  datum). In het raster zie je de naam van een foto of video onderaan de tegel als je erop wijst of
+  er met het toetsenbord op staat, zodat bijna gelijke burstfoto's uit elkaar te houden zijn.
+- Keurer: een map zonder foto's of video's (bijvoorbeeld alleen submappen) zegt "Geen foto's of
+  video's in deze map" met "Andere map", in plaats van een groen "Map volledig beoordeeld". De
+  labels ("Dagen op rij", "Vandaag", "Totaal beoordeeld") en de ongedaan-melding beginnen met een
+  hoofdletter.
+- Home: de foto van "op deze dag" open je ook met het toetsenbord (Enter of spatie), met de groene
+  focusring; zolang de foto de focus heeft, wisselt hij niet.
+- Diavoorstelling: titel, gegevens en voortgangsbalk staan boven en onder de foto in plaats van
+  eroverheen, op elke schermhoogte. Het getal met de ster heet nu "Score" (tooltip en schermlezer).
+- Paden zien er overal hetzelfde uit: vanaf het archief ("RAW/2022/bursts"), lange paden in het
+  midden ingekort ("RAW/…/zomer/dag 2"), in de mono-letter, met het volledige pad in de tooltip. Zo
+  ook in de Keurer en het Herstelcentrum. Instellingen > Over deze app toont het volledige pad op
+  de schijf, ook in mono.
+- Instellingen: de themakeuze is dezelfde schakelaar als Raster/Lijst, de knoppen zijn even groot
+  als elders, en het tandwiel krijgt als het actief is hetzelfde groene streepje als de andere
+  menu-onderdelen. Tussen het menu en het zoekveld blijft bij elke breedte vanaf 1024 px ruimte.
+- Duplicaten: de uitleg boven de groepen is opgesplitst in een regel met de twee labels (en rechts
+  wat er zichtbaar opgeruimd wordt) en één rustige regel met de gekozen regel.
+- Het takenpaneel rechtsonder bedekt geen inhoud meer: de pagina houdt onderaan zoveel ruimte vrij
+  als het paneel hoog is, dus ook de laatste tegel of het laatste chatbericht scrolt eronder vandaan.
+- Bronnen beheren: de mappen staan op één lijn met de tekst erboven. Het sneltoetsenoverzicht
+  scrolt in een laag venster binnen het venster, met de voetnoot altijd heel in beeld. In het
+  themamenu zie je ook na openen met de muis welke keuze de pijltjes gemarkeerd hebben.
 
 ## Fase 2 – Stabiliseren
 

@@ -160,6 +160,13 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   `--border-overlay`; voeg een nieuw zwevend vlak toe aan die regel onder `@tokens:end`.
 - Een venstertitel is `h2.modal-title` met één `<i>` vooraan; paden toon je met
   `archivePath()`/`pathNodes()` (app.js) vanaf het archief, met het volledige pad als `title`.
+  Een kort padlabel (een chip, een regel in een lijst) is `displayPath(path, max)` (app.js): vanaf
+  het archief, `Archief` voor de archiefmap zelf, lang ingekort in het midden, in een element met
+  klasse `.path-label` (mono).
+- Een eenheid achter een groot getal in een tegel is `<span class="stat-unit">` (gewone letter,
+  rustiger kleur); `.stat-label` staat onderaan de tegel, zodat labels in een rij op één lijn staan.
+- Het takenpaneel zet `--job-dock-space` (jobs.js); `.main-content` houdt zoveel onderaan vrij.
+  Een eigen scrollvlak dat tot de onderkant van het venster loopt, gebruikt die variabele ook.
 - Knoppen rechts in een paginakop staan bovenaan, op de hoogte van de titel (`align-items:
   flex-start`), in de gewone knopgrootte (geen `.btn-small`).
 - Mono (`--font-mono`) alleen voor getallen en paden; staat een getal in een zin, zet dan alleen
