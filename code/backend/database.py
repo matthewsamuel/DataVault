@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Set, Tuple
 from datetime import datetime
+import time
 import uuid
 
 from backend import migrations
@@ -158,67 +159,75 @@ class Database:
         conn.close()
     
     # Delete run tracking methods
-    
-    def create_delete_run(self) -> str:
-        """Create new delete run, return run_id"""
-        run_id = str(uuid.uuid4())
-        
+    #
+    # One run is one user action in the duplicates view (one click on 'opruimen'),
+    # however many files and requests it takes. A run only exists once its first
+    # file has been moved, so an empty run can never stand in the way of undo.
+    # Runs are ordered by seq, an AUTOINCREMENT number (migration 7), never by clock time.
+
+    _RUN_COLUMNS = """
+        r.seq, r.run_id, r.timestamp, r.created_at, r.total_files, r.folder,
+        (SELECT COUNT(*) FROM delete_operations o WHERE o.run_id = r.run_id) AS remaining
+    """
+
+    @staticmethod
+    def _run_row(row) -> Dict[str, Any]:
+        return {
+            "seq": row[0],
+            "run_id": row[1],
+            "timestamp": row[2],
+            "created_at": row[3],
+            "total_files": row[4],
+            "folder": row[5],
+            "remaining": row[6],
+        }
+
+    def record_delete_operation(
+        self, run_id: Optional[str], src_path: Path, dst_path: Path, folder: Optional[str] = None
+    ) -> str:
+        """
+        Record one moved file. Without a run_id (or with one that no longer exists,
+        e.g. because it was undone in the meantime) a new run is started in the same
+        transaction. Returns the run_id the file was recorded under.
+        """
         conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "INSERT INTO delete_runs (run_id, timestamp, total_files) VALUES (?, ?, 0)",
-            (run_id, datetime.now())
-        )
-        
-        conn.commit()
-        conn.close()
-        
+        try:
+            with conn:
+                exists = run_id is not None and conn.execute(
+                    "SELECT 1 FROM delete_runs WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                if not exists:
+                    run_id = str(uuid.uuid4())
+                    conn.execute(
+                        "INSERT INTO delete_runs (run_id, timestamp, total_files, created_at, folder) "
+                        "VALUES (?, ?, 0, ?, ?)",
+                        (run_id, datetime.now().isoformat(sep=" "), time.time(), folder),
+                    )
+                conn.execute(
+                    "INSERT INTO delete_operations (run_id, src_path, dst_path, timestamp) VALUES (?, ?, ?, ?)",
+                    (run_id, str(src_path), str(dst_path), datetime.now().isoformat(sep=" ")),
+                )
+                conn.execute(
+                    "UPDATE delete_runs SET total_files = total_files + 1 WHERE run_id = ?", (run_id,)
+                )
+        finally:
+            conn.close()
         return run_id
     
-    def record_delete_operation(self, run_id: str, src_path: Path, dst_path: Path):
-        """Record individual file move in a delete run"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT INTO delete_operations (run_id, src_path, dst_path, timestamp)
-            VALUES (?, ?, ?, ?)
-        """, (run_id, str(src_path), str(dst_path), datetime.now()))
-        
-        # Update total count
-        cursor.execute("""
-            UPDATE delete_runs
-            SET total_files = (
-                SELECT COUNT(*) FROM delete_operations WHERE run_id = ?
-            )
-            WHERE run_id = ?
-        """, (run_id, run_id))
-        
-        conn.commit()
-        conn.close()
-    
     def get_last_delete_run(self) -> Optional[Dict[str, Any]]:
-        """Get most recent delete run"""
+        """Most recent delete run that still has recorded files"""
+        runs = self.get_delete_runs(limit=1)
+        return runs[0] if runs else None
+    
+    def get_delete_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT run_id, timestamp, total_files
-            FROM delete_runs
-            ORDER BY timestamp DESC
-            LIMIT 1
-        """)
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            return {
-                "run_id": result[0],
-                "timestamp": result[1],
-                "total_files": result[2]
-            }
-        return None
+        try:
+            row = conn.execute(
+                f"SELECT {self._RUN_COLUMNS} FROM delete_runs r WHERE r.run_id = ?", (run_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return self._run_row(row) if row else None
     
     def get_delete_operations(self, run_id: str) -> List[Dict[str, str]]:
         """Get all operations for a delete run"""
@@ -239,21 +248,22 @@ class Database:
             for row in results
         ]
     
-    def get_delete_runs(self) -> List[Dict[str, Any]]:
-        """All delete runs, newest first"""
+    def get_delete_runs(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Delete runs that still have recorded files, newest (highest seq) first"""
         conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT run_id, timestamp, total_files
-            FROM delete_runs
-            ORDER BY timestamp DESC, rowid DESC
-        """)
-        results = cursor.fetchall()
-        conn.close()
-        return [
-            {"run_id": row[0], "timestamp": row[1], "total_files": row[2]}
-            for row in results
-        ]
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT {self._RUN_COLUMNS} FROM delete_runs r
+                WHERE EXISTS (SELECT 1 FROM delete_operations o WHERE o.run_id = r.run_id)
+                ORDER BY r.seq DESC
+                LIMIT ?
+                """,
+                (-1 if limit is None else limit,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._run_row(row) for row in rows]
     
     def delete_delete_operation(self, op_id: int):
         """Forget one restored file of a run; the run itself goes once it is empty"""

@@ -196,6 +196,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   RAW_DUPLICATES, TRASH of de cache worden geweigerd. (Voorheen kon één verzoek de hele
   RAW-map verplaatsen.)
 - Een geweigerd verzoek laat geen lege "verwijder-run" meer achter in de undo-geschiedenis.
+  Een actie wordt pas vastgelegd zodra het eerste bestand echt verplaatst is, en lege acties
+  van vroeger worden overgeslagen, zodat ze terugzetten nooit meer blokkeren.
 - "Laatste ongedaan maken" voor duplicaten liep vast als de bestanden van de laatste actie niet
   meer in RAW_DUPLICATES stonden (bijv. handmatig opgeruimd): oudere acties waren dan nooit meer
   terug te zetten. Zo'n actie wordt nu overgeslagen (en blijft bewaard, voor als de bestanden
@@ -228,3 +230,18 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   de volgende scan vanzelf opnieuw berekend (database-migratie 6; je beoordelingen, streaks,
   Keurer-beslissingen en undo-gegevens blijven ongemoeid). De cache wordt per scan in één keer
   gelezen en geschreven, en vergeet bestanden die niet meer bestaan.
+- Eén klik op opruimen is nu één actie in de geschiedenis, hoeveel bestanden het ook zijn
+  (de app stuurt grote acties in stukjes, maar onder één nummer). Zo zet je een hele opruimactie
+  in één keer terug, in plaats van per bestand (voorheen kwam bij "laatste ongedaan maken" van
+  100 opgeruimde bestanden er maar één terug).
+- Je kunt elke recente actie afzonderlijk terugzetten, niet alleen de laatste. Terugzetten
+  overschrijft nooit iets: staat er intussen een ander bestand op de oude plek, dan komt het
+  teruggezette bestand ernaast als `naam_RESTORED_001.jpg`.
+- "Nieuwste actie" betekent nu echt de laatst uitgevoerde: acties krijgen een oplopend nummer
+  (database-migratie 7). Voorheen werd op de lokale kloktijd gesorteerd, waardoor na de overgang
+  naar wintertijd de verkeerde actie teruggezet kon worden. Bestaande acties houden hun volgorde
+  en al hun gegevens.
+- Bij het opruimen kies jij welke kopie blijft (zie hieronder); de server controleert vlak voor
+  elke verplaatsing of precies die kopie nog bestaat en byte voor byte gelijk is.
+- Lukt het vastleggen van een verplaatsing in de database niet, dan zet de app het bestand meteen
+  terug, zodat er nooit een bestand in RAW_DUPLICATES belandt zonder dat het terug te zetten is.

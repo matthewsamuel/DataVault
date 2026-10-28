@@ -183,6 +183,42 @@ def _m006_hash_cache_algo_and_fingerprint(conn: sqlite3.Connection):
             conn.execute(f"ALTER TABLE file_hashes ADD COLUMN {name} {kind}")
 
 
+def _m007_delete_runs_sequence(conn: sqlite3.Connection):
+    """
+    Duplicate undo runs were ordered by a local-time text timestamp, so after
+    the switch to winter time (or a clock change) 'newest' could be the wrong
+    run (GAP-5). Rebuild delete_runs with an AUTOINCREMENT 'seq' that only ever
+    goes up. Existing runs get their rowid, which is their insertion order (a new
+    rowid is always above every existing one). Also new: created_at (UTC epoch
+    seconds, for display; existing rows converted from their local timestamp),
+    folder (which folder was being cleaned up) and an index on
+    delete_operations(run_id). Every run and operation is kept as it is.
+    """
+    count_before = conn.execute("SELECT COUNT(*) FROM delete_runs").fetchone()[0]
+    conn.execute("""
+        CREATE TABLE delete_runs_new (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL UNIQUE,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            total_files INTEGER DEFAULT 0,
+            created_at REAL,
+            folder TEXT
+        )
+    """)
+    conn.execute("""
+        INSERT INTO delete_runs_new (seq, run_id, timestamp, total_files, created_at)
+        SELECT rowid, run_id, timestamp, total_files,
+               CAST(strftime('%s', timestamp, 'utc') AS REAL)
+        FROM delete_runs ORDER BY rowid
+    """)
+    count_after = conn.execute("SELECT COUNT(*) FROM delete_runs_new").fetchone()[0]
+    if count_after != count_before:
+        raise RuntimeError(f"delete_runs copy incomplete: {count_after} of {count_before} rows")
+    conn.execute("DROP TABLE delete_runs")
+    conn.execute("ALTER TABLE delete_runs_new RENAME TO delete_runs")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_delops_run ON delete_operations(run_id)")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -191,6 +227,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (4, "keurer_keep_move_history", _m004_keurer_keep_move_history),
     (5, "keurer_keep_delete_history", _m005_keurer_keep_delete_history),
     (6, "hash_cache_algo_and_fingerprint", _m006_hash_cache_algo_and_fingerprint),
+    (7, "delete_runs_sequence", _m007_delete_runs_sequence),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
