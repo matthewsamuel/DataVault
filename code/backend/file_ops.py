@@ -22,7 +22,7 @@ import sys
 import threading
 import unicodedata
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Callable, Iterable, List, Optional, Tuple
 
 
 class FileOperationError(Exception):
@@ -56,6 +56,16 @@ ARCHIVE_LOCK = threading.RLock()
 
 # Folders/files no move may ever touch (the app's cache and live database); set at startup
 _protected_paths: List[Path] = []
+
+
+# Called with (src, final_dst) after every successful move, e.g. to carry a cached
+# thumbnail over to the new path. Set at startup; a failing callback never fails a move.
+_after_move: List[Callable[[Path, Path], None]] = []
+
+
+def on_moved(callback: Callable[[Path, Path], None]) -> None:
+    """Register a callback for every successful archive move (replaces earlier ones)."""
+    _after_move[:] = [callback]
 
 
 def protect_paths(paths: Iterable[Path]) -> None:
@@ -143,7 +153,13 @@ def move_no_overwrite(
     dst = Path(dst)
 
     with ARCHIVE_LOCK:
-        return _move_no_overwrite_locked(src, dst, rename_on_conflict, suffix_prefix)
+        final = _move_no_overwrite_locked(src, dst, rename_on_conflict, suffix_prefix)
+    for callback in list(_after_move):
+        try:
+            callback(src, final)
+        except Exception:
+            pass
+    return final
 
 
 def _move_no_overwrite_locked(src: Path, dst: Path, rename_on_conflict: bool, suffix_prefix: str) -> Path:

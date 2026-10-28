@@ -1,15 +1,27 @@
 """
 DataVault Dashboard - Thumbnail Generator
 Generate and cache thumbnails for photos and videos
+
+Cache entries are named after the file's path, size, modification time and inode plus
+a version stamp (THUMB_VERSION), so a different file at the same path (a restore, an
+undo, another IMG_0001.jpg moved in) never shows the old picture, and thumbnails from
+before a change in how they are made (EXIF rotation) are made again. A failed thumbnail
+is never cached: the caller serves a placeholder that is not stored, and the file is
+tried again after RETRY_SECONDS (or at once for a read error, e.g. a disk that was
+briefly gone).
 """
 import functools
 import hashlib
 import io
 import os
+import re
+import shutil
 import threading
+import time
+import warnings
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Dict, Iterator, Optional
 from PIL import Image, ImageOps
 try:
     from pillow_heif import register_heif_opener
@@ -18,20 +30,99 @@ try:
 except ImportError:
     HEIF_SUPPORT = False
 
-from backend.config import THUMB_SIZE, THUMB_QUALITY
+from backend.config import THUMB_SIZE, THUMB_QUALITY, RAW_PHOTO_EXTENSIONS
+
+# Bump when thumbnails must be made again (2: EXIF orientation applied, new cache key)
+THUMB_VERSION = 2
+
+# Pillow refuses images above 2x MAX_IMAGE_PIXELS (default ~179 MP) as a 'decompression
+# bomb'. These are the user's own photos (panoramas, scans), and a JPEG is decoded at
+# reduced size (draft), so allow up to 2 x 300 MP; very large non-JPEG images are
+# decoded one at a time (_BIG_DECODE) so memory stays bounded.
+Image.MAX_IMAGE_PIXELS = 300_000_000
+warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+BIG_IMAGE_PIXELS = 50_000_000
+_BIG_DECODE = threading.Lock()
+
+# At most this many thumbnails are made at once (requests and the thumbnail job together);
+# each holds a decoded image in memory
+_RENDER_SLOTS = threading.BoundedSemaphore(4)
+
+# Two requests for the same thumbnail: the second waits for the first instead of making it again
+_KEY_LOCKS = [threading.Lock() for _ in range(64)]
+
+# How long a file that could not be decoded is not tried again (in this process)
+RETRY_SECONDS = 300.0
+_FAILED: Dict[str, float] = {}
+_FAILED_LOCK = threading.Lock()
+
+
+def _file_key(file_path: Path) -> str:
+    try:
+        st = os.stat(file_path)
+        identity = f"{st.st_size}|{st.st_mtime_ns}|{st.st_ino}"
+    except OSError:
+        identity = "?"
+    return hashlib.md5(f"{file_path}|{identity}".encode("utf-8", "surrogateescape")).hexdigest()
+
 
 def get_thumbnail_cache_path(file_path: Path, thumb_cache_dir: Path) -> Path:
     """
-    Get cache path for thumbnail.
-    Uses hash of file path to avoid name conflicts.
-    All thumbnails are saved as JPEG.
+    Cache path for a file's thumbnail (always JPEG): a hash of its path, size,
+    modification time and inode, prefixed with THUMB_VERSION.
     """
-    # Create hash of file path
-    path_hash = hashlib.md5(str(file_path).encode()).hexdigest()
-    
-    # ALL thumbnails are JPEG
-    cache_filename = f"{path_hash}.jpg"
-    return thumb_cache_dir / cache_filename
+    return thumb_cache_dir / f"v{THUMB_VERSION}_{_file_key(file_path)}.jpg"
+
+
+_CURRENT_NAME = re.compile(rf"^v{THUMB_VERSION}_[0-9a-f]{{32}}\.jpg$")
+
+
+def prune_thumbnail_cache(thumb_cache_dir: Path, max_tmp_age: float = 3600.0) -> int:
+    """
+    Remove what an older version of the app left in the thumbnail cache: thumbnails
+    named the old way (path-only key, made before EXIF rotation), the per-file and shared
+    placeholders it stored, and temporary files older than max_tmp_age. Only ever touches
+    files directly in the app's own thumbnail folder. Returns how many were removed.
+    """
+    removed = 0
+    now = time.time()
+    try:
+        entries = list(os.scandir(thumb_cache_dir))
+    except OSError:
+        return 0
+    for entry in entries:
+        name = entry.name
+        try:
+            if not entry.is_file(follow_symlinks=False) or _CURRENT_NAME.match(name):
+                continue
+            if name.endswith(".tmp.jpg"):
+                if now - entry.stat(follow_symlinks=False).st_mtime < max_tmp_age:
+                    continue
+            elif not (re.match(r"^(v\d+_)?[0-9a-f]{32}\.jpg$", name) or name.startswith("_placeholder_")):
+                continue
+            os.unlink(entry.path)  # the app's own cache file, never an archive file
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def carry_over(old_path: Path, new_path: Path, thumb_cache_dir: Path) -> None:
+    """
+    After a move (same file: same size, mtime and inode), rename its cached thumbnail to
+    the new path's key, so the moved file keeps its thumbnail and no orphan is left.
+    Best effort; only touches the app's own cache.
+    """
+    try:
+        st = os.stat(new_path)
+        identity = f"{st.st_size}|{st.st_mtime_ns}|{st.st_ino}"
+        old_key = hashlib.md5(f"{old_path}|{identity}".encode("utf-8", "surrogateescape")).hexdigest()
+        old = thumb_cache_dir / f"v{THUMB_VERSION}_{old_key}.jpg"
+        if old.is_file():
+            os.replace(old, get_thumbnail_cache_path(new_path, thumb_cache_dir))
+    except OSError:
+        pass
+
 
 @contextmanager
 def _atomic_output(output_path: Path) -> Iterator[Path]:
@@ -78,52 +169,99 @@ def _is_read_error(e: BaseException, file_path: Path) -> bool:
 
 def is_thumbnail_valid(thumb_path: Path, original_path: Path) -> bool:
     """
-    Check if cached thumbnail is still valid.
-    Valid if it exists and is newer than original file.
+    A cached thumbnail is valid when it exists and is not empty: its name already holds
+    the original's path, size, modification time and inode (see get_thumbnail_cache_path).
     """
-    if not thumb_path.exists():
+    try:
+        return thumb_path.stat().st_size > 0
+    except OSError:
         return False
-    
-    if not original_path.exists():
-        return False
-    
-    thumb_mtime = thumb_path.stat().st_mtime
-    original_mtime = original_path.stat().st_mtime
-    
-    return thumb_mtime >= original_mtime
+
+
+def _orientation_fixed(img: Image.Image) -> Image.Image:
+    """Turn the (already small) image upright according to its EXIF orientation."""
+    return ImageOps.exif_transpose(img)
+
+
+def _to_rgb(img: Image.Image) -> Image.Image:
+    if img.mode in ('RGBA', 'LA', 'P', 'PA'):
+        if img.mode in ('P', 'PA'):
+            img = img.convert('RGBA')
+        background = Image.new('RGB', img.size, (255, 255, 255))
+        background.paste(img, mask=img.split()[-1])
+        return background
+    if img.mode != 'RGB':
+        return img.convert('RGB')
+    return img
+
 
 def render_photo_thumbnail(file_path: Path, output_path: Path) -> None:
     """
     Make the thumbnail of a photo, or raise: an unreadable photo is an OSError, a
     photo that reads fine but cannot be decoded is Undecodable. Never puts a
     placeholder in its place (see generate_photo_thumbnail).
+
+    Small first, then upright (MEDIA-THUMBS-TIMELINE-1/PERF-8): a JPEG is decoded at
+    1/2 to 1/8 of its size (draft), thumbnail() reduces it, and only the small image is
+    turned according to its EXIF orientation. A 48 MP photo then needs about 25 MB
+    instead of 400 MB. A RAW photo Pillow cannot decode goes through macOS's sips.
     """
-    try:
-        with Image.open(file_path) as img:
-            # Roteer volgens EXIF-oriëntatie zodat thumbnails altijd rechtop staan
-            img = ImageOps.exif_transpose(img)
+    with _RENDER_SLOTS:
+        try:
+            img = _decode_small(file_path)
+        except Exception as e:
+            if _is_read_error(e, file_path):
+                raise
+            if file_path.suffix.lower() in RAW_PHOTO_EXTENSIONS | {'.heic', '.heif', '.hif'} and _have_sips():
+                _render_with_sips(file_path, output_path)
+                return
+            raise Undecodable(f"geen beeld te maken van dit bestand ({e})") from e
 
-            # Convert RGBA to RGB if needed
-            if img.mode in ('RGBA', 'LA', 'P'):
-                # Create white background
-                background = Image.new('RGB', img.size, (255, 255, 255))
-                if img.mode == 'P':
-                    img = img.convert('RGBA')
-                background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                img = background
-            elif img.mode != 'RGB':
-                img = img.convert('RGB')
+        # Save (errors here are about the cache, never about the photo)
+        with _atomic_output(output_path) as tmp:
+            img.save(tmp, 'JPEG', quality=THUMB_QUALITY, optimize=True)
 
-            # Create thumbnail (a loaded copy: it outlives the opened file)
-            img.thumbnail(THUMB_SIZE, Image.Resampling.LANCZOS)
-    except Exception as e:
-        if _is_read_error(e, file_path):
-            raise
-        raise Undecodable(f"geen beeld te maken van dit bestand ({e})") from e
 
-    # Save (errors here are about the cache, never about the photo)
+def _decode_small(file_path: Path) -> Image.Image:
+    with Image.open(file_path) as img:
+        img.draft('RGB', (THUMB_SIZE[0] * 2, THUMB_SIZE[1] * 2))  # JPEG only; a no-op otherwise
+        big = img.size[0] * img.size[1] > BIG_IMAGE_PIXELS
+        with (_BIG_DECODE if big else _no_lock()):
+            # In place, so the EXIF orientation stays with it; a loaded copy that
+            # outlives the opened file
+            img.thumbnail(THUMB_SIZE, Image.Resampling.LANCZOS, reducing_gap=3.0)
+        return _to_rgb(_orientation_fixed(img))
+
+
+@contextmanager
+def _no_lock():
+    yield
+
+
+def _have_sips() -> bool:
+    return shutil.which('sips') is not None
+
+
+def _render_with_sips(file_path: Path, output_path: Path) -> None:
+    """macOS's own image converter: reads RAW formats (and HEIC) that Pillow cannot."""
+    import subprocess
     with _atomic_output(output_path) as tmp:
-        img.save(tmp, 'JPEG', quality=THUMB_QUALITY, optimize=True)
+        try:
+            result = subprocess.run(
+                ['sips', '-s', 'format', 'jpeg', '-s', 'formatOptions', str(THUMB_QUALITY),
+                 '-Z', str(max(THUMB_SIZE)), str(file_path), '--out', str(tmp)],
+                stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            raise OSError(0, "sips deed er te lang over")
+        try:
+            ok = result.returncode == 0 and tmp.stat().st_size > 0
+        except FileNotFoundError:
+            ok = False
+        if not ok:
+            if not _readable(file_path):
+                raise OSError(0, "de foto kon niet gelezen worden")
+            raise Undecodable("geen beeld te maken van dit bestand (ook niet met sips)")
 
 
 def generate_photo_thumbnail(file_path: Path, output_path: Path) -> bool:
@@ -148,7 +286,6 @@ class NoFfmpeg(OSError):
 
 
 def have_ffmpeg() -> bool:
-    import shutil
     return shutil.which('ffmpeg') is not None
 
 
@@ -159,9 +296,11 @@ def render_video_thumbnail(file_path: Path, output_path: Path) -> None:
     without ffmpeg, OSError when the video cannot be read (or ffmpeg takes too
     long), Undecodable when the video reads fine but ffmpeg gets no frame from it.
     Never puts a placeholder in place.
+
+    -ss comes before -i (seek in the input: no decoding from the start), and -nostdin
+    keeps ffmpeg from reading the Terminal the server runs in.
     """
     import subprocess
-    import shutil
 
     ffmpeg_path = shutil.which('ffmpeg')
     if not ffmpeg_path:
@@ -169,14 +308,14 @@ def render_video_thumbnail(file_path: Path, output_path: Path) -> None:
     with open(file_path, 'rb') as f:  # a clear error for a video that cannot be read
         f.read(1)
 
-    with _atomic_output(output_path) as tmp:
+    with _RENDER_SLOTS, _atomic_output(output_path) as tmp:
         # The frame at 1 second; a clip shorter than that has none, so then the first frame
-        for seek in (['-ss', '00:00:01'], []):
+        for seek in (['-ss', '1'], []):
             cmd = [
-                ffmpeg_path,
-                '-i', str(file_path),
+                ffmpeg_path, '-nostdin', '-v', 'error',
                 *seek,
-                '-vframes', '1',
+                '-i', str(file_path),
+                '-frames:v', '1',
                 '-vf', f'scale={THUMB_SIZE[0]}:{THUMB_SIZE[1]}:force_original_aspect_ratio=decrease',
                 '-y',  # Overwrite (the temporary file only)
                 str(tmp)
@@ -187,7 +326,7 @@ def render_video_thumbnail(file_path: Path, output_path: Path) -> None:
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    timeout=10
+                    timeout=20
                 )
             except subprocess.TimeoutExpired:
                 raise OSError(0, "ffmpeg deed er te lang over")
@@ -267,6 +406,24 @@ def create_placeholder_thumbnail(output_path: Path, is_video: bool = False) -> b
         print(f"Error creating placeholder: {e}")
         return False
 
+def _remember_failure(key: str) -> None:
+    with _FAILED_LOCK:
+        if len(_FAILED) > 10000:
+            _FAILED.clear()
+        _FAILED[key] = time.monotonic() + RETRY_SECONDS
+
+
+def _failed_recently(key: str) -> bool:
+    with _FAILED_LOCK:
+        until = _FAILED.get(key)
+        if until is None:
+            return False
+        if until < time.monotonic():
+            del _FAILED[key]
+            return False
+        return True
+
+
 def get_or_create_thumbnail(
     file_path: Path,
     thumb_cache_dir: Path,
@@ -274,48 +431,45 @@ def get_or_create_thumbnail(
     is_audio: bool = False
 ) -> Optional[Path]:
     """
-    Get cached thumbnail or create new one.
-    
-    Args:
-        file_path: Path to original media file
-        thumb_cache_dir: Directory for thumbnail cache
-        is_video: True if file is a video
-        is_audio: True if file is audio
-    
-    Returns:
-        Path to thumbnail file, or None if failed
+    The cached thumbnail of a photo or video, made when it is missing.
+
+    Returns None when there is no thumbnail to show: audio, a video without ffmpeg, a
+    file that cannot be read or decoded. The caller then serves placeholder_bytes()
+    without storing it, so nothing stands in for the file for good (MEDIA-THUMBS-
+    TIMELINE-7, GAP-1): a read error is tried again on the next request, a file that
+    cannot be decoded after RETRY_SECONDS.
     """
-    # Get cache path
+    if is_audio:
+        return None
     cache_path = get_thumbnail_cache_path(file_path, thumb_cache_dir)
-    
-    # Check if valid cached version exists
     if is_thumbnail_valid(cache_path, file_path):
         return cache_path
-    
-    # Generate new thumbnail
-    success = False
-    
-    if is_audio:
-        # Instantly create a placeholder for audio files
-        success = create_placeholder_thumbnail(cache_path, is_video=False)
-    else:
-        if is_video:
-            success = generate_video_thumbnail(file_path, cache_path)
-        else:
-            success = generate_photo_thumbnail(file_path, cache_path)
+    if _failed_recently(cache_path.name):
+        return None
 
-        # Fallback to placeholder. A file that cannot be read right now (disk just
-        # unplugged, no permission) gets a shared one: a placeholder under its own
-        # name would be newer than the photo and stand in for it for good.
-        if not success:
-            if not _readable(file_path):
-                shared = thumb_cache_dir / ('_placeholder_video.jpg' if is_video else '_placeholder_photo.jpg')
-                if shared.exists() or create_placeholder_thumbnail(shared, is_video=is_video):
-                    return shared
-                return None
-            success = create_placeholder_thumbnail(cache_path, is_video=is_video)
-    
-    if success and cache_path.exists():
-        return cache_path
-    
-    return None
+    with _KEY_LOCKS[hash(cache_path.name) % len(_KEY_LOCKS)]:
+        # Made by another request while this one waited
+        if is_thumbnail_valid(cache_path, file_path):
+            return cache_path
+        try:
+            if is_video:
+                render_video_thumbnail(file_path, cache_path)
+            else:
+                render_photo_thumbnail(file_path, cache_path)
+        except NoFfmpeg:
+            return None  # cheap to check again: works as soon as ffmpeg is installed
+        except Undecodable as e:
+            print(f"Geen miniatuur voor {file_path}: {e}")
+            _remember_failure(cache_path.name)
+            return None
+        except Exception as e:
+            # A read error (no permission, disk just unplugged) or a cache write error:
+            # tried again on the next request
+            print(f"Error generating thumbnail for {file_path}: {e}")
+            return None
+    return cache_path if is_thumbnail_valid(cache_path, file_path) else None
+
+
+def placeholder_bytes(kind: str) -> bytes:
+    """The placeholder JPEG for 'photo', 'video' or 'audio'; served, never stored."""
+    return _placeholder_bytes(kind == 'video')

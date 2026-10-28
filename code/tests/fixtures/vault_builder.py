@@ -35,6 +35,12 @@ XSS_FILE = "xss <img src=x onerror=window.__xss=1>.jpg"
 XSS_TRACK = "<img src=x onerror=window.__xss=2>"
 XSS_PHOTOS = [f"RAW/{XSS_FOLDER}/{XSS_FILE}", f"library/{XSS_FOLDER}/{XSS_FILE}"]
 
+# A real HEIC photo (written with pillow_heif when it can encode) and a JPEG stored
+# sideways with EXIF orientation 6 ("turn 90 degrees to stand upright"), both with
+# a DateTimeOriginal
+HEIC_PHOTO = "RAW/2023/iphone/IMG_4001.heic"
+PORTRAIT = "RAW/2023/iphone/portret.jpg"
+
 
 def _exif(dt, make="Canon", model="EOS 80D", gps=None):
     ex = Image.new("RGB", (1, 1)).getexif()
@@ -124,6 +130,22 @@ def build_test_vault(root: Path, with_media: bool = True) -> Path:
     _photo(root / "library/Reis Italië/rome.jpg", (180, 60, 60), "rome", "2023:06:01 10:00:00")
     _photo(root / "library/Reis Italië/venetië.jpg", (60, 60, 180), "venetie", "2023:06:03 10:00:00")
     _photo(root / "library/Familie/opa.jpg", (60, 180, 60), "opa", "2015:12:24 18:00:00")
+
+    # iPhone-style photos: HEIC and a sideways JPEG with an orientation tag
+    portrait = root / PORTRAIT
+    portrait.parent.mkdir(parents=True, exist_ok=True)
+    sideways = Image.new("RGB", (400, 200), (220, 20, 20))
+    ImageDraw.Draw(sideways).rectangle((200, 0, 399, 199), fill=(20, 20, 220))
+    exif = _exif("2016:10:28 08:00:00", make="Apple", model="iPhone 7")
+    exif[0x0112] = 6
+    sideways.save(portrait, "JPEG", quality=90, exif=exif)
+    try:
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+        Image.new("RGB", (640, 480), (40, 160, 90)).save(
+            root / HEIC_PHOTO, "HEIF", quality=80, exif=_exif("2023:08:15 09:30:00", make="Apple", model="iPhone 13"))
+    except Exception:
+        pass  # no HEIC encoder here: the HEIC tests skip
 
     # HTML and an apostrophe in folder and file names (RAW for the viewer/Keurer, library for Shows)
     for rel in XSS_PHOTOS:

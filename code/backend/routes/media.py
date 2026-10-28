@@ -2,7 +2,7 @@
 DataVault Dashboard - Media Routes
 """
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pathlib import Path
 from typing import Dict, Any
 
@@ -80,19 +80,25 @@ def get_thumbnail_endpoint(path: str = Query(...)):
         raise HTTPException(status_code=404, detail="File not found")
     
     # Generate or get cached thumbnail
-    from backend.thumbnail import get_or_create_thumbnail
-    from backend.config import is_audio
-    
-    thumb_path = get_or_create_thumbnail(
-        file_path,
-        config.THUMB_CACHE_PATH,
-        is_video=is_video(file_path),
-        is_audio=is_audio(file_path)
-    )
-    
-    if not thumb_path or not thumb_path.exists():
-        raise HTTPException(status_code=500, detail="Failed to generate thumbnail")
-    
+    from backend import thumbnail
+    from backend.config import media_type
+
+    kind = media_type(file_path)
+    thumb_path = None
+    if kind in ('photo', 'video'):
+        thumb_path = thumbnail.get_or_create_thumbnail(
+            file_path, config.THUMB_CACHE_PATH, is_video=(kind == 'video'))
+
+    if thumb_path is None:
+        # Nothing to show (audio, a document, no ffmpeg, a file that cannot be read or
+        # decoded): a placeholder that is never stored, here or in the browser, so the
+        # real thumbnail appears as soon as it can be made
+        return Response(
+            content=thumbnail.placeholder_bytes(kind),
+            media_type='image/jpeg',
+            headers={'Cache-Control': 'no-store', 'X-DataVault-Placeholder': kind},
+        )
+
     return FileResponse(
         path=str(thumb_path),
         media_type='image/jpeg'

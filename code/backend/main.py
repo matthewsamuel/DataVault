@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Optional
 import os
 import sqlite3
+import threading
 import uuid
 
-# Ensure ffmpeg is in PATH for video thumbnails
-if '/usr/local/bin' not in os.environ.get('PATH', ''):
-    os.environ['PATH'] = f"/usr/local/bin:{os.environ.get('PATH', '')}"
+# Ensure ffmpeg is in PATH for video thumbnails (Homebrew on Apple silicon and on Intel)
+for _bin in ('/usr/local/bin', '/opt/homebrew/bin'):
+    if _bin not in os.environ.get('PATH', '').split(':'):
+        os.environ['PATH'] = f"{os.environ.get('PATH', '')}:{_bin}".lstrip(':')
 
 import sys
 
@@ -24,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend import file_ops, restart, security
+from backend import file_ops, restart, security, thumbnail
 from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs
@@ -87,6 +89,9 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
 
         # No file move may ever take something out of (or into) the app's own cache/database
         file_ops.protect_paths([config.CACHE_FOLDER, config.DB_PATH])
+        # A moved file keeps its cached thumbnail (renamed to the new path's key)
+        thumbs = config.THUMB_CACHE_PATH
+        file_ops.on_moved(lambda src, dst: thumbnail.carry_over(src, dst, thumbs))
 
         # Validate paths (but don't fail if T7 not mounted)
         path_status = config.validate_paths()
@@ -100,6 +105,10 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             # Ensure cache directories exist
             config.ensure_cache_dirs()
             config.ensure_duplicates_folder()
+            # Old-style thumbnails (made before EXIF rotation, path-only key) and stored
+            # placeholders are made again on demand; clear them out in the background
+            threading.Thread(target=thumbnail.prune_thumbnail_cache, args=(config.THUMB_CACHE_PATH,),
+                             name="thumb-prune", daemon=True).start()
 
         # Initialize database
         db = Database(config.DB_PATH)

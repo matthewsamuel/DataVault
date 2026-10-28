@@ -49,7 +49,7 @@ DataVault Dashboard is a full-featured web application for organizing, analyzing
 
 #### Advanced Media Handling
 - **Format Support** — Photos: JPG, PNG, HEIF, TIFF, WebP, GIF, BMP, RAW, CR2, NEF, ARW, DNG | Videos: MP4, MOV, M4V, AVI, MKV, WMV, FLV, WebM, 3GP, MPG, MPEG, MTS, M2TS | Audio: MP3, WAV, FLAC, M4A, AAC, OGG, WMA
-- **Thumbnail Generation** — JPEG thumbnails (300x300, quality 85) cached with mtime validation; video frame extraction via ffmpeg
+- **Thumbnail Generation** — JPEG thumbnails (300x300, quality 85), decoded small and then turned upright by EXIF orientation; cached under a key of path, size, mtime and inode; HEIC via pillow-heif, RAW via macOS `sips`; video frame extraction via ffmpeg
 - **Metadata Preservation** — Atomic file operations (os.replace) preserve timestamps, EXIF, IPTC, extended attributes
 
 #### Performance & Reliability
@@ -388,10 +388,11 @@ Listening time: 45,000 minutes
 
 **Solution:**
 - **Lazy Thumbnail Generation:** JPEG thumbnails (300x300, quality 85) generated on first access
-- **Cache Validation:** Thumbnails valid if mtime > original file mtime; auto-regenerated if file changes
-- **Placeholders never stand in for a photo:** a file that cannot be read right now (disk unplugged, no permission) gets a shared placeholder, never one cached under its own name. The thumbnail job (`/api/jobs` type `thumbnails`) never writes placeholders: a photo or video that cannot be read counts as an error (`errors`, the run is not `complete`), one that reads fine but cannot be decoded (corrupt, empty, unknown format, no video frame) is counted apart as `undecodable` and does not make the run incomplete, a cached placeholder for a photo is made again (`thumbnail.is_placeholder` compares the exact placeholder bytes), and videos without ffmpeg are skipped as `no_ffmpeg`
+- **Small first, then upright:** a JPEG is decoded at 1/2 to 1/8 of its size (`img.draft`), `thumbnail()` reduces it, and only the small image is turned by its EXIF orientation (a 48 MP photo needs ~25 MB instead of ~400 MB). At most 4 thumbnails are made at once, and two requests for the same one make it once. Photos up to 2 x 300 MP are accepted (Pillow's default bomb limit is ~179 MP); non-JPEG images above 50 MP are decoded one at a time. A RAW or HEIC photo Pillow cannot decode goes through macOS `sips`
+- **Cache key:** `v2_<md5(path|size|mtime_ns|inode)>.jpg`. A different file at the same path (a restore, an undo, another `IMG_0001.jpg` moved in) never shows the old picture, and bumping `THUMB_VERSION` makes every thumbnail again (version 2: EXIF rotation). At startup old-style entries, stored placeholders and stale temporary files are removed from the thumbnail folder. A move through the app renames the cached thumbnail to the new path's key (`file_ops.on_moved` + `thumbnail.carry_over`)
+- **Placeholders are never stored:** audio, documents, a video without ffmpeg and a file that cannot be read or decoded get a placeholder served with `Cache-Control: no-store` and `X-DataVault-Placeholder`, never one cached under the file's name. A read error is tried again on the next request, an undecodable file after 5 minutes (`RETRY_SECONDS`), a video as soon as ffmpeg is installed. The thumbnail job (`/api/jobs` type `thumbnails`) never writes placeholders: a photo or video that cannot be read counts as an error (`errors`, the run is not `complete`), one that reads fine but cannot be decoded (corrupt, empty, unknown format, no video frame) is counted apart as `undecodable` and does not make the run incomplete, a cached placeholder for a photo is made again (`thumbnail.is_placeholder` compares the exact placeholder bytes), and videos without ffmpeg are skipped as `no_ffmpeg`
 - **Format Conversion:** Pillow handles HEIF (with pillow-heif), RAW, JPEG, PNG, etc.; converts to RGB as needed
-- **Video Frame Extraction:** ffmpeg extracts the frame at the 1s mark; a clip shorter than that gets a second try for its first frame
+- **Video Frame Extraction:** ffmpeg (`-nostdin`, `-ss 1` before `-i` so it seeks in the input) extracts the frame at the 1s mark; a clip shorter than that gets a second try for its first frame
 - **Never above the cache:** a thumbnail write only ever makes the thumbnail folder itself, and `Config.ensure_cache_dirs` makes folders below the vault root one at a time, so a vault renamed or unplugged mid-job is never recreated as an empty folder at the old path
 - **Concurrent Processing:** ThreadPoolExecutor for multi-core hash/thumbnail operations
 - **One viewer, its own list:** the Files grid, the timeline and the chat each open the shared
@@ -618,7 +619,7 @@ a fresh connection.
 |-----------|------|-------|
 | Duplicate scan, ~94k files (synthetic, SSD) | 6.2 s cold, 1.4 s warm | Phase 1: 73.6 s / 13.8 s. Background job; `/api/health` stays under 30 ms meanwhile; peak RSS ~175-225 MB (was ~960 MB) |
 | Thumbnail generation | 50-100ms | Per image with PIL |
-| Thumbnail cache hit | <10ms | Validated by mtime |
+| Thumbnail cache hit | <10ms | Key holds size, mtime and inode |
 | Video frame extraction | 100-300ms | Via ffmpeg |
 | Timeline rendering (10k photos) | <100ms | Virtual scrolling |
 | Spotify aggregation (millions) | <1s | defaultdict aggregation |

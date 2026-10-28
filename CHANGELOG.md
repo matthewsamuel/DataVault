@@ -481,3 +481,25 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   viewer de miniatuur.
 - Zoeken op bestandsnaam (zoekbalk en chat) vindt nu ook namen met accenten die Finder in een
   andere Unicode-vorm opsloeg, bijvoorbeeld "Café" of "Zürich".
+
+### Miniaturen
+- Miniaturen van grote foto's kosten veel minder geheugen en tijd: de foto wordt eerst klein
+  ingelezen en pas daarna rechtop gedraaid. Een foto van 48 megapixel kostte ~400 MB geheugen,
+  nu ~25 MB. Er worden hoogstens 4 miniaturen tegelijk gemaakt.
+- Staande foto's (EXIF-oriëntatie) krijgen nu altijd een rechtopstaande miniatuur, ook als er
+  al een scheve in de cache stond: oude miniaturen worden opnieuw gemaakt en de oude cache-
+  bestanden worden bij het opstarten opgeruimd.
+- Een ander bestand op dezelfde plek (na terugzetten, ongedaan maken of een tweede
+  `IMG_0001.jpg`) toont nooit meer de miniatuur van het vorige bestand. Een verplaatst bestand
+  houdt zijn miniatuur.
+- Een miniatuur die niet gemaakt kon worden (kapot bestand, ffmpeg ontbreekt, schijf even weg)
+  wordt niet meer voorgoed als grijs vlak bewaard. De app probeert het later opnieuw; een video
+  krijgt zijn miniatuur zodra ffmpeg geïnstalleerd is.
+- HEIC-foto's van de iPhone krijgen een echte miniatuur. RAW-foto's die de app zelf niet kan
+  lezen, gaan via het ingebouwde macOS-programma `sips`.
+- Panorama's en scans boven 179 megapixel krijgen een echte miniatuur in plaats van een grijs vlak.
+- Video's: ffmpeg zoekt direct naar seconde 1 in plaats van vanaf het begin te decoderen, en kan
+  de Terminal waarin de server draait niet meer uitlezen. Clips korter dan een seconde krijgen
+  hun eerste beeld.
+- Meerdere gelijktijdige verzoeken om dezelfde nieuwe miniatuur maken hem maar één keer en
+  krijgen nooit een half geschreven plaatje.
