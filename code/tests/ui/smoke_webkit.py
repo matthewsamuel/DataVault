@@ -28,6 +28,7 @@ PLAYWRIGHT_WEBKIT_EXECUTABLE at a pw_run.sh (the script tries the newest one in
 import glob
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -483,15 +484,112 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"storage: the list is cut off or narrow ({storage})")
             step("storage: close", lambda: page.keyboard.press("Escape"), 0.3)
 
-            # The search field searches the folder open in Bestanden: elsewhere Enter goes there
-            step("search: Enter on Home opens Bestanden", lambda: (
-                page.focus("#global-search"), page.keyboard.type("zzz"), page.keyboard.press("Enter")), 0.8)
-            expect(page.evaluate(view_now) == "viewer" and page.input_value("#global-search") == "zzz"
-                   and page.is_visible("#media-grid .empty-state .empty-state-action"),
-                   f"search: Enter on Home did not search in Bestanden ({page.evaluate(view_now)})")
-            step("search: Zoekopdracht wissen", lambda: page.click("#media-grid .empty-state-action"), 0.5)
-            expect(page.input_value("#global-search") == "", "search: 'Zoekopdracht wissen' left the search")
-            page.keyboard.press("Escape")
+            # Zoeken (search.js): Enter in the search field opens the search window for the whole
+            # library. Without the model: file names work, Slim zoeken explains how to install it.
+            step("search: Enter on Home opens the search window", lambda: (
+                page.focus("#global-search"), page.keyboard.type("zzz"), page.keyboard.press("Enter"),
+                page.wait_for_selector("#search-overlay.active", timeout=5000)), 0.8)
+            expect(page.input_value("#search-input") == "zzz" and page.evaluate(view_now) == "home",
+                   f"search: the window did not open with the query ({page.input_value('#search-input')!r})")
+            expect_focus_trapped("search-overlay", "search: window")
+            step("search: by file name", lambda: (
+                page.click(".search-mode[data-mode='filename']"), page.fill("#search-input", "burst"),
+                page.keyboard.press("Enter"), page.wait_for_selector(".search-result", timeout=5000)), 0.6)
+            expect(page.locator(".search-result").count() == 5,
+                   f"search: 'burst' found {page.locator('.search-result').count()} files, not 5")
+            step("search: arrow down to the results, Enter opens the viewer", lambda: (
+                page.focus("#search-input"), page.keyboard.press("ArrowDown"), page.keyboard.press("ArrowRight"),
+                page.keyboard.press("Enter")), 0.8)
+            expect(page.evaluate("topOverlay() && topOverlay().id") == "modal-viewer"
+                   and page.evaluate("viewerFile() && viewerFile().name") == "burst_03.jpg",
+                   f"search: Enter did not open the second result ({page.evaluate('viewerFile() && viewerFile().name')})")
+            step("search: Escape closes the viewer first", lambda: page.keyboard.press("Escape"), 0.4)
+            expect(page.is_visible("#search-overlay") and not page.is_visible("#modal-viewer"),
+                   "search: Escape did not go back from the viewer to the results")
+            expect(page.evaluate("document.activeElement.dataset.index") == "1",
+                   f"search: focus did not go back to the result ({page.evaluate('document.activeElement.className')})")
+            step("search: Slim zoeken without the model", lambda: (
+                page.click(".search-mode[data-mode='semantic']"),
+                page.wait_for_selector("#search-more .empty-state", timeout=5000)), 0.5)
+            title = page.evaluate("(document.querySelector('#search-more .empty-state-title') || {}).textContent")
+            expect(title == "Slim zoeken is nog niet geïnstalleerd", f"search: without the model it says {title!r}")
+            step("search: Naar Instellingen", lambda: page.click("#search-more .empty-state-action"), 0.8)
+            expect(page.evaluate(view_now) == "settings" and not page.is_visible("#search-overlay")
+                   and page.evaluate("document.activeElement.id") == "settings-search-install",
+                   f"search: 'Naar Instellingen' went to {page.evaluate(view_now)}, "
+                   f"focus {page.evaluate('document.activeElement.id')}")
+            install_text = page.evaluate("(document.getElementById('settings-search-install') || {}).textContent || ''")
+            expect("Zoekmodel installeren" in install_text and "MB" in install_text,
+                   f"settings: install button says {install_text!r}")
+            # The install button asks first, with where it downloads from; 'Annuleren' downloads nothing
+            asked = []
+            dismiss = lambda d: (asked.append(d.message), d.dismiss())  # noqa: E731
+            page.on("dialog", dismiss)
+            step("settings: install asks first", lambda: page.click("#settings-search-install"), 0.6)
+            page.remove_listener("dialog", dismiss)
+            jobs_now = page.evaluate("fetch('/api/jobs?type=model_download').then(r => r.json()).then(d => d.jobs.length)")
+            expect(asked and "huggingface.co" in asked[0] and jobs_now == 0,
+                   f"settings: install did not ask, or started anyway ({asked}, {jobs_now} jobs)")
+
+            # Slim zoeken with results (the model is not in the smoke vault: the answers are faked
+            # with real files, so the results grid, paging hint and similar mode are drawn for real)
+            files = page.evaluate("""fetch('/api/library/media?kind=photo&limit=1000').then(r => r.json())
+                .then(d => d.items.filter(i => !i.path.includes('/Groot/')).slice(0, 24))""")
+            expect(len(files) >= 10, f"search: only {len(files)} photos to fake results with")
+            fake_status = {"model": {"id": "x", "label": "SigLIP 2 (meertalig)", "licence": "Apache-2.0", "sources": [],
+                                     "size": 971000000, "folder": "/x", "installed": True, "homepage": ""},
+                           "ready": True, "library_ready": True, "total": len(files), "embedded": len(files) - 3,
+                           "pending": 3, "undecodable": 0, "device": "gpu", "per_second": 70, "job": None, "download": None}
+
+            def fake_answer(route, items):
+                route.fulfill(json={"total": len(items) - 4, "ranked": len(items), "offset": 0, "limit": 60,
+                                    "next_offset": None, "items": [dict(i, score=0.2) for i in items[:-4]],
+                                    "took_ms": 38.0, "library_ready": True, "indexed": len(files) - 3, "pending": 3})
+
+            fakes = {re.compile(r"/api/search/status"): lambda route: route.fulfill(json=fake_status),
+                     re.compile(r"/api/search/semantic\?"): lambda route: fake_answer(route, files),
+                     re.compile(r"/api/search/similar\?"): lambda route: fake_answer(route, files[1:])}
+            for pattern, handler in fakes.items():
+                page.route(pattern, handler)
+            page.evaluate("switchMainView('home')")
+            step("search: s opens the window", lambda: (page.focus("body"), page.keyboard.press("s"),
+                                                       page.wait_for_selector("#search-overlay.active", timeout=5000)), 0.5)
+            step("search: Slim zoeken shows results", lambda: (
+                page.click(".search-mode[data-mode='semantic']"), page.fill("#search-input", "hond op het strand"),
+                page.keyboard.press("Enter"), page.wait_for_timeout(800)), 0.3)
+            status_text = page.evaluate("document.getElementById('search-status').textContent")
+            expect(page.locator(".search-result").count() == len(files) - 4 and "goede resultaten" in status_text
+                   and "Nog bezig" in status_text and page.is_visible("#search-show-weak"),
+                   f"search: results not drawn as expected ({page.locator('.search-result').count()}, {status_text!r})")
+            def open_similar():
+                try:
+                    page.click(".search-result >> nth=0", timeout=5000)
+                    page.wait_for_timeout(600)
+                    page.keyboard.press("v")
+                    page.wait_for_selector("#search-similar:not([hidden])", timeout=5000)
+                except PlaywrightError as e:
+                    problems.append(f"search: Vergelijkbaar: {str(e).splitlines()[0]}")
+            step("search: open a result, then Vergelijkbaar (v)", open_similar, 0.6)
+            expect(not page.is_visible("#modal-viewer") and page.locator(".search-result").count() == len(files) - 5
+                   and page.evaluate("document.getElementById('search-title').textContent") == "Vergelijkbare foto’s",
+                   "search: Vergelijkbaar did not show the similar photos")
+            for theme in ("light", "dark"):
+                page.evaluate(f"setTheme('{theme}')")
+                page.wait_for_timeout(400)
+                if os.environ.get("DATAVAULT_SMOKE_SHOTS"):
+                    page.screenshot(path=str(Path(os.environ["DATAVAULT_SMOKE_SHOTS"]) / f"search_{theme}.png"))
+                page.add_script_tag(path=str(A11Y_CHECKS))
+                for fail in page.evaluate("__contrastFailures()"):
+                    problems.append(f"contrast {theme} search: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+                for control in page.evaluate("__unnamedControls()"):
+                    problems.append(f"unnamed control in search ({theme}): {control}")
+            page.evaluate("setTheme('auto')")
+            step("search: Escape closes the window", lambda: page.keyboard.press("Escape"), 0.4)
+            expect(not page.is_visible("#search-overlay"), "search: Escape left the window open")
+            for pattern in fakes:
+                page.unroute(pattern)
+            page.evaluate("document.getElementById('global-search').value = ''; searchState.status = null")
+            print("  ok      search window: contrast and names checked in 2 themes")
 
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
             # and a screenshot to look at
