@@ -199,7 +199,7 @@ def get_stories() -> Dict[str, Any]:
     if featured_files:
         featured_show = {
             "title": "Feeling Lucky",
-            "subtitle": f"{len(featured_files)} random photos from your library",
+            "subtitle": f"{len(featured_files)} willekeurige foto's uit je library",
             "files": featured_files,
             "type": "featured"
         }

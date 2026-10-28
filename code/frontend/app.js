@@ -254,7 +254,7 @@ async function reloadShows() {
     const btn = document.getElementById('btn-reload-shows');
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Reloading...';
+        btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Herladen…';
     }
     await loadShows();
 }
@@ -284,10 +284,10 @@ function renderShows(data) {
     container.innerHTML = `
         <div class="shows-header" style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
             <button class="btn btn-secondary" id="btn-shuffle-shows" onclick="shuffleShows()">
-                <i class="fas fa-random"></i> Shuffle Shows
+                <i class="fas fa-random" aria-hidden="true"></i> Shows husselen
             </button>
             <button class="btn btn-secondary" onclick="openSettingsModal()">
-                <i class="fas fa-sliders-h"></i> Manage Sources
+                <i class="fas fa-sliders-h" aria-hidden="true"></i> Bronnen beheren
             </button>
         </div>
     `;
@@ -306,8 +306,8 @@ function renderShows(data) {
                 <span class="shows-hero-tag">Featured</span>
                 <h2 class="shows-hero-title">${featured.title}</h2>
                 <p class="shows-hero-subtitle">${featured.subtitle}</p>
-                <button class="btn btn-primary btn-lg">
-                    <i class="fas fa-play" style="margin-right: 10px;"></i> Watch Now
+                <button class="btn btn-primary btn-lg" tabindex="-1">
+                    <i class="fas fa-play" style="margin-right: 10px;" aria-hidden="true"></i> Afspelen
                 </button>
             </div>
         `;
@@ -318,7 +318,7 @@ function renderShows(data) {
     if (shows && shows.length > 0) {
         const gridTitle = document.createElement('h3');
         gridTitle.className = 'section-title';
-        gridTitle.textContent = 'Collections';
+        gridTitle.textContent = 'Collecties';
         gridTitle.style.marginTop = '40px';
         container.appendChild(gridTitle);
 
@@ -345,7 +345,7 @@ function renderShows(data) {
                      ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" style="width: 100%; height: 100%; object-fit: cover;">` : html`<div class="no-thumb" style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;background:var(--bg-tertiary);">📁</div>`}
                     <div style="position:absolute;bottom:0;left:0;right:0;padding:10px 12px;background:linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 100%);">
                         <h4 style="margin:0;font-size:14px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.8),0 0 8px rgba(0,0,0,0.5);">${show.title}</h4>
-                        <span style="font-size:11px;color:rgba(255,255,255,0.75);text-shadow:0 1px 3px rgba(0,0,0,0.8);">Folder</span>
+                        <span style="font-size:11px;color:rgba(255,255,255,0.75);text-shadow:0 1px 3px rgba(0,0,0,0.8);">Map</span>
                     </div>
                 </div>
             `;
@@ -370,9 +370,9 @@ function shuffleShows() {
     // Visual feedback on button
     const btn = document.getElementById('btn-shuffle-shows');
     if (btn) {
-        btn.innerHTML = '<i class="fas fa-check"></i> Shuffled!';
+        btn.innerHTML = '<i class="fas fa-check"></i> Gehusseld!';
         setTimeout(() => {
-            btn.innerHTML = '<i class="fas fa-random"></i> Shuffle Shows';
+            btn.innerHTML = '<i class="fas fa-random"></i> Shows husselen';
         }, 800);
     }
 
@@ -1099,7 +1099,7 @@ async function openInFinder() {
     // Show visual feedback immediately
     const btn = document.getElementById('btn-open-finder');
     const oldText = btn.textContent;
-    btn.textContent = 'Opening...';
+    btn.textContent = 'Openen…';
     btn.disabled = true;
 
     try {
@@ -1109,7 +1109,7 @@ async function openInFinder() {
             body: JSON.stringify({ path: file.path })
         });
     } catch (e) {
-        toastFetchError('Open in Finder', e);
+        toastFetchError('Tonen in Finder mislukt', e);
     } finally {
         setTimeout(() => {
             btn.textContent = oldText;
@@ -1299,7 +1299,7 @@ function openMoveFileModal(fileData = null) {
     if (!fileToMove) return;
 
     const modal = document.getElementById('modal-move-file');
-    document.getElementById('move-file-name').textContent = fileToMove.name || 'Unknown File';
+    document.getElementById('move-file-name').textContent = fileToMove.name || 'Onbekend bestand';
     document.getElementById('btn-confirm-move').disabled = true;
     selectedMoveFolder = null;
     const destDisplay = document.getElementById('move-dest-display');
@@ -1318,7 +1318,7 @@ function openMoveFileModal(fileData = null) {
     // Show thumbnail preview
     const previewEl = document.getElementById('move-file-preview');
     if (previewEl) {
-        previewEl.innerHTML = html`<img src="${vaultFileUrl('thumb', fileToMove.path)}" alt="Preview" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">`;
+        previewEl.innerHTML = html`<img src="${vaultFileUrl('thumb', fileToMove.path)}" alt="Voorbeeld" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">`;
     }
 
     renderMoveFolderTreeUI();
@@ -1388,7 +1388,7 @@ function selectMoveDestination(path) {
 
     if (path === currentDir) {
         btn.disabled = true;
-        showToast('Info', 'File is already in this folder', 'warning');
+        showToast('Verplaatsen', 'Het bestand staat al in deze map', 'warning');
     } else {
         btn.disabled = false;
     }
@@ -1415,7 +1415,7 @@ async function confirmMoveFile() {
 
     const btn = document.getElementById('btn-confirm-move');
     const originalContent = [...btn.childNodes];
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Moving...';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Verplaatsen…';
     btn.disabled = true;
 
     let moved;
@@ -1733,7 +1733,7 @@ function renderCapabilityNotices(notices) {
 
 function copyToClipboard(text) {
     navigator.clipboard.writeText(text).then(() => {
-        showToast('Success', 'Path copied to clipboard', 'success');
+        showToast('Gekopieerd', 'Pad gekopieerd naar het klembord', 'success');
     });
 }
 
@@ -1782,7 +1782,7 @@ async function fetchHomeWidgets() {
             // Geen albumcover van buitenaf (zoals vroeger via iTunes): dat zou luistergeschiedenis
             // naar een externe dienst sturen. Het lokale Spotify-icoon blijft staan.
         } else {
-            content.innerHTML = '<div class="storage-text">No tracks played on this day.</div>';
+            content.innerHTML = '<div class="storage-text">Op deze dag in eerdere jaren niets geluisterd.</div>';
         }
     } catch (e) {
         document.getElementById('spotify-otd-loading').textContent = `Laden mislukt: ${e.message}`;
@@ -1922,7 +1922,7 @@ function updateOtdSettingsList() {
     list.innerHTML = '';
 
     if (!folderTree || folderTree.length === 0) {
-        list.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;">No folders available</div>';
+        list.innerHTML = '<div style="color:var(--text-secondary);font-size:0.8rem;">Geen mappen gevonden</div>';
         return;
     }
 
@@ -2447,9 +2447,9 @@ async function openSettingsModal() {
         modal.className = 'modal'; // Centered by CSS
         modal.innerHTML = `
         <div class="modal-content settings-modal-content">
-            <span class="close-modal" onclick="closeSettingsModal()">&times;</span>
-            <h2>Manage Sources</h2>
-            <p class="settings-subtitle">Choose which folders to include in your shows.</p>
+            <button type="button" class="close-modal" onclick="closeSettingsModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
+            <h2>Bronnen beheren</h2>
+            <p class="settings-subtitle">Kies welke mappen in library meedoen aan Shows.</p>
             <div id="settings-folders-list" class="settings-list">
                 <div class="loading-spinner"></div>
             </div>
@@ -2490,7 +2490,7 @@ async function openSettingsModal() {
             addEnabledState(showFolders);
             renderSettingsTree(showFolders, list);
         } else {
-            list.innerHTML = '<div class="error-message">Invalid folder data.</div>';
+            list.innerHTML = '<div class="error-message">Ongeldige mappenlijst van de server.</div>';
         }
 
     } catch (e) {
@@ -2593,7 +2593,7 @@ async function toggleSettingsFolder(path, enabled) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path, enabled })
         });
-        showToast('Instellingen', `Folder ${enabled ? 'ingeschakeld' : 'uitgeschakeld'}`, 'success');
+        showToast('Instellingen', `Map ${enabled ? 'ingeschakeld' : 'uitgeschakeld'}`, 'success');
         reloadShows();
     } catch (e) {
         toastFetchError('Instelling opslaan mislukt', e);
@@ -2637,7 +2637,7 @@ class CinematicPlayer {
  
 <div class="player-controls-top">
     <div class="player-title" id="player-slide-title"></div>
-    <button class="player-close-btn" onclick="activeShow.close()">&times;</button>
+    <button class="player-close-btn" onclick="activeShow.close()" aria-label="Slideshow sluiten" title="Sluiten (Esc)">&times;</button>
 </div>
  
 <div class="player-controls-bottom">
@@ -2648,16 +2648,16 @@ class CinematicPlayer {
      </div>
  
      <div class="player-actions">
-        <button class="player-btn" onclick="activeShow.prev()"><i class="fas fa-step-backward"></i></button>
-        <button class="player-btn" id="btn-play-pause" onclick="activeShow.togglePlay()"><i class="fas fa-pause"></i></button>
-        <button class="player-btn" onclick="activeShow.next()"><i class="fas fa-step-forward"></i></button>
+        <button class="player-btn" onclick="activeShow.prev()" aria-label="Vorige" title="Vorige (←)"><i class="fas fa-step-backward" aria-hidden="true"></i></button>
+        <button class="player-btn" id="btn-play-pause" onclick="activeShow.togglePlay()" aria-label="Pauzeren of afspelen" title="Pauzeren / afspelen (spatie)"><i class="fas fa-pause" aria-hidden="true"></i></button>
+        <button class="player-btn" onclick="activeShow.next()" aria-label="Volgende" title="Volgende (→)"><i class="fas fa-step-forward" aria-hidden="true"></i></button>
         
         <div class="player-divider"></div>
-        <button class="player-btn move-file-btn" onclick="openMoveFileModal()" title="Move File"><i class="fas fa-folder-open"></i></button>
+        <button class="player-btn move-file-btn" onclick="openMoveFileModal()" title="Verplaatsen" aria-label="Verplaatsen"><i class="fas fa-folder-open" aria-hidden="true"></i></button>
         <div class="player-divider"></div>
         
-        <button class="player-btn vote-up" onclick="activeShow.vote('up')"><i class="fas fa-heart"></i></button>
-        <button class="player-btn vote-down" onclick="activeShow.vote('down')"><i class="fas fa-thumbs-down"></i></button>
+        <button class="player-btn vote-up" onclick="activeShow.vote('up')" aria-label="Mooi" title="Mooi"><i class="fas fa-heart" aria-hidden="true"></i></button>
+        <button class="player-btn vote-down" onclick="activeShow.vote('down')" aria-label="Minder mooi" title="Minder mooi"><i class="fas fa-thumbs-down" aria-hidden="true"></i></button>
      </div>
 </div>
 `;

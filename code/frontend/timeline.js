@@ -248,7 +248,7 @@
         container.innerHTML = '';
 
         if (tlSelectedFolders.size === 0) {
-            container.innerHTML = '<span class="tl-no-folders">No folders selected</span>';
+            container.innerHTML = '<span class="tl-no-folders">Geen mappen gekozen</span>';
             return;
         }
 
@@ -258,6 +258,8 @@
                 createEl('span', { class: 'tl-chip-name', text: name }),
                 createEl('button', {
                     class: 'tl-chip-remove',
+                    'aria-label': `${name} uit de tijdlijn halen`,
+                    title: 'Uit de tijdlijn halen',
                     onClick: (e) => { e.stopPropagation(); timelineRemoveFolder(path); },
                 }, '×'));
             container.appendChild(chip);
@@ -321,7 +323,7 @@
             tlYearBoundaries = data.year_boundaries || {};
 
             if (tlFiles.length === 0) {
-                renderEmptyState('No photos found in selected folders');
+                renderEmptyState('Geen foto\'s of video\'s in de gekozen mappen');
                 tlScanning = false;
                 return;
             }
@@ -444,10 +446,10 @@
             ? `${years[0]} – ${years[years.length - 1]}`
             : years[0] || '';
         const loading = tlPagesLoading && tlFiles.length < tlTotal
-            ? html`<span class="tl-info-loading" role="status">${tlFiles.length.toLocaleString()} van ${tlTotal.toLocaleString()} geladen…</span>`
+            ? html`<span class="tl-info-loading" role="status">${tlFiles.length.toLocaleString('nl-NL')} van ${tlTotal.toLocaleString('nl-NL')} geladen…</span>`
             : html``;
         infoBar.innerHTML = html`
-            <span class="tl-info-count"><i class="fas fa-images"></i> ${tlTotal.toLocaleString()} photos</span>
+            <span class="tl-info-count"><i class="fas fa-images" aria-hidden="true"></i> ${tlTotal.toLocaleString('nl-NL')} foto's en video's</span>
             <span class="tl-info-range"><i class="fas fa-calendar-alt"></i> ${range}</span>
             ${loading}
         `;
@@ -468,8 +470,8 @@
             const month = dt.getMonth();
             const day = dt.getDate();
 
-            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                'July', 'August', 'September', 'October', 'November', 'December'];
+            const monthNames = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
+                'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
             const label = `${monthNames[month]} ${year}`;
 
             if (label !== currentLabel) {
@@ -699,8 +701,8 @@
 
         // Date label
         const dt = new Date(file.timestamp * 1000);
-        const dateStr = `${dt.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][dt.getMonth()]} ${dt.getFullYear()}`;
+        const dateStr = `${dt.getDate()} ${['jan', 'feb', 'mrt', 'apr', 'mei', 'jun',
+            'jul', 'aug', 'sep', 'okt', 'nov', 'dec'][dt.getMonth()]} ${dt.getFullYear()}`;
         const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
 
         const dateLabel = document.createElement('div');
@@ -745,7 +747,7 @@
             else if (tlYearBoundaries[y] > at) tlYearBoundaries[y]--;
         });
         if (tlFiles.length === 0 && !tlPagesLoading) {
-            renderEmptyState('No photos found in selected folders');
+            renderEmptyState('Geen foto\'s of video\'s in de gekozen mappen');
             return;
         }
         buildGroups();

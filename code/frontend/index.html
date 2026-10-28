@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 
 <head>
     <meta charset="UTF-8">
@@ -88,15 +88,15 @@
 
         <div class="main-layout">
             <!-- Sidebar - only shown in viewer mode -->
-            <aside class="sidebar" id="sidebar">
+            <aside class="sidebar" id="sidebar" aria-label="Mappen">
                 <div class="sidebar-header">
-                    <div class="sidebar-title">Folders</div>
+                    <div class="sidebar-title">Mappen</div>
                     <div class="tree-controls">
-                        <button class="tree-control-btn" onclick="expandAllFolders()" title="Expand all">
-                            Expand
+                        <button class="tree-control-btn" onclick="expandAllFolders()" title="Alle mappen openklappen">
+                            Alles open
                         </button>
-                        <button class="tree-control-btn" onclick="collapseAllFolders()" title="Collapse all">
-                            Collapse
+                        <button class="tree-control-btn" onclick="collapseAllFolders()" title="Alle mappen dichtklappen">
+                            Alles dicht
                         </button>
                     </div>
                 </div>
@@ -112,24 +112,24 @@
                     <div class="home-container">
                         <div class="home-header">
                             <h1 class="home-title">DataVault</h1>
-                            <p class="home-subtitle">Access your digital archive</p>
+                            <p class="home-subtitle">Je digitale archief, volledig lokaal</p>
                         </div>
 
                         <div class="home-stats-grid">
                             <div class="stat-card">
                                 <i class="fas fa-hdd" style="color: var(--accent);"></i>
-                                <h3>DataVault Storage</h3>
-                                <p>Active & Accessibly Offline</p>
+                                <h3>DataVault-opslag</h3>
+                                <p>Actief en offline bereikbaar</p>
                             </div>
                             <div class="stat-card">
                                 <i class="fas fa-music" style="color: #1DB954;"></i>
-                                <h3>Listening DNA</h3>
-                                <p>Synced with Spotify</p>
+                                <h3>Luister-DNA</h3>
+                                <p>Uit je Spotify-export</p>
                             </div>
                             <div class="stat-card">
                                 <i class="fas fa-shield-alt" style="color: #e74c3c;"></i>
-                                <h3>Privacy First</h3>
-                                <p>100% Local AI Model</p>
+                                <h3>Privacy eerst</h3>
+                                <p>100% lokaal AI-model</p>
                             </div>
                         </div>
 
@@ -144,8 +144,9 @@
                                         <select class="chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
                                     </div>
                                 </div>
-                                <button class="chat-fullscreen-toggle" onclick="openChatFullscreen()" title="Volledig scherm">
-                                    <i class="fas fa-expand"></i>
+                                <button class="chat-fullscreen-toggle" onclick="openChatFullscreen()" title="Volledig scherm"
+                                    aria-label="Chat op volledig scherm">
+                                    <i class="fas fa-expand" aria-hidden="true"></i>
                                 </button>
                             </div>
                             <!-- Eén berichtenlijst: bij volledig scherm verhuist #chat-messages naar
@@ -160,10 +161,10 @@
                                 </div>
                             </div>
                             <div class="chat-input-container">
-                                <input type="text" id="chat-input" class="chat-input" placeholder="Type a message..."
-                                    onkeypress="handleChatKeyPress(event)">
-                                <button class="chat-send-btn" onclick="sendChatMessage()">
-                                    <i class="fas fa-paper-plane"></i>
+                                <input type="text" id="chat-input" class="chat-input" placeholder="Typ een bericht…"
+                                    aria-label="Bericht aan Pasha" onkeypress="handleChatKeyPress(event)">
+                                <button class="chat-send-btn" onclick="sendChatMessage()" title="Versturen" aria-label="Versturen">
+                                    <i class="fas fa-paper-plane" aria-hidden="true"></i>
                                 </button>
                             </div>
                         </div>
@@ -191,8 +192,11 @@
 
                         <div class="dynamic-widget" id="widget-photo-otd">
                             <div class="otd-header-flex">
-                                <h4><i class="fas fa-camera-retro"></i> Photo On This Day</h4>
-                                <i class="fas fa-cog otd-settings-icon" onclick="toggleOtdSettings(event)" title="Settings"></i>
+                                <h4><i class="fas fa-camera-retro" aria-hidden="true"></i> Foto op deze dag</h4>
+                                <button type="button" class="otd-settings-icon" onclick="toggleOtdSettings(event)"
+                                    title="Kies de mappen" aria-label="Mappen voor 'foto op deze dag' kiezen">
+                                    <i class="fas fa-cog" aria-hidden="true"></i>
+                                </button>
                             </div>
                             <div class="widget-content otd-widget-envelope">
                                 <div class="loading-spinner" id="photo-otd-loading"></div>
@@ -200,14 +204,14 @@
                                     <!-- Will be populated by JS -->
                                 </div>
                                 <div id="otd-settings-panel" class="otd-settings-panel" style="display: none;">
-                                    <h5>Filter Sources</h5>
+                                    <h5>Mappen</h5>
                                     <div id="otd-settings-list" class="otd-settings-list"></div>
                                 </div>
                             </div>
                         </div>
 
                         <div class="dynamic-widget" id="widget-spotify-otd">
-                            <h4><i class="fab fa-spotify" style="color: #1DB954;"></i> Spotify On This Day</h4>
+                            <h4><i class="fab fa-spotify" style="color: #1DB954;" aria-hidden="true"></i> Spotify op deze dag</h4>
                             <div class="widget-content">
                                 <div class="loading-spinner" id="spotify-otd-loading"></div>
                                 <div id="spotify-otd-content" style="display: none;">
@@ -227,11 +231,11 @@
 
                 <div class="content-toolbar">
                     <div class=" toolbar-actions">
-                        <label class="toolbar-label">Sort by:</label>
+                        <label class="toolbar-label" for="sort-select">Sorteren:</label>
                         <select class="toolbar-select" id="sort-select" onchange="handleSort(this.value)">
-                            <option value="name">Name</option>
-                            <option value="date">Date Modified</option>
-                            <option value="size">Size</option>
+                            <option value="name">Naam</option>
+                            <option value="date">Gewijzigd</option>
+                            <option value="size">Grootte</option>
                         </select>
                     </div>
 
@@ -240,12 +244,12 @@
                         Miniaturen maken
                     </button>
 
-                    <div class="view-toggle">
-                        <button class="view-toggle-btn active" data-view="grid" onclick="toggleView('grid')">
-                            Grid
+                    <div class="view-toggle" role="group" aria-label="Weergave">
+                        <button class="view-toggle-btn active" data-view="grid" onclick="toggleView('grid')" aria-pressed="true">
+                            Raster
                         </button>
-                        <button class="view-toggle-btn" data-view="list" onclick="toggleView('list')">
-                            List
+                        <button class="view-toggle-btn" data-view="list" onclick="toggleView('list')" aria-pressed="false">
+                            Lijst
                         </button>
                     </div>
                 </div>
@@ -372,17 +376,17 @@
         <!-- Spotify View -->
         <div id="section-spotify" class="section hidden">
             <div class="spotify-header">
-                <h2>Your Spotify Wrapped</h2>
+                <h2>Jouw Spotify Wrapped</h2>
                 <div class="year-selector">
-                    <select id="spotify-year-select" onchange="loadSpotifyStats()">
-                        <option value="all">All Time</option>
+                    <select id="spotify-year-select" onchange="loadSpotifyStats()" aria-label="Jaar">
+                        <option value="all">Alle jaren</option>
                     </select>
                 </div>
             </div>
 
             <div id="spotify-loading" class="spotify-loading" style="display: none;">
                 <div class="spinner"></div>
-                <p>Crunching the numbers...</p>
+                <p>Even rekenen…</p>
             </div>
 
             <div id="spotify-content" class="spotify-content" style="display: none;">
@@ -391,56 +395,56 @@
                     <div class="stat-card total-time">
                         <div class="stat-icon">⏱️</div>
                         <div class="stat-value" id="stat-minutes">0</div>
-                        <div class="stat-label">Minutes Listened</div>
+                        <div class="stat-label">Minuten geluisterd</div>
                     </div>
                     <div class="stat-card top-artist-card">
                         <div class="stat-icon">🎤</div>
                         <div class="stat-value" id="stat-top-artist">-</div>
-                        <div class="stat-label">Top Artist</div>
+                        <div class="stat-label">Topartiest</div>
                     </div>
                     <div class="stat-card total-plays">
                         <div class="stat-icon">▶️</div>
                         <div class="stat-value" id="stat-plays">0</div>
-                        <div class="stat-label">Total Plays</div>
+                        <div class="stat-label">Keer afgespeeld</div>
                     </div>
-                    <div class="stat-card listening-personality" onclick="showDnaExplanation()">
+                    <div class="stat-card listening-personality" onclick="showDnaExplanation()" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
                         <div class="stat-icon">🧬</div>
                         <div class="stat-value" id="stat-dna" style="font-size: 1.5rem;">-</div>
-                        <div class="stat-label">Listening DNA</div>
+                        <div class="stat-label">Luister-DNA</div>
                     </div>
                 </div>
 
                 <!-- New Insights Grid -->
                 <div class="spotify-stats-grid" style="margin-top: 20px;">
-                    <div class="stat-card" onclick="showInsightExplanation('record_day')" style="cursor: pointer;">
+                    <div class="stat-card" onclick="showInsightExplanation('record_day')" style="cursor: pointer;" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
                         <div class="stat-icon">🏆</div>
                         <div class="stat-value" id="stat-record-day-hours" style="font-size: 1.5rem;">-</div>
-                        <div class="stat-label" id="stat-record-day-date">Record Listening Day</div>
+                        <div class="stat-label" id="stat-record-day-date">Recorddag</div>
                     </div>
-                    <div class="stat-card" onclick="showInsightExplanation('top_binge')" style="cursor: pointer;">
+                    <div class="stat-card" onclick="showInsightExplanation('top_binge')" style="cursor: pointer;" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
                         <div class="stat-icon">🔁</div>
                         <div class="stat-value" id="stat-top-binge"
                             style="font-size: 1.2rem; white-space: normal; word-wrap: break-word; line-height: 1.4;">
                             None</div>
-                        <div class="stat-label" id="stat-top-binge-count">Top Consecutive Binge</div>
+                        <div class="stat-label" id="stat-top-binge-count">Langste reeks achter elkaar</div>
                     </div>
                     <div class="stat-card" onclick="showInsightExplanation('mainstream_score')"
-                        style="cursor: pointer;">
+                        style="cursor: pointer;" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
                         <div class="stat-icon">📈</div>
                         <div class="stat-value" id="stat-mainstream-score" style="font-size: 1.2rem;">-</div>
-                        <div class="stat-label" id="stat-mainstream-percent">Mainstream Score</div>
+                        <div class="stat-label" id="stat-mainstream-percent">Mainstreamscore</div>
                     </div>
-                    <div class="stat-card" onclick="showInsightExplanation('seasonal_mood')" style="cursor: pointer;">
+                    <div class="stat-card" onclick="showInsightExplanation('seasonal_mood')" style="cursor: pointer;" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
                         <div class="stat-icon">🌤️</div>
                         <div class="stat-value" id="stat-seasonal-mood" style="font-size: 1.2rem;">-</div>
-                        <div class="stat-label">Seasonal Mood</div>
+                        <div class="stat-label">Seizoensstemming</div>
                     </div>
                 </div>
 
                 <!-- Top Discoveries Section -->
                 <div class="on-this-day-section" id="discoveries-container" style="display: none; margin-top: 30px;">
-                    <h3>🌟 Top Discoveries</h3>
-                    <p class="section-subtitle">Your favorite new artists found this year</p>
+                    <h3>🌟 Ontdekkingen</h3>
+                    <p class="section-subtitle">De nieuwe artiesten die je dit jaar het meest draaide</p>
                     <div class="on-this-day-list" id="discoveries-list">
                         <!-- Populated dynamically -->
                     </div>
@@ -449,14 +453,14 @@
                 <!-- On This Day Section -->
                 <div class="on-this-day-section" id="on-this-day-container" style="display: none;">
                     <div class="otd-header-row">
-                        <h3>📅 On This Day</h3>
-                        <span class="otd-vs">vs</span>
+                        <h3>📅 Op deze dag</h3>
+                        <span class="otd-vs">en</span>
                         <div class="otd-date-block">
                             <span class="otd-today-date" id="otd-today-date"></span>
                             <span class="otd-live-clock" id="otd-live-clock"></span>
                         </div>
                     </div>
-                    <p class="section-subtitle">What you were jamming to on this date in previous years</p>
+                    <p class="section-subtitle">Wat je op deze datum in eerdere jaren luisterde</p>
                     <div id="on-this-day-list" class="spotify-list horizontal-scroll"></div>
                 </div>
 
@@ -464,14 +468,14 @@
                 <div class="spotify-lists-container">
                     <div class="spotify-list-section">
                         <h3 class="spotify-section-heading"
-                            title="Your most-listened artists ranked by total listening time. Click an artist to search on Spotify.">
-                            🏆 Top Artists</h3>
+                            title="Je meest beluisterde artiesten, op totale luistertijd. Klik om op Spotify te zoeken.">
+                            🏆 Topartiesten</h3>
                         <div id="top-artists-list" class="spotify-list"></div>
                     </div>
                     <div class="spotify-list-section">
                         <h3 class="spotify-section-heading"
-                            title="Your most-played tracks ranked by play count. Click a track to search on Spotify.">
-                            🎵 Top Tracks</h3>
+                            title="Je vaakst gespeelde nummers. Klik om op Spotify te zoeken.">
+                            🎵 Topnummers</h3>
                         <div id="top-tracks-list" class="spotify-list"></div>
                     </div>
                 </div>
@@ -480,14 +484,14 @@
                 <div class="spotify-charts-container">
                     <div class="chart-wrapper">
                         <h3 class="spotify-section-heading"
-                            title="Number of tracks played each month. Shows seasonal listening patterns across the year.">
-                            📅 Monthly Activity</h3>
+                            title="Aantal gespeelde nummers per maand.">
+                            📅 Per maand</h3>
                         <div id="monthly-chart" class="simple-bar-chart"></div>
                     </div>
                     <div class="chart-wrapper">
                         <h3 class="spotify-section-heading"
-                            title="Distribution of plays across every hour of the day. Shows when you listen most—morning, afternoon, evening, or night.">
-                            🕒 Hourly Activity</h3>
+                            title="Wanneer je luistert, per uur van de dag.">
+                            🕒 Per uur</h3>
                         <div id="hourly-chart" class="simple-bar-chart"></div>
                     </div>
                 </div>
@@ -515,7 +519,7 @@
                     <span class="keurer-folder-path" id="keurer-folder-display">Geen map geselecteerd</span>
                     <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem; flex-shrink: 0;"
                         onclick="keurerOpenFolderPicker()">
-                        <i class="fas fa-folder-open"></i> Wijzigen
+                        <i class="fas fa-folder-open" aria-hidden="true"></i> Andere map
                     </button>
                 </div>
 
@@ -536,15 +540,17 @@
 
                 <!-- Actie-knoppen -->
                 <div class="keurer-action-buttons" id="keurer-action-buttons" style="display: none;">
-                    <button class="keurer-btn keurer-btn-keep" onclick="keurerDecideKeep()" title="Houden (← pijl)">
-                        <i class="fas fa-heart"></i>
+                    <button class="keurer-btn keurer-btn-keep" onclick="keurerDecideKeep()" title="Houden (← pijl)"
+                        aria-label="Houden">
+                        <i class="fas fa-heart" aria-hidden="true"></i>
                     </button>
-                    <button class="keurer-btn keurer-btn-move" onclick="keurerDecideMove()" title="Verplaatsen (↑ pijl)">
-                        <i class="fas fa-folder-open"></i>
+                    <button class="keurer-btn keurer-btn-move" onclick="keurerDecideMove()" title="Verplaatsen (↑ pijl)"
+                        aria-label="Verplaatsen">
+                        <i class="fas fa-folder-open" aria-hidden="true"></i>
                     </button>
                     <button class="keurer-btn keurer-btn-delete" onclick="keurerDecideDelete()"
-                        title="Verwijderen (→ pijl)">
-                        <i class="fas fa-trash"></i>
+                        title="Naar de prullenmand (→ pijl)" aria-label="Naar de prullenmand">
+                        <i class="fas fa-trash" aria-hidden="true"></i>
                     </button>
                 </div>
 
@@ -563,19 +569,19 @@
                 <!-- Timeline Header -->
                 <div class="tl-header">
                     <div class="tl-header-left">
-                        <h2 class="tl-title"><i class="fas fa-stream"></i> Timeline</h2>
+                        <h2 class="tl-title"><i class="fas fa-stream" aria-hidden="true"></i> Tijdlijn</h2>
                         <span class="tl-current-date" id="timeline-current-date"></span>
                     </div>
                     <div class="tl-header-right">
                         <button class="btn btn-secondary tl-folder-btn" onclick="timelineOpenFolderPicker()">
-                            <i class="fas fa-folder-plus"></i> Folders
+                            <i class="fas fa-folder-plus" aria-hidden="true"></i> Mappen kiezen
                         </button>
                     </div>
                 </div>
 
                 <!-- Folder Chips -->
                 <div class="tl-folder-chips-bar" id="timeline-folder-chips">
-                    <span class="tl-no-folders">No folders selected</span>
+                    <span class="tl-no-folders">Geen mappen gekozen</span>
                 </div>
 
                 <!-- Info Bar -->
@@ -585,7 +591,7 @@
                 <div class="tl-slider-wrap" id="timeline-slider-wrap" style="display: none;">
                     <div class="tl-slider-container">
                         <div class="tl-slider-tooltip" id="timeline-slider-tooltip"></div>
-                        <input type="range" id="timeline-slider" class="tl-slider" min="0" max="1000" value="0">
+                        <input type="range" id="timeline-slider" class="tl-slider" min="0" max="1000" value="0" aria-label="Door de tijd schuiven">
                     </div>
                     <div class="tl-year-labels" id="timeline-year-labels"></div>
                 </div>
@@ -643,7 +649,7 @@
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
                 <h2 class="modal-title">Kies een map om te scannen</h2>
-                <button class="modal-close" onclick="closeFolderSelector()" aria-label="Close">×</button>
+                <button class="modal-close" onclick="closeFolderSelector()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
 
             <div class="modal-body folder-selector-body">
@@ -668,7 +674,7 @@
         <div class="modal-container comparison-container">
             <div class="modal-header">
                 <h2 class="modal-title">Kopieën vergelijken</h2>
-                <button class="modal-close" onclick="closeComparisonModal()" aria-label="Sluiten">×</button>
+                <button class="modal-close" onclick="closeComparisonModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
 
             <div class="modal-body comparison-body">
@@ -720,7 +726,7 @@
         <div class="modal-container dup-confirm-container">
             <div class="modal-header">
                 <h2 class="modal-title" id="dup-confirm-title">Duplicaten opruimen?</h2>
-                <button class="modal-close" onclick="closeCleanupDialog()" aria-label="Sluiten">×</button>
+                <button class="modal-close" onclick="closeCleanupDialog()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body dup-confirm-body">
                 <ul class="dup-confirm-list" id="dup-confirm-list"></ul>
@@ -742,25 +748,25 @@
     <div class="modal" id="modal-viewer" onclick="if(event.target === this) closeModal()">
         <div class="modal-container">
             <div class="modal-header">
-                <h2 class="modal-title" id="modal-title">Media Viewer</h2>
-                <button class="modal-close" onclick="closeModal()" aria-label="Close">×</button>
+                <h2 class="modal-title" id="modal-title">Viewer</h2>
+                <button class="modal-close" onclick="closeModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
 
             <div class="modal-body" id="modal-body">
                 <!-- Media content will be inserted here -->
                 <!-- Navigation zones -->
-                <div class="modal-nav-zone left" onclick="prevFile()" title="Vorige" hidden>
-                    <span class="modal-nav-arrow">‹</span>
+                <div class="modal-nav-zone left" onclick="prevFile()" title="Vorige (←)" hidden>
+                    <span class="modal-nav-arrow" aria-hidden="true">‹</span>
                 </div>
-                <div class="modal-nav-zone right" onclick="nextFile()" title="Volgende" hidden>
-                    <span class="modal-nav-arrow">›</span>
+                <div class="modal-nav-zone right" onclick="nextFile()" title="Volgende (→)" hidden>
+                    <span class="modal-nav-arrow" aria-hidden="true">›</span>
                 </div>
             </div>
 
             <div class="modal-controls" id="modal-controls" style="display: none;">
-                <button class="modal-control-btn" onclick="zoomIn()">Zoom In</button>
-                <button class="modal-control-btn" onclick="zoomOut()">Zoom Out</button>
-                <button class="modal-control-btn" onclick="fitToScreen()">Fit to Screen</button>
+                <button class="modal-control-btn" onclick="zoomIn()" title="Inzoomen (+)">Inzoomen</button>
+                <button class="modal-control-btn" onclick="zoomOut()" title="Uitzoomen (−)">Uitzoomen</button>
+                <button class="modal-control-btn" onclick="fitToScreen()" title="Passend maken (0)">Passend</button>
             </div>
 
             <div class="modal-metadata" id="modal-metadata">
@@ -770,11 +776,11 @@
             <div class="modal-footer"
                 style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-md); border-top: 1px solid var(--border);">
                 <div style="display: flex; gap: var(--space-sm);">
-                    <button class="btn btn-secondary" id="btn-open-finder" onclick="openInFinder()">
-                        Open in Finder
+                    <button class="btn btn-secondary" id="btn-open-finder" onclick="openInFinder()" title="Toon in Finder (f)">
+                        Toon in Finder
                     </button>
-                    <button class="btn btn-primary" id="btn-move-file" onclick="openMoveFileModal()">
-                        Move
+                    <button class="btn btn-primary" id="btn-move-file" onclick="openMoveFileModal()" title="Verplaatsen (m)">
+                        Verplaatsen
                     </button>
                 </div>
                 <div style="flex: 1;"></div>
@@ -786,36 +792,36 @@
     <div class="modal" id="modal-move-file">
         <div class="move-modal-container">
             <div class="move-modal-header">
-                <h2><i class="fas fa-exchange-alt"></i>Move File</h2>
-                <button class="modal-close" onclick="closeMoveFileModal()" aria-label="Close">&times;</button>
+                <h2><i class="fas fa-exchange-alt" aria-hidden="true"></i>Bestand verplaatsen</h2>
+                <button class="modal-close" onclick="closeMoveFileModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
             </div>
             <div class="move-modal-body">
                 <div class="move-panel-file">
                     <div class="move-file-thumb" id="move-file-preview"></div>
                     <div class="move-file-meta">
-                        <div class="move-meta-label">FILE</div>
+                        <div class="move-meta-label">Bestand</div>
                         <div class="move-meta-value" id="move-file-name"></div>
                     </div>
                     <div class="move-file-meta">
-                        <div class="move-meta-label">CURRENT LOCATION</div>
+                        <div class="move-meta-label">Huidige map</div>
                         <div class="move-meta-location" id="move-file-source"><i class="fas fa-folder"></i><span></span>
                         </div>
                     </div>
                     <div class="move-file-meta move-file-dest-meta" id="move-dest-display" style="display:none;">
-                        <div class="move-meta-label">MOVE TO</div>
+                        <div class="move-meta-label">Naar</div>
                         <div class="move-meta-dest" id="move-dest-path"><i class="fas fa-folder-open"></i><span></span>
                         </div>
                     </div>
                 </div>
                 <div class="move-panel-tree">
-                    <div class="move-tree-header">Select destination</div>
+                    <div class="move-tree-header">Kies een doelmap (pijltjes en Enter)</div>
                     <div class="move-tree-scroll" id="move-folder-tree"></div>
                 </div>
             </div>
             <div class="move-modal-footer">
-                <button class="btn btn-secondary" onclick="closeMoveFileModal()">Cancel</button>
+                <button class="btn btn-secondary" onclick="closeMoveFileModal()">Annuleren</button>
                 <button class="btn btn-primary" id="btn-confirm-move" onclick="confirmMoveFile()" disabled><i
-                        class="fas fa-check"></i>Move Here</button>
+                        class="fas fa-check" aria-hidden="true"></i>Hierheen verplaatsen</button>
             </div>
         </div>
     </div>
@@ -894,8 +900,8 @@
     <div class="modal" id="modal-dna-explanation">
         <div class="modal-container dna-modal-container">
             <div class="modal-header">
-                <h2 class="modal-title">🧬 Your Listening DNA</h2>
-                <button class="modal-close" onclick="closeDnaModal()" aria-label="Close">×</button>
+                <h2 class="modal-title">🧬 Jouw luister-DNA</h2>
+                <button class="modal-close" onclick="closeDnaModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body dna-modal-body">
                 <!-- Left: Hero Section -->
@@ -912,7 +918,7 @@
 
                 <!-- Right: All Types -->
                 <div class="dna-sidebar">
-                    <h4 class="dna-sidebar-title">Personalities</h4>
+                    <h4 class="dna-sidebar-title">Typen</h4>
                     <div class="dna-types-list">
                         <div class="dna-type-item personality-early-bird" data-type="Early Bird">
                             <span class="type-icon">🐦</span>
@@ -946,7 +952,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-primary" style="width: 100%;" onclick="closeDnaModal()">Grootse DNA!</button>
+                <button class="btn btn-primary" style="width: 100%;" onclick="closeDnaModal()">Sluiten</button>
             </div>
         </div>
     </div>
@@ -955,8 +961,8 @@
     <div class="modal" id="modal-insight-explanation">
         <div class="modal-container dna-modal-container">
             <div class="modal-header">
-                <h2 class="modal-title" id="insight-modal-header">Insight Details</h2>
-                <button class="modal-close" onclick="closeInsightModal()" aria-label="Close">×</button>
+                <h2 class="modal-title" id="insight-modal-header">Uitleg</h2>
+                <button class="modal-close" onclick="closeInsightModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body dna-modal-body" style="display: block; text-align: center; padding: 2rem;">
                 <div id="insight-modal-icon" style="font-size: 4rem; margin-bottom: 1rem;">ℹ️</div>
@@ -975,7 +981,7 @@
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
                 <h2 class="modal-title"><i class="fas fa-folder-open"></i> Verplaatsen naar...</h2>
-                <button class="modal-close" onclick="keurerCloseMoveModal()" aria-label="Sluiten">×</button>
+                <button class="modal-close" onclick="keurerCloseMoveModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="keurer-move-topbar">
                 <div class="keurer-move-filename-row">
@@ -988,15 +994,15 @@
                         type="text"
                         id="keurer-move-search"
                         class="keurer-move-search"
-                        placeholder="Zoek map..."
+                        placeholder="Zoek map…" aria-label="Zoek een doelmap"
                         oninput="keurerFilterMoveTree(this.value)"
                         onkeydown="keurerHandleMoveSearchKeydown(event)"
                         autocomplete="off"
                         spellcheck="false"
                     >
                     <button class="keurer-move-search-clear" id="keurer-move-search-clear"
-                        onclick="keurerClearMoveSearch()" style="display:none;" title="Wissen">
-                        <i class="fas fa-times"></i>
+                        onclick="keurerClearMoveSearch()" style="display:none;" title="Zoektekst wissen" aria-label="Zoektekst wissen">
+                        <i class="fas fa-times" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
@@ -1016,8 +1022,8 @@
 
     <!-- Keurer: Fullscreen preview overlay -->
     <div id="keurer-preview-overlay" onclick="if(event.target===this)keurerClosePreview()">
-        <button class="keurer-preview-close" onclick="keurerClosePreview()" title="Sluiten (spatie / Esc)">
-            <i class="fas fa-times"></i>
+        <button class="keurer-preview-close" onclick="keurerClosePreview()" title="Sluiten (spatie / Esc)" aria-label="Sluiten">
+            <i class="fas fa-times" aria-hidden="true"></i>
         </button>
         <div id="keurer-preview-content"></div>
         <div class="keurer-preview-bar">
@@ -1031,7 +1037,7 @@
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
                 <h2 class="modal-title">Kies een map om te keuren</h2>
-                <button class="modal-close" onclick="keurerCloseFolderPicker()" aria-label="Sluiten">×</button>
+                <button class="modal-close" onclick="keurerCloseFolderPicker()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body folder-selector-body">
                 <div class="folder-tree-container" id="keurer-folder-tree">
@@ -1041,7 +1047,7 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="keurerCloseFolderPicker()">Annuleren</button>
                 <button class="btn btn-primary" id="btn-keurer-confirm-folder" onclick="keurerConfirmFolderSelection()" disabled>
-                    Map selecteren
+                    Kies deze map
                 </button>
             </div>
         </div>
@@ -1051,19 +1057,19 @@
     <div class="modal" id="modal-timeline-folders">
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
-                <h2 class="modal-title"><i class="fas fa-folder-plus"></i> Select Timeline Folders</h2>
-                <button class="modal-close" onclick="timelineCloseFolderPicker()" aria-label="Close">×</button>
+                <h2 class="modal-title"><i class="fas fa-folder-plus" aria-hidden="true"></i> Mappen voor de tijdlijn</h2>
+                <button class="modal-close" onclick="timelineCloseFolderPicker()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body folder-selector-body">
-                <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 0.9rem;">Select one or more folders to include in your timeline. Photos from all selected folders will be displayed chronologically.</p>
+                <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 0.9rem;">Kies een of meer mappen. De foto's en video's uit alle gekozen mappen komen op volgorde van datum in de tijdlijn.</p>
                 <div class="folder-tree-container" id="timeline-folder-tree">
                     <!-- Populated by timeline.js -->
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="timelineCloseFolderPicker()">Cancel</button>
+                <button class="btn btn-secondary" onclick="timelineCloseFolderPicker()">Annuleren</button>
                 <button class="btn btn-primary" onclick="timelineConfirmFolders()">
-                    <i class="fas fa-check"></i> Apply Selection
+                    <i class="fas fa-check" aria-hidden="true"></i> Toepassen
                 </button>
             </div>
         </div>
@@ -1093,16 +1099,16 @@
                                         <select class="chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
                                     </div>
                     </div>
-                    <button class="chat-fullscreen-toggle" onclick="closeChatFullscreen()" title="Sluiten">
-                        <i class="fas fa-compress"></i>
+                    <button class="chat-fullscreen-toggle" onclick="closeChatFullscreen()" title="Sluiten (Esc)" aria-label="Volledig scherm sluiten">
+                        <i class="fas fa-compress" aria-hidden="true"></i>
                     </button>
                 </div>
                 <div class="chat-messages-slot" id="chat-fullscreen-slot"></div>
                 <div class="chat-input-container">
-                    <input type="text" id="chat-input-fullscreen" class="chat-input" placeholder="Type a message..."
-                        onkeypress="handleChatKeyPressFullscreen(event)">
-                    <button class="chat-send-btn" onclick="sendChatMessageFullscreen()">
-                        <i class="fas fa-paper-plane"></i>
+                    <input type="text" id="chat-input-fullscreen" class="chat-input" placeholder="Typ een bericht…"
+                        aria-label="Bericht aan Pasha" onkeypress="handleChatKeyPressFullscreen(event)">
+                    <button class="chat-send-btn" onclick="sendChatMessageFullscreen()" title="Versturen" aria-label="Versturen">
+                        <i class="fas fa-paper-plane" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
