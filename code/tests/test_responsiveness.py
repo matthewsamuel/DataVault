@@ -42,7 +42,9 @@ def test_only_truly_async_routes_are_async_def(app):
         assert "build_system_prompt()" not in source and "run_in_threadpool(build_system_prompt)" in source
     from backend.routes import datagatherer
     source = inspect.getsource(datagatherer.upload)
-    assert "run_in_threadpool(_archive_upload" in source and ".write(" not in source.replace("out.write, ", "")
+    # Receiving the stream is async; writing, recognising and starting the copy job run in the thread pool
+    assert "run_in_threadpool(_start" in source and "run_in_threadpool(lambda: connector.detect" in source
+    assert ".write(" not in source.replace("out.write, ", "")
 
 
 SLOW_FACTORY = '''
