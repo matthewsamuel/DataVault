@@ -111,6 +111,11 @@ thema's, Shows) en faalt bij elke JavaScript-fout, consolefout of mislukte API-a
 heeft een Python met Playwright nodig (`pip install playwright && playwright install webkit`)
 en wordt niet door pytest meegenomen.
 
+Geen enkele pytest-test praat met een echte Ollama: `tests/conftest.py` zet de chat voor elke
+test op een nep-Ollama (`FakeOllama` in `tests/helpers.py`), die je per test kunt laten
+uitvallen, een model kunt laten missen of een fout kunt laten sturen. De testkluis bevat ook
+een echte HEIC-foto (als pillow_heif hem kan schrijven) en een gedraaide JPEG (EXIF-oriëntatie 6).
+
 ## Veiligheidsgaranties
 
 | | |
