@@ -24,14 +24,7 @@ def get_disabled_folders() -> List[str]:
     if not db:
         return []
     
-    conn = db._get_connection()
-    cursor = conn.cursor()
-    # 0 = disabled
-    cursor.execute("SELECT path FROM show_settings WHERE enabled = 0")
-    results = cursor.fetchall()
-    conn.close()
-    
-    return [row[0] for row in results]
+    return db.get_disabled_show_folders()
 
 def is_folder_enabled(path: Path, disabled_folders: List[str]) -> bool:
     """
@@ -251,28 +244,8 @@ async def update_settings(payload: Dict[str, Any]):
     # Only folders inside the vault can be switched off (stored in one spelling)
     path = str(resolve_in_vault(path, config, folder=True))
     
-    conn = db._get_connection()
-    cursor = conn.cursor()
-    
-    try:
-        if enabled:
-            # Enable: Remove from disabled list
-            cursor.execute("DELETE FROM show_settings WHERE path = ? AND enabled = 0", (path,))
-        else:
-            # Disable: Add to disabled list (0 = disabled)
-            cursor.execute(
-                "INSERT OR REPLACE INTO show_settings (path, enabled) VALUES (?, 0)",
-                (path,)
-            )
-            
-        conn.commit()
-        return {"status": "success", "message": f"Folder {'enabled' if enabled else 'disabled'}"}
-        
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
+    db.set_show_folder_disabled(path, not enabled)
+    return {"status": "success", "message": f"Folder {'enabled' if enabled else 'disabled'}"}
 
 @router.get("/settings")
 async def get_settings():

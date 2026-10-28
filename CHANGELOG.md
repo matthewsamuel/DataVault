@@ -299,3 +299,13 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   worden.
 - De chatopdracht "zoek duplicaten" start de scan van de gekozen map (of vraagt eerst een map te
   kiezen) in plaats van op een willekeurige knop te klikken.
+
+### Achtergrondtaken en snelheid
+- De database gebruikt nu per thread één vaste verbinding in WAL-modus, in plaats van voor
+  elke opvraging een nieuwe verbinding te openen en te sluiten. Lezen hoeft daardoor nooit op
+  schrijven te wachten, en twee gelijktijdige schrijvers wachten netjes op elkaar (tot 10 s)
+  in plaats van met "database is locked" te mislukken. Een fout halverwege laat nooit meer een
+  half afgemaakte bewerking (en daarmee een slot op de database) achter.
+- Wordt de schijf losgekoppeld en weer aangesloten, dan opent de app vanzelf een nieuwe
+  verbinding met de database op die schijf, in plaats van een verbinding met de oude te
+  blijven gebruiken.
