@@ -253,6 +253,39 @@ def test_a_run_undone_between_chunks_starts_a_new_run(client, vault):
     assert [run["run_id"] for run in _runs(client)] == [r["run_id"]]
 
 
+def test_unplugged_vault_answers_503_and_undo_works_once_it_is_back(client, vault):
+    """DUP-UNPLUGGED-500: the database lives on the vault disk; unplugged gave an SQLite 500."""
+    keep, [dup] = _group(vault, "u.jpg", b"losgekoppeld" * 40, copies=1)
+    run_id = _move(client, [(keep, [dup])]).json()["run_id"]
+    away = vault.with_name("vault_unplugged")
+    os.rename(vault, away)
+    try:
+        for response in (
+            client.get("/api/duplicates/runs"),
+            client.post("/api/duplicates/undo", json={"run_id": run_id}),
+            client.post("/api/raw_duplicates/undo_last"),
+            client.get("/api/keurer/history"),
+        ):
+            assert response.status_code == 503, response.text
+            assert response.json()["detail"] == "Archief niet bereikbaar (schijf losgekoppeld?)"
+    finally:
+        os.rename(away, vault)
+    r = client.post("/api/duplicates/undo", json={"run_id": run_id})
+    assert r.status_code == 200 and r.json()["restored"] == 1
+    assert dup.read_bytes() == b"losgekoppeld" * 40
+
+
+def test_other_database_errors_stay_a_500(client, vault, monkeypatch):
+    from backend.routes import duplicates
+
+    def broken(*args, **kwargs):
+        raise sqlite3.OperationalError("no such table: delete_runs")
+
+    monkeypatch.setattr(duplicates.db, "get_delete_runs", broken)
+    r = client.get("/api/duplicates/runs")
+    assert r.status_code == 500 and "no such table" in r.json()["detail"]
+
+
 # ==================== MIGRATIONS 6 AND 7 ====================
 
 def _migrate_to(db_path, version, monkeypatch):

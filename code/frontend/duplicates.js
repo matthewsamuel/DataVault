@@ -695,8 +695,8 @@ async function loadDuplicateRuns() {
     if (!container) return;
     try {
         const response = await fetch(`${API_BASE}/api/duplicates/runs`);
-        if (!response.ok) throw new Error(`Fout ${response.status}`);
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `Fout ${response.status}`);
         renderDuplicateRuns(data.runs || []);
     } catch (error) {
         container.replaceChildren(createEl('div', { class: 'dup-runs-empty', text: `Kon de geschiedenis niet laden: ${error.message}` }));

@@ -249,6 +249,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   "verborgen") mag nooit blijven staan terwijl een zichtbare kopie wordt weggezet. De app biedt
   dat zelf al niet aan, maar nu weigert ook de server zo'n verzoek ("De kopie die blijft is
   verborgen"). Anders zou de enige overgebleven kopie er een zijn die Finder en de app niet tonen.
+- Is de schijf met het archief losgekoppeld, dan antwoorden Herstellen, terugzetten en de
+  andere onderdelen die de database gebruiken (zoals de Keurer-geschiedenis) nu met
+  "Archief niet bereikbaar (schijf losgekoppeld?)" in plaats van een onduidelijke serverfout.
+  Er gaat niets verloren: zodra de schijf terug is, werkt terugzetten gewoon weer.
 
 ### Duplicaten: nieuwe weergave
 - Het duplicatenscherm is vernieuwd en in het Nederlands. Per groep zie je één miniatuur (alle

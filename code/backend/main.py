@@ -2,11 +2,13 @@
 DataVault Dashboard - FastAPI Application
 """
 from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pathlib import Path
 from typing import Optional
 import os
+import sqlite3
 import uuid
 
 # Ensure ffmpeg is in PATH for video thumbnails
@@ -105,6 +107,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         _say(traceback.format_exc())
 
     app.state.config = config
+    app.add_exception_handler(sqlite3.OperationalError, _database_error)
 
     # Register routes
     app.include_router(folders.router)
@@ -125,6 +128,22 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
 
     return app
+
+
+VAULT_UNREACHABLE = "Archief niet bereikbaar (schijf losgekoppeld?)"
+
+
+def _database_error(request: Request, exc: sqlite3.OperationalError) -> JSONResponse:
+    """
+    The database lives in the vault's cache folder, so an unplugged disk makes every
+    database query fail. Answer that with a clear 503 instead of a bare 500.
+    """
+    config = request.app.state.config
+    if config is None or not config.VAULT_ROOT.is_dir() or not config.DB_PATH.parent.is_dir():
+        return JSONResponse(status_code=503, content={"detail": VAULT_UNREACHABLE})
+    import traceback
+    _say("".join(traceback.format_exception(exc)))
+    return JSONResponse(status_code=500, content={"detail": f"Databasefout: {exc}"})
 
 
 core_router = APIRouter()
