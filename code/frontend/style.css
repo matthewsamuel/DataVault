@@ -8289,10 +8289,11 @@ button.otd-settings-icon:hover {
     margin-bottom: var(--space-md);
 }
 
-/* Vaste breedte voor de toetsen: de uitleg begint in elke groep op dezelfde plek */
+/* De toetsen minstens 96px breed (de uitleg begint meestal op dezelfde plek), en nooit
+   afgebroken: ← → ↑ ↓ blijft één regel */
 .shortcut-group dl {
     display: grid;
-    grid-template-columns: 96px minmax(0, 1fr);
+    grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
     gap: var(--space-sm) var(--space-md);
     align-items: baseline;
 }
@@ -8300,7 +8301,24 @@ button.otd-settings-icon:hover {
 .shortcut-group dt {
     display: flex;
     gap: 3px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+}
+
+/* 'Overal' over de hele breedte, in twee kolommen */
+.shortcut-group.is-wide {
+    grid-column: 1 / -1;
+}
+
+.shortcut-group.is-wide dl {
+    grid-template-columns: repeat(2, minmax(96px, max-content) minmax(0, 1fr));
+    column-gap: var(--space-lg);
+}
+
+@media (max-width: 760px) {
+    .shortcut-group.is-wide dl {
+        grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+    }
 }
 
 .shortcut-group dd {

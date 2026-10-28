@@ -34,6 +34,7 @@ const SHORTCUT_VIEWS = [
 const SHORTCUT_GROUPS = [
     {
         title: 'Overal',
+        wide: true,     // over de hele breedte, in twee kolommen: de andere groepen staan eronder
         keys: [
             [['1', '…', '9'], 'Naar een onderdeel (volgorde van het menu)'],
             [['g', 'letter'], 'Naar een onderdeel: ' + SHORTCUT_VIEWS.map(v => `${v.g} ${v.label}`).join(', ')],
@@ -43,7 +44,7 @@ const SHORTCUT_GROUPS = [
             [['Esc'], 'Bovenste venster sluiten, of uit een invoerveld'],
             [['Tab'], 'Naar het volgende onderdeel; in een venster blijft Tab binnen het venster, langs elke knop'],
             // Safari slaat met Tab buiten vensters knoppen over (instelling van Safari zelf)
-            [['⌥', 'Tab'], 'In Safari: ook langs knoppen op de pagina (of zet in Safari > Instellingen > Geavanceerd de Tab-optie aan)'],
+            [['⌥', 'Tab'], 'In Safari: ook langs knoppen op de pagina (zie onderaan)'],
         ],
     },
     {
@@ -105,7 +106,7 @@ function buildShortcutHelp() {
     const close = createEl('button', {
         type: 'button', class: 'modal-close', 'aria-label': 'Sluiten', title: 'Sluiten (Esc)', onClick: closeShortcutHelp,
     }, '×');
-    const groups = SHORTCUT_GROUPS.map(group => createEl('section', { class: 'shortcut-group' },
+    const groups = SHORTCUT_GROUPS.map(group => createEl('section', { class: `shortcut-group${group.wide ? ' is-wide' : ''}` },
         createEl('h3', { text: group.title }),
         createEl('dl', null, ...group.keys.flatMap(([keys, what]) => [
             createEl('dt', null, ...keys.map(k => createEl('kbd', { text: k }))),
@@ -122,7 +123,8 @@ function buildShortcutHelp() {
                 close),
             createEl('div', { class: 'shortcut-groups' }, ...groups),
             createEl('p', { class: 'shortcut-note',
-                text: 'Sneltoetsen doen niets terwijl je in een invoerveld typt, en nooit samen met Cmd, Ctrl of Alt.' })));
+                text: 'Sneltoetsen doen niets terwijl je in een invoerveld typt, en nooit samen met Cmd, Ctrl of Alt. ' +
+                      'Wil je in Safari met Tab alleen ook langs knoppen: Safari > Instellingen > Geavanceerd, de Tab-optie aan.' })));
     document.body.appendChild(overlay);
     return overlay;
 }

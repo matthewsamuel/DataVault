@@ -249,6 +249,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.evaluate("document.getElementById('global-search').value = ''; handleGlobalSearch('')")
             step("keys: ? opens the overview", lambda: page.keyboard.press("?"), 0.4)
             expect(page.is_visible("#shortcut-help"), "keys: ? did not open the shortcut overview")
+            # A key combination reads as one shortcut: never broken over two lines (also at 1024 px)
+            for width in (1400, 1024):
+                page.set_viewport_size({"width": width, "height": 900})
+                wrapped = page.evaluate("[...document.querySelectorAll('#shortcut-help dt')]"
+                                        ".filter(dt => new Set([...dt.children].map(k => k.offsetTop)).size > 1)"
+                                        ".map(dt => dt.textContent)")
+                expect(not wrapped, f"keys: shortcut keys wrap at {width}px: {wrapped}")
+            page.set_viewport_size({"width": 1400, "height": 900})
             expect_focus_trapped("shortcut-help", "keys: shortcut overview")
             step("keys: Escape closes the overview", lambda: page.keyboard.press("Escape"), 0.3)
             expect(not page.is_visible("#shortcut-help"), "keys: Escape did not close the overview")
