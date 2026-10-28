@@ -1070,11 +1070,11 @@ function viewerMetadata(file) {
     add('Pad:', file.path, ' ', createEl('button', { class: 'copy-btn', text: 'Kopieer', onClick: () => copyToClipboard(file.path) }));
     if (typeof file.size === 'number') add('Grootte:', formatBytes(file.size));
     if (typeof file.timestamp === 'number' && file.timestamp > 0) {
-        add('Datum:', new Date(file.timestamp * 1000).toLocaleString());
+        add('Datum:', new Date(file.timestamp * 1000).toLocaleString('nl-NL'));
         const source = { exif: 'EXIF (opnamedatum)', video: 'video (opnamedatum)', birthtime: 'aanmaakdatum bestand', mtime: 'wijzigingsdatum bestand' }[file.date_source];
         if (source) add('Bron:', source);
     } else if (typeof file.modified === 'number' && file.modified > 0) {
-        add('Gewijzigd:', new Date(file.modified * 1000).toLocaleString());
+        add('Gewijzigd:', new Date(file.modified * 1000).toLocaleString('nl-NL'));
     }
     add('Type:', file.type);
     if (typeof file.rating === 'number') {
@@ -2992,19 +2992,19 @@ function stopSpotifyClock() {
 
 function renderSpotifyStats(data) {
     // 1. Stats Cards
-    updateText('stat-minutes', data.total_minutes.toLocaleString());
+    updateText('stat-minutes', data.total_minutes.toLocaleString('nl-NL'));
     updateText('stat-top-artist', data.top_artists.length > 0 ? data.top_artists[0].name : '-');
-    updateText('stat-plays', data.total_plays.toLocaleString());
+    updateText('stat-plays', data.total_plays.toLocaleString('nl-NL'));
     updateText('stat-dna', data.listening_dna);
 
     // 2. Lists
     renderSpotifyList('top-artists-list', data.top_artists, (item, i) => spotifyListItem({
-        rank: `#${i + 1}`, name: item.name, meta: `${Math.round(item.ms / 60000).toLocaleString()} mins`,
+        rank: `#${i + 1}`, name: item.name, meta: `${Math.round(item.ms / 60000).toLocaleString('nl-NL')} min`,
         icon: 'fab fa-spotify', query: item.name,
     }));
 
     renderSpotifyList('top-tracks-list', data.top_tracks, (item, i) => spotifyListItem({
-        rank: `#${i + 1}`, name: item.name, meta: `${item.artist} • ${item.count} plays`,
+        rank: `#${i + 1}`, name: item.name, meta: `${item.artist} • ${item.count}× gespeeld`,
         icon: 'fas fa-play', query: `${item.name} ${item.artist}`,
     }));
 
@@ -3014,8 +3014,8 @@ function renderSpotifyStats(data) {
 
         // Record Day
         if (insights.record_day) {
-            updateText('stat-record-day-hours', `${insights.record_day.hours} hrs`);
-            updateText('stat-record-day-date', `Record Day: ${insights.record_day.date}`);
+            updateText('stat-record-day-hours', `${insights.record_day.hours} uur`);
+            updateText('stat-record-day-date', `Recorddag: ${insights.record_day.date}`);
         }
 
         // Binge
@@ -3027,15 +3027,15 @@ function renderSpotifyStats(data) {
                 style: 'color: inherit; text-decoration: underline;', text: binge.track,
                 onClick: (e) => e.stopPropagation(),
             }));
-            updateText('stat-top-binge-count', `Binge: ${insights.top_binge.count}x in a row`);
+            updateText('stat-top-binge-count', `${insights.top_binge.count}× achter elkaar`);
         } else {
-            updateText('stat-top-binge', 'No binges');
+            updateText('stat-top-binge', 'Geen reeksen');
         }
 
         // Mainstream
         if (insights.mainstream_score) {
             updateText('stat-mainstream-score', insights.mainstream_score);
-            updateText('stat-mainstream-percent', `Top 5% artists = ${insights.mainstream_percent}% of listening`);
+            updateText('stat-mainstream-percent', `Top 5% van de artiesten = ${insights.mainstream_percent}% van het luisteren`);
         }
 
         // Seasonal Mood
@@ -3051,7 +3051,7 @@ function renderSpotifyStats(data) {
             discoveriesContainer.style.display = 'block';
             renderSpotifyList('discoveries-list', insights.discoveries, (item, i) => spotifyListItem({
                 rank: `#${i + 1}`, name: item.name,
-                meta: `First played this year • ${Math.round(item.ms / 60000).toLocaleString()} mins`,
+                meta: `Dit jaar voor het eerst • ${Math.round(item.ms / 60000).toLocaleString('nl-NL')} min`,
                 icon: 'fab fa-spotify', query: item.name,
             }));
         } else {
