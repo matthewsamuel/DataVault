@@ -20,9 +20,10 @@ DataVault Dashboard is a full-featured web application for organizing, analyzing
 - **Multi-View Display** — Grid view (thumbnail-based), list view (sortable by name/date/size), and fullscreen modal viewer with zoom and pan controls
 
 #### Duplicate Detection & Management
-- **Content-Addressed Deduplication** — Find exact duplicates using xxHash3-128 hashing (size pre-filter first) with cache validation
-- **Safe Removal** — Move duplicates to RAW_DUPLICATES preserving directory structure, only after a byte-for-byte compare with the kept original; full undo, no metadata loss
-- **Folder-Level Scanning** — Scan any folder for duplicates within that folder (and its subfolders)
+- **Content-Addressed Deduplication** — Find exact duplicates using xxHash3-128 hashing (size pre-filter first) with a cache that is only trusted while the file is provably unchanged
+- **You Choose What Stays** — A fixed, deterministic rule per group (oldest by default; newest, shortest path or a preferred folder), switchable instantly in the UI, plus a per-group pick of the copy to keep
+- **Safe Removal** — Move duplicates to RAW_DUPLICATES preserving directory structure, only after a byte-for-byte compare with the kept copy; one undo run per cleanup action, no metadata loss
+- **Folder-Level Scanning** — Scan any folder for duplicates within that folder (and its subfolders); read errors are reported, never silently skipped
 
 #### Gamified Photo Curation (Foto Keurer)
 - **Swipe-Based Interface** — Four-directional gesture controls (left/right/up/down) + keyboard shortcuts for intuitive rapid rating
@@ -79,7 +80,7 @@ backend/
 └── routes/
     ├── folders.py             # Folder tree enumeration, recursive traversal
     ├── media.py               # Individual file operations, thumbnail serving, file downloads
-    ├── duplicates.py          # Per-folder duplicate scan, verified single removal, undo
+    ├── duplicates.py          # Per-folder duplicate scan, verified batch moves, undo per run
     ├── spotify.py             # Spotify JSON parsing, stats aggregation, year filtering
     ├── shows.py               # Slideshow generation, weighted sampling, ELO ratings
     ├── chat.py                # LLM chat with Ollama, context injection, action tags, streaming
@@ -105,7 +106,7 @@ frontend/
 ├── app.js                     # Core state management, view switching, prefetch caching
 ├── style.css                  # Responsive design (Flexbox/Grid), theme system, animations
 ├── keurer.js                  # Photo curator UI, swipe detection, undo history
-├── duplicates.js              # Duplicate browser, folder selection, progress polling
+├── duplicates.js              # Duplicate groups, keep rules, cleanup dialog, Herstellen (undo)
 ├── timeline.js                # Timeline UI, virtual scrolling, slider navigation
 ├── wave-background.js         # Animated background effect
 ├── resizable-sidebar.js       # Interactive folder tree sidebar
@@ -149,26 +150,48 @@ UI Update (render, toast notification)
 **Problem:** Large vaults accumulate identical files across folders. Manual identification is impossible; naive approaches are too slow.
 
 **Solution:**
-- **Per-Folder Scan** (`POST /api/duplicates/scan_folder`, `scanner.find_duplicates_in_folder`):
-  1. Walk the chosen folder and group media files by size (different sizes can never be duplicates)
+- **Per-Folder Scan** (`POST /api/duplicates/scan_folder?folder_path=&rule=&prefer_folder=`, `scanner.find_duplicates_in_folder`):
+  1. Walk the chosen folder in sorted order with the archive's one exclusion rule (no cache, TRASH,
+     RAW_DUPLICATES, hidden or `._` files, symlinks) and group the non-empty media files by size
   2. Hash only the files that share a size, in parallel, with xxHash3-128
-  3. Within each hash group the first file is the kept original; the others are reported as `duplicate_of` it
-- **Smart Caching:** Hashes are cached in SQLite and validated by file size + mtime; invalidated on any change
-- **Progress Tracking:** Real-time phase updates, file counts, cancellation support
-- **Verified Removal** (`POST /api/duplicates/delete_single`): right before moving, the server checks that the
-  file is a regular file outside RAW_DUPLICATES/TRASH/cache, that the kept original still exists inside the vault,
-  and that both files are **byte-for-byte identical** (`file_ops.files_identical`, no cached hash). Only then is the
-  duplicate moved to RAW_DUPLICATES with its folder structure, via `move_no_overwrite`. So the last copy of a photo
-  can never be moved away, even if the folder changed since the scan.
-- **Undo:** every removal is recorded per run; `POST /api/raw_duplicates/undo_last` moves the newest run that
-  still has a file in RAW_DUPLICATES back (a run whose files were tidied away by hand no longer blocks older ones).
-  A file that took the original place is never overwritten: the restored file then gets `name_RESTORED_001.ext`.
+  3. Group by hash and pick the copy that stays with `scanner.choose_keeper(rule)`
+  4. Answer with groups: `{id, hash, size, type, copies: [...], keep}`; each copy carries `capture_ts`
+     (EXIF DateTimeOriginal, else birthtime, else mtime), `file_ts`, `hidden`, `path_len` and `name_rank`
+- **Which copy stays:** every rule first prefers a copy that is not hidden (dot name or the Finder
+  'hidden' flag) and ends with the path in alphabetical order, so the result is fully deterministic.
+  `oldest` (default): oldest capture date, then oldest file date, then shortest path. `newest`: the reverse
+  dates. `shortest`: shortest path, then oldest. `folder`: a copy inside `prefer_folder`, then oldest.
+  Identical bytes mean identical EXIF, so within a group the file date tells the copies apart.
+  The UI (`keepSortKey` in duplicates.js) uses the same keys, so switching rules is instant, and the user can
+  pick another copy per group.
+- **Honest results:** an empty or cancelled scan answers 200 with the same shape (`cancelled: true`);
+  unreadable folders and files are counted (`errors`, `error_samples`, `complete: false`, progress status
+  `incomplete`); a folder that disappears mid-scan (disk unplugged) gives 503. The route is a plain `def`, so
+  progress and cancel answer while it runs, and only one scan runs at a time (409 otherwise).
+- **Smart Caching:** `file_hashes` rows carry their algorithm (`algo`) and are only used while the file's
+  inode, size, mtime_ns and ctime_ns are unchanged (ctime cannot be set back, so an in-place edit that
+  restores the mtime is still noticed). Rows from before migration 6 are simply rehashed. The cache is read in
+  one query and written in one transaction per scan, and rows of files that are gone are pruned.
+- **Verified Removal** (`POST /api/duplicates/move`, body `{groups: [{keep, move: [...]}], run_id?, folder?}`):
+  for every file, right before moving and under `ARCHIVE_LOCK`, the server checks that it is a regular file
+  outside RAW_DUPLICATES/TRASH/cache, that `keep` still exists inside the vault, and that both are
+  **byte-for-byte identical** (`file_ops.files_identical`, no cached hash). Only then is the file moved to
+  RAW_DUPLICATES with its folder structure, via `move_no_overwrite`. Refusals are listed per file in `failed`.
+  So the last copy of a photo can never be moved away, even if the folder changed since the scan.
+  `POST /api/duplicates/delete_single` does the same for one file.
+- **Undo per action:** a run is created in the same transaction as its first moved file (so there are no empty
+  runs); the UI sends one action in chunks of about 100 files with the returned `run_id`. Runs are ordered by an
+  AUTOINCREMENT `seq`, never by clock time. `GET /api/duplicates/runs` lists recent runs (with how many files are
+  still in RAW_DUPLICATES), `POST /api/duplicates/undo {run_id}` restores one run, and
+  `POST /api/raw_duplicates/undo_last` restores the newest run that still has a file in RAW_DUPLICATES.
+  A file that took the original place is never overwritten: the restored file then gets
+  `name_RESTORED_001.ext`. Only restored files are forgotten; the rest stays recorded for a later attempt.
 
 **Code Example:**
 ```python
-# duplicates.delete_single, shortened
+# duplicates._move_verified, shortened (the caller holds ARCHIVE_LOCK and records the move)
 if not files_identical(src_path, keeper):
-    raise HTTPException(409, "Original changed since the scan; scan again")
+    raise HTTPException(409, "File is no longer identical to the kept copy; scan again")
 dst_path, was_conflict = safe_move_with_structure(real_src, base_folder, config.DUPLICATES_FOLDER.resolve())
 ```
 
@@ -484,13 +507,17 @@ CREATE UNIQUE INDEX idx_keurer_keep_path_folder ON keurer_decisions(path, folder
 CREATE INDEX idx_keurer_folder ON keurer_decisions(folder);
 CREATE INDEX idx_keurer_date ON keurer_decisions(decided_at);
 
--- Hash cache: avoid re-hashing unchanged files
+-- Hash cache: avoid re-hashing unchanged files (migration 6)
 CREATE TABLE file_hashes (
     path TEXT PRIMARY KEY,
     size INTEGER NOT NULL,
     mtime REAL NOT NULL,
-    sha256 TEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    hash TEXT NOT NULL,      -- was 'sha256'; holds the algo's hex digest
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    algo TEXT,               -- 'xxh3_128'; NULL = unknown, never used
+    ino INTEGER,             -- the hash is only trusted while ino, size,
+    mtime_ns INTEGER,        -- mtime_ns and ctime_ns are unchanged
+    ctime_ns INTEGER
 );
 
 -- File ratings: ELO scores for weighted sampling
@@ -501,10 +528,14 @@ CREATE TABLE file_ratings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Undo tracking: record of file moves for reversals
+-- Undo tracking: one run per duplicates cleanup action (migration 7)
 CREATE TABLE delete_runs (
-    run_id TEXT PRIMARY KEY,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,  -- order of runs; never clock time
+    run_id TEXT NOT NULL UNIQUE,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    total_files INTEGER DEFAULT 0,
+    created_at REAL,                        -- UTC epoch seconds, for display
+    folder TEXT                             -- the folder that was cleaned up
 );
 
 CREATE TABLE delete_operations (
@@ -512,8 +543,10 @@ CREATE TABLE delete_operations (
     run_id TEXT NOT NULL,
     src_path TEXT NOT NULL,
     dst_path TEXT NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (run_id) REFERENCES delete_runs(run_id)
 );
+CREATE INDEX idx_delops_run ON delete_operations(run_id);
 
 -- Folder visibility settings
 CREATE TABLE show_settings (
@@ -528,7 +561,7 @@ CREATE TABLE show_settings (
 
 | Operation | Time | Notes |
 |-----------|------|-------|
-| Duplicate scan (one folder) | depends on size | Size pre-filter, then parallel xxHash3 (cached) |
+| Duplicate scan (one folder) | depends on size | Size pre-filter, then parallel xxHash3 (cache read in one query) |
 | Thumbnail generation | 50-100ms | Per image with PIL |
 | Thumbnail cache hit | <10ms | Validated by mtime |
 | Video frame extraction | 100-300ms | Via ffmpeg |

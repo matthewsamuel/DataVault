@@ -86,62 +86,62 @@ frontend/
 
 1. **Hash-Based Content Addressing**
    - Uses xxHash3-128 hashing with caching to find candidate duplicates by content, not name
-   - Cache validity verified by file size and modification time (mtime)
+   - A cached hash is tagged with its algorithm and only trusted while inode, size, mtime_ns and
+     ctime_ns are unchanged (ctime cannot be set back, so an edit that restores the mtime is caught)
    - A hash only *proposes* a duplicate: before anything moves, a full byte-for-byte compare decides
    
    ```python
-   def compute_hash_xxh3(file_path: Path, db: Database) -> str:
-       """xxHash3-128 with cache validation (5-10x faster than SHA-256)"""
-       stat = file_path.stat()
-       cached = db.get_cached_hash(file_path, stat.st_size, stat.st_mtime)
-       if cached:
-           return cached  # Cache hit
-       
-       hasher = xxhash.xxh3_128()
-       with open(file_path, 'rb') as f:
-           while chunk := f.read(65536):  # 64KB chunks
-               hasher.update(chunk)
-       
-       hash_hex = hasher.hexdigest()
-       db.store_hash(file_path, stat.st_size, stat.st_mtime, hash_hex)  # Cache for future
-       return hash_hex
+   cache = db.get_cached_hashes(folder_path, HASH_ALGO)       # one query per scan
+   for path in candidates:
+       cached = cache.get(str(path))
+       if cached and cached[0] == _fingerprint(stats[str(path)]):  # (ino, size, mtime_ns, ctime_ns)
+           hashes[str(path)] = cached[1]
+       else:
+           to_hash.append(path)                                  # hashed on up to 4 threads
+   ...
+   db.store_hashes(new_entries, HASH_ALGO)                       # one transaction per scan
    ```
 
 2. **Per-Folder Scanning with Progress Tracking**
    - Scans one chosen folder (and its subfolders), not the whole vault
    - Groups files by size first: files of different sizes can never be duplicates, so most files are never hashed
-   - Hashes the remaining candidates in parallel; within each hash group the first file is the kept original
-   - Tracks progress with phase indicators and cancellation support
+   - Hashes the remaining candidates in parallel, then picks the copy that stays per group by an
+     explicit, deterministic rule (never by which thread finished first)
+   - Tracks progress with phase indicators and cancellation support; read errors are counted and
+     reported instead of silently skipped
    
    ```python
-   def find_duplicates_in_folder(folder_path: Path, config: Config, db: Database) -> Dict:
-       by_size = defaultdict(list)
-       for file_path in media_files_under(folder_path):
-           by_size[file_path.stat().st_size].append(file_path)
-       candidates = [f for group in by_size.values() if len(group) > 1 for f in group]
-       
-       with ThreadPoolExecutor(max_workers=max_workers) as executor:
-           ...  # compute_hash_xxh3 per candidate, honouring is_scan_cancelled()
-       
-       # For identical files A, B, C: A is kept, B and C are reported as duplicate_of A
-       return {"duplicates": duplicates, "total_files": total_files}
+   def keeper_sort_key(copy, rule="oldest", prefer_folder=None):
+       hidden = 1 if copy["hidden"] else 0          # a visible copy always wins
+       oldest = (copy["capture_ts"], copy["file_ts"])  # EXIF, then birthtime/mtime
+       if rule == "newest":
+           return (hidden, -copy["capture_ts"], -copy["file_ts"], copy["path_len"], copy["name_rank"])
+       if rule == "shortest":
+           return (hidden, copy["path_len"], *oldest, copy["name_rank"])
+       if rule == "folder":
+           return (hidden, 0 if _inside(copy["path"], prefer_folder) else 1, *oldest,
+                   copy["path_len"], copy["name_rank"])
+       return (hidden, *oldest, copy["path_len"], copy["name_rank"])  # alphabetical last
    ```
+   The frontend uses the same keys, so switching the rule re-evaluates every group instantly, and
+   the user can still pick another copy per group.
 
 3. **Verified Removal with Undo Support**
    - Right before moving, the server re-checks that the file is a regular file outside
      RAW_DUPLICATES/TRASH/cache and that the kept original still exists and is byte-for-byte identical
    - Checks and move run under one app-wide lock, so a second request can never move "the other copy" away
    - Moves the duplicate to RAW_DUPLICATES preserving its folder structure, never overwriting
-   - Records every move in the database for undo
+   - Records every move in the database for undo: one run per user action (sent in chunks under one
+     run_id), created together with its first moved file, ordered by an AUTOINCREMENT seq
    
    ```python
    with ARCHIVE_LOCK:  # shared by every move in the app
        if not files_identical(src_path, keeper):  # full byte compare, no cached hash
-           raise HTTPException(409, "Original changed since the scan; scan again")
+           raise HTTPException(409, "File is no longer identical to the kept copy; scan again")
        dst_path, was_conflict = safe_move_with_structure(
            real_src, base_folder, config.DUPLICATES_FOLDER.resolve(), conflict_suffix="DUP"
        )  # -> move_no_overwrite(): a clash becomes name_DUP_001.ext
-       db.record_delete_operation(db.create_delete_run(), src_path, dst_path)
+       run_id = db.record_delete_operation(run_id, src_path, dst_path, folder)  # starts a run if needed
    ```
 
 **Technical Achievements:**
@@ -776,31 +776,25 @@ def move_no_overwrite(src: Path, dst: Path, rename_on_conflict: bool = True,
 
 #### 3.2 Hash Caching with Validity Tracking
 
-**Problem:** Computing SHA-256 for all files on every scan is slow. Naive caching ignores file changes.
+**Problem:** Hashing every file on every scan is slow. Naive caching (size + mtime) misses a file
+edited in place whose mtime was put back, and a cache without an algorithm tag mixes hash types.
 
-**Solution:** Cache with stat-based invalidation:
+**Solution:** Cache with identity-based invalidation, read and written once per scan:
 
 ```python
-def compute_hash_xxh3(file_path: Path, db: Database) -> str:
-    """Compute hash with cache validation by size/mtime"""
-    stat = file_path.stat()
-    size = stat.st_size
-    mtime = stat.st_mtime
-    
-    # Try cache: valid only if size and mtime unchanged
-    cached_hash = db.get_cached_hash(file_path, size, mtime)
-    if cached_hash:
-        return cached_hash  # Cache hit: no re-hashing needed
-    
-    # Cache miss: compute xxHash3-128 with 64KB chunks (memory efficient)
-    hasher = xxhash.xxh3_128()
-    with open(file_path, 'rb') as f:
-        while chunk := f.read(65536):
-            hasher.update(chunk)
-    
-    hash_hex = hasher.hexdigest()
-    db.store_hash(file_path, size, mtime, hash_hex)
-    return hash_hex
+def _fingerprint(st: os.stat_result):
+    """What must be unchanged for a cached hash to be trusted."""
+    return (st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+cache = db.get_cached_hashes(folder_path, HASH_ALGO)  # {path: (fingerprint, hash)}, algo must match
+hit = cache.get(str(path))
+if hit and hit[0] == _fingerprint(st):
+    digest = hit[1]                       # cache hit: no re-hashing needed
+else:
+    digest = hash_file_xxh3(path)         # 1 MB chunks
+    new_entries.append((str(path), _fingerprint(st), digest))
+...
+db.store_hashes(new_entries, HASH_ALGO)   # executemany in one transaction
 ```
 
 **Performance Impact:**
@@ -1217,8 +1211,8 @@ html[data-theme="light"] {
    
    with ThreadPoolExecutor(max_workers=4) as executor:
        futures = [
-           executor.submit(compute_hash_xxh3, file_path, db)
-           for file_path in candidates  # only files that share a size
+           executor.submit(hash_file_xxh3, file_path)
+           for file_path in to_hash  # files that share a size and have no valid cached hash
        ]
        
        for i, future in enumerate(as_completed(futures)):
@@ -1233,9 +1227,9 @@ html[data-theme="light"] {
    ```python
    # Duplicate scan: xxHash3-128 only proposes candidates (10x faster than SHA-256);
    # a byte-for-byte compare (files_identical) decides before anything is moved
-   def compute_hash_xxh3(file_path: Path, db: Database) -> str:
+   def hash_file_xxh3(file_path: Path) -> str:
        hasher = xxhash.xxh3_128()
-       while chunk := f.read(65536):  # 64KB chunks optimal for SSDs
+       while chunk := f.read(1024 * 1024):  # 1 MB chunks
            hasher.update(chunk)
        return hasher.hexdigest()
    ```
@@ -1264,22 +1258,22 @@ async def startup():
 ```python
 # Scan can be cancelled mid-operation
 @router.post("/api/raw_duplicates/cancel")
-async def cancel_scan():
+def cancel_scan():
     from backend.progress import cancel_scan
     cancel_scan()
     return {"status": "cancelled"}
 
-# Scanner checks cancellation flag
-def find_duplicates_in_folder(folder_path, config, db):
-    for file in folder_files:
+# Scanner checks cancellation flag; the answer always has the same shape
+def find_duplicates_in_folder(folder_path, config, db, rule="oldest", prefer_folder=None):
+    for root, dirnames, filenames in walk_archive(folder_path, config, onerror=record_error):
         if is_scan_cancelled():
-            return {"duplicates": [], "total_files": 0}  # Clean exit
+            return cancelled_result()  # {groups: [], cancelled: True, complete: False, ...}
 ```
 
 #### 7.3 File Operation Error Handling
 
 ```python
-# raw_duplicates/undo_last: restore one run, report every problem, lose no record
+# _restore_ops (undo of one run, used by /api/duplicates/undo and undo_last): report every problem, lose no record
 for op in operations:
     if not _paths_allowed(op):  # paths from the DB are re-validated
         errors.append(f"Refused to restore {op['dst_path']}")
