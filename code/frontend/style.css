@@ -5321,13 +5321,16 @@ a.breadcrumb-item:hover {
 
 /* ==================== DIAVOORSTELLING (Shows) ==================== */
 
+/* Drie rijen: titel, foto, bediening. De foto past altijd in de middelste rij, zodat titel,
+   gegevens en voortgangsbalk er bij geen enkele schermhoogte overheen vallen. */
 .cinematic-overlay {
     position: fixed;
     inset: 0;
     background: var(--media-bg);
     z-index: 20000;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     opacity: 0;
     pointer-events: none;
     transition: opacity 400ms var(--ease-out);
@@ -5339,10 +5342,11 @@ a.breadcrumb-item:hover {
 }
 
 #slide-container {
-    flex: 1;
+    grid-row: 2;
     position: relative;
     width: 100%;
     height: 100%;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     align-items: center;
@@ -5389,12 +5393,10 @@ a.breadcrumb-item:hover {
     animation: kenBurnsOut 10s ease-out forwards;
 }
 
-/* Bediening: verschijnt bij bewegen van de muis */
+/* Bediening: verschijnt bij bewegen van de muis, in een eigen rij boven en onder de foto */
 .player-controls-top,
 .player-controls-bottom {
-    position: absolute;
-    left: 0;
-    right: 0;
+    position: relative;
     z-index: 10;
     opacity: 0;
     transition: opacity var(--duration-slow) var(--ease-out);
@@ -5408,9 +5410,8 @@ a.breadcrumb-item:hover {
 }
 
 .player-controls-top {
-    top: 0;
-    padding: var(--space-xl) var(--space-2xl) var(--space-4xl);
-    background: linear-gradient(to bottom, var(--media-scrim), transparent);
+    grid-row: 1;
+    padding: var(--space-lg) var(--space-2xl);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -5444,9 +5445,8 @@ a.breadcrumb-item:hover {
 }
 
 .player-controls-bottom {
-    bottom: 0;
-    padding: var(--space-4xl) var(--space-2xl) var(--space-xl);
-    background: linear-gradient(to top, var(--media-scrim-strong), transparent);
+    grid-row: 3;
+    padding: var(--space-md) var(--space-2xl) var(--space-xl);
     display: flex;
     flex-direction: column;
     gap: var(--space-lg);

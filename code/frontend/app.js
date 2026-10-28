@@ -415,6 +415,17 @@ async function playFolderShow(showObj) {
     }
 }
 
+// Het scorelabel in de slideshow: een ster met het getal, en voluit 'Score 1000' als naam
+// en tooltip, zodat duidelijk is wat het getal is
+function setScoreBadge(badge, score) {
+    if (!badge) return;
+    const label = `Score ${score}`;
+    badge.title = `${label}: stijgt als je een foto mooi vindt, daalt bij minder mooi`;
+    badge.setAttribute('aria-label', label);
+    badge.setAttribute('role', 'img');
+    badge.replaceChildren(createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), ` ${score}`);
+}
+
 // ==================== FOLDER TREE ====================
 
 async function loadFolders() {
@@ -3029,7 +3040,7 @@ class CinematicPlayer {
         if (metaEl) {
             const badge = metaEl.querySelector('.elo-rating-badge');
             if (badge) {
-                badge.innerHTML = html`<i class="fas fa-star"></i> ELO: ${newRating}`;
+                setScoreBadge(badge, newRating);
                 badge.classList.add('updated'); // Add a glow effect in CSS if desired
                 setTimeout(() => badge.classList.remove('updated'), 1000);
             }
@@ -3045,7 +3056,7 @@ class CinematicPlayer {
             // Niet bewaard: de oude waardering terug, ook op het scherm
             file.rating = oldRating;
             const badge = metaEl && metaEl.querySelector('.elo-rating-badge');
-            if (badge) badge.innerHTML = html`<i class="fas fa-star"></i> ELO: ${oldRating}`;
+            if (badge) setScoreBadge(badge, oldRating);
             toastFetchError('Stem niet bewaard', e);
         }
     }
@@ -3135,10 +3146,9 @@ class CinematicPlayer {
 <span class="player-meta-item"><i class="fas fa-camera" aria-hidden="true"></i> ${file.name}</span>
 <span class="player-meta-item"><i class="fas fa-calendar" aria-hidden="true"></i> ${new Date(file.modified * 1000).toLocaleDateString('nl-NL')}</span>
 ${file.size ? html`<span class="player-meta-item"><i class="fas fa-hard-drive" aria-hidden="true"></i> ${formatBytes(file.size)}</span>` : ''}
-<div class="elo-rating-badge" title="Score (ELO): stijgt als je een foto mooi vindt">
-    <i class="fas fa-star" aria-hidden="true"></i> ${file.rating || 1000}
-</div>
+<div class="elo-rating-badge"></div>
 `;
+        setScoreBadge(metaEl.querySelector('.elo-rating-badge'), file.rating || 1000);
 
         // For videos: don't start the timer (video 'ended' event handles advancement)
         // For photos: use normal timer
