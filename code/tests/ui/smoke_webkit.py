@@ -9,7 +9,9 @@ that vault) and stops it again at the end.
 It also drives the app with the keyboard (tabs, the shortcut overview, the Files grid and the
 viewer, Tab staying inside every window, focus going back where it was, Keurer keys that never
 act from the theme menu or the search field), moves a file and puts it back from the
-Herstelcentrum, checks Instellingen and the storage window, and runs a11y_checks.js on every screen in the light and the dark theme:
+Herstelcentrum, checks Instellingen and the storage window, walks through DataGatherer (help, the
+menu, the connect window, reading the existing Spotify export, the network log), and runs
+a11y_checks.js on every screen in the light and the dark theme:
 all visible text must reach WCAG AA contrast and every control must have a name. On the way
 it saves a screenshot of every screen in both themes (for a look at the design), in a temp
 folder it prints at the end, or in $DATAVAULT_SMOKE_SHOTS when that is set.
@@ -44,7 +46,7 @@ VENV_PYTHON = CODE_DIR / "venv" / "bin" / "python"
 BIG_FOLDER = "Groot"
 BIG_FILES = 1500
 MAX_THUMBS_ON_OPEN = 100
-VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings"]
+VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings", "datagatherer"]
 A11Y_CHECKS = Path(__file__).with_name("a11y_checks.js")
 
 
@@ -738,6 +740,71 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 print(f"  {'ok' if len(problems) == seen else 'PROBLEM':7} home: archive unplugged")
             finally:
                 unplugged.rename(vault)
+
+            # DataGatherer: cards built from the connectors' metadata, g a, the help and the 'Meer'
+            # menu with the keyboard, the connect window (Tab stays inside), reading the export that
+            # is already in the archive (in place), the Spotify chip, the network log, Instellingen.
+            # Nothing here goes online: the test server refuses every request of the network guard.
+            page.reload()
+            page.wait_for_load_state("networkidle")
+            page.click(".nav-tab[data-view='home']")
+            step("datagatherer: g a opens it", lambda: (page.keyboard.press("g"), page.keyboard.press("a")), 0.6)
+            expect(page.evaluate(view_now) == "datagatherer", "datagatherer: g a did not open the tab")
+            spotify_card = ".dg-card[data-source='spotify']"
+            try:
+                page.wait_for_selector(spotify_card, timeout=10000)
+            except PlaywrightError:
+                pass   # reported below
+            cards = page.evaluate("[...document.querySelectorAll('.dg-card')].map(c => c.dataset.source)")
+            expect({"spotify", "lastfm", "google_takeout"} <= set(cards), f"datagatherer: cards {cards}")
+            primary = f"{spotify_card} .dg-primary"
+            expect(page.evaluate(f"(document.querySelector({json.dumps(primary)}) || {{}}).textContent || ''").strip() == "Inlezen",
+                   "datagatherer: the existing Spotify export does not ask to be read (Inlezen)")
+            page.focus(f"{spotify_card} button[aria-label^='Hulp']")
+            step("datagatherer: Enter opens the help", lambda: page.keyboard.press("Enter"), 0.8)
+            expect(page.evaluate(f"document.querySelectorAll({json.dumps(spotify_card + ' .dg-help-option')}).length") >= 3,
+                   "datagatherer: the help shows no options")
+            expect(page.evaluate("(document.activeElement.getAttribute('aria-label') || '')").startswith("Hulp"),
+                   "datagatherer: focus left the help button after it redrew the card")
+            page.keyboard.press("Enter")
+            page.focus(f"{spotify_card} .dg-more > summary")
+            step("datagatherer: Enter opens 'Meer'", lambda: page.keyboard.press("Enter"), 0.3)
+            expect(page.evaluate(f"document.querySelector({json.dumps(spotify_card + ' .dg-more')}).open"),
+                   "datagatherer: 'Meer' did not open with Enter")
+            step("datagatherer: Escape closes 'Meer'", lambda: page.keyboard.press("Escape"), 0.3)
+            expect(not page.evaluate(f"document.querySelector({json.dumps(spotify_card + ' .dg-more')}).open")
+                   and page.evaluate("document.activeElement.tagName") == "SUMMARY",
+                   "datagatherer: Escape did not close 'Meer' and keep the focus on it")
+            step("datagatherer: the connect window", lambda: page.click(".dg-card[data-source='lastfm'] .dg-primary"), 0.8)
+            expect(page.is_visible("#dg-connect"), "datagatherer: Verbinden did not open the connect window")
+            expect_focus_trapped("dg-connect", "datagatherer: connect window")
+            page.fill("#dg-connect-username", "smoketest")
+            page.fill("#dg-connect-api_key", "0123456789abcdef0123456789abcdef")
+            step("datagatherer: save Last.fm", lambda: page.click("#dg-connect .modal-footer .btn-primary"), 1.2)
+            expect(not page.is_visible("#dg-connect"), "datagatherer: the connect window stayed open after saving")
+            expect(page.evaluate("(document.querySelector(\".dg-card[data-source='lastfm'] .dg-primary\") || {}).dataset.action") == "sync",
+                   "datagatherer: a connected Last.fm does not offer Bijwerken")
+            step("datagatherer: read the existing Spotify export", lambda: page.click(primary), 0.4)
+            try:
+                page.wait_for_function(f"(document.querySelector({json.dumps(primary)}) || {{dataset: {{}}}}).dataset.action !== 'import'",
+                                       timeout=20000)
+            except PlaywrightError:
+                pass   # reported below
+            until = page.evaluate(f"(document.querySelector({json.dumps(spotify_card + ' .dg-until-date')}) || {{}}).textContent")
+            expect(bool(until), "datagatherer: after Inlezen the card shows no 'Gegevens t/m'")
+            expect((vault / "data" / "Matthew" / "Spotify Extended Streaming History").is_dir(),
+                   "datagatherer: the existing export folder moved")
+            step("datagatherer: the Spotify chip", lambda: page.click(".nav-tab[data-view='spotify']"), 1.2)
+            chip = page.evaluate("(document.getElementById('spotify-coverage') || {}).textContent || ''")
+            expect(chip.startswith("Bijgewerkt t/m") and "null" not in chip, f"datagatherer: the Spotify chip says {chip!r}")
+            page.evaluate("switchMainView('datagatherer')")
+            step("datagatherer: the network log", lambda: page.click("#section-datagatherer button:has-text('Netwerklog')"), 0.8)
+            expect(page.is_visible("#dg-network"), "datagatherer: the network log did not open")
+            expect_focus_trapped("dg-network", "datagatherer: network log")
+            step("datagatherer: Escape closes the log", lambda: page.keyboard.press("Escape"), 0.4)
+            expect(not page.is_visible("#dg-network"), "datagatherer: Escape did not close the network log")
+            step("datagatherer: Instellingen", lambda: page.click(".top-nav [data-view='settings']"), 0.8)
+            expect(page.is_visible("#settings-datagatherer"), "datagatherer: no section in Instellingen")
 
             # An archive without any folder: 'Het archief is leeg', not 'Kies een map'
             page.route("**/api/folders", lambda route: route.fulfill(json={"folders": []}))
