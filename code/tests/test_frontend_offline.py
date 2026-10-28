@@ -112,3 +112,16 @@ def test_index_loads_only_local_stylesheets_and_scripts():
     for ref in refs:
         assert "://" not in ref and not ref.startswith("//"), ref
         assert (FRONTEND / ref.split("?")[0]).is_file(), ref
+
+
+def test_api_docs_pages_load_nothing_from_a_cdn(client):
+    """FastAPI's /docs and /redoc pull Swagger UI and ReDoc from cdn.jsdelivr.net; they are off."""
+    for url in ("/docs", "/redoc", "/docs/oauth2-redirect"):
+        r = client.get(url)
+        assert "cdn.jsdelivr.net" not in r.text
+        assert "fastapi.tiangolo.com" not in r.text
+        assert "swagger-ui" not in r.text.lower()
+    # The machine-readable schema stays: plain JSON, nothing external
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+    assert r.json()["info"]["title"] == "DataVault Dashboard"

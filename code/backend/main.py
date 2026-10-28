@@ -62,6 +62,10 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app = FastAPI(
         title="DataVault Dashboard",
         lifespan=_lifespan,
+        # No Swagger UI or ReDoc: both load their scripts from a CDN, and DataVault must work
+        # fully offline. /openapi.json (plain JSON, nothing external) stays available.
+        docs_url=None,
+        redoc_url=None,
         telemetry={
             "tracing": False,
             "metrics": False,

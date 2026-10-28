@@ -151,6 +151,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   lokale Spotify-icoon.
 - Een test bewaakt dat de frontend geen externe adressen meer gebruikt. Alleen een link die je
   zelf aanklikt (een nummer opzoeken op Spotify) opent een site buiten de app.
+- De ingebouwde API-documentatiepagina's `/docs` en `/redoc` zijn uitgezet: ze laadden hun
+  scripts van een CDN (cdn.jsdelivr.net). De app zelf gebruikte ze niet; de beschrijving van
+  de API als JSON (`/openapi.json`) blijft beschikbaar.
 
 ### Foto Keurer
 - Ongedaan maken gebeurt nu volledig op de server: de app onthoudt per beslissing waar het
