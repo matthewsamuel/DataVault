@@ -102,7 +102,9 @@ function confirmFolderSelection() {
 
 function setSelectedFolder(folder) {
     selectedFolder = folder;
-    document.getElementById('selected-folder-path').textContent = folder || 'Geen';
+    const shown = document.getElementById('selected-folder-path');
+    shown.replaceChildren(...(folder ? pathNodes(archivePath(folder)) : ['Geen']));
+    shown.title = folder || '';
     document.getElementById('btn-scan-folder').disabled = !folder;
     document.getElementById('btn-index-folder').disabled = !folder;
 }
@@ -604,7 +606,9 @@ function updateGroupCard(card, group) {
 function setComparisonMedia(prefix, copy, isVideo) {
     const img = document.getElementById(`comparison-${prefix}-img`);
     const video = document.getElementById(`comparison-${prefix}-video`);
-    document.getElementById(`comparison-${prefix}-path`).textContent = copy.path;
+    const pathEl = document.getElementById(`comparison-${prefix}-path`);
+    pathEl.replaceChildren(...pathNodes(archivePath(copy.path)));
+    pathEl.title = copy.path;
     document.getElementById(`comparison-${prefix}-size`).textContent =
         `${formatBytes(copy.size)} · ${fileDateLabel(copy)}`;
     img.style.display = isVideo ? 'none' : 'block';
@@ -695,7 +699,8 @@ function openCleanupDialog(groups) {
     const list = document.getElementById('dup-confirm-list');
     list.replaceChildren(...items.map(text => createEl('li', { text })));
     if (single) {
-        list.appendChild(createEl('li', { class: 'dup-confirm-keep', text: `Blijft: ${plan[0].keep}` }));
+        list.appendChild(createEl('li', { class: 'dup-confirm-keep', title: plan[0].keep },
+            'Blijft: ', createEl('span', { class: 'dup-confirm-path' }, ...pathNodes(archivePath(plan[0].keep)))));
     }
 
     document.getElementById('dup-confirm-progress').hidden = true;

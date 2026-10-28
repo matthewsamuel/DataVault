@@ -3879,10 +3879,13 @@ a.breadcrumb-item:hover {
 }
 
 .dup-confirm-keep {
-    color: var(--accent-text);
+    color: var(--text-secondary);
+}
+
+.dup-confirm-path {
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
-    word-break: break-all;
+    color: var(--text-primary);
 }
 
 /* ---- Map kiezen (venster) ---- */
@@ -3994,7 +3997,7 @@ a.breadcrumb-item:hover {
     font-family: var(--font-mono);
     font-size: var(--fs-2xs);
     color: var(--text-primary);
-    word-break: break-all;
+    overflow-wrap: anywhere;
 }
 
 .comparison-size {

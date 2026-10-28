@@ -472,6 +472,25 @@ async function selectFolder(path) {
 
 // ==================== BREADCRUMB ====================
 
+// Een pad zoals de gebruiker het kent: vanaf het archief ('RAW/2019/zomer/foto.jpg'), niet het
+// hele pad op de schijf. Het volledige pad blijft bereikbaar (Kopieer, title).
+function archivePath(path) {
+    const root = (folderTree || []).find(f => path === f.path || path.startsWith(f.path + '/'));
+    if (!root) return path;
+    return path.slice(root.path.lastIndexOf('/') + 1);
+}
+
+// Tekstknopen met een afbreekpunt na elke '/': een lang pad breekt tussen mappen, niet midden
+// in een naam
+function pathNodes(text) {
+    const nodes = [];
+    String(text).split('/').forEach((part, i) => {
+        if (i > 0) nodes.push('/', createEl('wbr'));
+        if (part) nodes.push(part);
+    });
+    return nodes;
+}
+
 function updateBreadcrumb(path) {
     const breadcrumb = document.getElementById('breadcrumb');
     breadcrumb.innerHTML = '';
@@ -1111,7 +1130,8 @@ function viewerMetadata(file) {
         createEl('span', { class: 'metadata-label', text: label }),
         createEl('span', { class: 'metadata-value' }, ...value));
 
-    add('Pad', file.path, ' ', createEl('button', { class: 'copy-btn', text: 'Kopieer', onClick: () => copyToClipboard(file.path) }));
+    add('Pad', createEl('span', { title: file.path }, ...pathNodes(archivePath(file.path))), ' ',
+        createEl('button', { class: 'copy-btn', text: 'Kopieer', title: 'Kopieer het volledige pad', onClick: () => copyToClipboard(file.path) }));
     if (typeof file.size === 'number') add('Grootte', formatBytes(file.size));
     if (typeof file.timestamp === 'number' && file.timestamp > 0) {
         add('Datum', new Date(file.timestamp * 1000).toLocaleString('nl-NL'));
