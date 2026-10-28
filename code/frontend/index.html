@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=52">
+    <link rel="stylesheet" href="style.css?v=53">
 </head>
 
 <body>
@@ -412,7 +412,7 @@
                         </div>
                         <button type="button" class="btn btn-secondary" id="btn-series-compare" onclick="seriesStartCompare()"
                             title="Vergelijkt foto's die nieuw of veranderd zijn; wat al vergeleken is, wordt overgeslagen">
-                            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Foto's vergelijken
+                            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> <span id="series-compare-label">Foto's vergelijken</span>
                         </button>
                         <div class="series-controls">
                             <div class="series-strictness">
@@ -439,6 +439,7 @@
                         <span class="series-summary-text" id="series-summary-text"></span>
                         <span class="series-strictness-help" id="series-strictness-help"></span>
                         <button type="button" class="link-button" id="btn-series-reset" onclick="seriesResetReviews()" hidden>Behouden reeksen weer tonen</button>
+                        <span class="series-last-kept" id="series-last-kept" role="status" hidden></span>
                     </div>
                     <div class="series-list" id="series-list" aria-label="Reeksen"></div>
                 </div>
@@ -836,8 +837,33 @@
                 <ul class="dup-confirm-list" id="series-confirm-list"></ul>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" id="btn-series-cancel" onclick="seriesCloseConfirm()">Annuleren</button>
-                <button class="btn btn-primary" id="btn-series-go" onclick="seriesRunConfirm()" data-autofocus>Verplaatsen</button>
+                <button class="btn btn-secondary" id="btn-series-cancel" onclick="seriesCloseConfirm()" data-autofocus>Annuleren</button>
+                <button class="btn btn-primary" id="btn-series-go" onclick="seriesRunConfirm()">Verplaatsen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Beste uit reeks: de foto's van één reeks groot naast elkaar, passend of op 100% (series.js) -->
+    <div class="modal" id="modal-series-compare">
+        <div class="modal-container series-compare-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-magnifying-glass-plus" aria-hidden="true"></i> <span id="series-compare-title">Groot bekijken</span></h2>
+                <div class="segmented series-compare-zoom" role="group" aria-label="Weergave">
+                    <button type="button" id="btn-series-fit" aria-pressed="true" onclick="seriesCompareZoom(false)" title="Elke foto heel (d)">Passend</button>
+                    <button type="button" id="btn-series-detail" aria-pressed="false" onclick="seriesCompareZoom(true)" title="Dezelfde uitsnede op ware grootte; slepen verschuift (d)">100%</button>
+                </div>
+                <button class="modal-close" onclick="seriesCloseCompare()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body series-compare-body" id="series-compare-grid"></div>
+            <div class="modal-footer">
+                <div class="series-compare-hint" aria-hidden="true">
+                    <span><kbd>←</kbd> <kbd>→</kbd> foto</span>
+                    <span><kbd>spatie</kbd> houden</span>
+                    <span><kbd>d</kbd> passend of 100%</span>
+                    <span><kbd>Esc</kbd> sluiten</span>
+                </div>
+                <button class="btn btn-secondary" onclick="seriesCloseCompare()">Sluiten</button>
+                <button class="btn btn-primary" id="btn-series-compare-go" onclick="seriesCompareConfirm()">Verplaatsen</button>
             </div>
         </div>
     </div>
@@ -1216,7 +1242,7 @@
     <script src="app.js?v=60"></script>
     <script src="jobs.js?v=9"></script>
     <script src="duplicates.js?v=25"></script>
-    <script src="series.js?v=1"></script>
+    <script src="series.js?v=2"></script>
     <script src="keurer.js?v=21"></script>
     <script src="timeline.js?v=12"></script>
     <script src="wave-background.js?v=4"></script>

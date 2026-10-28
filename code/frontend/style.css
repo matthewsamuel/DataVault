@@ -4393,11 +4393,13 @@ a.breadcrumb-item:hover {
     box-shadow: var(--shadow-md);
 }
 
+/* De knoppen staan rechts naast de titel, en gaan pas naar een eigen regel als ze niet passen */
 .series-card-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
     justify-content: space-between;
-    gap: var(--space-lg);
+    gap: var(--space-md) var(--space-lg);
 }
 
 .series-card-heading {
@@ -4454,16 +4456,31 @@ a.breadcrumb-item:hover {
     color: var(--text-tertiary);
 }
 
+/* (.btn zet display; een verborgen knop blijft weg) */
+#btn-series-compare[hidden],
+.series-card-actions .btn[hidden],
+.series-last-kept[hidden] {
+    display: none;
+}
+
 .series-card-actions {
     flex: none;
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: var(--space-sm);
+    margin-left: auto;
 }
 
 .series-photos {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
     gap: var(--space-lg) var(--space-md);
+}
+
+/* Twee tot vier foto's: groter, zodat je ze hier al kunt vergelijken (--series-tile uit series.js) */
+.series-card.is-small .series-photos {
+    grid-template-columns: repeat(var(--series-count), minmax(0, var(--series-tile)));
 }
 
 .series-photo-cell {
@@ -4487,10 +4504,9 @@ a.breadcrumb-item:hover {
     outline-offset: 5px;
 }
 
-/* Wat weggaat, is gedempt en zegt dat onderaan op de foto */
+/* Wat weggaat, is iets gedempt (de foto blijft goed te zien) en zegt dat onderaan op de foto */
 .series-photo.is-leaving img {
-    opacity: 0.45;
-    filter: grayscale(0.6);
+    opacity: 0.72;
 }
 
 .series-photo.is-leaving img.loading {
@@ -4664,6 +4680,162 @@ a.breadcrumb-item:hover {
     padding: var(--space-sm) 0;
 }
 
+/* De laatste 'Alles behouden', meteen ongedaan te maken */
+.series-last-kept {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    color: var(--text-secondary);
+}
+
+.series-last-kept i {
+    color: var(--accent-text);
+    font-size: var(--fs-xs);
+}
+
+/* ---------- Groot vergelijken (venster) ---------- */
+
+.series-compare-container {
+    width: calc(100vw - 2 * var(--space-2xl));
+    max-width: 1440px;
+    height: calc(100vh - 2 * var(--space-2xl));
+    max-height: 960px;
+}
+
+.series-compare-zoom {
+    margin-left: auto;
+}
+
+.series-compare-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    display: grid;
+    grid-template-columns: repeat(var(--compare-columns, 2), minmax(260px, 1fr));
+    grid-auto-rows: minmax(380px, 1fr);
+    align-items: stretch;
+    justify-content: normal;
+    gap: var(--space-xl) var(--space-lg);
+    padding: var(--space-lg) var(--space-xl);
+}
+
+.series-compare-pane {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    min-width: 0;
+    min-height: 0;
+}
+
+.series-compare-frame {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 220px;
+    overflow: hidden;
+    border-radius: var(--radius-thumb);
+    background: var(--media-bg);
+    box-shadow: 0 0 0 1px var(--media-border);
+    transition: box-shadow var(--duration-fast) var(--ease-out);
+}
+
+/* Wat blijft: dezelfde groene ring als een gekozen foto in de lijst */
+.series-compare-pane.is-kept .series-compare-frame {
+    box-shadow: 0 0 0 3px var(--accent);
+}
+
+.series-compare-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: opacity var(--duration-base) var(--ease-out);
+}
+
+.series-compare-img.loading {
+    opacity: 0;
+}
+
+/* 100%: elke foto even breed als de grootste op ware grootte, dezelfde uitsnede in beeld */
+.series-compare-body.is-detail .series-compare-frame {
+    cursor: grab;
+    touch-action: none;
+}
+
+.series-compare-body.is-detail .series-compare-frame.is-dragging {
+    cursor: grabbing;
+}
+
+.series-compare-body.is-detail .series-compare-img {
+    inset: auto;
+    left: 50%;
+    top: 50%;
+    width: var(--compare-detail-width);
+    max-width: none;
+    height: auto;
+    object-fit: fill;
+    transform: translate(calc(var(--compare-x, 50%) * -1), calc(var(--compare-y, 50%) * -1));
+}
+
+.series-compare-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.series-compare-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+}
+
+.series-compare-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+}
+
+.series-compare-facts {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    color: var(--text-secondary);
+}
+
+.series-compare-score {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-md);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.series-compare-score-total {
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+}
+
+.series-compare-keep {
+    align-self: flex-start;
+}
+
+.series-compare-hint {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-lg);
+    margin-right: auto;
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
 .series-confirm-container {
     width: 560px;
 }
@@ -4672,18 +4844,16 @@ a.breadcrumb-item:hover {
     font-size: var(--fs-xs);
 }
 
-@media (max-width: 1100px) {
-    .series-card-header {
-        flex-direction: column;
-    }
-
-    .series-card-actions {
-        align-self: stretch;
-        justify-content: flex-end;
-    }
-}
-
 @media (max-width: 900px) {
+    .series-compare-hint {
+        display: none;
+    }
+
+    .series-compare-container {
+        width: calc(100vw - 2 * var(--space-lg));
+        height: calc(100vh - 2 * var(--space-lg));
+    }
+
     .series-controls {
         width: 100%;
         justify-content: space-between;

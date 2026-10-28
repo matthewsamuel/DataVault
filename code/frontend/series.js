@@ -10,13 +10,18 @@
 //
 // Toetsen (op een foto in de lijst): ← → naar de vorige of volgende foto, ↑ ↓ naar de vorige
 // of volgende reeks, spatie houden of laten gaan, Enter bevestigen, s overslaan, a alles
-// behouden. Overslaan geldt voor deze sessie; 'Alles behouden' onthoudt de server.
+// behouden, v groot vergelijken. Overslaan geldt voor deze sessie; 'Alles behouden' onthoudt
+// de server (en is meteen ongedaan te maken).
+//
+// Paging: een bevestigde of behouden reeks verdwijnt ook op de server, dus schuift de rest daar
+// een plaats op. nextOffset gaat dan één omlaag (seriesState.gone telt mee met een verzoek dat
+// al onderweg is); een overgeslagen reeks blijft op de server en telt gewoon mee.
 
 const SERIES_PAGE = 20;
 const SERIES_STRICTNESS = ['streng', 'normaal', 'ruim'];
 const SERIES_STRICTNESS_LABELS = { streng: 'Streng', normaal: 'Normaal', ruim: 'Ruim' };
 const SERIES_STRICTNESS_HELP = {
-    streng: 'Streng: alleen vrijwel dezelfde foto, zoals een verkleinde of opnieuw opgeslagen kopie.',
+    streng: 'Streng: alleen vrijwel dezelfde foto (een verkleinde of opnieuw opgeslagen kopie) en bursts met bijna geen beweging.',
     normaal: 'Normaal: ook licht bewerkte foto\'s en bursts met weinig beweging.',
     ruim: 'Ruim: ook iets bijgesneden of lichter gemaakte foto\'s en bursts met meer beweging.',
 };
@@ -32,8 +37,13 @@ const seriesState = {
     sort: 'size',
     items: [],             // reeksen in beeld, in volgorde
     nextOffset: 0,         // null: alles geladen
-    total: 0,
+    total: 0,              // reeksen die de server nog heeft (ook de overgeslagen)
     photos: 0,
+    gone: 0,               // reeksen die in deze sessie op de server verdwenen (bevestigd of behouden)
+    handled: 0,            // daarvan sinds het openen van het tabblad: voor 'Alles bekeken'
+    moved: 0,              // en daarvan met verplaatste foto's
+    lastKept: null,        // {key, title}: de laatste 'Alles behouden', ongedaan te maken
+    job: null,             // de vergelijking die nu loopt (voor het lege scherm)
     keep: new Map(),       // reeks-sleutel -> Set van foto-id's die blijven
     skipped: new Set(),    // reeks-sleutels die in deze sessie overgeslagen zijn
     cursor: { key: null, id: null },
@@ -114,6 +124,7 @@ function seriesOnShow() {
 // koos, blijft staan zolang de reeks dezelfde is
 function seriesInit() {
     seriesSyncControls();
+    seriesState.handled = seriesState.moved = 0;
     seriesLoadStatus();
     seriesLoad(true);
 }
@@ -149,20 +160,25 @@ function seriesRenderStatus(job) {
     const button = document.getElementById('btn-series-compare');
     const progress = document.getElementById('series-progress');
     const running = !!(job && JOB_ACTIVE.has(job.status));
+    const label = document.getElementById('series-compare-label');
+    const wasRunning = !!seriesState.job;
+    seriesState.job = running ? job : null;
     if (running) {
         const pct = job.total ? Math.round(job.processed / job.total * 100) : null;
-        text.textContent = job.status === 'waiting_for_vault' ? 'Wacht tot het archief terug is…'
-            : (job.message || 'Foto\'s vergelijken…');
+        text.textContent = seriesJobText(job);
         progress.hidden = false;
         progress.classList.toggle('is-indeterminate', pct === null);
         document.getElementById('series-progress-fill').style.width = pct === null ? '' : `${pct}%`;
+        // Bezig: de knop zegt het (de balk ernaast laat de voortgang zien)
         button.disabled = true;
-        button.classList.add('is-loading');
+        label.textContent = 'Bezig met vergelijken…';
+        seriesUpdateEmptyProgress();
         return;
     }
     progress.hidden = true;
     button.disabled = false;
-    button.classList.remove('is-loading');
+    label.textContent = 'Foto\'s vergelijken';
+    if (wasRunning && seriesState.loaded && !seriesState.items.length) seriesRender();
     if (!status) return;
     if (!status.ready) {
         text.textContent = 'De bibliotheek wordt nog opgebouwd; daarna kun je vergelijken.';
@@ -186,11 +202,12 @@ function seriesRenderStatus(job) {
 // toegevoegde foto's meedoen; daarna vergelijken
 async function seriesStartCompare() {
     const button = document.getElementById('btn-series-compare');
+    if (button.disabled && seriesState.job) return;
     button.disabled = true;
     try {
         // (auto: een stille ronde, zonder eigen melding; dit scherm toont de voortgang)
         const index = await jobsStart('index', { auto: true });
-        seriesRenderStatus({ status: 'running', message: 'Bibliotheek bijwerken…', total: null });
+        seriesRenderStatus({ id: index.id, status: 'running', message: 'Bibliotheek bijwerken…', total: null });
         const done = await seriesWaitForJob(index.id);
         if (done.status !== 'done') {
             seriesRenderStatus();
@@ -203,6 +220,18 @@ async function seriesStartCompare() {
         seriesRenderStatus();
         toastFetchError('Vergelijken niet gestart', err);
     }
+}
+
+function seriesJobText(job) {
+    return job.status === 'waiting_for_vault' ? 'Wacht tot het archief terug is…'
+        : (job.message || 'Foto\'s vergelijken…');
+}
+
+// Terwijl er vergeleken wordt en er nog niets te tonen is: het lege scherm zegt dat, zonder
+// tweede knop (de voortgang staat erboven)
+function seriesUpdateEmptyProgress() {
+    if (!seriesState.loaded || seriesState.items.length) return;
+    if (!document.getElementById('series-empty-progress')) seriesRender();
 }
 
 function seriesWaitForJob(id) {
@@ -252,18 +281,23 @@ function seriesSetStrictness(name) {
     seriesState.strictness = name;
     try { localStorage.setItem('seriesStrictness', name); } catch (e) { /* geen opslag */ }
     seriesSyncControls();
-    if (changed) seriesLoad(true);
+    if (changed) {
+        seriesState.handled = seriesState.moved = 0;
+        seriesLoad(true);
+    }
 }
 
 function seriesSetSort(sort) {
     if (sort !== 'size' && sort !== 'recent') return;
     seriesState.sort = sort;
+    seriesState.handled = seriesState.moved = 0;
     try { localStorage.setItem('seriesSort', sort); } catch (e) { /* geen opslag */ }
     seriesLoad(true);
 }
 
 // ==================== LADEN ====================
 
+// Geeft true terug als er reeksen bij kwamen (of de lijst opnieuw begon)
 async function seriesLoad(reset) {
     const seq = ++seriesState.seq;
     const list = document.getElementById('series-list');
@@ -272,15 +306,18 @@ async function seriesLoad(reset) {
         seriesState.nextOffset = 0;
         if (!seriesState.loaded) list.replaceChildren(skeletonRows(3));
     }
-    if (seriesState.nextOffset === null) return;
+    if (seriesState.nextOffset === null) return false;
     seriesState.loading = true;
+    seriesMoreBusy(true);
+    const goneBefore = seriesState.gone;
     const params = new URLSearchParams({
         strictness: seriesState.strictness, sort: seriesState.sort,
         offset: String(seriesState.nextOffset), limit: String(SERIES_PAGE),
     });
     try {
         const data = await fetchJSON(`${API_BASE}/api/series?${params}`);
-        if (seq !== seriesState.seq) return;
+        if (seq !== seriesState.seq) return false;
+        const before = seriesState.items.length;
         const fresh = data.items.filter(s => !seriesState.skipped.has(s.key)
             && !seriesState.items.some(t => t.key === s.key));
         fresh.forEach(s => {
@@ -289,18 +326,51 @@ async function seriesLoad(reset) {
             if (!still) seriesState.keep.set(s.key, new Set([s.best]));
         });
         seriesState.items.push(...fresh);
-        seriesState.nextOffset = data.next_offset;
-        seriesState.total = data.total;
+        // Wat tijdens dit verzoek op de server verdween, schoof de rest daar al op
+        const goneSince = seriesState.gone - goneBefore;
+        seriesState.nextOffset = data.next_offset === null ? null : Math.max(0, data.next_offset - goneSince);
+        seriesState.total = Math.max(0, data.total - goneSince);
         seriesState.photos = data.photos;
         seriesState.loaded = true;
-        seriesRender();
+        seriesState.loading = false;
+        // (bijna) alles op deze pagina was overgeslagen: meteen de volgende
+        const more = seriesState.items.length < 5 && seriesState.nextOffset !== null;
+        if (!more || seriesState.items.length) seriesRender();
+        if (more) await seriesLoad(false);
+        return seriesState.items.length > before || reset;
     } catch (err) {
         if (seq !== seriesState.seq) return;
         list.replaceChildren(errorState('Reeksen laden mislukt', err, () => seriesLoad(true)));
         document.getElementById('series-summary').hidden = true;
+        return false;
     } finally {
-        if (seq === seriesState.seq) seriesState.loading = false;
+        if (seq === seriesState.seq) {
+            seriesState.loading = false;
+            seriesMoreBusy(false);
+        }
     }
+}
+
+function seriesMoreBusy(busy) {
+    const more = document.getElementById('btn-series-more');
+    if (!more) return;
+    more.disabled = busy;
+    more.classList.toggle('is-loading', busy);
+}
+
+// Komt het einde van de lijst in beeld, dan laadt de volgende pagina vanzelf
+let seriesMoreObserver = null;
+
+function seriesWatchMore(button) {
+    if (!('IntersectionObserver' in window)) return;
+    if (!seriesMoreObserver) {
+        seriesMoreObserver = new IntersectionObserver(entries => {
+            if (entries.some(e => e.isIntersecting) && !seriesState.loading && seriesState.nextOffset !== null
+                && !document.getElementById('dup-panel-series').hidden) seriesLoad(false);
+        }, { rootMargin: '0px 0px 400px 0px' });
+    }
+    seriesMoreObserver.disconnect();
+    seriesMoreObserver.observe(button);
 }
 
 // ==================== TEKENEN ====================
@@ -320,30 +390,49 @@ function seriesDate(ts) {
     });
 }
 
+function seriesNotCompared(status) {
+    return !!(status && status.ready && !status.analysed && status.pending);
+}
+
+function seriesSummaryText(status) {
+    if (seriesNotCompared(status)) return '';
+    const { total, photos } = seriesState;
+    const skipped = seriesState.skipped.size;
+    if (!total) return 'Geen reeksen';
+    const parts = [`${formatNumberNl(total)} ${total === 1 ? 'reeks' : 'reeksen'}`, `${formatNumberNl(photos)} foto's`];
+    if (skipped) parts.push(`${formatNumberNl(skipped)} overgeslagen`);
+    return parts.join(' · ');
+}
+
 function seriesRender() {
     const list = document.getElementById('series-list');
     const summary = document.getElementById('series-summary');
     const status = seriesState.status;
     const shown = seriesState.items.length;
+    // Stond de focus in de lijst, dan komt hij na het opnieuw tekenen terug op de cursor
+    const hadFocus = list.contains(document.activeElement);
     summary.hidden = false;
-    const compared = !status || status.analysed > 0 || !status.pending;
-    document.getElementById('series-summary-text').textContent = !compared ? '' : seriesState.total
-        ? `${formatNumberNl(seriesState.total)} ${seriesState.total === 1 ? 'reeks' : 'reeksen'} · ${formatNumberNl(seriesState.photos)} foto's`
-        : 'Geen reeksen';
+    document.getElementById('series-summary-text').textContent = seriesSummaryText(status);
+    seriesRenderLastKept();
+    // Eén hoofdknop: vóór de eerste vergelijking staat hij in het lege scherm, niet ook bovenin
+    document.getElementById('btn-series-compare').hidden = !shown && seriesNotCompared(status) && !seriesState.job;
     if (!shown) {
         list.replaceChildren(seriesEmptyState(status));
+        if (hadFocus) seriesFocusCursor();
         return;
     }
     const cards = seriesState.items.map(series => seriesCard(series));
     list.replaceChildren(...cards);
     if (seriesState.nextOffset !== null) {
-        list.appendChild(createEl('div', { class: 'series-more' },
-            createEl('button', {
-                class: 'btn btn-secondary', id: 'btn-series-more', text: 'Meer reeksen laden',
-                onClick: () => seriesLoad(false),
-            })));
+        const more = createEl('button', {
+            class: 'btn btn-secondary', id: 'btn-series-more', text: 'Meer reeksen laden',
+            onClick: () => seriesLoad(false),
+        });
+        list.appendChild(createEl('div', { class: 'series-more' }, more));
+        seriesWatchMore(more);
     }
     seriesEnsureCursor();
+    if (hadFocus) seriesFocusCursor(false);
 }
 
 function seriesEmptyState(status) {
@@ -353,7 +442,16 @@ function seriesEmptyState(status) {
             text: 'Zodra alle foto\'s bekend zijn, kun je ze hier vergelijken.',
         });
     }
-    if (status && !status.analysed && status.pending) {
+    if (seriesState.job && (!status || !status.analysed || !seriesState.total)) {
+        // Er wordt vergeleken: geen knop; de voortgang staat erboven
+        const state = emptyState({
+            icon: 'fa-hourglass-half', title: 'Foto\'s worden vergeleken…',
+            text: 'Dat gebeurt op de achtergrond; je kunt intussen verder. De reeksen verschijnen hier zodra het klaar is.',
+        });
+        state.id = 'series-empty-progress';
+        return state;
+    }
+    if (seriesNotCompared(status)) {
         return emptyState({
             icon: 'fa-layer-group', title: 'Nog niet vergeleken',
             text: 'Vergelijk je foto\'s één keer; daarna gaat het alleen nog om nieuwe of veranderde foto\'s.',
@@ -363,8 +461,20 @@ function seriesEmptyState(status) {
     if (seriesState.skipped.size && seriesState.total) {
         return emptyState({
             icon: 'fa-forward', title: 'Alle reeksen overgeslagen',
-            text: 'Overgeslagen reeksen komen terug als je de pagina opnieuw laadt.',
-            action: { label: 'Overgeslagen tonen', onClick: () => { seriesState.skipped.clear(); seriesLoad(true); } },
+            text: seriesState.handled
+                ? `${formatNumberNl(seriesState.handled)} ${seriesState.handled === 1 ? 'reeks' : 'reeksen'} afgehandeld; de overgeslagen reeksen wachten nog.`
+                : 'Overgeslagen reeksen blijven voor later staan.',
+            action: { label: 'Overgeslagen tonen', primary: true, onClick: seriesShowSkipped },
+        });
+    }
+    if (seriesState.handled) {
+        const n = `${formatNumberNl(seriesState.handled)} ${seriesState.handled === 1 ? 'reeks' : 'reeksen'}`;
+        return emptyState({
+            icon: 'fa-circle-check', title: 'Alles bekeken',
+            text: seriesState.moved
+                ? `Je hebt ${n} afgehandeld. Wat je verplaatste, staat in het Herstelcentrum en kan daar terug.`
+                : `Je hebt ${n} afgehandeld en alles behouden. Met \u2018Behouden reeksen weer tonen\u2019 zie je ze opnieuw.`,
+            action: seriesState.moved ? { label: 'Naar het Herstelcentrum', onClick: () => goToView('recovery') } : null,
         });
     }
     const looser = SERIES_STRICTNESS[SERIES_STRICTNESS.indexOf(seriesState.strictness) + 1];
@@ -375,6 +485,29 @@ function seriesEmptyState(status) {
         action: looser ? { label: `${SERIES_STRICTNESS_LABELS[looser]} proberen`, onClick: () => seriesSetStrictness(looser) } : null,
     });
 }
+
+function seriesShowSkipped() {
+    seriesState.skipped.clear();
+    seriesLoad(true).then(() => seriesFocusCursor());
+}
+
+// 'Alles behouden' is meteen ongedaan te maken, tot de volgende keer
+function seriesRenderLastKept() {
+    const slot = document.getElementById('series-last-kept');
+    const last = seriesState.lastKept;
+    slot.hidden = !last;
+    if (!last) {
+        slot.replaceChildren();
+        return;
+    }
+    slot.replaceChildren(
+        createEl('i', { class: 'fas fa-check', 'aria-hidden': 'true' }),
+        createEl('span', { text: `Behouden: ${last.title}` }),
+        createEl('button', { type: 'button', class: 'link-button', id: 'btn-series-undo-keep', text: 'Ongedaan maken', onClick: seriesUndoKeepAll }));
+}
+
+// Kleine reeksen krijgen grotere foto's: twee foto's van 156 px vergelijk je niet
+const SERIES_TILE = { 2: 340, 3: 300, 4: 260 };
 
 function seriesCard(series) {
     const keep = seriesState.keep.get(series.key);
@@ -401,20 +534,41 @@ function seriesCard(series) {
                     createEl('div', { class: 'series-card-meta' }, ...seriesJoin(meta)))),
             createEl('div', { class: 'series-card-actions' },
                 createEl('button', {
+                    class: 'btn btn-ghost', title: 'De foto\'s groot naast elkaar (v)', onClick: () => seriesOpenCompare(series),
+                }, createEl('i', { class: 'fas fa-magnifying-glass-plus', 'aria-hidden': 'true' }), 'Groot bekijken'),
+                createEl('button', {
                     class: 'btn btn-ghost', title: 'Deze reeks nu overslaan (s)', onClick: () => seriesSkip(series),
                 }, 'Overslaan'),
                 createEl('button', {
-                    class: 'btn btn-secondary', title: 'Alle foto\'s blijven; de reeks komt niet terug (a)',
+                    class: 'btn btn-secondary series-keepall-btn', title: 'Alle foto\'s blijven; de reeks komt niet terug (a)',
                     onClick: () => seriesKeepAll(series),
                 }, 'Alles behouden'),
                 createEl('button', {
                     class: 'btn btn-primary series-confirm-btn', title: 'Bevestigen (Enter)',
                     onClick: () => seriesConfirm(series),
-                }, moving.length ? `Verplaats ${moving.length}` : 'Alles behouden'))),
+                }, `Verplaats ${moving.length}`))),
         createEl('div', { class: 'series-photos', role: 'group', 'aria-label': `Foto's: ${seriesTitle(series)}` },
             ...series.members.map(member => seriesPhoto(series, member, keep.has(member.id)))),
         createEl('div', { class: 'series-detail', 'aria-live': 'polite' }));
+    const tile = SERIES_TILE[series.members.length];
+    if (tile) {
+        card.style.setProperty('--series-tile', `${tile}px`);
+        card.style.setProperty('--series-count', String(series.members.length));
+    }
+    card.classList.toggle('is-small', !!tile);
+    seriesSyncActions(card, moving.length);
     return card;
+}
+
+// Niets te verplaatsen: dan is 'Alles behouden' de hoofdactie, en er staat geen tweede knop
+// met dezelfde naam naast
+function seriesSyncActions(card, moving) {
+    const confirm = card.querySelector('.series-confirm-btn');
+    const keepAll = card.querySelector('.series-keepall-btn');
+    confirm.hidden = !moving;
+    confirm.textContent = `Verplaats ${moving}`;
+    keepAll.classList.toggle('btn-primary', !moving);
+    keepAll.classList.toggle('btn-secondary', !!moving);
 }
 
 function seriesJoin(nodes) {
@@ -492,9 +646,9 @@ function seriesUpdateCard(series) {
         tile.setAttribute('aria-label', seriesPhotoLabel(member, kept));
         tile.querySelector('.series-photo-state').textContent = kept ? '' : 'Gaat weg';
     });
-    const moving = series.members.length - keep.size;
-    card.querySelector('.series-confirm-btn').textContent = moving ? `Verplaats ${moving}` : 'Alles behouden';
+    seriesSyncActions(card, series.members.length - keep.size);
     seriesRenderDetail(series);
+    if (seriesCompareState.series === series) seriesRenderCompare();
 }
 
 function seriesCardEl(key) {
@@ -549,12 +703,12 @@ function seriesMoveCursor(key, id, focus) {
     if (series) seriesRenderDetail(series);
 }
 
-function seriesFocusCursor() {
+function seriesFocusCursor(scroll = true) {
     const card = seriesCardEl(seriesState.cursor.key);
     const tile = card && [...card.querySelectorAll('.series-photo')].find(t => t.dataset.id === String(seriesState.cursor.id));
     if (tile) {
-        tile.focus();
-        tile.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        tile.focus({ preventScroll: !scroll });
+        if (scroll) tile.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     } else {
         const list = document.getElementById('series-list');
         const fallback = list.querySelector('.empty-state-action, #btn-series-more');
@@ -564,6 +718,8 @@ function seriesFocusCursor() {
 
 function seriesKeydown(e) {
     if (e.metaKey || e.ctrlKey || e.altKey || anyOverlayOpen()) return;
+    // 'g' en dan een letter wisselt van pagina (shortcuts.js): die letter is niet voor de reeks
+    if (typeof shortcutGPending !== 'undefined' && shortcutGPending) return;
     const tile = e.target.closest && e.target.closest('.series-photo');
     if (!tile) return;
     const key = tile.closest('.series-card').dataset.key;
@@ -582,6 +738,7 @@ function seriesKeydown(e) {
     case 'ArrowDown': {
         const next = seriesState.items[index + 1];
         if (next) go(next, next.members.find(m => m.best) || next.members[0]);
+        else if (seriesState.nextOffset !== null) seriesDownIntoNextPage(series.key);
         break;
     }
     case 'ArrowUp': {
@@ -607,11 +764,24 @@ function seriesKeydown(e) {
     case 'a':
         seriesKeepAll(series);
         break;
+    case 'v':
+        seriesOpenCompare(series, series.members[pos].id);
+        break;
     default:
         return;
     }
     e.preventDefault();
     e.stopPropagation();
+}
+
+// ↓ op de laatste geladen reeks: de volgende pagina laden en daar verder
+async function seriesDownIntoNextPage(key) {
+    if (!seriesState.loading) await seriesLoad(false);
+    const index = seriesState.items.findIndex(s => s.key === key);
+    const next = seriesState.items[index + 1];
+    if (!next) return;
+    seriesMoveCursor(next.key, (next.members.find(m => m.best) || next.members[0]).id, false);
+    seriesFocusCursor();
 }
 
 // ==================== BESLISSEN ====================
@@ -630,14 +800,22 @@ function seriesToggleKeep(series, id) {
     seriesUpdateCard(series);
 }
 
-// Een reeks is afgehandeld: weg uit de lijst, de cursor naar de volgende (of de vorige)
-function seriesDone(series) {
+// Een reeks is afgehandeld: weg uit de lijst, de cursor naar de volgende (of de vorige).
+// gone: de server heeft hem niet meer (verplaatst of behouden), dus schuift de rest daar op;
+// een overgeslagen reeks staat er nog wel.
+function seriesDone(series, gone) {
     const index = seriesState.items.indexOf(series);
+    if (index < 0) return;
     const hadFocus = !!(document.activeElement && document.activeElement.closest('#series-list'));
     seriesState.items.splice(index, 1);
     seriesState.keep.delete(series.key);
-    seriesState.total = Math.max(0, seriesState.total - 1);
-    seriesState.photos = Math.max(0, seriesState.photos - series.count);
+    if (gone) {
+        seriesState.gone += 1;
+        seriesState.handled += 1;
+        if (seriesState.nextOffset !== null) seriesState.nextOffset = Math.max(0, seriesState.nextOffset - 1);
+        seriesState.total = Math.max(0, seriesState.total - 1);
+        seriesState.photos = Math.max(0, seriesState.photos - series.count);
+    }
     const next = seriesState.items[index] || seriesState.items[index - 1];
     if (next) seriesState.cursor = { key: next.key, id: next.best };
     seriesRender();
@@ -647,22 +825,24 @@ function seriesDone(series) {
 
 function seriesSkip(series) {
     seriesState.skipped.add(series.key);
-    seriesDone(series);
+    seriesDone(series, false);
 }
 
 async function seriesKeepAll(series) {
     if (seriesState.busy) return;
     seriesState.busy = true;
     try {
-        await fetchJSON(`${API_BASE}/api/series/keep-all`, {
+        const data = await fetchJSON(`${API_BASE}/api/series/keep-all`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ members: series.members.map(m => m.id) }),
         });
-        seriesDone(series);
+        seriesState.lastKept = { key: data.key, title: seriesTitle(series) };
+        seriesDone(series, true);
         if (seriesState.status) seriesState.status.reviewed += 1;
         seriesRenderStatus();
-        showToast('Alles behouden', `${series.count} foto's blijven staan. Deze reeks komt niet meer terug, tenzij hij verandert.`, 'success');
+        showToast('Alles behouden', `${series.count} foto's blijven staan. Deze reeks komt niet meer terug, tenzij hij verandert; `
+            + 'met \u2018Ongedaan maken\u2019 boven de lijst staat hij er meteen weer.', 'success');
     } catch (err) {
         toastFetchError('Behouden mislukt', err);
     } finally {
@@ -734,7 +914,8 @@ async function seriesRunConfirm() {
         } else {
             showToast(`${moved} ${moved === 1 ? 'foto' : 'foto\'s'} verplaatst`,
                 'Ze staan in RAW_DUPLICATES/near-duplicates. Terugzetten kan in het Herstelcentrum.', 'success');
-            seriesDone(pending.series);
+            seriesState.moved += 1;
+            seriesDone(pending.series, true);
         }
         seriesLoadStatus();
     } catch (err) {
@@ -750,10 +931,221 @@ async function seriesRunConfirm() {
     }
 }
 
+// ==================== GROOT VERGELIJKEN ====================
+//
+// De foto's van één reeks groot naast elkaar (v, of 'Groot bekijken'). 'Passend' toont elke foto
+// heel; '100%' toont dezelfde uitsnede van elke foto op de pixelgrootte van de grootste, zodat
+// een verkleinde of wazige kopie echt zachter oogt. Slepen verschuift de uitsnede van alle foto's
+// tegelijk. Houden of laten gaan kan hier ook; de kaart in de lijst loopt mee.
+
+const seriesCompareState = { series: null, current: null, detail: false, focus: { x: 50, y: 50 }, drag: null };
+
+function seriesOpenCompare(series, id) {
+    seriesCompareState.series = series;
+    seriesCompareState.current = id || (seriesState.cursor.key === series.key ? seriesState.cursor.id : series.best);
+    seriesCompareState.focus = { x: 50, y: 50 };
+    document.getElementById('series-compare-title').textContent = seriesTitle(series);
+    const grid = document.getElementById('series-compare-grid');
+    grid.style.setProperty('--compare-columns', String(Math.min(series.members.length, 3)));
+    grid.replaceChildren(...series.members.map(member => seriesComparePane(series, member)));
+    seriesCompareZoom(seriesCompareState.detail);
+    seriesRenderCompare();
+    document.getElementById('modal-series-compare').classList.add('active');
+    // De focus op de knop van de foto onder de cursor (niet op de eerste knop van het venster)
+    setTimeout(() => seriesCompareFocus(seriesCompareState.current), 0);
+}
+
+function seriesCloseCompare() {
+    document.getElementById('modal-series-compare').classList.remove('active');
+    document.getElementById('series-compare-grid').replaceChildren();
+    seriesCompareState.series = null;
+}
+
+function seriesComparePane(series, member) {
+    const img = createEl('img', { class: 'series-compare-img loading', alt: member.name, draggable: 'false' });
+    img.addEventListener('load', () => img.classList.remove('loading'), { once: true });
+    // Kan de browser het origineel niet tonen (HEIC buiten Safari), dan de miniatuur
+    img.addEventListener('error', () => {
+        if (img.dataset.fallback) { img.classList.remove('loading'); return; }
+        img.dataset.fallback = '1';
+        img.src = vaultFileUrl('thumb', member.path);
+    });
+    img.src = vaultFileUrl('file', member.path);
+    const frame = createEl('div', { class: 'series-compare-frame' },
+        img,
+        member.best ? createEl('span', { class: 'series-best-badge' },
+            createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), 'Beste') : null);
+    frame.addEventListener('pointerdown', e => seriesCompareDragStart(e, frame));
+    const facts = [
+        member.width && member.height ? `${member.width} × ${member.height}` : null,
+        formatBytes(member.size),
+        member.camera,
+    ].filter(Boolean).join(' · ');
+    return createEl('div', { class: 'series-compare-pane', dataset: { id: String(member.id) } },
+        frame,
+        createEl('div', { class: 'series-compare-info' },
+            createEl('div', { class: 'series-compare-head' },
+                createEl('span', { class: 'series-compare-name', title: member.path, text: member.name }),
+                createEl('span', { class: 'badge series-compare-state' })),
+            createEl('div', { class: 'series-compare-facts', text: facts }),
+            createEl('div', { class: 'series-compare-score' },
+                createEl('span', { class: 'series-compare-score-total', text: `Score ${member.score}` }),
+                ...SERIES_POINTS.map(([key, label, max], i) => createEl('span', { class: 'series-detail-part' },
+                    createEl('span', { class: `series-score-dot series-score-part-${i + 1}`, 'aria-hidden': 'true' }),
+                    `${label} ${member.breakdown[key]}/${max}`)))),
+        createEl('button', {
+            type: 'button', class: 'btn series-compare-keep',
+            onClick: () => { seriesCompareState.current = member.id; seriesToggleKeep(series, member.id); },
+            onFocus: () => seriesCompareSetCurrent(member.id),
+        }));
+}
+
+// Na elke wijziging: wat blijft, wat gaat, en de knop onderin
+function seriesRenderCompare() {
+    const series = seriesCompareState.series;
+    if (!series) return;
+    const keep = seriesState.keep.get(series.key);
+    if (!keep) return;
+    document.querySelectorAll('#series-compare-grid .series-compare-pane').forEach(pane => {
+        const member = series.members.find(m => m.id === Number(pane.dataset.id));
+        const kept = keep.has(member.id);
+        pane.classList.toggle('is-kept', kept);
+        pane.classList.toggle('is-current', member.id === seriesCompareState.current);
+        const state = pane.querySelector('.series-compare-state');
+        state.className = `badge series-compare-state ${kept ? 'badge-accent' : 'badge-warning'}`;
+        state.textContent = kept ? 'Blijft' : 'Gaat weg';
+        const button = pane.querySelector('.series-compare-keep');
+        button.classList.toggle('btn-primary', kept);
+        button.classList.toggle('btn-secondary', !kept);
+        button.setAttribute('aria-pressed', kept ? 'true' : 'false');
+        button.setAttribute('aria-label', `${member.name} houden`);
+        button.replaceChildren(createEl('i', { class: `fas ${kept ? 'fa-check' : 'fa-plus'}`, 'aria-hidden': 'true' }),
+            kept ? 'Blijft' : 'Houden');
+    });
+    const moving = series.members.length - keep.size;
+    const go = document.getElementById('btn-series-compare-go');
+    go.textContent = moving ? `Verplaats ${moving}` : 'Alles behouden';
+}
+
+function seriesCompareSetCurrent(id) {
+    seriesCompareState.current = id;
+    document.querySelectorAll('#series-compare-grid .series-compare-pane').forEach(pane => {
+        pane.classList.toggle('is-current', pane.dataset.id === String(id));
+    });
+}
+
+function seriesCompareFocus(id) {
+    const pane = [...document.querySelectorAll('#series-compare-grid .series-compare-pane')].find(p => p.dataset.id === String(id));
+    if (!pane) return;
+    pane.querySelector('.series-compare-keep').focus({ preventScroll: true });
+    pane.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+// Passend of 100%: op 100% krijgt elke foto de breedte (in beeldpunten) van de grootste
+function seriesCompareZoom(detail) {
+    seriesCompareState.detail = !!detail;
+    const series = seriesCompareState.series;
+    document.getElementById('btn-series-fit').setAttribute('aria-pressed', detail ? 'false' : 'true');
+    document.getElementById('btn-series-detail').setAttribute('aria-pressed', detail ? 'true' : 'false');
+    const grid = document.getElementById('series-compare-grid');
+    grid.classList.toggle('is-detail', !!detail);
+    if (!series) return;
+    const widest = Math.max(...series.members.map(m => m.width || 0)) || 1600;
+    grid.style.setProperty('--compare-detail-width', `${Math.round(widest / (window.devicePixelRatio || 1))}px`);
+    seriesComparePan();
+}
+
+function seriesComparePan() {
+    const { x, y } = seriesCompareState.focus;
+    const grid = document.getElementById('series-compare-grid');
+    grid.style.setProperty('--compare-x', `${x}%`);
+    grid.style.setProperty('--compare-y', `${y}%`);
+}
+
+// Slepen op 100%: de uitsnede van alle foto's schuift mee
+function seriesCompareDragStart(e, frame) {
+    if (!seriesCompareState.detail || e.button !== 0) return;
+    const img = frame.querySelector('img');
+    const rect = img.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    e.preventDefault();
+    const start = { px: e.clientX, py: e.clientY, ...seriesCompareState.focus };
+    frame.setPointerCapture(e.pointerId);
+    frame.classList.add('is-dragging');
+    const move = ev => {
+        const clamp = v => Math.max(0, Math.min(100, v));
+        seriesCompareState.focus = {
+            x: clamp(start.x - (ev.clientX - start.px) / rect.width * 100),
+            y: clamp(start.y - (ev.clientY - start.py) / rect.height * 100),
+        };
+        seriesComparePan();
+    };
+    const end = () => {
+        frame.classList.remove('is-dragging');
+        frame.removeEventListener('pointermove', move);
+        frame.removeEventListener('pointerup', end);
+        frame.removeEventListener('pointercancel', end);
+    };
+    frame.addEventListener('pointermove', move);
+    frame.addEventListener('pointerup', end);
+    frame.addEventListener('pointercancel', end);
+}
+
+function seriesCompareKeydown(e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || !seriesCompareState.series) return;
+    const series = seriesCompareState.series;
+    const pos = series.members.findIndex(m => m.id === seriesCompareState.current);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        const next = series.members[pos + (e.key === 'ArrowRight' ? 1 : -1)];
+        if (next) seriesCompareFocus(next.id);
+    } else if (e.key === 'Home' || e.key === 'End') {
+        seriesCompareFocus(series.members[e.key === 'Home' ? 0 : series.members.length - 1].id);
+    } else if (e.key === 'd') {
+        seriesCompareZoom(!seriesCompareState.detail);
+    } else {
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+// Verplaatsen vanuit het venster: eerst dicht, dan dezelfde vraag als in de lijst
+function seriesCompareConfirm() {
+    const series = seriesCompareState.series;
+    if (!series) return;
+    seriesCloseCompare();
+    seriesConfirm(series);
+}
+
+async function seriesUndoKeepAll() {
+    const last = seriesState.lastKept;
+    if (!last) return;
+    try {
+        await fetchJSON(`${API_BASE}/api/series/reviews/undo`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: last.key }),
+        });
+        seriesState.lastKept = null;
+        seriesState.handled = Math.max(0, seriesState.handled - 1);
+        showToast('Weer in de lijst', `${last.title} staat weer tussen de reeksen.`, 'success');
+        seriesLoadStatus();
+        await seriesLoad(true);
+        const back = seriesState.items.find(s => s.key === last.key);
+        if (back) {
+            seriesMoveCursor(back.key, back.best, false);
+            seriesFocusCursor();
+        }
+    } catch (err) {
+        toastFetchError('Ongedaan maken mislukt', err);
+    }
+}
+
 async function seriesResetReviews() {
     try {
         const data = await fetchJSON(`${API_BASE}/api/series/reviews/reset`, { method: 'POST' });
         showToast('Reeksen weer zichtbaar', `${data.shown_again} ${data.shown_again === 1 ? 'reeks staat' : 'reeksen staan'} weer in de lijst.`, 'success');
+        seriesState.lastKept = null;
         seriesLoadStatus();
         seriesLoad(true);
     } catch (err) {
@@ -765,6 +1157,8 @@ function seriesInitPage() {
     document.querySelector('.dup-tabs').addEventListener('keydown', dupTabsKeydown);
     document.getElementById('series-list').addEventListener('keydown', seriesKeydown);
     registerOverlayCloser('modal-series-confirm', seriesCloseConfirm);
+    registerOverlayCloser('modal-series-compare', seriesCloseCompare);
+    document.getElementById('modal-series-compare').addEventListener('keydown', seriesCompareKeydown);
     addShortcutGroupLater();
     // Na het terugzetten in het Herstelcentrum of een nieuwe vergelijking: opnieuw laden bij terugkomst
     if (typeof jobsOnFinished === 'function') {
@@ -781,7 +1175,9 @@ function addShortcutGroupLater() {
         addShortcutGroup('Beste uit reeks (Duplicaten)', [
             [['←', '→'], 'Vorige of volgende foto in de reeks'],
             [['↑', '↓'], 'Vorige of volgende reeks'],
-            [['Spatie'], 'Foto houden of laten gaan'],
+            [['Home', 'End'], 'Eerste of laatste foto in de reeks'],
+            [['spatie'], 'Foto houden of laten gaan'],
+            [['v'], 'Groot vergelijken (ook op 100%)'],
             [['Enter'], 'Reeks bevestigen (met een vraag vooraf)'],
             [['s'], 'Reeks overslaan'],
             [['a'], 'Alles behouden'],

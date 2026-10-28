@@ -649,7 +649,16 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.is_visible("#dup-panel-series") and not page.is_visible("#dup-panel-exact")
                    and page.evaluate("document.activeElement.id") == "dup-tab-series",
                    "series: ArrowRight on the tabs did not open 'Beste uit reeks'")
-            step("series: compare", lambda: page.click("#btn-series-compare"), 0.5)
+            # Before the first comparison there is one primary action, in the empty state
+            before = page.evaluate("""[document.getElementById('btn-series-compare').getClientRects().length,
+                [...document.querySelectorAll('#dup-panel-series .btn-primary')].filter(b => b.getClientRects().length).map(b => b.textContent.trim())]""")
+            expect(before[0] == 0 and before[1] == ["Foto's vergelijken"],
+                   f"series: before comparing, expected one primary 'Foto's vergelijken' (in the empty state), got {before}")
+            step("series: compare", lambda: page.click("#series-list .empty-state-action"), 0.5)
+            running = page.evaluate("[!!document.getElementById('series-empty-progress') || !!document.querySelector('.series-card'),"
+                                    " document.querySelectorAll('#series-list .empty-state-action').length]")
+            expect(running[0] and running[1] == 0,
+                   f"series: while comparing the list still offers to compare, or says nothing ({running})")
             try:
                 page.wait_for_function("document.getElementById('series-progress').hidden"
                                        " && !document.getElementById('btn-series-compare').disabled"
@@ -679,6 +688,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                              cards: document.querySelectorAll('.series-card').length }; })()""")
 
             page.focus(".series-photo[tabindex='0']")
+            # 'g s' goes to Spotify, also from a photo tile (the s is not 'skip' then)
+            step("series: g s goes to Spotify", lambda: (page.keyboard.press("g"), page.keyboard.press("s")), 0.5)
+            expect(page.evaluate("!document.getElementById('section-spotify').classList.contains('hidden')")
+                   and page.evaluate("seriesState.items.length") == 2,
+                   "series: 'g s' on a photo tile skipped the series instead of opening Spotify")
+            step("series: back to the tab", lambda: (page.evaluate("switchMainView('duplicates')"),
+                                                     page.wait_for_selector(".series-card")), 0.8)
+            page.focus(".series-photo[tabindex='0']")
             first = tile_state()
             step("series: ArrowRight to the next photo", lambda: page.keyboard.press("ArrowRight"), 0.2)
             second = tile_state()
@@ -693,12 +710,52 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("series: s skips the series", lambda: page.keyboard.press("s"), 0.4)
             left = tile_state()
             expect(left["cards"] == 1 and left["pressed"] == "true", f"series: s did not skip to the next series ({left})")
+
+            # v: the photos large, side by side; d switches to 100%, space keeps, Escape goes back
+            step("series: v compares large", lambda: page.keyboard.press("v"), 1.0)
+            compare = page.evaluate("""[!!document.querySelector('#modal-series-compare.active'),
+                document.querySelectorAll('#series-compare-grid .series-compare-pane').length,
+                document.activeElement.classList.contains('series-compare-keep'),
+                Math.round((document.querySelector('.series-compare-frame') || {getBoundingClientRect: () => ({height: 0})}).getBoundingClientRect().height)]""")
+            expect(compare[0] and compare[1] == 2 and compare[2] and compare[3] >= 300,
+                   f"series: 'v' did not open the large comparison with the focus on a photo ({compare})")
+            for theme in ("light", "dark"):
+                page.evaluate(f"setTheme('{theme}')")
+                page.wait_for_timeout(300)
+                page.screenshot(path=str(shots / f"duplicates-series-compare_{theme}.png"))
+                page.add_script_tag(path=str(A11Y_CHECKS))
+                for fail in page.evaluate("__contrastFailures()"):
+                    problems.append(f"contrast {theme} series compare: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+                for control in page.evaluate("__unnamedControls()"):
+                    problems.append(f"unnamed control on series compare: {control}")
+            page.evaluate("setTheme('auto')")
+            if compare[0]:
+                expect_focus_trapped("modal-series-compare", "series: large comparison")
+                page.focus("#series-compare-grid .series-compare-keep")
+                step("series: d shows 100%", lambda: page.keyboard.press("d"), 0.3)
+                expect(page.evaluate("document.getElementById('series-compare-grid').classList.contains('is-detail')"
+                                     " && document.getElementById('btn-series-detail').getAttribute('aria-pressed') === 'true'"),
+                       "series: 'd' did not switch the comparison to 100%")
+                page.keyboard.press("d")
+                step("series: ArrowRight and space keep the other photo", lambda: (page.keyboard.press("ArrowRight"),
+                                                                                  page.keyboard.press(" ")), 0.3)
+                both = page.evaluate("[document.activeElement.getAttribute('aria-pressed'),"
+                                     " document.querySelectorAll('.series-card .series-photo.selected').length,"
+                                     " (document.getElementById('btn-series-compare-go') || {}).textContent]")
+                expect(both == ["true", 2, "Alles behouden"], f"series: keeping in the comparison did not reach the list ({both})")
+                page.keyboard.press(" ")
+            step("series: Escape closes the comparison", lambda: page.keyboard.press("Escape"), 0.4)
+            expect(not page.evaluate("!!document.querySelector('#modal-series-compare.active')")
+                   and page.evaluate("!!document.activeElement.closest('.series-photo')")
+                   and tile_state()["button"] == "Verplaats 1",
+                   f"series: Escape did not close the comparison back onto the photo ({tile_state()})")
+
             step("series: Enter asks first", lambda: page.keyboard.press("Enter"), 0.5)
             dialog = page.evaluate("[document.getElementById('modal-series-confirm').classList.contains('active'),"
                                    " document.getElementById('series-confirm-list').textContent,"
                                    " document.activeElement.id]")
             expect(dialog[0] and "RAW_DUPLICATES/near-duplicates" in dialog[1] and "null" not in dialog[1]
-                   and dialog[2] == "btn-series-go", f"series: the confirmation is missing or unclear ({dialog})")
+                   and dialog[2] == "btn-series-cancel", f"series: the confirmation is missing or unclear, or does not start on Annuleren ({dialog})")
             expect_focus_trapped("modal-series-confirm", "series: confirmation")
             page.focus("#btn-series-cancel")
             step("series: Escape moves nothing", lambda: page.keyboard.press("Escape"), 0.4)
@@ -707,12 +764,22 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(klein.exists() and all(p.exists() for p in originals) and tile_state()["cards"] == 1
                    and page.evaluate("!!document.activeElement.closest('.series-photo')"),
                    "series: Escape on the confirmation moved something or lost the focus")
-            step("series: Enter, Enter moves", lambda: (page.keyboard.press("Enter"), page.wait_for_timeout(400),
-                                                        page.keyboard.press("Enter")), 1.0)
+            step("series: Enter, Enter cancels", lambda: (page.keyboard.press("Enter"), page.wait_for_timeout(400),
+                                                          page.keyboard.press("Enter")), 0.6)
+            expect(klein.exists() and tile_state()["cards"] == 1
+                   and not page.evaluate("document.getElementById('modal-series-confirm').classList.contains('active')"),
+                   "series: a double Enter moved files (the dialog must start on Annuleren)")
+            step("series: Enter, Tab, Enter moves", lambda: (page.keyboard.press("Enter"), page.wait_for_timeout(400),
+                                                             page.keyboard.press("Tab"), page.keyboard.press("Enter")), 1.0)
             holding = vault / "RAW_DUPLICATES" / "near-duplicates"
             expect(not klein.exists() and (holding / "2022" / "bursts" / "strand klein.jpg").exists()
                    and all(p.exists() for p in originals) and tile_state()["cards"] == 0,
                    "series: confirming did not move the resized photo to RAW_DUPLICATES/near-duplicates")
+            # The burst was skipped: the list says so (not 'Geen reeksen gevonden') and can show it again
+            empty = page.evaluate("[(document.querySelector('#series-list .empty-state-title') || {}).textContent,"
+                                  " (document.querySelector('#series-list .empty-state-action') || {}).textContent]")
+            expect(empty == ["Alle reeksen overgeslagen", "Overgeslagen tonen"],
+                   f"series: after the last decision the list did not say the rest was skipped ({empty})")
             accept = lambda d: d.accept()
             page.on("dialog", accept)
             step("series: undo in the Herstelcentrum", lambda: (
