@@ -235,20 +235,49 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("document.activeElement.dataset.gridIndex") == str(first_file),
                    f"viewer: focus did not go back to the card ({page.evaluate(active_id)})")
 
-            # Herstelcentrum: a move in the viewer is listed and undone from there
-            moved_src = page.evaluate("gridFiles()[0].path")
-            step("recovery: move a file in the viewer", lambda: (
-                page.evaluate("openMediaModal(gridFiles()[0])"), page.keyboard.press("m"),
-                page.wait_for_timeout(400),
-                page.evaluate(f"selectMoveDestination({json.dumps(str(vault / 'library'))})"),
-                page.click("#btn-confirm-move")), 1.2)
-            expect(not Path(moved_src).exists(), "recovery: the file was not moved")
+            # Move window: with a folder highlighted, Enter on Annuleren or × closes it and moves nothing
+            moved_src, second_src = page.evaluate("[gridFiles()[0].path, gridFiles()[1].path]")
+            move_open = "document.getElementById('modal-move-file').classList.contains('active')"
+            for name, button in (("Annuleren", "#modal-move-file .move-modal-footer .btn-secondary"),
+                                 ("×", "#modal-move-file .modal-close")):
+                step(f"move: Enter on {name}", lambda button=button: (
+                    page.evaluate("openMediaModal(gridFiles()[0])"), page.keyboard.press("m"),
+                    page.wait_for_timeout(400), page.keyboard.press("ArrowDown"),
+                    page.focus(button), page.keyboard.press("Enter")), 0.8)
+                expect(Path(moved_src).exists() and not page.evaluate(move_open),
+                       f"move: Enter on {name} did not just close the window (moved: {not Path(moved_src).exists()})")
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
+
+            # Herstelcentrum: two moves in the viewer are listed and undone from there with the
+            # keyboard; after each undo the focus stays in the list
+            for src in (moved_src, second_src):
+                step("recovery: move a file in the viewer", lambda src=src: (
+                    page.evaluate(f"openMediaModal(gridFiles().find(f => f.path === {json.dumps(src)}))"),
+                    page.keyboard.press("m"), page.wait_for_timeout(400),
+                    page.evaluate(f"selectMoveDestination({json.dumps(str(vault / 'library'))})"),
+                    page.click("#btn-confirm-move")), 1.2)
+                expect(not Path(src).exists(), "recovery: the file was not moved")
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(300)
             step("recovery: 8 opens the Herstelcentrum", lambda: page.keyboard.press("8"), 1.0)
-            expect(page.is_visible(".recovery-entry"), "recovery: no entry for the move")
-            page.once("dialog", lambda d: d.accept())
-            step("recovery: Terugzetten", lambda: page.click(".recovery-entry .recovery-undo"), 1.2)
+            expect(page.locator(".recovery-entry").count() == 2, "recovery: no entry for each move")
+            focused = "(document.activeElement.closest('.recovery-entry') || {dataset: {}}).dataset.key || document.activeElement.id"
+            accept = lambda d: d.accept()
+            page.on("dialog", accept)
+            first_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
+            step("recovery: Enter on Terugzetten", lambda: (
+                page.focus(".recovery-entry .recovery-undo"), page.keyboard.press("Enter")), 1.2)
+            expect(Path(second_src).exists(), "recovery: the newest move did not go back")
+            left_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
+            expect(left_key != first_key and page.evaluate(focused) == left_key,
+                   f"recovery: focus not on the next entry after the undo ({page.evaluate(focused)})")
+            step("recovery: Enter on the last Terugzetten", lambda: page.keyboard.press("Enter"), 1.2)
             expect(Path(moved_src).exists(), "recovery: the file did not go back")
             expect(page.is_visible("#recovery-list .empty-state"), "recovery: the list did not show its empty state")
+            expect(page.evaluate("document.activeElement.id") == "recovery-title",
+                   f"recovery: focus not on the title once the list is empty ({page.evaluate(active_id)})")
+            page.remove_listener("dialog", accept)
 
             # Instellingen: every built-in part is there and the theme can be chosen there
             step("settings: 9 opens Instellingen", lambda: page.keyboard.press("9"), 1.0)
@@ -294,6 +323,32 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             undone = page.evaluate(keurer_state)
             expect(undone[1] == before[1] and Path(keurer_file).exists(),
                    f"keurer: ArrowDown did not undo the decision ({undone} vs {before})")
+            # Only the Keurer tab passes arrows on: on another tab an arrow decides nothing.
+            # (Undoing a keep leaves keurerIndex where it is, so compare with the state just before.)
+            base = page.evaluate(keurer_state)
+            current = page.evaluate("keurerFileQueue[keurerIndex].path")
+            step("keurer: arrow on the Tijdlijn tab", lambda: (
+                page.focus(".nav-tab[data-view='timeline']"), page.keyboard.press("ArrowRight")), 0.8)
+            expect(page.evaluate(keurer_state) == base and Path(current).exists(),
+                   f"keurer: an arrow on another tab decided on a file ({page.evaluate(keurer_state)} vs {base})")
+            # Space on a Keurer button presses that button, it does not open the preview
+            step("keurer: Space on Houden", lambda: (
+                page.focus(".keurer-btn-keep"), page.keyboard.press("Space")), 1.0)
+            pressed = page.evaluate(keurer_state)
+            expect(pressed[1] == base[1] + 1 and not pressed[3],
+                   f"keurer: Space on Houden did not keep ({pressed} vs {base})")
+            step("keurer: undo the keep", lambda: page.keyboard.press("ArrowDown"), 1.0)
+            expect(page.evaluate(keurer_state)[1] == base[1], "keurer: ArrowDown did not undo the keep")
+            # Move window: a highlighted folder and Enter on Annuleren: closed, nothing moved
+            base = page.evaluate(keurer_state)
+            current = page.evaluate("keurerFileQueue[keurerIndex].path")
+            step("keurer: Enter on Annuleren in the move window", lambda: (
+                page.evaluate("document.activeElement.blur()"), page.keyboard.press("ArrowUp"),
+                page.wait_for_selector("#keurer-move-folder-tree .folder-item", timeout=5000),
+                page.keyboard.press("ArrowDown"),
+                page.focus("#modal-keurer-move .modal-footer .btn-secondary"), page.keyboard.press("Enter")), 0.8)
+            expect(page.evaluate(keurer_state) == base and Path(current).exists(),
+                   f"keurer: Enter on Annuleren moved the file or left the window open ({page.evaluate(keurer_state)} vs {base})")
 
             # Storage per folder: the list starts at the top (nothing cut off) and fills the width
             step("storage: open the window", lambda: (
