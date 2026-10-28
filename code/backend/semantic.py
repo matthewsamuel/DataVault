@@ -90,10 +90,18 @@ MAX_RANKED = 5000                 # a query never ranks more than this many phot
 # and SCORE_Z standard deviations above the mean of the selection (a real match stands out
 # from the rest; a query of nonsense lifts nothing out of the crowd). On the set that keeps
 # 90% of the right photos at 70% precision; the rest is one click away (include_weak).
-MIN_SCORE = 0.05
+# The background (median and MAD) is taken over the whole index, not the filtered selection:
+# when a concept is a fifth of a folder, the folder's own mean would rise above the matches.
+# MIN_SCORE is calibrated for SigLIP 2: true matches score 0.11-0.16, nonsense 0.06-0.09.
+# A best score of at least CLEAR_SCORE is never emptied by the background rule.
+MIN_SCORE = 0.10
 SCORE_SPREAD = 0.06
 SCORE_Z = 2.0
 SCORE_Z_MIN_COUNT = 30            # with fewer photos the spread says too little
+CLEAR_SCORE = 0.11
+# Image to image cosines sit on another scale (0.6-0.95): a near-copy must not set the cut
+NEAR_COPY = 0.93
+SIMILAR_SPREAD = 0.12
 MAX_QUERY_CHARS = 200
 
 
@@ -577,6 +585,7 @@ def purge_orphans(db) -> int:
         cursor = conn.execute("DELETE FROM semantic_embeddings WHERE media_id NOT IN (SELECT id FROM media)")
         removed = cursor.rowcount or 0
     if removed:
+        _index.reset()      # SQLite hands out the freed rowids again: reload from scratch
         _bump()
     return removed
 
@@ -904,22 +913,26 @@ def _filters_key(filters: Dict[str, Any]) -> str:
 
 
 def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: Dict[str, Any],
-         exclude: Optional[int] = None) -> Dict[str, Any]:
+         exclude: Optional[int] = None, keep_stale: bool = False) -> Dict[str, Any]:
     """
     {ids, scores, strong}: the best MAX_RANKED media ids for a query vector within the
     filters, best first; strong is how many pass the relevance cut. Cached per query,
-    filters and index state, so paging does not rank again.
+    filters and index state, so paging does not rank again (keep_stale: a later page keeps
+    the ranking of the first page while the index grows, so pages do not shift).
     """
     spec = current_model()
     _index.refresh(db, spec)
-    cache_key = (spec.id, key, _filters_key(filters), exclude, _generation, media_index.generation())
+    cache_key = (spec.id, key, _filters_key(filters), exclude)
+    state_key = (_generation, media_index.generation())
     with _rankings_lock:
-        if cache_key in _rankings:
+        cached = _rankings.get(cache_key)
+        if cached is not None and (keep_stale or cached["state"] == state_key):
             _rankings.move_to_end(cache_key)
-            return _rankings[cache_key]
+            return cached
     query = vector_fn()
     ids, scores = _index.scores(query)
     keep = ids >= 0
+    background = scores[keep]
     allowed = _allowed_ids(db, filters)
     keep &= np.isin(ids, allowed)
     if exclude is not None:
@@ -927,16 +940,28 @@ def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: D
     ids, scores = ids[keep], scores[keep]
     cut = MIN_SCORE
     if len(scores):
-        cut = max(cut, float(scores.max()) - SCORE_SPREAD)
-        if len(scores) >= SCORE_Z_MIN_COUNT:
-            cut = max(cut, float(scores.mean() + SCORE_Z * scores.std()))
+        best = float(scores.max())
+        spread = SCORE_SPREAD
+        if key[0] == "similar":
+            spread = SIMILAR_SPREAD
+            apart = scores[scores < NEAR_COPY]
+            if len(apart):
+                best = float(apart.max())
+        cut = max(cut, best - spread)
+        if len(background) >= SCORE_Z_MIN_COUNT:
+            median = float(np.median(background))
+            mad = float(np.median(np.abs(background - median))) * 1.4826
+            z_cut = max(cut, median + SCORE_Z * mad)
+            if float(scores.max()) >= CLEAR_SCORE and z_cut > float(scores.max()):
+                z_cut = cut      # a clear match is never hidden by a crowded background
+            cut = z_cut
     if len(ids) > MAX_RANKED:
         top = np.argpartition(-scores, MAX_RANKED - 1)[:MAX_RANKED]
         ids, scores = ids[top], scores[top]
     order = np.argsort(-scores, kind="stable")
     ids, scores = ids[order], scores[order]
     strong = int(np.searchsorted(-scores, -cut, side="right")) if len(scores) else 0
-    ranking = {"ids": ids, "scores": scores, "strong": strong}
+    ranking = {"ids": ids, "scores": scores, "strong": strong, "state": state_key}
     with _rankings_lock:
         _rankings[cache_key] = ranking
         while len(_rankings) > RANKING_CACHE:
@@ -984,7 +1009,8 @@ def search_text(db, config, text: str, filters: Optional[Dict[str, Any]] = None,
     filters = dict(filters or {})
     if not model_ready(config):
         raise NotReady(not_installed_message(config))
-    ranking = rank(db, config, ("text", clean_query(text)), lambda: text_vector(config, text), filters)
+    ranking = rank(db, config, ("text", clean_query(text)), lambda: text_vector(config, text), filters,
+                   keep_stale=offset > 0)
     return page(db, ranking, offset, limit, include_weak)
 
 
@@ -1001,7 +1027,8 @@ def search_similar(db, config, media_id: int, filters: Optional[Dict[str, Any]] 
     vector = _index.vector_of(media_id)
     if vector is None:
         raise LookupError("Deze foto is nog niet herkend")
-    ranking = rank(db, config, ("similar", int(media_id)), lambda: vector, filters, exclude=int(media_id))
+    ranking = rank(db, config, ("similar", int(media_id)), lambda: vector, filters, exclude=int(media_id),
+                   keep_stale=offset > 0)
     return page(db, ranking, offset, limit, include_weak)
 
 
@@ -1029,10 +1056,11 @@ def search_filename(db, text: str, filters: Optional[Dict[str, Any]] = None, off
     needle = unicodedata.normalize("NFC", str(text or "").strip())[:MAX_QUERY_CHARS]
     where, args = media_index._where({"kind": ["photo", "video"], **(filters or {})})
     escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    where += " AND lower(m.name) LIKE ? ESCAPE '\\'"
-    args = [*args, f"%{escaped.lower()}%"]
+    where += " AND casefold(m.name) LIKE ? ESCAPE '\\'"
+    args = [*args, f"%{escaped.casefold()}%"]
     columns = ", ".join(f"m.{c}" for c in media_index.ROW_COLUMNS)
     with db._connect() as conn:
+        conn.create_function("casefold", 1, lambda v: v.casefold() if isinstance(v, str) else v)
         total = conn.execute(f"SELECT COUNT(*) FROM media m WHERE {where}", args).fetchone()[0]
         rows = conn.execute(
             f"SELECT {columns}, r.rating, r.votes FROM media m LEFT JOIN file_ratings r ON r.path = m.path "

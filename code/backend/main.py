@@ -147,6 +147,14 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             media_index.set_updater(app.state.auto_index.request)
             # Slim zoeken: photos are recognised after the index, once the model is installed
             app.state.auto_semantic = semantic.SemanticAuto(job_manager, config, db)
+            # ... and the text model is read from disk now (10-20 s the first time after a boot),
+            # so the first query does not wait for it
+            def _warm():
+                try:
+                    semantic.warm_up(config)
+                except Exception:
+                    pass    # the first query reports a model that does not load
+            threading.Thread(target=_warm, daemon=True, name="semantic-warm").start()
         else:
             media_index.set_updater(None)
 
