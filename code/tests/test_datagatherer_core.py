@@ -40,6 +40,17 @@ def test_every_connector_has_valid_dutch_metadata():
     assert order == sorted(order)
 
 
+def test_the_template_connector_is_valid_and_not_loaded(tmp_path):
+    from backend.datagatherer.connectors import _template
+    assert registry.validate(_template.CONNECTOR) == []
+    assert registry.get("voorbeeld") is None
+    export = tmp_path / "ViewingActivity.csv"
+    export.write_text("Title,Date\nFilm,2026-10-01\n")
+    assert _template.CONNECTOR.detect(export, None) == "kijkgeschiedenis"
+    (tmp_path / "other.csv").write_text("a,b\n")
+    assert _template.CONNECTOR.detect(tmp_path / "other.csv", None) is None
+
+
 class _Bad(Connector):
     id = "Bad Id"
     name = ""
