@@ -2905,8 +2905,8 @@ a.breadcrumb-item:hover {
     line-height: var(--lh-snug);
 }
 
-/* Het pad is een technische waarde */
-.metadata-value:first-of-type {
+/* Het pad (de eerste waarde) is een technische waarde */
+.metadata-grid > .metadata-value:nth-child(2) {
     font-family: var(--font-mono);
     font-size: var(--fs-2xs);
     word-break: break-all;
@@ -2921,7 +2921,7 @@ a.breadcrumb-item:hover {
     color: var(--on-media);
 }
 
-#modal-viewer .metadata-value:first-of-type {
+#modal-viewer .metadata-grid > .metadata-value:nth-child(2) {
     color: var(--on-media-muted);
 }
 

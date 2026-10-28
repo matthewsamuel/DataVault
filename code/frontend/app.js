@@ -1064,19 +1064,19 @@ function viewerMetadata(file) {
         createEl('span', { class: 'metadata-label', text: label }),
         createEl('span', { class: 'metadata-value' }, ...value));
 
-    add('Pad:', file.path, ' ', createEl('button', { class: 'copy-btn', text: 'Kopieer', onClick: () => copyToClipboard(file.path) }));
-    if (typeof file.size === 'number') add('Grootte:', formatBytes(file.size));
+    add('Pad', file.path, ' ', createEl('button', { class: 'copy-btn', text: 'Kopieer', onClick: () => copyToClipboard(file.path) }));
+    if (typeof file.size === 'number') add('Grootte', formatBytes(file.size));
     if (typeof file.timestamp === 'number' && file.timestamp > 0) {
-        add('Datum:', new Date(file.timestamp * 1000).toLocaleString('nl-NL'));
+        add('Datum', new Date(file.timestamp * 1000).toLocaleString('nl-NL'));
         const source = { exif: 'EXIF (opnamedatum)', video: 'video (opnamedatum)', birthtime: 'aanmaakdatum bestand', mtime: 'wijzigingsdatum bestand' }[file.date_source];
-        if (source) add('Bron:', source);
+        if (source) add('Bron', source);
     } else if (typeof file.modified === 'number' && file.modified > 0) {
-        add('Gewijzigd:', new Date(file.modified * 1000).toLocaleString('nl-NL'));
+        add('Gewijzigd', new Date(file.modified * 1000).toLocaleString('nl-NL'));
     }
-    add('Type:', file.type);
+    add('Soort', { photo: 'Foto', video: 'Video', audio: 'Audio', other: 'Ander bestand' }[file.type] || file.type);
     if (typeof file.rating === 'number') {
         const votes = typeof file.votes === 'number' ? ` (${file.votes} ${file.votes === 1 ? 'stem' : 'stemmen'})` : '';
-        add('Shows-waardering:', createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), `${file.rating}${votes}`);
+        add('Shows-waardering', createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), `${file.rating}${votes}`);
     }
     return createEl('div', { class: 'metadata-grid' }, ...rows);
 }
