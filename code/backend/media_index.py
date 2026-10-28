@@ -738,6 +738,9 @@ SORTS = {
     "-size": "m.size DESC, m.path ASC",
     "added": "m.added_at ASC, m.id ASC",
     "-added": "m.added_at DESC, m.id DESC",
+    # Shows rating (query() joins file_ratings as r); files nobody voted on come last
+    "rating": "r.rating IS NULL, r.rating ASC, m.taken ASC, m.path ASC",
+    "-rating": "r.rating IS NULL, r.rating DESC, m.taken DESC, m.path DESC",
     "path": "m.path ASC",
     "random": "random()",
 }
@@ -767,7 +770,13 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
       min_rating    Shows rating at least this (files never voted on are left out)
       orientation   'landscape' | 'portrait' | 'square' (as shown, after rotation)
       month_day     (month, day): taken on that day of any year (local time)
+      month_days    a list of such (month, day) pairs (any of them)
+      month         1..12: taken in that month of any year (local time)
       exclude_year  leave out this (local) year
+      camera_contains  the camera make or model contains this text (case-insensitive)
+      keurer        'keep': the Keurer kept it; 'undecided': no Keurer decision on this path
+      capture_date  'known': a date from EXIF or the video itself; 'missing': only the
+                    date of the file (birth or modification time), or none
     Hidden (missing) rows are never returned.
     """
     filters = filters or {}
@@ -813,6 +822,10 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
         if filters.get(key):
             clauses.append(f"m.{key} = ? COLLATE NOCASE")
             args.append(filters[key])
+    if filters.get("camera_contains"):
+        pattern = "%" + "".join("\\" + c if c in "%_\\" else c for c in str(filters["camera_contains"])) + "%"
+        clauses.append("(m.camera_model LIKE ? ESCAPE '\\' OR m.camera_make LIKE ? ESCAPE '\\')")
+        args.extend([pattern, pattern])
     if filters.get("has_gps") is True:
         clauses.append("m.lat IS NOT NULL")
     elif filters.get("has_gps") is False:
@@ -836,10 +849,30 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
             raise ValueError(f"orientation must be one of {', '.join(ORIENTATIONS)}")
         op = {"landscape": ">", "portrait": "<", "square": "="}[orientation]
         clauses.append(f"m.width IS NOT NULL AND m.height IS NOT NULL AND m.width {op} m.height")
+    month_days = []
     if filters.get("month_day") is not None:
-        month, day = filters["month_day"]
-        clauses.append("strftime('%m-%d', m.taken, 'unixepoch', 'localtime') = ?")
-        args.append(f"{int(month):02d}-{int(day):02d}")
+        month_days.append(filters["month_day"])
+    month_days.extend(filters.get("month_days") or [])
+    if month_days:
+        any_of("strftime('%m-%d', m.taken, 'unixepoch', 'localtime')",
+               [f"{int(month):02d}-{int(day):02d}" for month, day in month_days])
+    if filters.get("month") is not None:
+        clauses.append("strftime('%m', m.taken, 'unixepoch', 'localtime') = ?")
+        args.append(f"{int(filters['month']):02d}")
+    keurer = filters.get("keurer")
+    if keurer == "keep":
+        clauses.append("EXISTS (SELECT 1 FROM keurer_decisions k WHERE k.path = m.path AND k.decision = 'keep')")
+    elif keurer == "undecided":
+        clauses.append("NOT EXISTS (SELECT 1 FROM keurer_decisions k WHERE k.path = m.path)")
+    elif keurer is not None:
+        raise ValueError("keurer must be 'keep' or 'undecided'")
+    capture = filters.get("capture_date")
+    if capture == "known":
+        clauses.append("m.taken_source IN ('exif', 'video')")
+    elif capture == "missing":
+        clauses.append("(m.taken_source IS NULL OR m.taken_source NOT IN ('exif', 'video'))")
+    elif capture is not None:
+        raise ValueError("capture_date must be 'known' or 'missing'")
     if filters.get("exclude_year") is not None:
         clauses.append("strftime('%Y', m.taken, 'unixepoch', 'localtime') != ?")
         args.append(f"{int(filters['exclude_year']):04d}")
@@ -887,6 +920,54 @@ def date_histogram(db, filters: Optional[Dict[str, Any]] = None) -> List[Tuple[i
             "CAST(strftime('%m', m.taken, 'unixepoch', 'localtime') AS INTEGER) AS mo, COUNT(*) "
             f"FROM media m WHERE {where} AND m.taken IS NOT NULL GROUP BY y, mo ORDER BY y, mo", args).fetchall()
     return [tuple(row) for row in rows]
+
+
+def year_groups(db, filters: Optional[Dict[str, Any]] = None,
+                per_year: int = 60) -> List[Tuple[int, int, List[Dict[str, Any]]]]:
+    """
+    The matching rows grouped by local capture year, newest year first:
+    [(year, rows in that year, the first per_year of them by capture time)].
+    For 'on this day' (filters with month_day): one query, whatever the number of years.
+    """
+    where, args = _where(filters)
+    per_year = max(0, min(int(per_year), MAX_LIMIT))
+    columns = ", ".join(f"m.{c}" for c in ROW_COLUMNS)
+    year = "CAST(strftime('%Y', m.taken, 'unixepoch', 'localtime') AS INTEGER)"
+    with db._connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM (SELECT {columns}, r.rating, r.votes, {year} AS y, "
+            f"ROW_NUMBER() OVER (PARTITION BY {year} ORDER BY m.taken, m.path) AS rn, "
+            f"COUNT(*) OVER (PARTITION BY {year}) AS n "
+            f"FROM media m LEFT JOIN file_ratings r ON r.path = m.path WHERE {where} AND m.taken IS NOT NULL) "
+            "WHERE rn <= ? ORDER BY y DESC, rn ASC", (*args, max(per_year, 1))).fetchall()
+    groups: List[Tuple[int, int, List[Dict[str, Any]]]] = []
+    for row in rows:
+        y, n = row[-3], row[-1]
+        if not groups or groups[-1][0] != y:
+            groups.append((y, n, []))
+        if per_year:
+            groups[-1][2].append(_item(row[:-3]))
+    return groups
+
+
+def facets(db) -> Dict[str, Any]:
+    """
+    What a filter bar can offer, over every visible row: the capture years, the
+    cameras (make, model) and the file types, each with how many files have it.
+    """
+    year = "CAST(strftime('%Y', taken, 'unixepoch', 'localtime') AS INTEGER)"
+    with db._connect() as conn:
+        years = conn.execute(f"SELECT {year} AS y, COUNT(*) FROM media WHERE missing = 0 AND taken IS NOT NULL "
+                             "GROUP BY y ORDER BY y DESC").fetchall()
+        cameras = conn.execute(
+            "SELECT camera_make, camera_model, COUNT(*) AS n FROM media WHERE missing = 0 "
+            "AND (camera_make IS NOT NULL OR camera_model IS NOT NULL) "
+            "GROUP BY camera_make, camera_model ORDER BY n DESC, camera_make, camera_model").fetchall()
+        exts = conn.execute("SELECT kind, ext, COUNT(*) AS n FROM media WHERE missing = 0 "
+                            "GROUP BY kind, ext ORDER BY n DESC, ext").fetchall()
+    return {"years": [list(r) for r in years],
+            "cameras": [{"make": make, "model": model, "count": n} for make, model, n in cameras],
+            "exts": [{"kind": kind, "ext": ext, "count": n} for kind, ext, n in exts]}
 
 
 def selection_version(db, filters: Optional[Dict[str, Any]] = None) -> str:
