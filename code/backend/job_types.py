@@ -54,6 +54,18 @@ def _folder(params: Dict[str, Any], config: Config, key: str = "folder", default
     return folder
 
 
+def _describe(config: Config):
+    """The folder a job works on, relative to the vault ('hele archief' for the root)."""
+    def describe(params: Dict[str, Any]) -> str:
+        folder = Path(params.get("folder") or config.VAULT_ROOT)
+        try:
+            rel = folder.relative_to(config.VAULT_ROOT)
+        except ValueError:
+            return str(folder)
+        return str(rel) if rel.parts else "hele archief"
+    return describe
+
+
 def _vault_check(config: Config, folder: Path, errors) -> None:
     """Errors while the vault (or the folder) is gone are not a result: wait or fail."""
     if errors.count and not config.VAULT_ROOT.is_dir():
@@ -111,7 +123,8 @@ def dup_scan_type(config: Config, db, on_done=None) -> JobType:
         }
 
     return JobType("dup_scan", "Duplicaten zoeken", prepare, run, summarize,
-                   present=lambda result: present_scan(result), on_done=on_done, results_to_keep=5)
+                   present=lambda result: present_scan(result), on_done=on_done, results_to_keep=5,
+                   describe=_describe(config))
 
 
 class ScanFolderGone(Exception):
@@ -176,6 +189,8 @@ def hashing_type(config: Config, db) -> JobType:
         _, newly = scanner.hash_files(paths, fingerprints, folder, db, ctx, errors, label="Indexeren")
         _vault_check(config, folder, errors)
         ctx.save_checkpoint({"files": len(paths), "hashed": newly})
+        ctx.progress(message=f"Klaar: {len(paths)} bestanden, {newly} nieuw berekend"
+                             + (f", {errors.count} leesfout(en)" if errors.count else ""))
         return {
             "folder": str(folder),
             "files": len(paths),
@@ -188,7 +203,7 @@ def hashing_type(config: Config, db) -> JobType:
 
     return JobType("hashing", "Controlegetallen berekenen", prepare, run,
                    summarize=lambda r: {k: r[k] for k in ("folder", "files", "hashed", "errors", "complete")},
-                   results_to_keep=3)
+                   results_to_keep=3, describe=_describe(config))
 
 
 # ---------- thumbnails ----------
@@ -258,6 +273,8 @@ def thumbnails_type(config: Config) -> JobType:
         ctx.check()
         _vault_check(config, folder, errors)
         ctx.save_checkpoint({"files": total, **counts})
+        ctx.progress(message=f"Klaar: {counts['made']} nieuw, {counts['cached']} waren er al"
+                             + (f", {errors.count} mislukt" if errors.count else ""))
         return {
             "folder": str(folder),
             "files": total,
@@ -270,7 +287,7 @@ def thumbnails_type(config: Config) -> JobType:
 
     return JobType("thumbnails", "Miniaturen maken", prepare, run,
                    summarize=lambda r: {k: r[k] for k in ("folder", "files", "made", "errors", "complete")},
-                   results_to_keep=3)
+                   results_to_keep=3, describe=_describe(config))
 
 
 def build_job_types(config: Config, db, on_dup_scan_done=None) -> List[JobType]:

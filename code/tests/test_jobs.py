@@ -105,7 +105,7 @@ def test_migration_8_adds_jobs_and_keeps_every_user_row(tmp_path, monkeypatch):
 def test_scan_job_runs_in_the_background_and_its_result_is_kept(client, vault):
     folder = _copies(vault / "Achtergrond", n=4)
     job = _start(client, "dup_scan", folder=str(folder))
-    assert job["type"] == "dup_scan" and job["label"] == "Duplicaten zoeken"
+    assert job["type"] == "dup_scan" and job["label"] == "Duplicaten zoeken" and job["target"] == "Achtergrond"
     assert job["params"] == {"folder": str(folder), "rule": "oldest", "prefer_folder": None}
     job = _wait(client, job["id"])
     assert job["status"] == "done" and job["processed"] == job["total"] == 4
@@ -281,6 +281,7 @@ def test_unplugged_vault_makes_the_job_wait_and_it_finishes_when_back(client, va
         time.sleep(0.3)
         job = _job(client, job["id"])
         assert job["status"] == "waiting_for_vault" and "schijf" in job["message"]
+        assert job["processed"] == 0 and job["total"] is None  # never shown as (nearly) finished
         # The dock still lists it while the database (on the vault disk) is gone
         assert [j["id"] for j in client.get("/api/jobs").json()["jobs"]] == [job["id"]]
     finally:
@@ -350,6 +351,7 @@ def test_thumbnail_job_makes_missing_thumbnails_once(client, vault, config):
 def test_thumbnail_job_for_the_whole_vault_by_default(client, vault):
     job = _wait(client, _start(client, "thumbnails")["id"], timeout=60)
     assert job["status"] == "done" and job["params"] == {"folder": str(vault.resolve())}
+    assert job["target"] == "hele archief" and job["message"].startswith("Klaar: ")
     assert job["summary"]["files"] > 10
 
 

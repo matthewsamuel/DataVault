@@ -135,6 +135,7 @@ class JobType:
     present: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None     # result as served later
     on_done: Optional[Callable[[Dict[str, Any]], None]] = None
     results_to_keep: int = 5                                 # stored results of this type
+    describe: Optional[Callable[[Dict[str, Any]], str]] = None   # what it works on, for the dock
 
 
 class _Live:
@@ -580,6 +581,7 @@ class JobManager:
             "id": row["id"],
             "type": row["type"],
             "label": job_type.label if job_type else row["type"],
+            "target": job_type.describe(row["params"]) if job_type and job_type.describe else None,
             "params": row["params"],
             "status": status,
             "processed": row["processed"],
@@ -601,7 +603,9 @@ class JobManager:
 
     def _wait_for_vault(self, live: _Live) -> bool:
         """Poll until the vault is back (True) or the job is stopped (False)."""
-        self._update(live, status=WAITING_FOR_VAULT, persist=True,
+        # What was counted before the disk went is not progress: the run starts over (from the cache)
+        live.samples.clear()
+        self._update(live, status=WAITING_FOR_VAULT, persist=True, processed=0, total=None,
                      message="Wachten op het archief (schijf losgekoppeld?). Gaat vanzelf verder.")
         while not live.stop_reason:
             if self.vault_available():
