@@ -218,6 +218,35 @@ def test_a_new_kind_of_action_plugs_in_with_the_recorder(client, vault, app):
     assert left["file_count"] == 1 and not left["undoable"] and "staat al een bestand" in left["reason"]
 
 
+def test_the_undo_of_an_action_checks_every_path_in_full(client, vault, app, monkeypatch):
+    """The list checks paths once per folder (FolderChecks); the undo checks each file's own
+    paths again, as the README and FolderChecks promise."""
+    from backend import recovery
+    from backend.file_ops import ARCHIVE_LOCK, move_no_overwrite
+    db = app.state.db
+    files = [vault / INBOX / f"IMG_{i:04d}.JPG" for i in (1, 2, 3, 4)]
+    with ARCHIVE_LOCK:
+        action = recovery.ActionRecorder(db, "viewer_move", "Vier foto's")
+        for src in files:
+            action.add(src, move_no_overwrite(src, vault / "library" / src.name))
+
+    checked = []
+    real = recovery.is_in_vault
+
+    def counted(path, *args, **kwargs):
+        checked.append(str(path))
+        return real(path, *args, **kwargs)
+    monkeypatch.setattr(recovery, "is_in_vault", counted)
+
+    [entry] = _list(client)["entries"]
+    assert entry["restorable"] == 4 and len(checked) == 2   # one source and one target folder
+    checked.clear()
+    r = _undo(client, entry)
+    assert r.status_code == 200 and r.json()["restored"] == 4
+    assert sorted(checked) == sorted([str(f) for f in files] + [str(vault / "library" / f.name) for f in files])
+    assert all(f.exists() for f in files)
+
+
 def test_the_recorder_moves_the_file_back_when_it_cannot_record(client, vault, app, monkeypatch):
     src = vault / INBOX / "IMG_0002.JPG"
     db = app.state.db

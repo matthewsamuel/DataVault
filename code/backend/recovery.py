@@ -325,17 +325,22 @@ def _move_file(config, move: Dict[str, Any], state: str) -> Dict[str, Any]:
 
 
 def _action_files(db, config, action: Dict[str, Any]) -> List[Dict[str, Any]]:
-    checks = FolderChecks(config)
-    return [_move_file(config, move, _move_state(config, move, checks)) for move in db.get_recovery_moves(action["id"])]
+    """Every file of an action, for the undo: each path is checked in full (no FolderChecks)."""
+    return [_move_file(config, move, _move_state(config, move, None)) for move in db.get_recovery_moves(action["id"])]
 
 
-def _move_state(config, move: Dict[str, Any], checks: FolderChecks) -> str:
+def _move_state(config, move: Dict[str, Any], checks: Optional[FolderChecks]) -> str:
+    """The file's state. checks: a FolderChecks for the list, or None to check every path in
+    full (the undo always does that)."""
     src, dst = move["src_path"], move["dst_path"]
     dst_entry = lstat_or_none(dst)
     src_entry = lstat_or_none(src)
-    in_vault = lambda path: lambda: is_in_vault(path, config, allow_internal=True)
-    if not (checks.check("vault", src, src_entry, in_vault(src))
-            and checks.check("vault", dst, dst_entry, in_vault(dst))):
+
+    def in_vault(path: str, entry: Optional[os.stat_result]) -> bool:
+        full = lambda: is_in_vault(path, config, allow_internal=True)
+        return full() if checks is None else checks.check("vault", path, entry, full)
+
+    if not (in_vault(src, src_entry) and in_vault(dst, dst_entry)):
         return "refused"
     state = moved_file_state(dst, move["dst_ino"], move["dst_size"], dst_entry)
     if state == "ok" and src_entry is not None:
