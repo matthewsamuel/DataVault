@@ -693,7 +693,7 @@
         img.addEventListener('load', () => img.classList.remove('loading'));
         img.addEventListener('error', () => {
             img.classList.remove('loading');
-            img.style.backgroundColor = 'var(--bg-tertiary)';
+            img.style.backgroundColor = 'var(--surface-raised)';
         });
 
         img.src = thumbUrl;

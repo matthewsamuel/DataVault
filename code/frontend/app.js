@@ -350,7 +350,7 @@ function renderShows(data) {
             // Full thumbnail with transparent overlay + text shadow for readability
             card.innerHTML = html`
                 <div class="show-card-image-wrapper" style="position: relative; height: 180px; overflow: hidden; border-radius: 12px;">
-                     ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" style="width: 100%; height: 100%; object-fit: cover;">` : html`<div class="no-thumb" style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;background:var(--bg-tertiary);">📁</div>`}
+                     ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" style="width: 100%; height: 100%; object-fit: cover;">` : html`<div class="no-thumb" style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;background:var(--surface-raised);">📁</div>`}
                     <div style="position:absolute;bottom:0;left:0;right:0;padding:10px 12px;background:linear-gradient(to top, rgba(0,0,0,0.45) 0%, transparent 100%);">
                         <h4 style="margin:0;font-size:14px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.8),0 0 8px rgba(0,0,0,0.5);">${show.title}</h4>
                         <span style="font-size:11px;color:rgba(255,255,255,0.75);text-shadow:0 1px 3px rgba(0,0,0,0.8);">Map</span>
@@ -848,7 +848,7 @@ function createMediaCard(file) {
     // Show broken image state on error
     img.addEventListener('error', () => {
         img.classList.remove('loading');
-        img.style.backgroundColor = 'var(--bg-tertiary)';
+        img.style.backgroundColor = 'var(--surface-raised)';
     });
 
     // Pas laden als de kaart (bijna) in beeld komt; lazy moet vóór src gezet worden
