@@ -272,6 +272,7 @@ LOOSEST = "ruim"
 PAIR_RADIUS = STRICTNESS[LOOSEST]["near"][0]    # = 11: radius // 4 = 2 bits per part (fast)
 BURST_GAP = 3.0               # seconds between two shots of one burst
 BURST_LOOKAHEAD = 6           # a shot is compared with this many shots after it in its burst
+MAX_SERIES_SIZE = 48          # photos per series on screen; a bigger group comes in parts, in time order
 
 
 def strictness_or_default(value: Optional[str]) -> str:
@@ -340,15 +341,21 @@ def counts(db) -> Dict[str, int]:
             f"SELECT COUNT(*) FROM media m JOIN media_phash h ON h.media_id = m.id "
             f"WHERE m.missing = 0 AND h.paired = 0 AND h.status = 'ok' AND {_CURRENT}", (ALGO_VERSION,)).fetchone()[0]
         pairs = conn.execute("SELECT COUNT(*) FROM near_dup_pairs").fetchone()[0]
+        signature = list(conn.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(m.id), 0) FROM media m JOIN media_phash h ON h.media_id = m.id "
+            f"WHERE h.status = 'ok' AND {_CURRENT}", (ALGO_VERSION,)).fetchone())
         reviewed = conn.execute("SELECT COUNT(*) FROM near_dup_reviews").fetchone()[0]
     by_status = dict(rows)
     done = by_status.get(OK, 0) + by_status.get(UNDECODABLE, 0)
+    pending = max(0, photos - done) + unpaired
+    if not pending and signature[0] and state(db).get("pairs_signature") not in (None, signature):
+        pending = 1   # a photo left the index since the last lookup: the next run looks again
     return {
         "photos": photos,
         "analysed": by_status.get(OK, 0),
         "undecodable": by_status.get(UNDECODABLE, 0),
         "errors": by_status.get(ERROR, 0),
-        "pending": max(0, photos - done) + unpaired,
+        "pending": pending,
         "pairs": pairs,
         "reviewed": reviewed,
     }
@@ -502,56 +509,89 @@ def _color_matrix(blobs: Sequence[Optional[bytes]]) -> np.ndarray:
     return out
 
 
+def _twins(rows) -> Dict[Tuple, List[int]]:
+    """Positions of rows that look exactly alike to the analysis (same hashes and colours)."""
+    twins: Dict[Tuple, List[int]] = {}
+    for i, r in enumerate(rows):
+        twins.setdefault((r[1], r[2], r[3]), []).append(i)
+    return twins
+
+
 def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]:
     """
-    Look up the pairs of every analysed photo that has none yet (paired = 0) among all
-    analysed photos, and the bursts again when anything changed. Photos hidden as
-    missing (moved to RAW_DUPLICATES by the app) stay in: when an undo brings them
-    back, their pairs are still there. Returns the counts of near pairs and bursts written.
+    When any analysed photo is new or changed (paired = 0), find the pairs again from the
+    stored fingerprints (no photo is decoded; about 2 s for 100k photos):
+
+    - Photos that look exactly alike (same hashes and colours: 'twins') are one group.
+      Pairs are looked up once per group, between the groups' first photos, so a folder
+      of 1,500 copies of one shot is one group, not a million pairs. The series are made
+      from the groups when they are shown (all_series), so a group's first photo may be
+      gone (moved, or back after an undo) without breaking anything.
+    - Twins of the same size get a content hash (xxh3, media_phash.content): the ones
+      with the same hash are byte-for-byte copies, the duplicates screen's work.
+    - Bursts: shots by the same camera within BURST_GAP seconds, compared one by one.
+
+    Photos hidden as missing (moved to RAW_DUPLICATES by the app) stay in: when an undo
+    brings them back, their pairs are still there. Returns the counts written.
     """
+    from backend.scanner import hash_file_xxh3
     with db._connect() as conn:
         rows = conn.execute(
             f"SELECT m.id, h.phash, h.dhash, h.colors, h.paired, m.size, m.path, m.taken, m.taken_source, "
-            f"m.camera_make, m.camera_model, h.contrast FROM media m JOIN media_phash h ON h.media_id = m.id "
+            f"m.camera_make, m.camera_model, h.contrast, h.content FROM media m "
+            f"JOIN media_phash h ON h.media_id = m.id "
             f"WHERE h.status = 'ok' AND {_CURRENT} ORDER BY m.id", (ALGO_VERSION,)).fetchall()
-    dirty_ids = [r[0] for r in rows if not r[4]]
-    if not dirty_ids:
+    dirty = [r[0] for r in rows if not r[4]]
+    # (also when a photo left the index: it may have been the first of its group)
+    signature = [len(rows), sum(r[0] for r in rows)]
+    if not dirty and state(db).get("pairs_signature") == signature:
         return {"near": 0, "burst": 0}
-    ids = np.array([r[0] for r in rows], dtype=np.int64)
-    phashes = np.array([to_unsigned(r[1]) for r in rows], dtype=np.uint64)
-    dhashes = np.array([to_unsigned(r[2]) for r in rows], dtype=np.uint64)
-    colors = _color_matrix([r[3] for r in rows])
-    flat = np.array([(r[11] or 0.0) < FLAT_CONTRAST for r in rows], dtype=bool)
-    position = {r[0]: i for i, r in enumerate(rows)}
-    queries = np.array([position[i] for i in dirty_ids], dtype=np.int64)
 
-    # Near pairs of the new photos, against every analysed photo
+    # Content hashes of twins of the same size (only the ones not known yet)
+    twins = _twins(rows)
+    contents = []
+    for members in twins.values():
+        by_size: Dict[int, List[int]] = {}
+        for i in members:
+            by_size.setdefault(rows[i][5], []).append(i)
+        for same in by_size.values():
+            for i in (same if len(same) > 1 else ()):
+                if rows[i][12] is None:
+                    check()
+                    try:
+                        contents.append((hash_file_xxh3(Path(rows[i][6])), rows[i][0]))
+                    except OSError:
+                        pass
+
+    # Near pairs between the groups, by their first photo
+    firsts = [members[0] for members in twins.values()]
+    phashes = np.array([to_unsigned(rows[i][1]) for i in firsts], dtype=np.uint64)
+    dhashes = np.array([to_unsigned(rows[i][2]) for i in firsts], dtype=np.uint64)
+    colors = _color_matrix([rows[i][3] for i in firsts])
+    flat = np.array([(rows[i][11] or 0.0) < FLAT_CONTRAST for i in firsts], dtype=bool)
     loose_p, loose_d, loose_c = STRICTNESS[LOOSEST]["near"]
-    i, j, pd = HashIndex(phashes).pairs(PAIR_RADIUS, queries, check)
+    i, j, pd = HashIndex(phashes).pairs(PAIR_RADIUS, None, check)
     dd = np.bitwise_count(dhashes[i] ^ dhashes[j]).astype(np.int64)
     cd = np.abs(colors[i] - colors[j]).mean(axis=1)
     fl = flat[i] | flat[j]
     keep = (dd <= loose_d) & (cd <= np.where(fl, min(loose_c, FLAT_COLOR), loose_c))
-    i, j, pd, dd, cd, fl = i[keep], j[keep], pd[keep], dd[keep], cd[keep], fl[keep]
-    near = []
-    for a, b, p, d, c, f in zip(i.tolist(), j.tolist(), pd.tolist(), dd.tolist(), cd.tolist(), fl.tolist()):
-        same = 0
-        if p == 0 and d == 0 and rows[a][5] == rows[b][5]:
-            check()
-            same = int(_identical(rows[a][6], rows[b][6]))
-        near.append((rows[a][0], rows[b][0], "near", p, d, round(c, 2), None, int(f), same))
+    near = [(rows[firsts[a]][0], rows[firsts[b]][0], "near", p, d, round(c, 2), None, int(f), 0)
+            for a, b, p, d, c, f in zip(i[keep].tolist(), j[keep].tolist(), pd[keep].tolist(),
+                                        dd[keep].tolist(), cd[keep].tolist(), fl[keep].tolist())]
 
-    bursts = _burst_pairs(rows, phashes, dhashes, colors, flat)
+    bursts = _burst_pairs(rows, np.array([to_unsigned(r[1]) for r in rows], dtype=np.uint64),
+                          np.array([to_unsigned(r[2]) for r in rows], dtype=np.uint64),
+                          _color_matrix([r[3] for r in rows]),
+                          np.array([(r[11] or 0.0) < FLAT_CONTRAST for r in rows], dtype=bool))
+    check()
     with db._connect() as conn:
-        for chunk in _chunks(dirty_ids):
-            marks = ",".join("?" * len(chunk))
-            conn.execute(f"DELETE FROM near_dup_pairs WHERE kind = 'near' AND (a IN ({marks}) OR b IN ({marks}))",
-                         (*chunk, *chunk))
+        conn.execute("DELETE FROM near_dup_pairs")
         conn.executemany(_INSERT_PAIR, near)
-        conn.execute("DELETE FROM near_dup_pairs WHERE kind = 'burst'")
         conn.executemany(_INSERT_PAIR, bursts)
-        for chunk in _chunks(dirty_ids):
+        conn.executemany("UPDATE media_phash SET content = ? WHERE media_id = ?", contents)
+        for chunk in _chunks(dirty):
             conn.execute(f"UPDATE media_phash SET paired = 1 WHERE media_id IN ({','.join('?' * len(chunk))})", chunk)
+    db.set_setting(STATE_KEY, {**state(db), "pairs_signature": signature})
     _bump()
     return {"near": len(near), "burst": len(bursts)}
 
@@ -561,6 +601,7 @@ _INSERT_PAIR = ("INSERT OR REPLACE INTO near_dup_pairs (a, b, kind, phash_d, dha
 
 
 def _identical(a: str, b: str) -> bool:
+    """Byte for byte the same (False when either cannot be read)."""
     from backend.file_ops import files_identical
     try:
         return files_identical(Path(a), Path(b))
@@ -649,11 +690,15 @@ def series_structure(db, strictness: str) -> Dict[str, Any]:
 def all_series(db, strictness: str) -> Dict[str, Any]:
     """
     Every series at this strictness: {series: [{key, kind, ids, copies: {rep: [ids]},
-    taken, size}], rows: {id: (path, folder, taken, size, mtime_ns)}, version}. Cached
-    until the index or the fingerprints change.
+    taken, size, part}], components, copies, rows: {id: (path, folder, taken, size,
+    mtime_ns)}, version}. Cached until the index or the fingerprints change.
 
-    Byte-identical copies (same_bytes pairs) are the duplicates screen's work: they count
-    as one photo here, shown once (the oldest copy) with the others listed with it.
+    Built from groups of twins (photos that look exactly alike, see update_pairs): the
+    pairs join groups, and a group counts with the photos of it that are in the archive
+    now. Byte-identical copies are the duplicates screen's work: they count as one photo
+    here, shown once (the oldest copy) with the others listed with it. A group of more
+    than MAX_SERIES_SIZE photos is cut into parts (part: [n, of]); components keeps the
+    whole groups, for checking what a request names.
     """
     from backend import media_index
     version = (media_index.generation(), generation())
@@ -664,68 +709,87 @@ def all_series(db, strictness: str) -> Dict[str, Any]:
     near_p, near_d, near_c = STRICTNESS[strictness]["near"]
     burst_p, burst_d, burst_c = STRICTNESS[strictness]["burst"]
     with db._connect() as conn:
+        analysed = conn.execute(
+            f"SELECT m.id, h.phash, h.dhash, h.colors, h.content, m.missing, m.path, m.folder, m.taken, "
+            f"m.size, m.mtime_ns FROM media m JOIN media_phash h ON h.media_id = m.id "
+            f"WHERE h.status = 'ok' AND {_CURRENT}", (ALGO_VERSION,)).fetchall()
         pairs = conn.execute(
-            f"SELECT p.a, p.b, p.kind, p.same_bytes FROM near_dup_pairs p "
-            f"JOIN media ma ON ma.id = p.a AND ma.missing = 0 "
-            f"JOIN media mb ON mb.id = p.b AND mb.missing = 0 "
-            f"JOIN media_phash ha ON ha.media_id = p.a AND ha.status = 'ok' "
-            f"AND ha.size = ma.size AND ha.mtime_ns = ma.mtime_ns AND ha.version = ? "
-            f"JOIN media_phash hb ON hb.media_id = p.b AND hb.status = 'ok' "
-            f"AND hb.size = mb.size AND hb.mtime_ns = mb.mtime_ns AND hb.version = ? "
-            f"WHERE p.same_bytes = 1 "
-            f"OR (p.kind = 'near' AND p.phash_d <= ? AND p.dhash_d <= ? "
-            f"AND p.color_d <= CASE WHEN p.flat THEN ? ELSE ? END) "
-            f"OR (p.kind = 'burst' AND p.phash_d <= ? AND p.dhash_d <= ? "
-            f"AND p.color_d <= CASE WHEN p.flat THEN ? ELSE ? END AND ma.folder = mb.folder)",
-            (ALGO_VERSION, ALGO_VERSION, near_p, near_d, min(near_c, FLAT_COLOR), near_c,
+            "SELECT a, b, kind FROM near_dup_pairs WHERE "
+            "(kind = 'near' AND phash_d <= ? AND dhash_d <= ? AND color_d <= CASE WHEN flat THEN ? ELSE ? END) "
+            "OR (kind = 'burst' AND phash_d <= ? AND dhash_d <= ? AND color_d <= CASE WHEN flat THEN ? ELSE ? END)",
+            (near_p, near_d, min(near_c, FLAT_COLOR), near_c,
              burst_p, burst_d, min(burst_c, FLAT_COLOR), burst_c)).fetchall()
-        ids = sorted({p[0] for p in pairs} | {p[1] for p in pairs})
-        rows: Dict[int, Tuple] = {}
-        for chunk in _chunks(ids):
-            for r in conn.execute(f"SELECT id, path, folder, taken, size, mtime_ns FROM media "
-                                  f"WHERE id IN ({','.join('?' * len(chunk))})", chunk):
-                rows[r[0]] = r[1:]
+
+    # Twins: one group per look; only the photos that are in the archive now take part
+    group_of: Dict[int, int] = {}
+    group_ids: Dict[Tuple, int] = {}
+    members_of: Dict[int, List[int]] = {}
+    rows: Dict[int, Tuple] = {}
+    content: Dict[int, Optional[str]] = {}
+    for r in analysed:
+        g = group_ids.setdefault((r[1], r[2], r[3]), len(group_ids))
+        group_of[r[0]] = g
+        if r[5] == 0:
+            members_of.setdefault(g, []).append(r[0])
+            rows[r[0]] = (r[6], r[7], r[8], r[9], r[10])
+            content[r[0]] = r[4]
+
+    groups = _UnionFind()
+    for g, members in members_of.items():
+        groups.find(g)
+    burst_photos: Set[int] = set()
+    for a, b, kind in pairs:
+        ga, gb = group_of.get(a), group_of.get(b)
+        if ga is None or gb is None or ga not in members_of or gb not in members_of:
+            continue
+        if kind == "burst":
+            # A burst only counts within one folder (as the photos are now)
+            if a not in rows or b not in rows or rows[a][1] != rows[b][1]:
+                continue
+            burst_photos.update((a, b))
+        groups.union(ga, gb)
 
     # 1. Byte-identical copies count as one photo: the oldest (then shortest path) stands for them
-    copies = _UnionFind()
-    for a, b, _kind, same in pairs:
-        if same:
-            copies.union(a, b)
-    rep_of: Dict[int, int] = {}
     copies_of: Dict[int, List[int]] = {}
-    for members in copies.groups().values():
-        rep = min(members, key=lambda i: (rows[i][4], len(rows[i][0]), rows[i][0]))
-        copies_of[rep] = sorted(m for m in members if m != rep)
-        for m in members:
-            rep_of[m] = rep
+    reps_of_group: Dict[int, List[int]] = {}
+    for g, members in members_of.items():
+        clusters: Dict[Tuple, List[int]] = {}
+        for i in members:
+            clusters.setdefault((rows[i][3], content[i]) if content[i] else ("photo", i), []).append(i)
+        reps = []
+        for cluster in clusters.values():
+            rep = min(cluster, key=lambda i: (rows[i][4], len(rows[i][0]), rows[i][0]))
+            reps.append(rep)
+            if len(cluster) > 1:
+                copies_of[rep] = sorted(i for i in cluster if i != rep)
+        reps_of_group[g] = reps
 
-    # 2. Series: connected photos (after the copies were folded into one)
-    groups = _UnionFind()
-    burst_edges: Set[Tuple[int, int]] = set()
-    for a, b, kind, same in pairs:
-        ra, rb = rep_of.get(a, a), rep_of.get(b, b)
-        if ra == rb:
-            continue
-        groups.union(ra, rb)
-        if kind == "burst":
-            burst_edges.add((min(ra, rb), max(ra, rb)))
-    in_burst = {i for edge in burst_edges for i in edge}
+    # 2. Series: the photos (one per set of copies) of connected groups
     series = []
-    for members in groups.groups().values():
+    components = []
+    for gs in groups.groups().values():
+        members = [i for g in gs for i in reps_of_group[g]]
         if len(members) < 2:
             continue
         members.sort(key=lambda i: (rows[i][2] if rows[i][2] is not None else float("inf"), rows[i][0]))
-        key = series_key(members)
-        taken = [rows[i][2] for i in members if rows[i][2] is not None]
-        series.append({
-            "key": key,
-            "kind": "burst" if all(i in in_burst for i in members) else "near",
-            "ids": members,
-            "copies": {i: copies_of[i] for i in members if copies_of.get(i)},
-            "taken": max(taken) if taken else None,
-            "size": sum(rows[i][3] for i in members),
-        })
-    result = {"series": series, "rows": rows, "version": f"{version[0]:x}.{version[1]:x}"}
+        components.append(members)
+        # A very big group (hundreds of the same shot) is shown in parts, in time order
+        parts = -(-len(members) // MAX_SERIES_SIZE)
+        size = -(-len(members) // parts)
+        for start in range(0, len(members), size):
+            part = members[start:start + size]
+            taken = [rows[i][2] for i in part if rows[i][2] is not None]
+            series.append({
+                "key": series_key(part),
+                "kind": "burst" if all(i in burst_photos for i in part) else "near",
+                "ids": part,
+                "copies": {i: copies_of[i] for i in part if copies_of.get(i)},
+                "taken": max(taken) if taken else None,
+                "size": sum(rows[i][3] for i in part),
+                "part": [start // size + 1, parts] if parts > 1 else None,
+            })
+    result = {"series": series, "components": components, "copies": copies_of, "rows": rows,
+              "version": f"{version[0]:x}.{version[1]:x}"}
     with _structure_lock:
         _structure_cache[strictness] = (version, result)
     return result
@@ -822,6 +886,7 @@ def present(db, series: Dict[str, Any]) -> Dict[str, Any]:
         "count": len(members),
         "taken": series["taken"],
         "folder": folders.pop() if len(folders) == 1 else None,
+        "part": series.get("part"),
         "best": next(m["id"] for m in members if m["best"]),
         "members": members,
     }
@@ -864,15 +929,17 @@ def reset_reviews(db) -> int:
 
 def find_series(db, ids: Sequence[int]) -> Optional[Dict[str, Any]]:
     """
-    The series at the loosest setting (decisions ignored) that holds every one of ids,
-    with the byte-identical copies of its photos; None when they are not one series.
+    The group of connected photos at the loosest setting (decisions ignored, never cut
+    into parts) that holds every one of ids, as {key, ids, copies}; None when they are
+    not one group.
     """
+    structure = all_series(db, LOOSEST)
     wanted = set(ids)
-    for s in all_series(db, LOOSEST)["series"]:
-        if wanted <= set(s["ids"]):
-            return s
+    for members in structure["components"]:
+        if wanted <= set(members):
+            return {"key": series_key(members), "ids": members,
+                    "copies": {i: structure["copies"][i] for i in members if structure["copies"].get(i)}}
     return None
-
 
 # ---------- keeping the best ----------
 
@@ -963,6 +1030,10 @@ def keep_best(db, config, member_ids: Sequence[int], keep_ids: Sequence[int]) ->
             folder=folders.pop() if len(folders) == 1 else None,
             details={"series": series["key"], "keep": [rows[i]["path"] for i in keep if i in rows]},
         )
+        # An exact copy goes along only while it is still byte for byte the photo that goes
+        # (checked before anything moves)
+        not_copies = {c for loser in losers for c in series["copies"].get(loser, [])
+                      if c in rows and loser in rows and not _identical(rows[c]["path"], rows[loser]["path"])}
         config.ensure_duplicates_folder()
         target = holding_folder(config)
         for i in moving:
@@ -971,6 +1042,8 @@ def keep_best(db, config, member_ids: Sequence[int], keep_ids: Sequence[int]) ->
                 failed.append({"id": i, "path": row["path"] if row else None, "reason": "Niet meer in de bibliotheek"})
                 continue
             reason = _unchanged(row["path"], *fingerprints[i][:2])
+            if reason is None and i in not_copies:
+                reason = "Geen exacte kopie meer van de foto die weggaat"
             if reason is None:
                 try:
                     src = resolve_in_vault(row["path"], config)   # never out of TRASH or RAW_DUPLICATES

@@ -599,6 +599,70 @@ def test_series_are_paged_and_sorted(client, vault):
     assert client.get("/api/series", params={"offset": -1}).status_code == 422
 
 
+def test_hundreds_of_photos_that_look_the_same_are_one_group_not_a_million_pairs(client, vault, config):
+    folder = vault / "RAW/2024/scans"
+    folder.mkdir(parents=True)
+    sample = (vault / BURST[0]).read_bytes()
+    for i in range(300):
+        (folder / f"scan_{i:03d}.jpg").write_bytes(sample + str(i).encode())   # same picture, other bytes
+    (folder / "scan_kopie.jpg").write_bytes(sample + b"7")                     # byte for byte scan_007
+    _index(client)
+    started = time.monotonic()
+    _run(client)
+    assert time.monotonic() - started < 30
+    with sqlite3.connect(str(config.DB_PATH)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM near_dup_pairs").fetchone()[0] < 2000
+    listed = _series(client)
+
+    def in_scans(items):
+        return [m for s in items for m in s["members"] if m["folder"] == str(folder)]
+
+    # 301 scans, of which two byte for byte the same: 300 photos, in parts of at most 48
+    total = len(in_scans(listed["items"]))
+    assert total == 300
+    assert all(s["count"] <= near_dups.MAX_SERIES_SIZE for s in listed["items"])
+    assert sum(1 for s in listed["items"] if s["part"]) >= 300 // near_dups.MAX_SERIES_SIZE
+    copies = [m for s in listed["items"] for m in s["members"] if m["copies"]]
+    assert any(m["name"] in ("scan_007.jpg", "scan_kopie.jpg") and [Path(c["path"]).name for c in m["copies"]]
+               in (["scan_kopie.jpg"], ["scan_007.jpg"]) for m in copies)
+
+
+
+def test_when_the_first_photo_of_a_group_leaves_the_rest_is_paired_again(client, vault):
+    """Pairs between groups of lookalikes are stored between their first photos."""
+    folder = vault / "RAW/2024/groep"
+    folder.mkdir(parents=True)
+    base = _scene(61)
+    base.save(folder / "a.jpg", quality=92)
+    (folder / "b.jpg").write_bytes((folder / "a.jpg").read_bytes() + b"x")   # looks the same, other bytes
+    base.resize((400, 300)).save(folder / "c.jpg", quality=60)
+    _index(client)
+    _run(client)
+    assert _names(_with(_series(client), "a.jpg")[0]) == ["a.jpg", "b.jpg", "c.jpg"]
+    (folder / "a.jpg").rename(folder / "a.weg")
+    _index(client)
+    _index(client)                       # a.jpg (and its pairs) leave the index
+    assert client.get("/api/series/status").json()["pending"] >= 1
+    _run(client)
+    assert _names(_with(_series(client), "b.jpg")[0]) == ["b.jpg", "c.jpg"]
+
+
+def test_a_very_big_group_comes_in_parts_that_each_can_be_decided(client, vault, monkeypatch):
+    monkeypatch.setattr(near_dups, "MAX_SERIES_SIZE", 3)
+    _index(client)
+    _run(client)
+    parts = [s for s in _series(client)["items"] if s["kind"] == "burst"]
+    assert sorted(len(s["members"]) for s in parts) == [2, 3]
+    assert sorted(tuple(s["part"]) for s in parts) == [(1, 2), (2, 2)]
+    assert sorted(n for s in parts for n in _names(s)) == [Path(p).name for p in BURST]
+    first = next(s for s in parts if s["part"] == [1, 2])
+    ids = [m["id"] for m in first["members"]]
+    r = client.post("/api/series/keep", json={"members": ids, "keep": ids[:1]})
+    assert r.status_code == 200 and len(r.json()["moved"]) == 2, r.text
+    assert client.post("/api/series/keep-all", json={
+        "members": [m["id"] for m in next(s for s in parts if s["part"] == [2, 2])["members"]]}).status_code == 200
+
+
 # ---------- migration ----------
 
 def test_migration_30_adds_the_tables_and_keeps_every_user_row(tmp_path, monkeypatch):
@@ -630,12 +694,12 @@ def test_migration_30_adds_the_tables_and_keeps_every_user_row(tmp_path, monkeyp
 
     db = Database(db_path)
     with sqlite3.connect(str(db_path)) as conn:
-        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 30
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 31
         for table, rows in before.items():
             assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
         assert {r[1] for r in conn.execute("PRAGMA table_info(media_phash)")} >= {
             "media_id", "algo", "version", "size", "mtime_ns", "status", "dhash", "phash", "colors",
-            "sharpness", "clip_low", "clip_high", "contrast", "paired"}
+            "sharpness", "clip_low", "clip_high", "contrast", "paired", "content"}
         assert {r[1] for r in conn.execute("PRAGMA table_info(near_dup_pairs)")} >= {
             "a", "b", "kind", "phash_d", "dhash_d", "color_d", "gap", "flat", "same_bytes"}
         assert {r[1] for r in conn.execute("PRAGMA table_info(near_dup_reviews)")} == {

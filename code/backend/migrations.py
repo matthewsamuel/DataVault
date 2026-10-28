@@ -456,6 +456,18 @@ def _m030_near_duplicates(conn: sqlite3.Connection):
     """)
 
 
+def _m031_near_duplicates_content(conn: sqlite3.Connection):
+    """
+    media_phash.content: the xxh3 hash of a photo that looks exactly like another photo of
+    the same size (backend/near_dups.py): the ones with the same hash are byte-for-byte
+    copies, shown as one photo. Photos that look exactly alike are now grouped when the
+    series are made instead of being paired one by one (a folder of 1,500 copies of one
+    shot gave a million pairs), so near_dup_pairs.same_bytes is no longer written.
+    Only a new column: no existing row is touched.
+    """
+    conn.execute("ALTER TABLE media_phash ADD COLUMN content TEXT")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -471,6 +483,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (11, "media_index", _m011_media_index),
     (12, "recovery_actions", _m012_recovery_actions),
     (30, "near_duplicates", _m030_near_duplicates),
+    (31, "near_duplicates_content", _m031_near_duplicates_content),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
