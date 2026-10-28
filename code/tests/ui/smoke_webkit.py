@@ -9,7 +9,9 @@ that vault) and stops it again at the end.
 It also drives the app with the keyboard (tabs, the shortcut overview, the Files grid and the
 viewer, Tab staying inside every window, focus going back where it was, Keurer keys that never
 act from the theme menu or the search field), moves a file and puts it back from the
-Herstelcentrum, checks Instellingen and the storage window, and runs a11y_checks.js on every screen in the light and the dark theme:
+Herstelcentrum, compares photos on the Beste uit reeks tab and keeps the best of a series
+with the keyboard (and undoes that), checks Instellingen and the storage window, and runs
+a11y_checks.js on every screen in the light and the dark theme:
 all visible text must reach WCAG AA contrast and every control must have a name. On the way
 it saves a screenshot of every screen in both themes (for a look at the design), in a temp
 folder it prints at the end, or in $DATAVAULT_SMOKE_SHOTS when that is set.
@@ -619,6 +621,88 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(not dock["collapsed"] and dock["incomplete"] == ["-2"] and "1 onvolledig" in dock["title"]
                    and "2 eerder" not in dock["folded"] and "onvolledig" in dock["library"],
                    f"job dock: an incomplete run is folded away or not marked: {dock}")
+
+            # Beste uit reeks (second tab of Duplicaten): compare, decide with the keyboard, move one
+            # series after the confirmation and put it back from the Herstelcentrum
+            page.evaluate("switchMainView('duplicates')")
+            page.focus("#dup-tab-exact")
+            step("series: ArrowRight opens the tab", lambda: page.keyboard.press("ArrowRight"), 0.5)
+            expect(page.is_visible("#dup-panel-series") and not page.is_visible("#dup-panel-exact")
+                   and page.evaluate("document.activeElement.id") == "dup-tab-series",
+                   "series: ArrowRight on the tabs did not open 'Beste uit reeks'")
+            step("series: compare", lambda: page.click("#btn-series-compare"), 0.5)
+            try:
+                page.wait_for_function("document.getElementById('series-progress').hidden"
+                                       " && !document.getElementById('btn-series-compare').disabled"
+                                       " && !!document.querySelector('.series-card')", timeout=120000, polling=250)
+            except PlaywrightError:
+                problems.append("series: comparing never showed a series")
+            # (the big folder's 1500 files are copies of corrupt.jpg: not decodable, so no series)
+            cards = page.evaluate("[...document.querySelectorAll('.series-card')].map(c => [...c.querySelectorAll('.series-photo-name')].map(n => n.textContent))")
+            expect(len(cards) == 2 and any("burst_00.jpg" in c for c in cards) and any("strand klein.jpg" in c for c in cards),
+                   f"series: expected the burst and the beach series, got {cards}")
+            for theme in ("light", "dark"):
+                page.evaluate(f"setTheme('{theme}')")
+                page.wait_for_timeout(300)
+                page.screenshot(path=str(shots / f"duplicates-series_{theme}.png"))
+                page.add_script_tag(path=str(A11Y_CHECKS))
+                for fail in page.evaluate("__contrastFailures()"):
+                    problems.append(f"contrast {theme} duplicates-series: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+                for control in page.evaluate("__unnamedControls()"):
+                    problems.append(f"unnamed control on duplicates-series: {control}")
+            page.evaluate("setTheme('auto')")
+
+            def tile_state():
+                return page.evaluate("""(() => { const a = document.activeElement;
+                    const card = a.closest('.series-card');
+                    return { name: a.closest('.series-photo-cell') ? a.closest('.series-photo-cell').querySelector('.series-photo-name').textContent : a.id,
+                             pressed: a.getAttribute('aria-pressed'), button: card ? card.querySelector('.series-confirm-btn').textContent : '',
+                             cards: document.querySelectorAll('.series-card').length }; })()""")
+
+            page.focus(".series-photo[tabindex='0']")
+            first = tile_state()
+            step("series: ArrowRight to the next photo", lambda: page.keyboard.press("ArrowRight"), 0.2)
+            second = tile_state()
+            expect(second["name"] != first["name"] and second["pressed"] == "false",
+                   f"series: ArrowRight did not move to the next photo ({first} -> {second})")
+            step("series: space keeps it", lambda: page.keyboard.press(" "), 0.2)
+            kept = tile_state()
+            expect(kept["pressed"] == "true" and kept["name"] == second["name"],
+                   f"series: space did not keep the photo ({kept})")
+            step("series: space lets it go again", lambda: page.keyboard.press(" "), 0.2)
+            expect(tile_state()["pressed"] == "false", "series: a second space did not let the photo go")
+            step("series: s skips the series", lambda: page.keyboard.press("s"), 0.4)
+            left = tile_state()
+            expect(left["cards"] == 1 and left["pressed"] == "true", f"series: s did not skip to the next series ({left})")
+            step("series: Enter asks first", lambda: page.keyboard.press("Enter"), 0.5)
+            dialog = page.evaluate("[document.getElementById('modal-series-confirm').classList.contains('active'),"
+                                   " document.getElementById('series-confirm-list').textContent,"
+                                   " document.activeElement.id]")
+            expect(dialog[0] and "RAW_DUPLICATES/near-duplicates" in dialog[1] and "null" not in dialog[1]
+                   and dialog[2] == "btn-series-go", f"series: the confirmation is missing or unclear ({dialog})")
+            expect_focus_trapped("modal-series-confirm", "series: confirmation")
+            page.focus("#btn-series-cancel")
+            step("series: Escape moves nothing", lambda: page.keyboard.press("Escape"), 0.4)
+            klein = vault / "RAW" / "2022" / "bursts" / "strand klein.jpg"
+            originals = [vault / "RAW" / "2019" / "zomer vakantie" / "strand 001.jpg", vault / "RAW" / "misc" / "strand 001 kopie.jpg"]
+            expect(klein.exists() and all(p.exists() for p in originals) and tile_state()["cards"] == 1
+                   and page.evaluate("!!document.activeElement.closest('.series-photo')"),
+                   "series: Escape on the confirmation moved something or lost the focus")
+            step("series: Enter, Enter moves", lambda: (page.keyboard.press("Enter"), page.wait_for_timeout(400),
+                                                        page.keyboard.press("Enter")), 1.0)
+            holding = vault / "RAW_DUPLICATES" / "near-duplicates"
+            expect(not klein.exists() and (holding / "2022" / "bursts" / "strand klein.jpg").exists()
+                   and all(p.exists() for p in originals) and tile_state()["cards"] == 0,
+                   "series: confirming did not move the resized photo to RAW_DUPLICATES/near-duplicates")
+            accept = lambda d: d.accept()
+            page.on("dialog", accept)
+            step("series: undo in the Herstelcentrum", lambda: (
+                page.click(".top-nav [data-view='recovery']"),
+                page.wait_for_selector(".recovery-entry"),
+                page.click(".recovery-entry:has-text('Beste uit reeks') .recovery-undo")), 1.5)
+            page.remove_listener("dialog", accept)
+            expect(klein.exists() and not (holding / "2022" / "bursts" / "strand klein.jpg").exists(),
+                   "series: the Herstelcentrum did not put the resized photo back")
 
             # Timeline of the whole vault from the index: only what is in view is drawn
             page.evaluate(f"localStorage.setItem('timeline_folders', JSON.stringify([{json.dumps(str(vault))}]))")
