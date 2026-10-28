@@ -36,17 +36,19 @@ def get_storage_stats() -> Dict[str, Any]:
         "free_gb": round(free / (2**30), 2),
         "percent_used": round((used / total) * 100, 1)
     }
-def _du_breakdown(target_path: Path, names: List[str]) -> Dict[str, float]:
+def _du_breakdown(target_path: Path, names: List[str]) -> Dict[str, int]:
     """
-    Size in GB of each named subfolder of target_path, measured with `du -sm`.
+    Size in bytes of each named subfolder of target_path, measured with `du -sk`.
     '--' ends du's options, so a folder named '-h' is measured instead of read as a flag;
     lines du could not measure (no leading number) are skipped instead of failing everything.
+    Kilobytes, not whole megabytes or rounded gigabytes: a folder of a few MB used to round
+    to 0.00 GB and drop out of the overview.
     """
     breakdown = {}
     if not names:
         return breakdown
     result = subprocess.run(
-        ["du", "-sm", "--", *names],
+        ["du", "-sk", "--", *names],
         cwd=str(target_path),
         capture_output=True,
         text=True,
@@ -60,14 +62,20 @@ def _du_breakdown(target_path: Path, names: List[str]) -> Dict[str, float]:
         if not sep:
             continue
         try:
-            size_mb = int(size_str)
+            size_kb = int(size_str)
         except ValueError:
             continue
-        gb_size = round(size_mb / 1024, 2)
-        if gb_size > 0:
-            breakdown[folder_name] = gb_size
+        breakdown[folder_name] = size_kb * 1024
     # Sort by size descending
     return dict(sorted(breakdown.items(), key=lambda item: item[1], reverse=True))
+
+
+def _breakdown_answer(sizes: Dict[str, int]) -> Dict[str, Any]:
+    """
+    'sizes' in bytes (what the page shows, as KB/MB/GB); 'breakdown' in GB with two decimals
+    as before, for older callers. Every measured folder is in both, also one under 5 MB.
+    """
+    return {"sizes": sizes, "breakdown": {name: round(size / 2**30, 2) for name, size in sizes.items()}}
 
 
 def _subfolder_names(target_path: Path) -> List[str]:
@@ -96,14 +104,14 @@ def _stats_folder(folder_path: Optional[str]) -> Path:
 def get_storage_breakdown() -> Dict[str, Any]:
     # Calculate sizes for immediate subdirectories using `du` for speed
     vault_path = config.VAULT_ROOT
-    return {"breakdown": _du_breakdown(vault_path, _subfolder_names(vault_path))}
+    return _breakdown_answer(_du_breakdown(vault_path, _subfolder_names(vault_path)))
 
 @router.get("/storage-breakdown-nested")
 def get_storage_breakdown_nested(folder_path: str = None) -> Dict[str, Any]:
     """Get storage breakdown for a specific folder and its subfolders."""
     target_path = _stats_folder(folder_path)
-    breakdown = _du_breakdown(target_path, _subfolder_names(target_path))
-    return {"breakdown": breakdown, "path": folder_path or "/"}
+    sizes = _du_breakdown(target_path, _subfolder_names(target_path))
+    return {**_breakdown_answer(sizes), "path": folder_path or "/"}
 
 @router.get("/largest-files")
 def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[str, Any]:
@@ -120,16 +128,17 @@ def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[str, Any
                 size_bytes = file_path.stat().st_size
             except OSError:
                 continue
-            size_mb = round(size_bytes / (1024 * 1024), 2)
-            if size_mb > 0:
+            if size_bytes > 0:
+                size_mb = round(size_bytes / (1024 * 1024), 2)
                 files_with_sizes.append({
                     "name": filename,
                     "path": str(file_path.relative_to(vault_path)),
+                    "size": size_bytes,
                     "size_mb": size_mb,
                     "size_gb": round(size_mb / 1024, 2)
                 })
 
-    sorted_files = sorted(files_with_sizes, key=lambda x: x['size_mb'], reverse=True)[:limit]
+    sorted_files = sorted(files_with_sizes, key=lambda x: x['size'], reverse=True)[:limit]
     return {"files": sorted_files, "path": folder_path or "/"}
 
 # "On this day" and photos-by-date use the capture date (backend/media_dates.py). Once

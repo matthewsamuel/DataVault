@@ -483,3 +483,24 @@ def test_shows_library_symlinked_out_of_the_vault_is_not_walked(client, vault, o
     os.symlink(outside, vault / "library")
     stories = client.get("/api/shows/stories").json()
     assert stories["shows"] == [] and stories["featured"] is None
+
+
+def test_storage_overview_keeps_folders_and_files_under_5_mb(client, vault):
+    """A folder of a few MB rounded to 0.00 GB and dropped out of the overview (Nog open, fase 2)."""
+    small = vault / "RAW" / "klein"
+    small.mkdir()
+    (small / "a.bin").write_bytes(b"\x01" * (300 * 1024))
+    data = client.get("/api/stats/storage-breakdown-nested", params={"folder_path": "RAW"}).json()
+    assert 300 * 1024 <= data["sizes"]["klein"] < 400 * 1024
+    assert data["breakdown"]["klein"] == 0.0          # still there for older callers
+    assert set(data["sizes"]) == set(data["breakdown"])
+    assert {"2019", "misc"} <= set(data["sizes"])     # the tiny test folders too
+    top = client.get("/api/stats/storage-breakdown").json()
+    assert "RAW" in top["sizes"] and top["sizes"]["RAW"] > 0
+
+    files = client.get("/api/stats/largest-files", params={"folder_path": "RAW/klein"}).json()["files"]
+    assert [(f["name"], f["size"]) for f in files] == [("a.bin", 300 * 1024)]
+    tiny = small / "b.txt"
+    tiny.write_bytes(b"x" * 10)
+    files = client.get("/api/stats/largest-files", params={"folder_path": "RAW/klein"}).json()["files"]
+    assert [f["name"] for f in files] == ["a.bin", "b.txt"]   # 10 bytes no longer rounds away
