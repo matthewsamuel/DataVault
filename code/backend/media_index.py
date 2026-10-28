@@ -16,8 +16,11 @@ Keeping it up to date (the 'index' job, job_types.index_type -> run_pass):
   A full pass (full=True, the 'Bibliotheek bijwerken' button) lists every folder
   and compares every file, which also catches a file edited in place.
 - Work is written in bounded batches (executemany). A folder's row is written only
-  after all of its files, so a cancelled, paused or interrupted pass resumes by
-  itself: what was written is unchanged and skipped next time.
+  after its files and its whole subtree (post-order), and never while something
+  below it could not be listed in this pass. So a stored row means "everything
+  below this folder was in the index at this mtime": a cancelled, paused or
+  interrupted pass resumes by itself (what was written is skipped next time, what
+  was not is listed again), and a folder that failed is tried again next time.
 - A file that is gone from its folder is marked missing (hidden from every query),
   never deleted at once. At the end of a pass, once every folder had its turn, a
   missing file whose (inode, size, birthtime), or (size, content hash), matches a
@@ -54,6 +57,10 @@ FLUSH_SECONDS = 2.0           # pending work is written at least this often
 PROGRESS_SECONDS = 0.5
 MOVE_HASH_LIMIT = 500         # files hashed per pass to recognise moves by content
 FAILED_FOLDERS_KEPT = 200
+# The walk's rules for media_folders rows. An index written under older rules (a
+# folder row written before its subfolders were visited) gets one pass that lists
+# every folder, as a full pass does, before unchanged folders are trusted again.
+WALK_VERSION = 2
 
 # Every column of a media row that comes from the file (media_meta.read_metadata)
 META_COLUMNS = ("kind", "ext", "size", "mtime_ns", "inode", "birthtime", "taken", "taken_source",
@@ -219,6 +226,7 @@ class _Pass:
         self.errors = errors                # folders and entries that could not be listed
         self.read_errors = read_errors      # files whose metadata could not be read
         self.vault_unavailable = vault_unavailable
+        self.relist = full or state(db).get("walk_version") != WALK_VERSION
         self.filter = ArchiveFilter(config)
         self.root = str(config.VAULT_ROOT)
         self.now = time.time()
@@ -226,6 +234,8 @@ class _Pass:
         self.failed: List[str] = []
         self.pending_reads: List[Tuple[str, os.stat_result]] = []
         self.pending_folders: List[Tuple[str, Optional[str], int]] = []
+        self.listed: Dict[str, Tuple[Optional[str], int]] = {}   # listed, row waits for the subtree
+        self.tainted = set()    # folders with something in or below them that failed in this pass
         self.pending_missing: List[str] = []
         self.pending_present: List[str] = []    # rows that were missing and are back
         self.pending_seen: List[str] = []       # listed folders: their present rows are seen now
@@ -254,20 +264,27 @@ class _Pass:
 
     def walk(self) -> None:
         self._load()
-        full_started = self.ctx.checkpoint.get("full_started") if self.full else None
-        if self.full and full_started is None:
+        full_started = self.ctx.checkpoint.get("full_started") if self.relist else None
+        if self.relist and full_started is None:
             full_started = self.now
             self.ctx.save_checkpoint({**self.ctx.checkpoint, "full_started": full_started})
         self.full_started = full_started
         self.visited = set()
-        stack = [self.root]
+        # (folder, False) visits a folder; (folder, True) comes back to it once its
+        # whole subtree was visited, and only then is its row due (post-order)
+        stack: List[Tuple[str, bool]] = [(self.root, False)]
         while stack:
             self.ctx.check()
-            folder = stack.pop()
+            folder, subtree_done = stack.pop()
+            if subtree_done:
+                self._commit(folder)
+                continue
             self.visited.add(folder)
             subdirs = self._visit(folder)
             if subdirs is not None:
-                stack.extend(sorted(subdirs, reverse=True))
+                if folder in self.listed:
+                    stack.append((folder, True))
+                stack.extend((path, False) for path in sorted(subdirs, reverse=True))
             self._progress()
             if len(self.pending_reads) >= BATCH_FILES or (
                     (self.pending_reads or self.pending_folders)
@@ -279,13 +296,11 @@ class _Pass:
         try:
             st = os.stat(folder)
         except OSError as e:
-            self.errors(folder, e)
-            self.failed.append(folder)
-            self.vault_unavailable()
+            self._fail(folder, e)
             return None
         known = self.known.get(folder)
         unchanged = known is not None and known[0] == st.st_mtime_ns and folder not in self.retry
-        if unchanged and self.full:
+        if unchanged and self.relist:
             # A full pass lists every folder once; a resumed one skips what it already listed
             unchanged = known[2] >= self.full_started
         if unchanged:
@@ -294,9 +309,7 @@ class _Pass:
         try:
             entries = scan_dir(Path(folder), self.filter)
         except OSError as e:
-            self.errors(folder, e)
-            self.failed.append(folder)
-            self.vault_unavailable()
+            self._fail(folder, e)
             return None
         self.counts["folders_listed"] += 1
         subdirs: List[str] = []
@@ -326,15 +339,39 @@ class _Pass:
             if path not in files and path not in unreadable and not row[3]:
                 self.pending_missing.append(path)
         self.pending_seen.append(folder)
-        if not unreadable:
+        parent = None if folder == self.root else os.path.dirname(folder)
+        self.listed[folder] = (parent, st.st_mtime_ns)
+        if unreadable:
             # A folder with an entry it could not read is listed again next time
-            parent = None if folder == self.root else os.path.dirname(folder)
-            self.pending_folders.append((folder, parent, st.st_mtime_ns))
-        else:
             self.failed.append(folder)
+            self._taint(folder)
         # Subfolders that are no longer there (removed, renamed, now hidden) are found
         # after the walk: known folders that were never visited
         return subdirs
+
+    def _fail(self, folder: str, error: OSError) -> None:
+        self.errors(folder, error)
+        self.failed.append(folder)
+        self._taint(folder)
+        self.vault_unavailable()
+
+    def _taint(self, folder: str) -> None:
+        """Something in folder failed: no row for it or any folder above it in this pass."""
+        while folder not in self.tainted:
+            self.tainted.add(folder)
+            if folder == self.root or len(folder) <= len(self.root):
+                break
+            folder = os.path.dirname(folder)
+
+    def _commit(self, folder: str) -> None:
+        """
+        The whole subtree of a listed folder was visited: its row is due, unless
+        something in or below it failed. Then the row keeps its old mtime (or stays
+        absent), so the next pass lists the folder again and retries what failed.
+        """
+        parent, mtime_ns = self.listed.pop(folder)
+        if folder not in self.tainted:
+            self.pending_folders.append((folder, parent, mtime_ns))
 
     def _progress(self, force: bool = False) -> None:
         now = time.monotonic()
@@ -438,6 +475,10 @@ def run_pass(ctx, config, db, full: bool, errors, read_errors, vault_unavailable
             "last_seconds": round(time.monotonic() - started, 3)}
     if complete:
         info["last_complete_at"] = now
+    if run.relist and complete:
+        # Every folder was listed under the current rules (a failed one would leave
+        # an older row above it that the next pass could trust)
+        info["walk_version"] = WALK_VERSION
     if full:
         info["last_full_at"] = now
     db.set_setting(STATE_KEY, info)

@@ -357,7 +357,7 @@ def test_a_paused_pass_resumes_without_reading_again_what_it_wrote(client, confi
 
     def slow_read(path, st):
         reads.append(path)
-        if len(reads) == pause_at:
+        if pause_at and len(reads) == pause_at:
             _manager().pause(job_id["id"])
         return original(path, st)
 
@@ -369,11 +369,13 @@ def test_a_paused_pass_resumes_without_reading_again_what_it_wrote(client, confi
     partial = len(_paths(config))
     assert 0 < partial < 40
     reads.clear()
+    pause_at = None
     _manager().resume(job_id["id"])
     job = _manager().wait(job_id["id"], statuses=("queued", "running"), timeout=60)
     assert job["status"] == "done", job
     result = client.get(f"/api/jobs/{job_id['id']}/result").json()["result"]
     assert result["files"] == len(_paths(config)) and len(reads) == result["files"] - partial
+    _assert_index_matches_disk(client, config, set())
 
 
 def test_a_cancelled_pass_leaves_a_consistent_index(client, config, monkeypatch):
@@ -396,6 +398,7 @@ def test_a_cancelled_pass_leaves_a_consistent_index(client, config, monkeypatch)
     monkeypatch.setattr(media_index, "read_file", original)
     result = _index(client)
     assert result["complete"] and result["files"] == len(_paths(config))
+    _assert_index_matches_disk(client, config, set())
 
 
 def test_an_unplugged_vault_makes_the_pass_wait_and_finish_when_it_returns(client, config, monkeypatch):
@@ -422,6 +425,130 @@ def test_an_unplugged_vault_makes_the_pass_wait_and_finish_when_it_returns(clien
     assert job["status"] == "done", job
     result = client.get(f"/api/jobs/{job_id}/result").json()["result"]
     assert result["complete"] and result["files"] == len(_paths(config)) and result["removed"] == 0
+    _assert_index_matches_disk(client, config, set())
+
+
+def _new_root_folders(config, count=12):
+    """Many sibling folders at the vault root, each with two photos (they come early in the walk)."""
+    added = set()
+    for i in range(count):
+        for j in range(2):
+            rel = f"Map {i:02d}/foto {j}.jpg"
+            _photo(config.VAULT_ROOT / rel, (i, j, 1), rel, f"2015:0{1 + j}:{10 + i} 12:00:00")
+            added.add(rel)
+    return added
+
+
+def _assert_index_matches_disk(client, config, added):
+    assert added <= _paths(config)
+    full = _index(client, full=True)
+    # A full pass that finds nothing new or changed: the index already held the disk
+    assert (full["new"], full["changed"], full["read"], full["removed"]) == (0, 0, 0, 0), full
+    assert _scan(client, config.VAULT_ROOT)["source"] == "index"
+
+
+@pytest.mark.parametrize("how", ["cancel", "pause"])
+def test_an_interrupted_pass_leaves_no_folder_out_of_the_index(client, config, monkeypatch, how):
+    # A folder's row is only written once its whole subtree is in the index, so a
+    # stored root row can never hide subfolders that the interrupted pass did not reach
+    from backend import media_index
+    monkeypatch.setattr(media_index, "_updater", lambda: None)
+    _index(client)
+    added = _new_root_folders(config)
+    monkeypatch.setattr(media_index, "BATCH_FILES", 3)
+    original = media_index.read_file
+    count = []
+    job_id = {}
+
+    def read(path, st):
+        count.append(1)
+        if len(count) == 5:
+            (_manager().cancel if how == "cancel" else _manager().pause)(job_id["id"])
+        return original(path, st)
+
+    monkeypatch.setattr(media_index, "read_file", read)
+    job_id["id"] = client.post("/api/jobs", json={"type": "index", "params": {}}).json()["job"]["id"]
+    job = _manager().wait(job_id["id"], timeout=60)
+    assert job["status"] == ("cancelled" if how == "cancel" else "paused"), job
+    assert not added <= _paths(config)
+    # Not fresh: the timeline walks instead of answering from a partial index
+    assert _scan(client, config.VAULT_ROOT)["source"] == "walk"
+    monkeypatch.setattr(media_index, "read_file", original)
+    if how == "cancel":
+        result = _index(client)
+    else:
+        _manager().resume(job_id["id"])
+        job = _manager().wait(job_id["id"], statuses=("queued", "running"), timeout=60)
+        assert job["status"] == "done", job
+        result = client.get(f"/api/jobs/{job_id['id']}/result").json()["result"]
+    assert result["complete"] and result["files"] == len(_paths(config))
+    _assert_index_matches_disk(client, config, added)
+
+
+def test_a_cold_pass_cancelled_early_is_finished_by_the_next_incremental_pass(client, config, monkeypatch):
+    from backend import media_index
+    added = _new_root_folders(config)
+    monkeypatch.setattr(media_index, "BATCH_FILES", 3)
+    original = media_index.read_file
+    count = []
+    job_id = {}
+
+    def read(path, st):
+        count.append(1)
+        if len(count) == 7:
+            _manager().cancel(job_id["id"])
+        return original(path, st)
+
+    monkeypatch.setattr(media_index, "read_file", read)
+    job_id["id"] = client.post("/api/jobs", json={"type": "index", "params": {}}).json()["job"]["id"]
+    assert _manager().wait(job_id["id"], timeout=60)["status"] == "cancelled"
+    monkeypatch.setattr(media_index, "read_file", original)
+    result = _index(client)
+    assert result["complete"] and result["files"] == len(_paths(config))
+    _assert_index_matches_disk(client, config, added)
+
+
+def test_a_new_folder_that_could_not_be_listed_is_tried_again(client, config, monkeypatch):
+    from backend import media_index
+    monkeypatch.setattr(media_index, "_updater", lambda: None)
+    _index(client)
+    new = config.VAULT_ROOT / "library/Nieuw"
+    _photo(new / "a.jpg", (2, 2, 2), "a", "2019:05:05 05:05:05")
+    os.chmod(new, 0)
+    try:
+        result = _index(client)
+        assert result["complete"] is False and result["errors"] >= 1
+        assert _scan(client, config.VAULT_ROOT / "library")["source"] == "walk"
+    finally:
+        os.chmod(new, 0o755)
+    # Still not fresh after the folder became readable: its parent was never marked done
+    assert _scan(client, config.VAULT_ROOT / "library")["source"] == "walk"
+    result = _index(client)
+    assert result["complete"] is True and result["new"] == 1
+    assert "library/Nieuw/a.jpg" in _paths(config)
+    assert _scan(client, config.VAULT_ROOT / "library")["source"] == "index"
+    _assert_index_matches_disk(client, config, {"library/Nieuw/a.jpg"})
+
+
+def test_an_index_from_the_older_walk_is_listed_once_in_full(client, config):
+    # An index written before folder rows waited for their subtree may have a root
+    # row that hides unvisited subfolders: the next pass lists every folder once
+    from backend import media_index
+    from backend.routes.library import db
+    _index(client)
+    lost = str(config.VAULT_ROOT / "library") + "/"
+    with _sqlite3.connect(str(config.DB_PATH)) as conn:
+        conn.execute("DELETE FROM media WHERE path >= ? AND path < ?", (lost, lost[:-1] + "0"))
+        conn.execute("DELETE FROM media_folders WHERE path >= ? AND path < ?", (lost, lost[:-1] + "0"))
+    info = media_index.state(db)
+    info.pop("walk_version")
+    db.set_setting(media_index.STATE_KEY, info)
+    result = _index(client)
+    assert result["complete"] and result["new"] > 0 and result["folders_unchanged"] == 0
+    assert any(p.startswith("library/") for p in _paths(config))
+    again = _index(client)
+    assert (again["folders_listed"], again["read"]) == (0, 0)
+    _assert_index_matches_disk(client, config, set())
 
 
 def test_automatic_passes_keep_only_their_last_five_jobs(client, config):
