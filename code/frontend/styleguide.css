@@ -1,0 +1,129 @@
+/* Opmaak van de stijlgids zelf (styleguide.html); alleen tokens, geen eigen kleuren */
+
+.sg-body {
+    min-height: 100vh;
+    background: var(--surface-page);
+}
+
+.sg-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    padding: var(--space-2xl) var(--page-gutter) var(--space-xl);
+}
+
+.sg-header .nav-brand-mark {
+    width: 40px;
+    height: 40px;
+    font-size: var(--icon-lg);
+}
+
+.sg-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+
+.sg-column {
+    background: var(--surface-page);
+    color: var(--text-primary);
+    padding: var(--space-xl) var(--page-gutter) var(--space-4xl);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xl);
+    min-width: 0;
+}
+
+.sg-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.sg-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.sg-top {
+    align-items: flex-start;
+}
+
+.sg-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-lg);
+}
+
+.sg-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+}
+
+.sg-swatch {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    color: var(--text-secondary);
+}
+
+.sg-swatch span {
+    width: 64px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-hairline);
+}
+
+.sg-type {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.sg-check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--fs-sm);
+}
+
+.sg-note {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+.sg-thumbs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-md);
+}
+
+.sg-thumbs .thumb-tile {
+    aspect-ratio: 1;
+}
+
+.sg-static {
+    width: 100%;
+    max-width: none;
+    position: static;
+}
+
+.sg-toasts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.menu.sg-static {
+    width: 200px;
+}
+
+@media (max-width: 1100px) {
+    .sg-columns {
+        grid-template-columns: 1fr;
+    }
+}

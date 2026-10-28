@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="nl">
+
+<!--
+    Levende stijlgids van DataVault ("Modern, groen accent"). Lokaal te openen op
+    http://127.0.0.1:<poort>/styleguide.html; niet gelinkt in het menu.
+    Alles hieronder gebruikt alleen de tokens en componentklassen uit style.css, en staat er
+    twee keer: links licht, rechts donker (class="theme-scope" met data-theme).
+-->
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DataVault · stijlgids</title>
+    <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
+    <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css?v=46">
+    <link rel="stylesheet" href="styleguide.css?v=1">
+</head>
+
+<body class="sg-body">
+    <header class="sg-header">
+        <span class="nav-brand-mark" aria-hidden="true"><i class="fas fa-vault"></i></span>
+        <div>
+            <h1 class="page-title">Stijlgids</h1>
+            <p class="page-subtitle">Tokens en componenten van DataVault. Nieuwe schermen gebruiken alleen wat hier
+                staat. Links het lichte thema, rechts het donkere.</p>
+        </div>
+    </header>
+
+    <div class="sg-columns">
+        <template id="sg-content">
+            <section class="sg-section">
+                <h2 class="section-title">Kleuren</h2>
+                <p class="overline">Vlakken</p>
+                <div class="sg-swatches">
+                    <div class="sg-swatch"><span style="background: var(--surface-page)"></span>page</div>
+                    <div class="sg-swatch"><span style="background: var(--surface-card)"></span>card</div>
+                    <div class="sg-swatch"><span style="background: var(--surface-raised)"></span>raised</div>
+                    <div class="sg-swatch"><span style="background: var(--surface-overlay)"></span>overlay</div>
+                    <div class="sg-swatch"><span style="background: var(--media-bg)"></span>media</div>
+                </div>
+                <p class="overline">Tekst en randen</p>
+                <div class="sg-swatches">
+                    <div class="sg-swatch"><span style="background: var(--text-primary)"></span>primary</div>
+                    <div class="sg-swatch"><span style="background: var(--text-secondary)"></span>secondary</div>
+                    <div class="sg-swatch"><span style="background: var(--text-tertiary)"></span>tertiary</div>
+                    <div class="sg-swatch"><span style="background: var(--border-hairline)"></span>hairline</div>
+                    <div class="sg-swatch"><span style="background: var(--border-default)"></span>default</div>
+                    <div class="sg-swatch"><span style="background: var(--border-strong)"></span>strong</div>
+                </div>
+                <p class="overline">Accent en betekenis</p>
+                <div class="sg-swatches">
+                    <div class="sg-swatch"><span style="background: var(--accent)"></span>accent</div>
+                    <div class="sg-swatch"><span style="background: var(--accent-hover)"></span>hover</div>
+                    <div class="sg-swatch"><span style="background: var(--accent-subtle)"></span>subtle</div>
+                    <div class="sg-swatch"><span style="background: var(--success)"></span>success</div>
+                    <div class="sg-swatch"><span style="background: var(--warning)"></span>warning</div>
+                    <div class="sg-swatch"><span style="background: var(--danger)"></span>danger</div>
+                    <div class="sg-swatch"><span style="background: var(--info)"></span>info</div>
+                </div>
+            </section>
+
+            <section class="sg-section">
+                <h2 class="section-title">Typografie</h2>
+                <div class="sg-type">
+                    <div style="font-size: var(--fs-4xl); font-weight: var(--fw-bold); letter-spacing: var(--tracking-tighter)">Goedemorgen</div>
+                    <h1 class="page-title">Paginatitel (24)</h1>
+                    <div class="section-title">Sectietitel (17)</div>
+                    <div class="card-title">Kaarttitel (15)</div>
+                    <p>Lopende tekst (14): je digitale archief, volledig lokaal op deze Mac.</p>
+                    <p class="card-text">Secundaire tekst (13) voor uitleg bij een onderdeel.</p>
+                    <p class="stat-tile-meta">Meta (12): bijgewerkt 17:38</p>
+                    <p class="overline">Overline (11)</p>
+                    <p><span class="mono">/Volumes/T7/vault/RAW/2019 · 4.096 · a1b2c3</span> (mono: alleen techniek en cijfers)</p>
+                </div>
+            </section>
+
+            <section class="sg-section">
+                <h2 class="section-title">Knoppen</h2>
+                <div class="sg-row">
+                    <button class="btn btn-primary"><i class="fas fa-play" aria-hidden="true"></i> Primair</button>
+                    <button class="btn btn-secondary">Secundair</button>
+                    <button class="btn btn-ghost">Spook</button>
+                    <button class="btn btn-danger">Gevaarlijk</button>
+                    <button class="btn btn-danger-solid">Wissen bevestigen</button>
+                    <button class="btn btn-secondary btn-icon" aria-label="Instellingen"><i class="fas fa-cog" aria-hidden="true"></i></button>
+                </div>
+                <div class="sg-row">
+                    <button class="btn btn-primary btn-sm">Klein</button>
+                    <button class="btn btn-secondary btn-sm">Klein</button>
+                    <button class="btn btn-primary btn-lg">Groot</button>
+                    <button class="btn btn-primary" disabled>Uitgeschakeld</button>
+                    <button class="btn btn-primary is-loading" disabled>Bezig</button>
+                    <button class="link-button">Link</button>
+                </div>
+                <p class="sg-note">Hover, focus (Tab) en indrukken zijn live te zien.</p>
+            </section>
+
+            <section class="sg-section">
+                <h2 class="section-title">Invoer</h2>
+                <div class="sg-row">
+                    <input class="input" placeholder="Invoerveld" aria-label="Voorbeeld invoerveld">
+                    <select class="select" aria-label="Voorbeeld keuzelijst">
+                        <option>Keuzelijst</option>
+                        <option>Tweede</option>
+                    </select>
+                    <div class="search-field">
+                        <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                        <input class="input" type="search" placeholder="Zoeken…" aria-label="Voorbeeld zoeken">
+                    </div>
+                </div>
+                <div class="sg-row">
+                    <label class="sg-check"><input type="checkbox" class="checkbox" checked> Vinkje</label>
+                    <label class="sg-check"><input type="checkbox" class="checkbox"> Vinkje uit</label>
+                    <label class="sg-check"><input type="radio" class="radio" name="r" checked> Keuze</label>
+                    <label class="sg-check"><input type="radio" class="radio" name="r"> Keuze</label>
+                    <label class="switch"><input type="checkbox" checked aria-label="Schakelaar"><span class="slider"></span></label>
+                    <label class="switch"><input type="checkbox" aria-label="Schakelaar uit"><span class="slider"></span></label>
+                </div>
+            </section>
+
+            <section class="sg-section">
+                <h2 class="section-title">Chips, pillen, keuzes en tabs</h2>
+                <div class="sg-row">
+                    <span class="chip">vault <button class="chip-remove" aria-label="Weghalen">×</button></span>
+                    <button class="pill active">Alles (24)</button>
+                    <button class="pill">Foto's</button>
+                    <button class="pill">Video's</button>
+                </div>
+                <div class="sg-row">
+                    <div class="segmented" role="group" aria-label="Weergave">
+                        <button class="active" aria-pressed="true">Raster</button>
+                        <button aria-pressed="false">Lijst</button>
+                    </div>
+                </div>
+                <div class="tabs">
+                    <button class="tab active">Submappen</button>
+                    <button class="tab">Grootste bestanden</button>
+                </div>
+            </section>
+
+            <section class="sg-section">
+                <h2 class="section-title">Kaarten, cijfers en badges</h2>
+                <div class="sg-grid">
+                    <div class="stat-tile">
+                        <div class="stat-tile-label"><i class="fas fa-image" aria-hidden="true"></i> Foto's</div>
+                        <div class="stat-tile-value">12.480</div>
+                        <div class="stat-tile-meta">In 312 mappen</div>
+                    </div>
+                    <div class="card card-interactive">
+                        <div class="card-header">
+                            <div class="card-title"><i class="fas fa-folder" aria-hidden="true"></i> Kaart</div>
+                            <span class="badge badge-accent">Nieuw</span>
+                        </div>
+                        <p class="card-text">Een kaart groepeert één onderwerp. Klikbaar met card-interactive.</p>
+                    </div>
+                </div>
+                <div class="sg-row">
+                    <span class="badge">Neutraal</span>
+                    <span class="badge badge-success">Blijft</span>
+                    <span class="badge badge-warning">Let op</span>
+                    <span class="badge badge-danger">Naar RAW_DUPLICATES</span>
+                    <span class="badge badge-info">Info</span>
+                    <img class="avatar" src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha">
+                    <kbd>⌘</kbd><kbd>K</kbd>
+                    <span data-tooltip="Een rustig label" tabindex="0" class="sg-note">Tooltip (hover)</span>
+                </div>
+            </section>
+
+            <section class="sg-section">
+                <h2 class="section-title">Fototegels</h2>
+                <div class="sg-thumbs">
+                    <div class="thumb-tile"><img src="assets/audio_thumbs/audio_thumb_var1.png" alt=""></div>
+                    <div class="thumb-tile selected"><img src="assets/audio_thumbs/audio_thumb_var2.png" alt=""></div>
+                    <div class="thumb-tile"><img class="loading" alt=""></div>
+                    <div class="thumb-tile"><img src="assets/audio_thumbs/audio_thumb_var3.png" alt=""><span class="thumb-caption">Met bijschrift</span></div>
+                </div>
+            </section>
+
+            <section class="sg-section">
+                <h2 class="section-title">Venster, menu en melding</h2>
+                <div class="modal-container sg-static">
+                    <div class="modal-header">
+                        <h2 class="modal-title">Venstertitel</h2>
+                        <button class="modal-close" aria-label="Sluiten">×</button>
+                    </div>
+                    <div class="modal-body modal-body-list">
+                        <p class="card-text">Inhoud van een venster met een lijst of tekst.</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary">Annuleren</button>
+                        <button class="btn btn-primary">Bevestigen</button>
+                    </div>
+                </div>
+                <div class="sg-row sg-top">
+                    <div class="menu sg-static" role="menu">
+                        <button class="menu-item active" role="menuitemradio" aria-checked="true"><i class="fas fa-check menu-check" aria-hidden="true"></i> Automatisch</button>
+                        <button class="menu-item" role="menuitemradio" aria-checked="false"><i class="fas fa-check menu-check" aria-hidden="true"></i> Licht</button>
+                        <button class="menu-item" role="menuitemradio" aria-checked="false"><i class="fas fa-check menu-check" aria-hidden="true"></i> Donker</button>
+                    </div>
+                    <div class="sg-toasts">
+                        <div class="toast success"><div class="toast-header"><strong>Opgeslagen</strong><button aria-label="Sluiten">×</button></div><div class="toast-body">De map is verplaatst.</div></div>
+                        <div class="toast error"><div class="toast-header"><strong>Mislukt</strong><button aria-label="Sluiten">×</button></div><div class="toast-body">Het archief is niet bereikbaar.</div></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="sg-section">
+                <h2 class="section-title">Lege staat, laden en voortgang</h2>
+                <div class="card sg-static">
+                    <div class="empty-state">
+                        <i class="fas fa-folder-open empty-state-icon" aria-hidden="true"></i>
+                        <div class="empty-state-title">Nog niets om te tonen</div>
+                        <div class="empty-state-text">Eén zin die uitlegt wat hier komt en wat je kunt doen.</div>
+                        <button class="btn btn-primary btn-small empty-state-action">Map kiezen</button>
+                    </div>
+                </div>
+                <div class="skeleton-list">
+                    <div class="skeleton-row"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
+                </div>
+                <div class="progress"><div class="progress-fill" style="width: 62%"></div></div>
+                <div class="progress is-indeterminate"><div class="progress-fill"></div></div>
+                <div class="spinner"></div>
+            </section>
+        </template>
+
+        <div class="theme-scope sg-column" data-theme="light"></div>
+        <div class="theme-scope sg-column" data-theme="dark"></div>
+    </div>
+
+    <script src="styleguide.js?v=1"></script>
+</body>
+
+</html>
