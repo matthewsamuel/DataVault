@@ -33,6 +33,9 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 CODE_DIR = Path(__file__).resolve().parents[2]
 VENV_PYTHON = CODE_DIR / "venv" / "bin" / "python"
+BIG_FOLDER = "Groot"
+BIG_FILES = 1500
+MAX_THUMBS_ON_OPEN = 100
 VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline"]
 
 
@@ -47,6 +50,13 @@ def start_server(workdir: Path):
     python = str(VENV_PYTHON if VENV_PYTHON.exists() else sys.executable)
     subprocess.run([python, str(CODE_DIR / "tests/fixtures/vault_builder.py"), str(vault)],
                    check=True, stdout=subprocess.DEVNULL)
+    # A big folder: opening it may only fetch thumbnails for what is (nearly) in view
+    big = vault / "RAW" / BIG_FOLDER
+    big.mkdir()
+    sample = next(f for f in sorted((vault / "RAW" / "misc").iterdir())
+                  if f.suffix == ".jpg" and not f.name.startswith(".")).read_bytes()
+    for i in range(BIG_FILES):
+        (big / f"foto_{i:04d}.jpg").write_bytes(sample + str(i).encode())   # distinct bytes, still a JPEG
     port = free_port()
     env = dict(os.environ, DATAVAULT_TESTING="1", DATAVAULT_CONFIG=str(workdir / "vault_config.json"),
                DATAVAULT_LOG_FILE=str(workdir / "server.log"))
@@ -122,6 +132,20 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("viewer: move dialog", lambda: page.click("#btn-move-file"), 0.5)
             step("viewer: close dialog", lambda: page.keyboard.press("Escape"), 0.4)
             step("viewer: close", lambda: page.keyboard.press("Escape"), 0.4)
+
+            # Files: a folder with 1500 photos renders in chunks with lazy thumbnails
+            thumbs = set()
+            page.on("request", lambda r: thumbs.add(r.url) if "/api/thumb" in r.url else None)
+            big = str(vault / "RAW" / BIG_FOLDER)
+            step("viewer: open folder with 1500 files",
+                 lambda: page.evaluate(f"selectFolder({json.dumps(big)})"), 3.0)
+            cards = page.evaluate("document.querySelectorAll('#media-grid .media-card').length")
+            if len(thumbs) >= MAX_THUMBS_ON_OPEN or cards >= BIG_FILES:
+                problems.append(f"big folder: {len(thumbs)} thumbnail requests and {cards} cards on open")
+            step("viewer: scroll to the end", lambda: page.evaluate(
+                "window.scrollTo(0, document.documentElement.scrollHeight)"), 1.0)
+            if page.evaluate("document.querySelectorAll('#media-grid .media-card').length") <= cards:
+                problems.append("big folder: scrolling down rendered no more cards")
 
             # Home: chat full screen open and closed, theme switch
             step("home: chat full screen", lambda: (page.click(".nav-tab[data-view='home']"),

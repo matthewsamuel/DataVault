@@ -435,6 +435,14 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   Escape helemaal niets). Nu werken ze meteen. Vraag je in de schermvullende chat om een map te
   openen, dan gaat de chat dicht zodat je de map ook echt ziet.
 - Meldingen (toasts) staan nu altijd bovenop, ook boven de viewer en de slideshow.
+- Files: een map met duizenden bestanden opent nu meteen. De kaarten verschijnen in stukken van
+  60 terwijl je scrolt, en een miniatuur wordt pas opgehaald als hij (bijna) in beeld komt.
+  Voorheen vroeg één map van 1500 foto's direct 1500 miniaturen op, die de server allemaal op
+  de schijf maakte en bewaarde, ook als je alleen de eerste rij bekeek. Het zoekveld filtert pas
+  als je even stopt met typen, in plaats van bij elke letter het hele raster opnieuw te bouwen.
+- Files: verplaats je een foto vanuit de tijdlijn, de chat of een slideshow, dan verdwijnt hij nu
+  ook uit de Files-weergave (voorheen bleef de kaart staan en gaf een klik een foutmelding). Na
+  verplaatsen springt een lange lijst niet meer terug naar boven.
 - Spotify: lukte het laden één keer niet (bijv. tijdens een herstart), dan bleef de pagina leeg
   tot je de hele app herlaadde. Nu zie je een melding met de knop "Opnieuw proberen", en de
   pagina werkt gewoon weer zodra het lukt.

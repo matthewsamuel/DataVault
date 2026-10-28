@@ -515,31 +515,77 @@ function toggleView(view) {
 }
 
 // ==================== MEDIA GRID RENDERING ====================
+// Een map kan duizenden bestanden hebben. De kaarten worden in stukken van GRID_CHUNK
+// getekend: het volgende stuk pas als je in de buurt van het einde scrolt (een sentinel
+// onder het raster, zoals in duplicates.js). Elke miniatuur laadt bovendien lazy, dus de
+// server maakt alleen miniaturen voor wat je (bijna) ziet, niet voor de hele map.
 
-function renderMediaGrid() {
+const GRID_CHUNK = 60;
+let gridItems = [];        // mappen eerst, dan bestanden: de volgorde van het raster
+let gridRendered = 0;      // zoveel kaarten van gridItems staan er nu
+let gridObserver = null;
+
+// keepCount: na verplaatsen of verversen evenveel kaarten tonen als ervoor, zodat de
+// scrollpositie niet verspringt
+function renderMediaGrid(keepCount = false) {
     const grid = document.getElementById('media-grid');
+    const previous = keepCount ? gridRendered : 0;
+    if (gridObserver) {
+        gridObserver.disconnect();
+        gridObserver = null;
+    }
     grid.innerHTML = '';
+    gridRendered = 0;
 
     if (filteredMedia.length === 0) {
+        gridItems = [];
         grid.innerHTML = '<p class="text-center">No media files found.</p>';
         return;
     }
 
-    // Separate folders and media files
-    const folders = filteredMedia.filter(item => item.type === 'folder');
-    const mediaFiles = filteredMedia.filter(item => item.type !== 'folder');
+    // Mappen eerst, dan de bestanden
+    gridItems = filteredMedia.filter(item => item.type === 'folder')
+        .concat(filteredMedia.filter(item => item.type !== 'folder'));
+    renderMoreGridCards(Math.max(GRID_CHUNK, previous));
+    observeGridEnd(grid);
+}
 
-    // Render folders first
-    folders.forEach(folder => {
-        const card = createFolderCard(folder);
-        grid.appendChild(card);
-    });
+function renderMoreGridCards(count = GRID_CHUNK) {
+    const grid = document.getElementById('media-grid');
+    const end = Math.min(gridItems.length, gridRendered + count);
+    const fragment = document.createDocumentFragment();
+    for (let i = gridRendered; i < end; i++) {
+        const item = gridItems[i];
+        fragment.appendChild(item.type === 'folder' ? createFolderCard(item) : createMediaCard(item));
+    }
+    gridRendered = end;
+    grid.appendChild(fragment);
+}
 
-    // Then render media files
-    mediaFiles.forEach(file => {
-        const card = createMediaCard(file);
-        grid.appendChild(card);
-    });
+function observeGridEnd(grid) {
+    let sentinel = document.getElementById('media-grid-sentinel');
+    if (!sentinel) {
+        sentinel = createEl('div', { id: 'media-grid-sentinel', 'aria-hidden': 'true' });
+        grid.after(sentinel);
+    }
+    if (gridRendered >= gridItems.length) return;
+    if (!('IntersectionObserver' in window)) {
+        renderMoreGridCards(gridItems.length);
+        return;
+    }
+    gridObserver = new IntersectionObserver(entries => {
+        if (!entries.some(e => e.isIntersecting)) return;
+        renderMoreGridCards();
+        if (gridRendered >= gridItems.length) {
+            gridObserver.disconnect();
+            gridObserver = null;
+            return;
+        }
+        // Blijft de sentinel in beeld (groot scherm), dan meteen nog een stuk
+        gridObserver.unobserve(sentinel);
+        gridObserver.observe(sentinel);
+    }, { rootMargin: '600px 0px' });   // de pagina zelf scrolt (de viewport is de root)
+    gridObserver.observe(sentinel);
 }
 
 function createFolderCard(folder) {
@@ -637,7 +683,9 @@ function createMediaCard(file) {
         img.style.backgroundColor = 'var(--bg-tertiary)';
     });
 
-    // Set src to start loading (async, non-blocking)
+    // Pas laden als de kaart (bijna) in beeld komt; lazy moet vóór src gezet worden
+    img.loading = 'lazy';
+    img.decoding = 'async';
     img.src = thumbUrl;
 
     card.appendChild(img);
@@ -693,7 +741,18 @@ function searchKey(text) {
     return String(text || '').normalize('NFC').toLowerCase().trim();
 }
 
+// Tijdens het typen pas na een korte pauze filteren: bij duizenden bestanden zou elke
+// toetsaanslag het hele raster opnieuw opbouwen
+const SEARCH_DEBOUNCE_MS = 200;
+let searchTimer = null;
+
+function queueGlobalSearch(query) {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => handleGlobalSearch(query), SEARCH_DEBOUNCE_MS);
+}
+
 function handleGlobalSearch(query) {
+    clearTimeout(searchTimer);
     query = searchKey(query);
 
     if (!query) {
@@ -753,10 +812,13 @@ function openMediaModal(file) {
     openViewer(gridFiles(), gridFiles().indexOf(file), { onRemoved: removeFromFilesView });
 }
 
+// Haalt een verplaatst bestand uit de Files-weergave, ook als het vanuit de tijdlijn, de chat
+// of een slideshow verplaatst werd (anders bleef de kaart staan en gaf een klik een 404)
 function removeFromFilesView(file) {
+    if (!currentMedia.some(f => f.path === file.path)) return;
     currentMedia = currentMedia.filter(f => f.path !== file.path);
     filteredMedia = filteredMedia.filter(f => f.path !== file.path);
-    renderMediaGrid();
+    renderMediaGrid(true);
 }
 
 // Video of audio van het vorige bestand stoppen (ook bij bladeren, niet alleen bij sluiten)
@@ -1212,6 +1274,7 @@ async function confirmMoveFile() {
 
     showToast('Moved', moved.message || 'File successfully moved', 'success');
     btn.replaceChildren(...originalContent);
+    removeFromFilesView(file);
 
     if (activeShow && activeShow.files.includes(file)) {
         // Add a fly-away animation to the current active slide
