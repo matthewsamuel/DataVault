@@ -453,6 +453,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - De lijst met shows: de map `library` zelf is geen show meer, een map met alleen submappen
   (en bijv. een `.DS_Store`) wordt wel een show met een voorbeeld uit een submap, en één map die
   niet te lezen is laat niet meer alle volgende shows stilletjes verdwijnen.
+- Stemmen die tegelijk binnenkomen (bijv. vanuit twee tabbladen) tellen nu allemaal mee. Voorheen
+  kon de ene stem de andere overschrijven: na 40 gelijktijdige duimpjes omhoog stond een foto op
+  1350 in plaats van 3000, terwijl de teller wel 40 stemmen zei. De regel zelf is ongewijzigd
+  (start 1000, +50 of −50 per stem, nooit onder de 100) en wordt nu ook door tests bewaakt.
 
 ### Thema en zuinigheid
 - Het thema "Auto" volgt nu echt de systeeminstelling van macOS (licht of donker), ook als die

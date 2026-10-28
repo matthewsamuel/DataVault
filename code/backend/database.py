@@ -203,6 +203,22 @@ class Database:
                     updated_at = CURRENT_TIMESTAMP
             """, (path, new_rating, new_rating))
 
+    def apply_vote(self, path: str, change: int, floor: int = 100, start: int = 1000) -> Tuple[int, int]:
+        """Add change to a file's rating (never below floor) and count the vote, in one
+        statement, so votes that arrive at the same time can never overwrite each other.
+        A file without a rating starts at start. Returns (rating, votes)."""
+        with self._connect() as conn:
+            rating, votes = conn.execute("""
+                INSERT INTO file_ratings (path, rating, votes, updated_at)
+                VALUES (?, max(?, ? + ?), 1, CURRENT_TIMESTAMP)
+                ON CONFLICT(path) DO UPDATE SET
+                    rating = max(?, rating + ?),
+                    votes = votes + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING rating, votes
+            """, (path, floor, start, change, floor, change)).fetchone()
+        return rating, votes
+
     def get_all_ratings(self) -> Dict[str, int]:
         """Get all file ratings as a dictionary for bulk access"""
         with self._connect() as conn:

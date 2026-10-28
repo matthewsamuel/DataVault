@@ -47,6 +47,9 @@ def is_folder_enabled(path: Path, disabled_folders: List[str]) -> bool:
 
 SHOW_MAX_FILES = 2000      # a folder show plays at most this many (picked from all files)
 FEATURED_SIZE = 50         # Feeling Lucky
+RATING_START = 1000        # the rating of a file nobody voted on yet
+VOTE_STEP = 50             # one up-vote adds this, one down-vote subtracts it
+RATING_FLOOR = 100         # a rating never drops below this
 
 
 def is_show_media(path) -> bool:
@@ -87,7 +90,7 @@ def weighted_order(paths: List[str], ratings: Dict[str, int], k: Optional[int] =
     k = len(paths) if k is None else min(k, len(paths))
     if k <= 0:
         return []
-    keyed = ((random.random() ** (1.0 / show_weight(ratings.get(p, 1000))), p) for p in paths)
+    keyed = ((random.random() ** (1.0 / show_weight(ratings.get(p, RATING_START))), p) for p in paths)
     return [p for _, p in heapq.nlargest(k, keyed)]
 
 
@@ -107,7 +110,7 @@ def describe_show_file(path: str, ratings: Dict[str, int]) -> Optional[Dict[str,
         "size": st.st_size,
         "modified": st.st_mtime,
         "type": "video" if is_video(p) else "photo",
-        "rating": ratings.get(path, 1000),
+        "rating": ratings.get(path, RATING_START),
     }
 
 
@@ -259,12 +262,11 @@ def vote_file(payload: Dict[str, Any]):
         raise HTTPException(status_code=404, detail="Bestand niet gevonden")
     path = str(target)
 
-    current_rating = db.get_rating(path)
-    change = 50 if vote == "up" else -50
-    new_rating = max(100, current_rating + change)
-    db.update_rating(path, new_rating)
+    # One atomic read-modify-write: two votes at the same moment (two tabs) both count
+    change = VOTE_STEP if vote == "up" else -VOTE_STEP
+    new_rating, votes = db.apply_vote(path, change, floor=RATING_FLOOR, start=RATING_START)
 
-    return {"status": "ok", "new_rating": new_rating}
+    return {"status": "ok", "new_rating": new_rating, "votes": votes}
 
 @router.get("/folder-content")
 def get_folder_content(path: str):
