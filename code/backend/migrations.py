@@ -219,6 +219,44 @@ def _m007_delete_runs_sequence(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_delops_run ON delete_operations(run_id)")
 
 
+def _m008_background_jobs(conn: sqlite3.Connection):
+    """
+    Background jobs (backend/jobs.py): duplicate scans, hashing and thumbnails run
+    in a worker thread and survive a reload or restart of the page. One row per
+    job with its progress and a checkpoint to resume from; the (possibly large)
+    result lives in job_results, zlib-compressed JSON, so listing jobs stays cheap.
+    Only new tables: no existing row is touched.
+    (delete_operations(run_id) already got its index, idx_delops_run, in migration 7.)
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            params TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL,
+            processed INTEGER NOT NULL DEFAULT 0,
+            total INTEGER,
+            message TEXT,
+            error TEXT,
+            checkpoint TEXT,
+            summary TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            started_at REAL,
+            finished_at REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type, id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS job_results (
+            job_id INTEGER PRIMARY KEY REFERENCES jobs(id),
+            encoding TEXT NOT NULL,
+            data BLOB NOT NULL
+        )
+    """)
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -228,6 +266,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (5, "keurer_keep_delete_history", _m005_keurer_keep_delete_history),
     (6, "hash_cache_algo_and_fingerprint", _m006_hash_cache_algo_and_fingerprint),
     (7, "delete_runs_sequence", _m007_delete_runs_sequence),
+    (8, "background_jobs", _m008_background_jobs),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

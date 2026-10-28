@@ -6,17 +6,15 @@ import xxhash
 from pathlib import Path
 from typing import List, Dict, Set, Any, Optional, Tuple
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
+import sqlite3
 import stat as stat_module
+import time
 
 from backend.config import Config, MEDIA_EXTENSIONS, is_media_file
 from backend.paths import ArchiveFilter, scan_dir, walk_archive
 from backend.database import Database
-from backend.progress import (
-    ScanProgress, set_scan_progress, update_scan_progress,
-    is_scan_cancelled, reset_scan_cancellation
-)
+from backend.jobs import bounded_map
 from datetime import datetime
 
 def get_folders(root_path: Path, archive_filter: ArchiveFilter) -> List[Dict[str, Any]]:
@@ -145,9 +143,38 @@ DEFAULT_KEEP_RULE = "oldest"
 
 MAX_ERROR_SAMPLES = 20
 
+HASH_WORKERS = 4
+HASH_FLUSH_FILES = 2000     # new hashes are written to the cache in batches of this many...
+HASH_FLUSH_SECONDS = 10.0   # ...or at least this often, so a resumed scan skips them
+PROGRESS_SECONDS = 0.25     # progress messages are built at most this often
+
 
 class ScanAborted(Exception):
     """The scanned folder disappeared during the scan (e.g. the disk was unplugged)."""
+
+
+class _QuietReporter:
+    """Progress and stop checks for a scan that is not a background job."""
+
+    stopping = False
+
+    def check(self) -> None:
+        pass
+
+    def progress(self, processed=None, total=None, message=None) -> None:
+        pass
+
+
+class _ErrorLog:
+    def __init__(self):
+        self.count = 0
+        self.samples: List[Dict[str, str]] = []
+
+    def __call__(self, path, exc) -> None:
+        self.count += 1
+        if len(self.samples) < MAX_ERROR_SAMPLES:
+            reason = (exc.strerror or str(exc)) if isinstance(exc, OSError) else str(exc)
+            self.samples.append({"path": str(path), "error": reason})
 
 
 def hash_file_xxh3(file_path: Path) -> str:
@@ -167,7 +194,6 @@ def hash_file_xxh3(file_path: Path) -> str:
 def _fingerprint(st: os.stat_result):
     """What must be unchanged for a cached hash to be trusted (see database.py)."""
     return (st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
-
 
 try:  # HEIC/HEIF EXIF, same as thumbnail.py
     from pillow_heif import register_heif_opener
@@ -263,24 +289,135 @@ def _copy_info(path: Path, st: os.stat_result, top: Path, exif_ts) -> Dict[str, 
     }
 
 
+def collect_media_files(folder_path: Path, config: Config, reporter, record_error) -> Tuple[Dict[str, Tuple[int, int, int, int]], Set[str], int]:
+    """
+    Walk folder_path in sorted order with the archive's one exclusion rule (never
+    the cache, TRASH, RAW_DUPLICATES, hidden or '._' files, symlinks) and return
+    ({path: fingerprint} of the non-empty media files, every media path seen, empty files).
+    Only plain strings and small tuples are kept per file (PERF-13).
+    """
+    files: Dict[str, Tuple[int, int, int, int]] = {}
+    seen: Set[str] = set()
+    empty = 0
+    last = time.monotonic()
+    for root, dirnames, filenames in walk_archive(folder_path, config, onerror=record_error):
+        reporter.check()
+        dirnames.sort()
+        for filename in sorted(filenames):
+            if not is_media_file(Path(filename)):
+                continue
+            path = os.path.join(root, filename)
+            try:
+                st = os.lstat(path)
+            except OSError as e:
+                record_error(path, e)
+                continue
+            if not stat_module.S_ISREG(st.st_mode):
+                continue
+            seen.add(path)
+            if st.st_size == 0:
+                empty += 1  # empty files are all 'identical' and never a real copy
+                continue
+            files[path] = _fingerprint(st)
+        now = time.monotonic()
+        if now - last >= PROGRESS_SECONDS:
+            last = now
+            reporter.progress(len(files), None, f'Bestanden zoeken... {len(files)} gevonden')
+    return files, seen, empty
+
+
+def hash_files(
+    paths: List[str],
+    fingerprints: Dict[str, Tuple[int, int, int, int]],
+    cache_folder: Path,
+    db: Database,
+    reporter,
+    record_error,
+    label: str = 'Vergelijken',
+) -> Tuple[Dict[str, str], int]:
+    """
+    xxHash3 of every path, from the cache where the fingerprint still matches.
+    The rest is hashed on HASH_WORKERS threads with bounded submission; new hashes
+    go to the cache in batches (HASH_FLUSH_FILES / HASH_FLUSH_SECONDS) so a stopped
+    or interrupted run loses at most one batch. A file that changed while it was
+    read is an error, not a hash. Returns ({path: hash}, number newly hashed).
+    """
+    total = len(paths)
+    cache = db.get_cached_hashes(cache_folder, HASH_ALGO) if paths else {}
+    hashes: Dict[str, str] = {}
+    to_hash: List[str] = []
+    for path in paths:
+        cached = cache.get(path)
+        if cached and cached[0] == fingerprints[path]:
+            hashes[path] = cached[1]
+        else:
+            to_hash.append(path)
+    del cache
+
+    processed = len(hashes)
+    reporter.progress(processed, total, f'{label}... {processed}/{total}')
+    batch: List[Tuple[str, Tuple[int, int, int, int], str]] = []
+    newly = 0
+    last_flush = last_report = time.monotonic()
+
+    def flush():
+        nonlocal batch, last_flush
+        entries, batch = batch, []
+        last_flush = time.monotonic()
+        try:
+            db.store_hashes(entries, HASH_ALGO)
+        except sqlite3.Error as e:  # the cache is an optimisation; a failed write loses nothing
+            print(f"Hash cache write failed: {e}")
+
+    try:
+        # On a stop nothing new starts, but what is being hashed still lands in the cache
+        stop = lambda: reporter.stopping  # noqa: E731
+        for path, digest, error in bounded_map(hash_file_xxh3, to_hash, workers=HASH_WORKERS, stop=stop):
+            processed += 1
+            if error is None:
+                try:
+                    after = _fingerprint(os.lstat(path))
+                except OSError as e:
+                    error = e
+            if error is not None:
+                record_error(path, error)
+            elif after == fingerprints[path]:
+                hashes[path] = digest
+                batch.append((path, after, digest))
+                newly += 1
+            else:
+                record_error(path, OSError(0, "bestand veranderde tijdens de scan"))
+            now = time.monotonic()
+            if len(batch) >= HASH_FLUSH_FILES or (batch and now - last_flush >= HASH_FLUSH_SECONDS):
+                flush()
+            if now - last_report >= PROGRESS_SECONDS or processed == total:
+                last_report = now
+                reporter.progress(processed, total, f'{label}... {processed}/{total}')
+    finally:
+        if batch:
+            flush()
+    reporter.check()
+    return hashes, newly
+
+
 def find_duplicates_in_folder(
     folder_path: Path,
     config: Config,
     db: Database,
     rule: str = DEFAULT_KEEP_RULE,
     prefer_folder: Optional[str] = None,
+    reporter=None,
 ) -> Dict[str, Any]:
     """
     Find groups of byte-identical media files below folder_path.
     
-    1. Walk the folder in sorted order with the archive's one exclusion rule
-       (never the cache, TRASH, RAW_DUPLICATES, hidden or '._' files, symlinks)
-       and group the non-empty media files by size.
-    2. Hash only files that share their size with another file. A cached hash is
-       used only while inode, size, mtime_ns and ctime_ns are unchanged; the rest
-       is hashed on up to 4 threads. New hashes are stored in one transaction.
+    1. Walk the folder (collect_media_files) and group the non-empty media files by size.
+    2. Hash only files that share their size with another file (hash_files: a cached
+       hash is used only while inode, size, mtime_ns and ctime_ns are unchanged).
     3. Group by hash and pick the copy that stays with choose_keeper(rule).
     
+    reporter (a jobs.JobContext) gets progress and may stop the scan: its check()
+    raises jobs.JobStopped, after the hashes found so far are in the cache.
     Every folder or file that cannot be read is counted and reported (errors,
     error_samples, complete=False): a scan never says 'complete' while it missed
     files. If the folder itself disappears, ScanAborted is raised.
@@ -293,168 +430,72 @@ def find_duplicates_in_folder(
     """
     if rule not in KEEP_RULES:
         raise ValueError(f"unknown rule: {rule}")
+    reporter = reporter or _QuietReporter()
+    errors = _ErrorLog()
     
-    reset_scan_cancellation()
-    
-    progress = ScanProgress(
-        status='counting',
-        phase='Bestanden tellen...',
-        started_at=datetime.now(),
-        total_files=0,
-        processed_files=0
-    )
-    set_scan_progress(progress)
-    
-    errors = 0
-    error_samples: List[Dict[str, str]] = []
-    
-    def record_error(path, exc):
-        nonlocal errors
-        errors += 1
-        if len(error_samples) < MAX_ERROR_SAMPLES:
-            error_samples.append({"path": str(path), "error": exc.strerror or str(exc) if isinstance(exc, OSError) else str(exc)})
-    
-    def result(groups=(), cancelled=False):
-        groups = list(groups)
-        return {
-            "total_files": file_count,
-            "empty_skipped": empty_skipped,
-            "groups": groups,
-            "duplicates_found": sum(len(g["copies"]) - 1 for g in groups),
-            "cancelled": cancelled,
-            "complete": not cancelled and errors == 0,
-            "errors": errors,
-            "error_samples": error_samples,
-            "rule": rule,
-        }
-    
-    def cancelled_result():
-        update_scan_progress(status='cancelled', phase='Scan geannuleerd', completed_at=datetime.now())
-        return result(cancelled=True)
+    def gone():
+        return errors.count and not folder_path.is_dir()
     
     # PHASE 1: group by size (files with different sizes cannot be duplicates)
-    size_groups: Dict[int, List[Path]] = defaultdict(list)
-    stats: Dict[str, os.stat_result] = {}
-    seen: Set[str] = set()
-    file_count = 0
-    empty_skipped = 0
-    
-    for root, dirnames, filenames in walk_archive(folder_path, config, onerror=record_error):
-        if is_scan_cancelled():
-            return cancelled_result()
-        dirnames.sort()
-        for filename in sorted(filenames):
-            file_path = Path(root) / filename
-            if not is_media_file(file_path):
-                continue
-            try:
-                st = os.lstat(file_path)
-            except OSError as e:
-                record_error(file_path, e)
-                continue
-            if not stat_module.S_ISREG(st.st_mode):
-                continue
-            seen.add(str(file_path))
-            if st.st_size == 0:
-                empty_skipped += 1  # empty files are all 'identical' and never a real copy
-                continue
-            file_count += 1
-            size_groups[st.st_size].append(file_path)
-            stats[str(file_path)] = st
-            if file_count % 50 == 0:
-                update_scan_progress(phase=f'Groeperen op grootte... {file_count} bestanden', total_files=file_count)
-    
-    if errors and not folder_path.is_dir():
-        update_scan_progress(status='error', phase='Map niet meer bereikbaar',
-                             error_message=f'{folder_path} is niet meer bereikbaar', completed_at=datetime.now())
+    reporter.progress(0, None, 'Bestanden zoeken...')
+    fingerprints, seen, empty_skipped = collect_media_files(folder_path, config, reporter, errors)
+    if gone():
         raise ScanAborted(str(folder_path))
+    file_count = len(fingerprints)
+    size_groups: Dict[int, List[str]] = defaultdict(list)
+    for path, fp in fingerprints.items():
+        size_groups[fp[1]].append(path)
     
     # PHASE 2: hash only files that share their size with another file
-    candidates = sorted(
-        (path for paths in size_groups.values() if len(paths) > 1 for path in paths),
-        key=str,
-    )
-    update_scan_progress(
-        status='scanning',
-        phase=f'Voorfilter klaar: {len(candidates)} bestanden te vergelijken ({file_count - len(candidates)} uniek van grootte)',
-        total_files=len(candidates),
-        processed_files=0
-    )
+    candidates = sorted(path for paths in size_groups.values() if len(paths) > 1 for path in paths)
+    del size_groups
+    reporter.progress(0, len(candidates),
+                      f'Voorfilter klaar: {len(candidates)} bestanden te vergelijken '
+                      f'({file_count - len(candidates)} uniek van grootte)')
+    hashes, _ = hash_files(candidates, fingerprints, folder_path, db, reporter, errors)
     
-    cache = db.get_cached_hashes(folder_path, HASH_ALGO) if candidates else {}
-    hashes: Dict[str, str] = {}
-    to_hash: List[Path] = []
-    for path in candidates:
-        cached = cache.get(str(path))
-        if cached and cached[0] == _fingerprint(stats[str(path)]):
-            hashes[str(path)] = cached[1]
-        else:
-            to_hash.append(path)
-    
-    processed = len(hashes)
-    update_scan_progress(processed_files=processed)
-    new_entries = []
-    
-    if to_hash:
-        executor = ThreadPoolExecutor(max_workers=min(4, len(to_hash)))
+    if errors.count == 0:
         try:
-            futures = {executor.submit(hash_file_xxh3, path): path for path in to_hash}
-            for future in as_completed(futures):
-                if is_scan_cancelled():
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    db.store_hashes(new_entries, HASH_ALGO)
-                    return cancelled_result()
-                path = futures[future]
-                processed += 1
-                try:
-                    digest = future.result()
-                    after = os.lstat(path)
-                except Exception as e:
-                    record_error(path, e)
-                else:
-                    if _fingerprint(after) == _fingerprint(stats[str(path)]):
-                        hashes[str(path)] = digest
-                        new_entries.append((str(path), _fingerprint(after), digest))
-                    else:
-                        record_error(path, OSError(0, "bestand veranderde tijdens de scan"))
-                if processed % 10 == 0 or processed == len(candidates):
-                    update_scan_progress(
-                        processed_files=processed,
-                        phase=f'Vergelijken... {processed}/{len(candidates)}'
-                    )
-        finally:
-            executor.shutdown(wait=True, cancel_futures=True)
-    
-    try:
-        db.store_hashes(new_entries, HASH_ALGO)
-        if errors == 0:
             db.prune_hashes(folder_path, seen)
-    except Exception as e:  # the cache is an optimisation; a failed write loses nothing
-        print(f"Hash cache write failed: {e}")
+        except sqlite3.Error as e:
+            print(f"Hash cache prune failed: {e}")
+    del seen
     
-    if errors and not folder_path.is_dir():
-        update_scan_progress(status='error', phase='Map niet meer bereikbaar',
-                             error_message=f'{folder_path} is niet meer bereikbaar', completed_at=datetime.now())
+    if gone():
         raise ScanAborted(str(folder_path))
     
     # PHASE 3: group by hash and choose the copy that stays
-    by_hash: Dict[Tuple[int, str], List[Path]] = defaultdict(list)
-    for path_str, digest in hashes.items():
-        by_hash[(stats[path_str].st_size, digest)].append(Path(path_str))
+    by_hash: Dict[Tuple[int, str], List[str]] = defaultdict(list)
+    for path, digest in hashes.items():
+        by_hash[(fingerprints[path][1], digest)].append(path)
+    del hashes
     
     groups = []
     for (size, digest), paths in by_hash.items():
         if len(paths) < 2:
             continue
-        paths.sort(key=str)
-        exif_ts = exif_capture_time(paths[0])  # identical bytes: one read per group
-        copies = [_copy_info(p, stats[str(p)], folder_path, exif_ts) for p in paths]
+        paths.sort()
+        members = []
+        for path in paths:
+            try:
+                st = os.lstat(path)
+            except OSError as e:
+                errors(path, e)
+                continue
+            if _fingerprint(st) != fingerprints[path]:
+                errors(path, OSError(0, "bestand veranderde tijdens de scan"))
+                continue
+            members.append((Path(path), st))
+        if len(members) < 2:
+            continue
+        exif_ts = exif_capture_time(members[0][0])  # identical bytes: one read per group
+        copies = [_copy_info(p, st, folder_path, exif_ts) for p, st in members]
         for rank, copy in enumerate(copies):
             copy["name_rank"] = rank
         groups.append({
             "hash": digest,
             "size": size,
-            "type": get_file_type(paths[0]),
+            "type": get_file_type(members[0][0]),
             "copies": copies,
             "keep": choose_keeper(copies, rule, prefer_folder),
         })
@@ -463,21 +504,16 @@ def find_duplicates_in_folder(
         group["id"] = i
     
     found = sum(len(g["copies"]) - 1 for g in groups)
-    if errors:
-        update_scan_progress(
-            status='incomplete',
-            phase=f'Scan klaar met {errors} leesfout(en): {found} duplicaten gevonden',
-            duplicates_found=found,
-            error_message=f'{errors} bestand(en) of map(pen) konden niet gelezen worden',
-            completed_at=datetime.now()
-        )
-    else:
-        update_scan_progress(
-            status='complete',
-            phase=f'Scan klaar: {found} duplicaten gevonden',
-            duplicates_found=found,
-            completed_at=datetime.now()
-        )
-    print(f"Duplicate scan of {folder_path}: {file_count} files, {len(groups)} groups, {found} duplicates, {errors} errors")
+    print(f"Duplicate scan of {folder_path}: {file_count} files, {len(groups)} groups, {found} duplicates, {errors.count} errors")
     
-    return result(groups)
+    return {
+        "total_files": file_count,
+        "empty_skipped": empty_skipped,
+        "groups": groups,
+        "duplicates_found": found,
+        "cancelled": False,
+        "complete": errors.count == 0,
+        "errors": errors.count,
+        "error_samples": errors.samples,
+        "rule": rule,
+    }

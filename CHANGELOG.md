@@ -312,3 +312,22 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Miniaturen worden eerst onder een tijdelijke naam weggeschreven en pas als ze compleet zijn
   op hun plek gezet. Een server die halverwege stopt, of twee verzoeken die tegelijk dezelfde
   miniatuur maken, laten zo nooit meer een half geschreven (grijze of kapotte) miniatuur achter.
+- Nieuw: **achtergrondtaken**. De duplicatenscan, het vooraf berekenen van controlegetallen
+  (hashes) en het vooraf maken van miniaturen voor een map (of het hele archief) lopen nu als
+  taak op de achtergrond, in plaats van binnen één verzoek. De server blijft daardoor gewoon
+  antwoorden, je kunt de pagina herladen, en een taak kun je annuleren, pauzeren en hervatten.
+  Er loopt telkens hoogstens één taak van elke soort; een tweede wacht netjes in de rij, en
+  dezelfde taak twee keer starten (dubbelklik) geeft gewoon dezelfde taak.
+- Wordt de server gestopt of herstart terwijl een taak loopt, dan staat die taak daarna als
+  "onderbroken" in de lijst. Hervatten gaat verder waar hij was: wat al berekend was (hashes,
+  miniaturen) wordt overgeslagen.
+- Wordt de schijf met het archief losgekoppeld terwijl een taak loopt, dan wacht de taak
+  ("Wachten op het archief") en gaat hij vanzelf verder zodra de schijf terug is. Een taak die
+  door het loskoppelen bestanden gemist heeft, wordt nooit als "klaar" gemeld.
+- Het resultaat van een duplicatenscan wordt bewaard. Na herladen van de pagina zie je de
+  laatste scan dus terug; kopieën die intussen verplaatst zijn, worden daarbij weggelaten.
+- De duplicatenscan houdt per bestand alleen nog het hoognodige in het geheugen en zet het
+  hashwerk in kleine porties klaar, in plaats van tienduizenden taken tegelijk (dat kostte
+  honderden MB geheugen). Nieuw berekende hashes worden tussendoor in porties opgeslagen, zodat
+  een gestopte scan bij de volgende keer niet opnieuw begint. De voortgang wordt hooguit een
+  paar keer per seconde bijgewerkt en hooguit één keer per seconde in de database gezet.

@@ -1,8 +1,10 @@
 """
 DataVault Dashboard - FastAPI Application
 """
+from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pathlib import Path
@@ -23,7 +25,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from backend.config import Config
 from backend.database import Database
 from backend import file_ops, restart, security
-from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline
+from backend.jobs import JobManager
+from backend.job_types import build_job_types
+from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs
 
 
 def _say(message: str) -> None:
@@ -32,6 +36,19 @@ def _say(message: str) -> None:
         print(message, flush=True)
     except OSError:
         pass
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    yield
+    # Stop background jobs at their next check (they stay resumable as 'interrupted'),
+    # then close the database connections
+    job_manager = getattr(app.state, "jobs", None)
+    if job_manager is not None:
+        await run_in_threadpool(job_manager.shutdown)
+    database = getattr(app.state, "db", None)
+    if database is not None:
+        database.close_all()
 
 
 def create_app(config_path: Optional[str] = None) -> FastAPI:
@@ -43,6 +60,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     # Telemetry is explicitly off: DataVault never sends data anywhere
     app = FastAPI(
         title="DataVault Dashboard",
+        lifespan=_lifespan,
         telemetry={
             "tracing": False,
             "metrics": False,
@@ -61,6 +79,8 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=security.allowed_hosts())
 
     config = None
+    app.state.jobs = None
+    app.state.db = None
     try:
         # Load configuration
         config = Config(config_path)
@@ -83,7 +103,17 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
 
         # Initialize database
         db = Database(config.DB_PATH)
+        app.state.db = db
         _say(f"Database initialized: {config.DB_PATH}")
+
+        # Background jobs (scans, hashing, thumbnails); what a previous run left
+        # running can only be resumed by hand
+        job_manager = JobManager(db, config, build_job_types(config, db, on_dup_scan_done=duplicates.remember_scan))
+        interrupted = job_manager.recover()
+        if interrupted:
+            _say(f"{interrupted} background job(s) were interrupted; resume them in the job dock")
+        app.state.jobs = job_manager
+        jobs.init_router(job_manager)
 
         # Initialize routes with config and database
         folders.init_router(config)
@@ -113,6 +143,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(folders.router)
     app.include_router(media.router)
     app.include_router(duplicates.router)
+    app.include_router(jobs.router, tags=["jobs"])
     app.include_router(spotify.router, prefix="/api/spotify", tags=["spotify"])
     app.include_router(shows.router, prefix="/api/shows", tags=["shows"])
     app.include_router(chat.router, tags=["chat"])

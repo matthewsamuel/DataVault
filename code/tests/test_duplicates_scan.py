@@ -89,7 +89,12 @@ def test_scan_without_candidates_or_cancelled_answers_200(client, vault, monkeyp
     assert r.status_code == 200, r.text
     assert r.json()["groups"] == [] and r.json()["complete"] is True and r.json()["cancelled"] is False
 
-    monkeypatch.setattr(scanner, "is_scan_cancelled", lambda: True)
+    from backend import jobs
+
+    def cancelled(self):
+        raise jobs.JobStopped("cancel")
+
+    monkeypatch.setattr(jobs.JobContext, "check", cancelled)
     r = _scan(client, vault / "RAW")
     assert r.status_code == 200, r.text
     assert r.json()["cancelled"] is True and r.json()["groups"] == [] and r.json()["complete"] is False
@@ -144,10 +149,25 @@ def test_scan_of_a_folder_that_disappears_answers_503(client, vault, monkeypatch
     assert client.get("/api/raw_duplicates/progress").json()["status"] == "error"
 
 
-def test_second_scan_while_one_runs_gets_409(client, vault):
-    from backend.progress import SCAN_LOCK
-    with SCAN_LOCK:
+def test_second_scan_while_one_runs_gets_409(client, vault, monkeypatch):
+    import threading
+    release = threading.Event()
+    real = scanner.find_duplicates_in_folder
+
+    def slow(*args, **kwargs):
+        release.wait(10)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(scanner, "find_duplicates_in_folder", slow)
+    first = client.post("/api/jobs", json={"type": "dup_scan", "params": {"folder": str(vault / "RAW")}}).json()["job"]
+    try:
         assert _scan(client, vault / "RAW").status_code == 409
+        assert _scan(client, vault / "library").status_code == 409
+    finally:
+        release.set()
+    deadline = time.time() + 10
+    while client.get(f"/api/jobs/{first['id']}").json()["status"] != "done" and time.time() < deadline:
+        time.sleep(0.05)
     assert _scan(client, vault / "RAW").status_code == 200
 
 

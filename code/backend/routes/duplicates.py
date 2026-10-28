@@ -63,30 +63,72 @@ def _require_config():
 
 
 # ==================== SCAN ====================
+#
+# The scan runs as a background job (type 'dup_scan', see backend/job_types.py and
+# /api/jobs): the duplicates screen starts it there and follows it in the job dock.
+# The endpoints below stay for scripts and older callers.
+
+def remember_scan(result: Dict[str, Any]) -> None:
+    """After every finished scan: the pairs delete_single falls back on."""
+    global last_scan_results
+    last_scan_results = [
+        {"path": copy["path"], "duplicate_of": group["copies"][group["keep"]]["path"]}
+        for group in result["groups"]
+        for i, copy in enumerate(group["copies"]) if i != group["keep"]
+    ]
+
+
+def _latest_scan_job() -> Optional[Dict[str, Any]]:
+    from backend.routes.jobs import get_manager
+    jobs = get_manager().list(limit=1, job_type="dup_scan")
+    return jobs[0] if jobs else None
+
+
+_OLD_STATUS = {"queued": "counting", "running": "scanning", "failed": "error", "interrupted": "error"}
+
 
 @router.get("/api/raw_duplicates/progress")
 def get_scan_progress_endpoint():
-    """Get current scan progress"""
-    from backend.progress import get_scan_progress
-
-    progress = get_scan_progress()
-    if progress:
-        return progress.to_dict()
+    """The newest duplicate scan job, in the shape of the old progress endpoint."""
+    job = _latest_scan_job()
+    if job is None:
+        return {
+            "status": "idle",
+            "phase": "Geen scan bezig",
+            "total_files": 0,
+            "processed_files": 0,
+            "duplicates_found": 0,
+            "progress_percent": 0,
+        }
+    summary = job["summary"] or {}
+    status = _OLD_STATUS.get(job["status"], job["status"])
+    error = job["error"]
+    if job["status"] == "done":
+        status = "complete" if summary.get("complete", True) else "incomplete"
+        if status == "incomplete":
+            error = f"{summary.get('errors', 0)} bestand(en) of map(pen) konden niet gelezen worden"
+    total = job["total"] or 0
     return {
-        "status": "idle",
-        "phase": "Geen scan bezig",
-        "total_files": 0,
-        "processed_files": 0,
-        "duplicates_found": 0,
-        "progress_percent": 0
+        "status": status,
+        "phase": job["message"],
+        "total_files": total,
+        "processed_files": job["processed"],
+        "duplicates_found": summary.get("duplicates_found", 0),
+        "progress_percent": int(job["processed"] / total * 100) if total else 0,
+        "error_message": error,
+        "job_id": job["id"],
     }
+
 
 @router.post("/api/raw_duplicates/cancel")
 def cancel_scan_endpoint():
-    """Cancel the current scan"""
-    from backend.progress import cancel_scan
-
-    cancel_scan()
+    """Cancel every duplicate scan that is queued, running or waiting for the vault."""
+    from backend.jobs import ACTIVE
+    from backend.routes.jobs import get_manager
+    jobs = get_manager()
+    for job in jobs.list(limit=20, job_type="dup_scan"):
+        if job["status"] in ACTIVE:
+            jobs.cancel(job["id"])
     return {"status": "cancelled"}
 
 
@@ -104,60 +146,45 @@ def scan_folder_for_duplicates(
     folder_path: str, rule: str = "oldest", prefer_folder: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Scan one folder (and its subfolders) for byte-identical media files.
+    Scan one folder (and its subfolders) for byte-identical media files, and wait
+    for the answer. Runs the same 'dup_scan' background job the duplicates screen
+    starts via /api/jobs (a plain def: it waits in the threadpool, never on the event loop).
 
     rule picks the copy that stays in each group: oldest (default), newest,
     shortest or folder (with prefer_folder). The client can re-apply any rule
     itself from the returned copy data, and override per group.
 
-    A plain def: FastAPI runs it in the threadpool, so progress and cancel are
-    answered while it runs. One scan at a time (409 otherwise). A cancelled scan
-    is a normal answer (cancelled: true); read errors are counted and reported
-    (complete: false); a folder that disappears mid-scan (disk unplugged) gives 503.
+    One scan at a time (409 otherwise). A cancelled scan is a normal answer
+    (cancelled: true); read errors are counted and reported (complete: false);
+    a folder that disappears mid-scan gives 503, and so does an unplugged vault
+    (the job then waits for it and finishes later, see /api/jobs).
     """
-    global last_scan_results
-    from backend.progress import SCAN_LOCK
-    from backend.scanner import find_duplicates_in_folder, KEEP_RULES, ScanAborted
+    from backend.jobs import QUEUED, RUNNING
+    from backend.routes.jobs import call, get_manager
+    from backend.job_types import ScanFolderGone
 
     _require_config()
+    jobs = get_manager()
+    params: Dict[str, Any] = {"folder": folder_path, "rule": rule}
+    if prefer_folder is not None:
+        params["prefer_folder"] = prefer_folder
+    job, _ = call(jobs.start, "dup_scan", params, exclusive=True)
+    job = jobs.wait(job["id"], statuses=(QUEUED, RUNNING))
 
-    # Inside the vault first, existence second: the same 403 for anything outside
-    folder = resolve_in_vault(folder_path, config, folder=True)
-    # RAW_DUPLICATES and TRASH hold what was already moved: groups there could never be cleaned
-    if _in_protected_folder(folder) is not None:
-        raise HTTPException(status_code=400, detail="Deze map wordt niet op duplicaten gescand")
-    if not folder.is_dir():
-        raise HTTPException(status_code=404, detail="Folder not found")
-
-    if rule not in KEEP_RULES:
-        raise HTTPException(status_code=400, detail=f"Onbekende regel: kies uit {', '.join(KEEP_RULES)}")
-    prefer = None
-    if rule == "folder":
-        if not prefer_folder:
-            raise HTTPException(status_code=400, detail="Kies een voorkeursmap voor deze regel")
-        prefer = str(resolve_in_vault(prefer_folder, config, folder=True))
-
-    if not SCAN_LOCK.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="Er loopt al een duplicatenscan")
-    try:
-        result = find_duplicates_in_folder(folder, config, db, rule=rule, prefer_folder=prefer)
-    except ScanAborted:
+    if job["status"] == "done":
+        return call(jobs.result, job["id"])
+    if job["status"] == "cancelled":
+        return {
+            "folder": job["params"]["folder"], "total_scanned": 0, "total_files": 0,
+            "empty_skipped": 0, "groups": [], "duplicates_found": 0, "cancelled": True,
+            "complete": False, "errors": 0, "error_samples": [], "rule": job["params"]["rule"],
+        }
+    if job["status"] == "waiting_for_vault":
+        from backend.main import VAULT_UNREACHABLE
+        raise HTTPException(status_code=503, detail=f"{VAULT_UNREACHABLE} De scan gaat verder zodra de schijf terug is (taak {job['id']}).")
+    if job["error"] == str(ScanFolderGone()):
         raise HTTPException(status_code=503, detail="De map is tijdens de scan onbereikbaar geworden (schijf losgekoppeld?)")
-    finally:
-        SCAN_LOCK.release()
-
-    if not result["cancelled"]:
-        last_scan_results = [
-            {"path": copy["path"], "duplicate_of": group["copies"][group["keep"]]["path"]}
-            for group in result["groups"]
-            for i, copy in enumerate(group["copies"]) if i != group["keep"]
-        ]
-
-    return {
-        "folder": str(folder),
-        "total_scanned": result["total_files"],
-        **result,
-    }
+    raise HTTPException(status_code=500, detail=job["error"] or f"Scan {job['status']}")
 
 
 # ==================== MOVE (verified, never overwrites) ====================
