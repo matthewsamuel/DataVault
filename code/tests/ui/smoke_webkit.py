@@ -6,6 +6,11 @@ It never touches a real archive: it builds a throwaway test vault in a temp fold
 starts its own server on a free port (DATAVAULT_TESTING=1, DATAVAULT_CONFIG pointing at
 that vault) and stops it again at the end.
 
+It also drives the app with the keyboard (tabs, the shortcut overview, the Files grid and the
+viewer, focus going back where it was), moves a file and puts it back from the Herstelcentrum,
+checks Instellingen, and runs a11y_checks.js on every screen in the light and the dark theme:
+all visible text must reach WCAG AA contrast and every control must have a name.
+
 Not collected by pytest (the name does not start with test_). Run it from the repo root
 with a Python that has Playwright (`pip install playwright && playwright install webkit`):
 
@@ -36,7 +41,8 @@ VENV_PYTHON = CODE_DIR / "venv" / "bin" / "python"
 BIG_FOLDER = "Groot"
 BIG_FILES = 1500
 MAX_THUMBS_ON_OPEN = 100
-VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline"]
+VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings"]
+A11Y_CHECKS = Path(__file__).with_name("a11y_checks.js")
 
 
 def free_port() -> int:
@@ -119,7 +125,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Every tab, by clicking it like a user
             for view in VIEWS:
-                step(f"tab {view}", lambda: page.click(f".nav-tab[data-view='{view}']"), 1.5)
+                step(f"tab {view}", lambda: page.click(f".top-nav [data-view='{view}']"), 1.5)
                 if not page.is_visible(f"#section-{view}"):
                     problems.append(f"tab {view}: section not visible")
 
@@ -169,6 +175,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("chat: Escape closes the file", lambda: page.keyboard.press("Escape"), 0.4)
             expect(not page.evaluate("isViewerOpen()") and page.evaluate(fullscreen_open),
                    "chat open_file: Escape did not close only the viewer")
+            expect(page.evaluate("document.activeElement.id") == "chat-input-fullscreen",
+                   "chat open_file: focus did not go back to the chat input after closing the photo")
             step("chat: open_folder from full screen",
                  lambda: page.evaluate("executeAIAction({action: 'open_folder', target: 'misc'})"), 1.2)
             expect(not page.evaluate(fullscreen_open) and page.is_visible("#section-viewer"),
@@ -178,9 +186,89 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 step(f"theme {theme}", lambda: (page.click(".theme-button"),
                                                  page.click(f".theme-option[data-theme='{theme}']")), 0.3)
 
+            # Keyboard: tabs with digits and g + letter, never while typing, the shortcut overview
+            # keeps Tab inside and gives focus back, and the Files grid works with arrows and Enter
+            view_now = "currentMainView()"
+            active_id = "document.activeElement && (document.activeElement.id || document.activeElement.className)"
+            page.click(".nav-tab[data-view='home']")
+            step("keys: 7 opens the timeline", lambda: page.keyboard.press("7"), 0.6)
+            expect(page.evaluate(view_now) == "timeline", "keys: 7 did not open the timeline")
+            step("keys: g b opens Bestanden", lambda: (page.keyboard.press("g"), page.keyboard.press("b")), 0.6)
+            expect(page.evaluate(view_now) == "viewer", "keys: g b did not open Bestanden")
+            step("keys: / focuses the search", lambda: page.keyboard.press("/"), 0.2)
+            expect(page.evaluate("document.activeElement.id") == "global-search", "keys: / did not focus the search")
+            step("keys: typing 8 in the search stays", lambda: (page.keyboard.type("8"), page.keyboard.press("Escape")), 0.4)
+            expect(page.evaluate(view_now) == "viewer", "keys: a digit typed in the search switched the tab")
+            # (not page.fill: that would put the focus back in the search field)
+            page.evaluate("document.getElementById('global-search').value = ''; handleGlobalSearch('')")
+            step("keys: ? opens the overview", lambda: page.keyboard.press("?"), 0.4)
+            expect(page.is_visible("#shortcut-help"), "keys: ? did not open the shortcut overview")
+            for _ in range(25):
+                page.keyboard.press("Tab")
+            expect(page.evaluate("document.getElementById('shortcut-help').contains(document.activeElement)"),
+                   "keys: Tab left the shortcut overview")
+            step("keys: Escape closes the overview", lambda: page.keyboard.press("Escape"), 0.3)
+            expect(not page.is_visible("#shortcut-help"), "keys: Escape did not close the overview")
+
+            step("grid: open a folder", lambda: page.evaluate(f"selectFolder({json.dumps(folder)})"), 1.0)
+            page.focus("#media-grid [data-grid-index][tabindex='0']")
+            step("grid: arrow right", lambda: page.keyboard.press("ArrowRight"), 0.2)
+            expect(page.evaluate("document.activeElement.dataset.gridIndex") == "1", "grid: ArrowRight did not move")
+            first_file = page.evaluate("[...document.querySelectorAll('#media-grid [data-grid-index]')]"
+                                       ".find(c => !c.classList.contains('folder-card')).dataset.gridIndex")
+            page.evaluate(f"focusGridCard({first_file})")
+            step("grid: Enter opens the viewer", lambda: page.keyboard.press("Enter"), 0.6)
+            expect(page.evaluate("isViewerOpen()"), "grid: Enter did not open the viewer")
+            for _ in range(15):
+                page.keyboard.press("Tab")
+            expect(page.evaluate("document.getElementById('modal-viewer').contains(document.activeElement)"),
+                   "viewer: Tab left the viewer")
+            step("grid: Escape closes the viewer", lambda: page.keyboard.press("Escape"), 0.4)
+            expect(page.evaluate("document.activeElement.dataset.gridIndex") == str(first_file),
+                   f"viewer: focus did not go back to the card ({page.evaluate(active_id)})")
+
+            # Herstelcentrum: a move in the viewer is listed and undone from there
+            moved_src = page.evaluate("gridFiles()[0].path")
+            step("recovery: move a file in the viewer", lambda: (
+                page.evaluate("openMediaModal(gridFiles()[0])"), page.keyboard.press("m"),
+                page.wait_for_timeout(400),
+                page.evaluate(f"selectMoveDestination({json.dumps(str(vault / 'library'))})"),
+                page.click("#btn-confirm-move")), 1.2)
+            expect(not Path(moved_src).exists(), "recovery: the file was not moved")
+            step("recovery: 8 opens the Herstelcentrum", lambda: page.keyboard.press("8"), 1.0)
+            expect(page.is_visible(".recovery-entry"), "recovery: no entry for the move")
+            page.once("dialog", lambda d: d.accept())
+            step("recovery: Terugzetten", lambda: page.click(".recovery-entry .recovery-undo"), 1.2)
+            expect(Path(moved_src).exists(), "recovery: the file did not go back")
+            expect(page.is_visible("#recovery-list .empty-state"), "recovery: the list did not show its empty state")
+
+            # Instellingen: every built-in part is there and the theme can be chosen there
+            step("settings: 9 opens Instellingen", lambda: page.keyboard.press("9"), 1.0)
+            for part in ("weergave", "taalmodel", "bibliotheek", "shows", "herstel", "over"):
+                expect(page.is_visible(f"#settings-{part}"), f"settings: part {part} missing")
+            step("settings: dark theme", lambda: page.check("input[data-theme-choice='dark']"), 0.3)
+            expect(page.evaluate("document.documentElement.dataset.theme") == "dark", "settings: theme not set")
+            page.check("input[data-theme-choice='auto']")
+
+            # Every screen in both themes: all visible text reaches WCAG AA, every control has a name
+            for theme in ("light", "dark"):
+                page.evaluate(f"setTheme('{theme}')")
+                for view in VIEWS:
+                    page.evaluate(f"switchMainView('{view}')")
+                    page.wait_for_timeout(700)
+                    page.add_script_tag(path=str(A11Y_CHECKS))
+                    for fail in page.evaluate("__contrastFailures()"):
+                        problems.append(f"contrast {theme} {view}: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+                    if theme == "light":
+                        for control in page.evaluate("__unnamedControls()"):
+                            problems.append(f"unnamed control on {view}: {control}")
+            print(f"  ok      contrast and names checked on {len(VIEWS)} screens in 2 themes")
+            page.evaluate("setTheme('auto')")
+            page.evaluate("switchMainView('home')")
+
             # Shows: Manage Sources and the Feeling Lucky slideshow
             step("shows: manage sources", lambda: (page.click(".nav-tab[data-view='shows']"),
-                                                   page.click("text=Manage Sources")), 1.0)
+                                                   page.click("text=Bronnen beheren")), 1.0)
             step("shows: close sources", lambda: page.evaluate("closeSettingsModal()"), 0.3)
             if page.query_selector(".shows-hero"):
                 step("shows: slideshow", lambda: page.click(".shows-hero"), 1.5)
