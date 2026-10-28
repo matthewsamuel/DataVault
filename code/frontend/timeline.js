@@ -14,6 +14,8 @@
     let tlLoading = false;
     let tlScanning = false;
     let tlInitialized = false;
+    let tlFoldersFailed = false;        // last folder list or scan failed (e.g. the disk was gone):
+    let tlScanFailed = false;           // done again on return to the tab or when the disk is back
 
     // Virtualization
     const ITEM_HEIGHT = 220;            // photo card height (px)
@@ -57,6 +59,11 @@
 
         // Prevent re-initialization when switching back to timeline tab
         if (tlInitialized) {
+            // What failed last time (the disk was gone) is tried again
+            if (tlFoldersFailed || tlScanFailed) {
+                await timelineVaultReturned();
+                return;
+            }
             // Window resized while the tab was hidden: rebuild with the real width
             if (tlFiles.length > 0 && getColumns() !== tlLayoutCols) recomputeLayout();
             // Just re-render in case of resize
@@ -97,11 +104,24 @@
         try {
             const data = await fetchJSON(`${API_BASE}/api/timeline/folders`);
             tlFolderTree = data.folders || [];
+            tlFoldersFailed = false;
         } catch (e) {
             toastFetchError('Tijdlijn: mappen laden mislukt', e);
             tlFolderTree = [];
+            tlFoldersFailed = true;
         }
     }
+
+    // The disk is back (app.js reloadAfterVaultReturn) or the tab is opened again:
+    // load again what failed, without the user picking the folders again
+    window.timelineVaultReturned = async function () {
+        if (!tlInitialized) return;
+        if (tlFoldersFailed) await loadTimelineFolders();
+        if (tlScanFailed && tlSelectedFolders.size > 0) {
+            updateFolderChips();
+            await scanTimeline();
+        }
+    };
 
     // ── Folder Picker Modal ───────────────────────────────
     window.timelineOpenFolderPicker = function () {
@@ -245,6 +265,7 @@
             [...tlSelectedFolders].forEach(folder => params.append('folders', folder));
             const data = await fetchJSON(`${API_BASE}/api/timeline/scan?${params}`);
             tlFiles = timelineFilesFrom(data);
+            tlScanFailed = false;
             if (data.skipped && data.skipped.length) {
                 showToast('Tijdlijn', `${data.skipped.length} gekozen map(pen) niet gevonden en overgeslagen`, 'warning');
             }
@@ -282,6 +303,7 @@
 
         } catch (e) {
             console.error('Timeline scan error:', e);
+            tlScanFailed = true;
             renderEmptyState(`Scannen mislukt: ${e.message}`);
         }
 

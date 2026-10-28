@@ -19,6 +19,7 @@ let keurerHistory = [];
 const KEURER_UNDO_MAX = 20;
 let keurerUndoBusy = false;
 let keurerMoveBusy = false;   // één verplaatsverzoek tegelijk (Enter in zoekveld én boom)
+let keurerLoadFailed = false; // laatste keer laden mislukt (bijv. schijf los): opnieuw zodra hij terug is
 
 // ==================== INITIALISATIE ====================
 
@@ -52,6 +53,15 @@ function keurerInit() {
             </div>`;
         }
     }
+}
+
+// De schijf is terug (app.js reloadAfterVaultReturn): statistieken en undo-stapel opnieuw,
+// en de foto's alleen als dat laden mislukt was (een lopende reeks blijft staan)
+function keurerVaultReturned() {
+    keurerLoadStats();
+    keurerLoadHistory().finally(() => {
+        if (keurerFolder && keurerLoadFailed) keurerLoadFiles();
+    });
 }
 
 // ==================== STATISTIEKEN ====================
@@ -167,6 +177,7 @@ async function keurerLoadFiles() {
         }
         keurerFileQueue = data.files;
         keurerIndex = 0;
+        keurerLoadFailed = false;
 
         if (remEl) {
             const rem  = data.remaining || 0;
@@ -180,6 +191,7 @@ async function keurerLoadFiles() {
             keurerShowCard();
         }
     } catch (e) {
+        keurerLoadFailed = true;
         cardArea.innerHTML = html`
             <div class="keurer-state-card">
                 <span style="font-size: 3rem;">⚠️</span>

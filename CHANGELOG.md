@@ -579,7 +579,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 ### Schijf los, foutmeldingen en wat er op deze Mac ontbreekt
 - Is de archiefschijf (T7) niet aangesloten of raakt hij los, dan toont de app bovenin een rode
   balk "Archief niet bereikbaar". Zodra de schijf terug is, verdwijnt de balk en laadt de app
-  vanzelf opnieuw wat je zag, zonder de server te herstarten.
+  vanzelf opnieuw wat je zag, zonder de server te herstarten. Dat geldt ook voor de tijdlijn (je
+  hoeft de mappen niet opnieuw te kiezen), de Foto Keurer en "Herstellen" bij Duplicaten. Was de
+  tijdlijn mislukt terwijl je op een ander tabblad zat, dan scant hij opnieuw zodra je hem opent.
+  Een Keurer-reeks die gewoon geladen was, blijft staan waar je was.
 - Elk onderdeel dat het archief nodig heeft, geeft dan dezelfde duidelijke melding. Voorheen kreeg
   je afhankelijk van de plek "niet gevonden", een lege lijst, "0 foto's" of een serverfout. Ook
   als de schijf midden in een verzoek wegvalt, komt die melding.

@@ -1441,6 +1441,9 @@ function reloadAfterVaultReturn() {
     else if (view === 'viewer' && currentFolder) loadMedia(currentFolder);
     else if (view === 'shows') loadShows();
     else if (view === 'spotify') loadSpotifyStats();
+    else if (view === 'timeline' && typeof timelineVaultReturned === 'function') timelineVaultReturned();
+    else if (view === 'keurer' && typeof keurerVaultReturned === 'function') keurerVaultReturned();
+    else if (view === 'duplicates' && typeof duplicatesInit === 'function') duplicatesInit();
     loadChatModels();
 }
 
