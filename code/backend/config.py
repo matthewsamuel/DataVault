@@ -37,13 +37,23 @@ def _positive_int(value: Any, default: int) -> int:
     return max(1, int(value))
 
 
+def _expand(value: str) -> Path:
+    """The path with a leading '~' turned into the home folder (kept as written without one)."""
+    try:
+        return Path(value).expanduser()
+    except RuntimeError:
+        return Path(value)
+
+
 def _real_path(value: str) -> Path:
     """
     The configured path with symlinks resolved, so every path the app walks, compares or
     stores uses one spelling (a vault_root through a symlink would otherwise give two).
+    A leading '~' is the user's home folder (as the README writes the backup folder), not a
+    folder named '~' below wherever the app was started.
     A disk that is not mounted yet resolves as far as it exists; on failure keep it as given.
     """
-    path = Path(value)
+    path = _expand(value)
     try:
         return path.resolve()
     except (OSError, RuntimeError):
@@ -89,7 +99,15 @@ class Config:
 
         # Database backups (backend/backup.py): on the Mac's own disk, not next to the
         # database on the T7. In test mode the default stays inside the temp directory.
+        # A relative backup_folder would depend on the folder the app was started from (and
+        # put the backups next to the app on the T7): it is not used, and Instellingen says so.
         backup_folder = data.get('backup_folder')
+        self.BACKUP_FOLDER_NOTE = None
+        if backup_folder and not _expand(backup_folder).is_absolute():
+            self.BACKUP_FOLDER_NOTE = (
+                f'De back-upmap "{backup_folder}" in config.json is geen volledig pad, dus de app gebruikt '
+                'de standaardmap. Schrijf het pad helemaal uit (beginnend met / of ~/).')
+            backup_folder = None
         if backup_folder:
             self.BACKUP_FOLDER = _real_path(backup_folder)
         elif os.environ.get("DATAVAULT_TESTING") == "1":

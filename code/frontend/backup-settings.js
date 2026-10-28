@@ -98,6 +98,11 @@ function backupRenderStatus(box, status) {
             : settingsRow('Bewaard', createEl('span', { class: 'backup-none', text: 'Nog niets bewaard' }),
                 createEl('span', { class: 'backup-muted', text: ` · straks ${rule}` })),
     ];
+    if (status.folder_note) {
+        rows.push(createEl('div', { class: 'backup-error' },
+            createEl('i', { class: 'fas fa-circle-info', 'aria-hidden': 'true' }),
+            createEl('span', { text: status.folder_note })));
+    }
     if (status.last_error) {
         rows.push(createEl('div', { class: 'backup-error', role: 'alert' },
             createEl('i', { class: 'fas fa-triangle-exclamation', 'aria-hidden': 'true' }),

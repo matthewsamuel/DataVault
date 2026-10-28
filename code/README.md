@@ -66,7 +66,9 @@ Kopieer `code/config.example.json` naar `code/config.json` en stel de vault-pade
 
 Optioneel voor de back-ups van de database (zie hieronder): `"backup_folder"` (standaard
 `~/Library/Application Support/DataVault/backups`), `"backup_keep_daily"` (7) en
-`"backup_keep_weekly"` (4).
+`"backup_keep_weekly"` (4). Een pad met `~/` begint in je thuismap. Een relatief pad (zonder `/` of
+`~/` vooraan) gebruikt de app niet, omdat het zou afhangen van de map waarin de app start: dan blijft
+de standaardmap in gebruik en zegt Instellingen > Back-ups waarom.
 
 ## Installatie (eerste keer)
 

@@ -505,6 +505,7 @@ def status(config, auto_enabled: bool = False, next_check_at: Optional[float] = 
     return {
         "folder": str(folder),
         "folder_exists": folder.is_dir(),
+        "folder_note": getattr(config, "BACKUP_FOLDER_NOTE", None),
         "auto": auto_enabled,
         "max_age_hours": MAX_AGE // 3600,
         "keep_daily": getattr(config, "BACKUP_KEEP_DAILY", KEEP_DAILY),

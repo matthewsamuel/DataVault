@@ -343,6 +343,32 @@ def test_test_mode_refuses_a_backup_folder_outside_the_temp_dir(vault, tmp_path)
     assert Config(str(path)).BACKUP_FOLDER == (vault / ".datavault_cache/backups").resolve()
 
 
+def test_a_backup_folder_with_a_tilde_is_in_the_home_folder(vault, tmp_path, monkeypatch):
+    """The README writes the default as ~/Library/...: copied into config.json it must mean
+    the home folder, not a folder named '~' below wherever the app was started."""
+    import json
+    from fixtures.vault_builder import write_config
+    home = tmp_path / "thuis"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    path = write_config(vault, tmp_path / "c.json")
+    data = json.loads(path.read_text())
+    data["backup_folder"] = "~/Library/Application Support/DataVault/backups"
+    path.write_text(json.dumps(data))
+    config = Config(str(path))
+    assert config.BACKUP_FOLDER == (home / "Library/Application Support/DataVault/backups").resolve()
+    assert "~" not in str(config.BACKUP_FOLDER) and config.BACKUP_FOLDER_NOTE is None
+    # A relative folder would depend on where the app was started: the default is used, and
+    # Instellingen says why
+    data["backup_folder"] = "backups"
+    path.write_text(json.dumps(data))
+    config = Config(str(path))
+    assert config.BACKUP_FOLDER == (vault / ".datavault_cache/backups").resolve()
+    assert "geen volledig pad" in config.BACKUP_FOLDER_NOTE and '"backups"' in config.BACKUP_FOLDER_NOTE
+    assert backup.status(config)["folder_note"] == config.BACKUP_FOLDER_NOTE
+
+
 # ==================== RESTORE ====================
 
 def _rating(db_path, path):
