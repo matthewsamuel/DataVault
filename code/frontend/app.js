@@ -2136,14 +2136,14 @@ function showDnaExplanation() {
 
     // Populate DNA type from current data
     const dnaText = document.getElementById('stat-dna');
-    const currentDna = dnaText ? dnaText.textContent.trim() : '';
+    const currentDna = dnaText ? (dnaText.dataset.dna || dnaText.textContent).trim() : '';
 
     const dnaTypes = {
-        'Early Bird 🐦': { icon: '🐦', title: 'Early Bird', desc: 'You listen most between 5 AM and 12 PM. Early risers unite — you start your day powered by music before the world wakes up.' },
-        'Daydreamer ☀️': { icon: '☀️', title: 'Daydreamer', desc: 'Your peak listening is between 12 PM and 6 PM. Afternoon vibes fuel your creative flow and keep you energized throughout the day.' },
-        'Evening Chiller 🌇': { icon: '🌇', title: 'Evening Chiller', desc: 'You\u2019re most active between 6 PM and 11 PM. Music is your wind-down ritual — perfect for reflecting on the day.' },
-        'Night Owl 🦉': { icon: '🦉', title: 'Night Owl', desc: 'You listen most between 11 PM and 5 AM. The night is your kingdom, and music is your loyal companion in the dark hours.' },
-        'Balanced Listener': { icon: '🎧', title: 'Balanced Listener', desc: 'Your listening is spread evenly across the day. You\u2019re a true all-day listener with no single peak time.' }
+        'Early Bird 🐦': { icon: '🐦', title: 'Vroege vogel', key: 'Early Bird', desc: 'Je luistert het meest tussen 5:00 en 12:00. Je begint de dag met muziek, nog voor de rest wakker is.' },
+        'Daydreamer ☀️': { icon: '☀️', title: 'Dagdromer', key: 'Daydreamer', desc: 'Je luistert het meest tussen 12:00 en 18:00. Muziek houdt je middag op gang.' },
+        'Evening Chiller 🌇': { icon: '🌇', title: 'Avondgenieter', key: 'Evening Chiller', desc: 'Je luistert het meest tussen 18:00 en 23:00. Muziek is je manier om de dag af te sluiten.' },
+        'Night Owl 🦉': { icon: '🦉', title: 'Nachtuil', key: 'Night Owl', desc: 'Je luistert het meest tussen 23:00 en 5:00. De nacht is van jou, met muziek als gezelschap.' },
+        'Balanced Listener': { icon: '🎧', title: 'Evenwichtige luisteraar', key: 'Balanced Listener', desc: 'Je luistert verspreid over de hele dag, zonder één piekmoment.' }
     };
 
     const info = dnaTypes[currentDna] || dnaTypes['Balanced Listener'];
@@ -2168,12 +2168,12 @@ function showDnaExplanation() {
         if (isActual) {
             newItem.classList.add('actual-personality');
             if (!newItem.querySelector('.actual-dna-badge')) {
-                newItem.appendChild(createEl('div', { class: 'actual-dna-badge', text: 'Your DNA' }));
+                newItem.appendChild(createEl('div', { class: 'actual-dna-badge', text: 'Jij' }));
             }
         }
 
         // Initial active state matches the actual DNA
-        newItem.classList.toggle('active', info.title.includes(typeName));
+        newItem.classList.toggle('active', info.key === typeName);
 
         // Click listener to view other explanations
         newItem.addEventListener('click', () => {
@@ -2405,23 +2405,23 @@ function showInsightExplanation(insightKey) {
     const insightDetails = {
         'record_day': {
             icon: '🏆',
-            title: 'Record Listening Day',
-            desc: 'This is the single calendar day where you racked up the absolute highest amount of listening time.'
+            title: 'Recorddag',
+            desc: 'De ene dag waarop je het allerlangst naar muziek luisterde.'
         },
         'top_binge': {
             icon: '🔁',
-            title: 'Top Consecutive Binge',
-            desc: 'Your highest streak for playing the exact same song back-to-back repeatedly without interruption.'
+            title: 'Langste reeks',
+            desc: 'Het nummer dat je het vaakst direct achter elkaar draaide, zonder iets anders ertussen.'
         },
         'mainstream_score': {
             icon: '📈',
-            title: 'Explorer vs Mainstream',
-            desc: 'If 75%+ of your listening goes to just a tiny handful of top artists, you are categorized as a "Mainstream Repeater". If it is widely spread, you are a "Broad Explorer".'
+            title: 'Ontdekker of vaste favorieten',
+            desc: 'Gaat meer dan 75% van je luistertijd naar een handvol topartiesten, dan heb je vaste favorieten. Is het breed verspreid, dan ben je een brede ontdekker.'
         },
         'seasonal_mood': {
             icon: '🌤️',
-            title: 'Seasonal Mood',
-            desc: 'Checks whether your listening spikes significantly during Winter months (Hibernator) or Summer months (Summer Vibes) based on your monthly playback.'
+            title: 'Seizoensstemming',
+            desc: 'Of je in de wintermaanden of juist in de zomermaanden duidelijk meer luistert, op basis van je luistertijd per maand.'
         }
     };
 
@@ -3003,7 +3003,9 @@ function renderSpotifyStats(data) {
     updateText('stat-minutes', data.total_minutes.toLocaleString('nl-NL'));
     updateText('stat-top-artist', data.top_artists.length > 0 ? data.top_artists[0].name : '-');
     updateText('stat-plays', data.total_plays.toLocaleString('nl-NL'));
-    updateText('stat-dna', data.listening_dna);
+    updateText('stat-dna', spotifyLabel(data.listening_dna));
+    const dnaEl = document.getElementById('stat-dna');
+    if (dnaEl) dnaEl.dataset.dna = data.listening_dna || '';
 
     // 2. Lists
     renderSpotifyList('top-artists-list', data.top_artists, (item, i) => spotifyListItem({
@@ -3042,13 +3044,13 @@ function renderSpotifyStats(data) {
 
         // Mainstream
         if (insights.mainstream_score) {
-            updateText('stat-mainstream-score', insights.mainstream_score);
+            updateText('stat-mainstream-score', spotifyLabel(insights.mainstream_score));
             updateText('stat-mainstream-percent', `Top 5% van de artiesten = ${insights.mainstream_percent}% van het luisteren`);
         }
 
         // Seasonal Mood
         if (insights.seasonal_mood) {
-            updateText('stat-seasonal-mood', insights.seasonal_mood);
+            updateText('stat-seasonal-mood', spotifyLabel(insights.seasonal_mood));
         }
 
         // Discoveries
@@ -3160,6 +3162,20 @@ function renderSpotifyStats(data) {
     renderSimpleChart('hourly-chart', data.hourly_activity,
         ['12a', '', '', '', '4a', '', '', '', '8a', '', '', '', '12p', '', '', '', '4p', '', '', '', '8p', '', '', '']
     );
+}
+
+// De server noemt luistertypes in het Engels (met een emoji); op het scherm staat Nederlands
+const SPOTIFY_LABELS_NL = {
+    'Early Bird': 'Vroege vogel', 'Daydreamer': 'Dagdromer', 'Evening Chiller': 'Avondgenieter',
+    'Night Owl': 'Nachtuil', 'Balanced Listener': 'Evenwichtige luisteraar', 'Balanced': 'In balans',
+    'Mainstream Repeater': 'Vaste favorieten', 'Broad Explorer': 'Brede ontdekker',
+    'Winter Hibernator': 'Winterluisteraar', 'Summer Vibes': 'Zomerluisteraar', 'Consistent': 'Het hele jaar door',
+};
+
+function spotifyLabel(value) {
+    const text = String(value || '').trim();
+    const key = Object.keys(SPOTIFY_LABELS_NL).sort((a, b) => b.length - a.length).find(k => text.startsWith(k));
+    return key ? SPOTIFY_LABELS_NL[key] : (text || '-');
 }
 
 function updateText(id, text) {

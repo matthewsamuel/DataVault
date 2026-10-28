@@ -198,8 +198,8 @@ def get_stories() -> Dict[str, Any]:
     featured_files = pick_show_files(all_paths, ratings, FEATURED_SIZE)
     if featured_files:
         featured_show = {
-            "title": "Feeling Lucky",
-            "subtitle": f"{len(featured_files)} willekeurige foto's uit je library",
+            "title": "Verras me",
+            "subtitle": f"{len(featured_files)} willekeurige foto's uit je archief",
             "files": featured_files,
             "type": "featured"
         }
