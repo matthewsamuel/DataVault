@@ -261,6 +261,12 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Kies zelf welke kopie blijft met "Welke kopie blijft": Oudste behouden (standaard), Nieuwste
   behouden, Kortste pad of Voorkeursmap (kies een map uit de gevonden mappen). Alle groepen
   passen zich meteen aan, zonder opnieuw te scannen. Je keuze wordt onthouden.
+- Bij Voorkeursmap kun je nu ook een bovenliggende map kiezen (bijv. `2019` als de kopieën in
+  `2019/zomer` en `2019/winter` staan); de voorkeur geldt dan voor alles daaronder. De lijst
+  staat in mapvolgorde, met elke submap direct onder haar bovenliggende map.
+- Na het opruimen van een groep sprong de keuzelijst Voorkeursmap terug naar de eerste map,
+  terwijl de eerder gekozen map nog steeds gold. De lijst toont nu altijd de map die echt geldt
+  (ook als er geen kopie meer in staat), en je kunt meteen een andere map kiezen.
 - Klik op een kopie om juist die te bewaren; zo'n groep is gemarkeerd als "zelf gekozen" en
   met één klik terug te zetten naar de regel.
 - "Vergelijk" toont de kopie die blijft en een kopie die verplaatst wordt naast elkaar, met

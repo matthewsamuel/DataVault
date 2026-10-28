@@ -267,10 +267,32 @@ function setPreferFolder(folder) {
     refreshAllGroups();
 }
 
+// Elke map met een kopie plus de bovenliggende mappen tot de gescande map:
+// de voorkeur geldt voor de hele submap, dus 'RAW/2019' dekt ook 'RAW/2019/zomer'
+function preferFolderChoices() {
+    const base = dupState.folder || '';
+    const folders = new Set();
+    dupState.groups.forEach(g => g.copies.forEach(c => {
+        folders.add(c.folder);
+        let folder = c.folder;
+        while (folder.startsWith(base + '/')) {
+            folder = folder.slice(0, folder.lastIndexOf('/'));
+            if (folder === base) break;
+            folders.add(folder);
+        }
+    }));
+    // De actieve voorkeur blijft zichtbaar, ook als er geen kopie meer in staat
+    if (dupState.prefer) folders.add(dupState.prefer);
+    // Per mapniveau sorteren, zodat een submap direct onder haar bovenliggende map staat
+    return [...folders].sort((a, b) => compareKeys(a.split('/'), b.split('/')) || a.length - b.length);
+}
+
 function fillPreferFolderOptions() {
     const select = document.getElementById('dup-prefer-folder');
-    const folders = [...new Set(dupState.groups.flatMap(g => g.copies.map(c => c.folder)))].sort();
+    const folders = preferFolderChoices();
     select.replaceChildren(...folders.map(f => createEl('option', { value: f, text: relativeToScan(f) || '(gescande map zelf)' })));
+    // replaceChildren zet de keuze terug op de eerste optie; toon wat echt geldt
+    if (dupState.prefer) select.value = dupState.prefer;
     select.hidden = dupState.rule !== 'folder';
 }
 
