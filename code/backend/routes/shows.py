@@ -352,24 +352,15 @@ def _base_candidates(target: Path) -> List[Dict[str, Any]]:
     series}] (series: see elo.mark_series)."""
     folder = str(target)
     disabled = get_disabled_folders()
+    base = None
     if db is not None and media_index.usable(db):
-        filters = {"kind": "photo", "folder": folder}
-        key = ("index", media_index.selection_version(db, filters), tuple(disabled))
-        with _candidates_lock:
-            cached = _candidates_cache.get(folder)
-        if cached and cached[0] == key:
-            return cached[2]
-        rows, offset = [], 0
-        while True:
-            page = media_index.query(db, filters, sort="path", offset=offset, limit=media_index.MAX_LIMIT)
-            rows.extend(page)
-            if len(page) < media_index.MAX_LIMIT:
-                break
-            offset += len(page)
-        base = [{"path": r["path"], "id": r["id"], "size": r["size"], "taken": r["taken"],
-                 "taken_source": r["taken_source"]}
-                for r in rows if elo.is_elo_photo(r["path"]) and is_folder_enabled(Path(r["folder"]), disabled)]
-    else:
+        base = _index_candidates(target, disabled)
+        # A folder made since the last pass is not in the index yet: then the walk answers
+        # (and the index is asked to catch up), instead of 'too few photos'
+        if len(base) < 2 and not media_index.fresh_for(db, [target]):
+            media_index.request_update()
+            base = None
+    if base is None:
         key = ("walk", tuple(disabled))
         with _candidates_lock:
             cached = _candidates_cache.get(folder)
@@ -377,6 +368,31 @@ def _base_candidates(target: Path) -> List[Dict[str, Any]]:
             return cached[2]
         base = [{"path": p, "id": None, "size": None, "taken": None, "taken_source": None}
                 for p in collect_show_files(target, disabled) if elo.is_elo_photo(p)]
+        elo.mark_series(base)
+        with _candidates_lock:
+            _candidates_cache[folder] = (key, time.monotonic(), base)
+    return base
+
+
+def _index_candidates(target: Path, disabled: List[str]) -> List[Dict[str, Any]]:
+    """The photos below target as the media index knows them (cached until the selection changes)."""
+    folder = str(target)
+    filters = {"kind": "photo", "folder": folder}
+    key = ("index", media_index.selection_version(db, filters), tuple(disabled))
+    with _candidates_lock:
+        cached = _candidates_cache.get(folder)
+    if cached and cached[0] == key:
+        return cached[2]
+    rows, offset = [], 0
+    while True:
+        page = media_index.query(db, filters, sort="path", offset=offset, limit=media_index.MAX_LIMIT)
+        rows.extend(page)
+        if len(page) < media_index.MAX_LIMIT:
+            break
+        offset += len(page)
+    base = [{"path": r["path"], "id": r["id"], "size": r["size"], "taken": r["taken"],
+             "taken_source": r["taken_source"]}
+            for r in rows if elo.is_elo_photo(r["path"]) and is_folder_enabled(Path(r["folder"]), disabled)]
     elo.mark_series(base)
     with _candidates_lock:
         _candidates_cache[folder] = (key, time.monotonic(), base)

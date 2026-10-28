@@ -467,6 +467,21 @@ def test_pairs_come_from_the_index_once_it_is_there(client, app, vault, monkeypa
     assert seen == {"rome.jpg", "venetië.jpg", "opa.jpg", "opa kopie.jpg", "xss <img src=x onerror=window.__xss=1>.jpg"}
 
 
+def test_a_folder_made_after_the_last_index_pass_still_has_its_photos(client, app, vault, monkeypatch):
+    from test_media_index import _index
+    from backend import media_index
+    _index(client, full=False)
+    new = (vault / "library/Nieuw na de index").resolve()
+    new.mkdir()
+    for name, extra in (("a.jpg", b"1"), ("b.jpg", b"22")):
+        (new / name).write_bytes((vault / OPA).read_bytes() + extra)   # distinct sizes: no copies
+    asked = []
+    monkeypatch.setattr(media_index, "request_update", lambda: asked.append(1))
+    body = client.get("/api/shows/compare/pair", params={"folder": str(new)}).json()
+    assert body["pair"] and {p["name"] for p in body["pair"]} == {"a.jpg", "b.jpg"}
+    assert asked                         # and the index is asked to catch up
+
+
 def test_leaderboard_ranks_by_rating_with_wins(client, app, vault):
     rome, venice, opa = ((vault / p).resolve() for p in (ROME, VENICE, OPA))
     client.post("/api/shows/compare", json={"a": str(rome), "b": str(venice), "winner": "a"})
