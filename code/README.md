@@ -121,19 +121,32 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   `#albums/album/3`, `#albums/op-deze-dag/07-14`), dus een weergave is te bewaren als bladwijzer.
 - Eén filtervorm voor het adres, de server en de opgeslagen albums: `backend/library_filters.py`
   (`clean()` controleert en normaliseert, `to_query()` maakt er `media_index`-filters van). Datums
-  zijn lokale dagen, net als de opnamedatums in de index en de tijdlijn.
+  zijn lokale dagen, net als de opnamedatums in de index en de tijdlijn. `folder` is één map,
+  `folders` een lijst (een van deze mappen; zo opent 'op deze dag' met de mappen van Home), nooit
+  allebei. De pagina laat waarden uit het adres die niet kunnen weg (`paramsToSpec` in library.js)
+  en toont een filter dat de server weigert (400/403/422) als **Filter klopt niet**.
 - Een slim album is een opgeslagen filter met naam, sortering en icoon (`backend/smart_albums.py`,
   migratie 20). Het is altijd actueel en verplaatst of kopieert nooit een bestand. De zes
   standaardalbums komen er één keer bij; verborgen of verwijderde komen terug met
-  **Standaardalbums terugzetten**.
+  **Standaardalbums terugzetten** (is de naam intussen van een eigen album, dan met "(2)" erachter).
+  Namen zijn uniek zonder op hoofdletters te letten (`casefold()`, ook buiten ASCII). Verandert een
+  standaardalbum in een nieuwe versie (`UPGRADES`, `DEFAULTS_VERSION`), dan krijgt een ongewijzigd
+  album het nieuwe filter één keer.
 - **Op deze dag** toont per jaar (nieuwste eerst) de foto's en video's van een dag in eerdere jaren,
-  met vorige/volgende dag en de mappen die op Home gekozen zijn. 29 februari is altijd te kiezen; in
-  een jaar zonder 29 februari laat 28 februari die foto's ook zien.
+  met vorige/volgende dag en de mappen die op Home gekozen zijn, alleen met een echte opnamedatum
+  (`capture_date: known`). 29 februari is altijd te kiezen; in een jaar zonder 29 februari laat
+  28 februari die foto's ook zien. Elk jaar heeft `filters`: dezelfde selectie als browse-filter,
+  zodat **Alle N bekijken** precies die N opent.
 - API onder `/api/library`: `browse` (filters als queryparameters of `album=id`, met `offset`,
   `limit` tot 1000, `sort`; het antwoord heeft `version` zodat een lijst die doorbladert ziet dat de
   selectie veranderde), `facets`, `on-this-day?date=MM-DD`, en `albums` (GET/POST,
-  `albums/{id}` GET/PATCH/DELETE, `albums/defaults` POST). De tellingen in de zijbalk worden per
-  album bewaard tot de index verandert (hooguit 30 s).
+  `albums/{id}` GET/PATCH/DELETE met een id van 0 tot 2^62, `albums/defaults` POST). De tellingen in
+  de zijbalk worden per album bewaard tot de index verandert (hooguit 30 s).
+- `media_index.query()` sorteert eerst alleen de id's (en de sorteersleutel) en leest daarna de rijen
+  van de pagina; gelijke waarden gaan op id, namen op pad. `selection_info()` geeft aantal en versie
+  in één keer. Op 100.000 rijen kost een diepe pagina met aantal en versie hoogstens ~140 ms.
+- `showToast(title, message, type, action)` kan een knop meekrijgen (`{label, onClick}`), bijvoorbeeld
+  **Ongedaan maken** na het verbergen van een album.
 
 ### Herstelcentrum
 - Eén lijst (tab **Herstel**, sneltoets 8) van alles wat de app in het archief verplaatste: Keurer

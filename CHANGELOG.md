@@ -64,34 +64,43 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   albums, elk met het aantal bestanden. Rechts zie je alles uit de bibliotheek in één raster.
 - Filteren kan op soort (foto's, video's, audio), wanneer (dit jaar, vorig jaar, deze maand, de laatste
   30 dagen, een jaar, of van… tot…), maand, map (met of zonder submappen) en, onder **Meer filters**, op
-  camera, bestandstype, locatie, Shows-waardering, Keurer (gehouden of nog niet gekeurd), liggend of
-  staand en wel of geen opnamedatum. Filters zijn te combineren; wat je koos staat als labels boven
-  het raster en gaat met één klik weer weg. Sorteren kan op datum, naam, grootte of waardering.
+  camera, bestandstype, locatie, Shows-score (in de woorden van Shows: "Vaker mooi dan niet", "Netto
+  3× mooi"), Keurer (gehouden of nog niet gekeurd), liggend of staand en wel of geen opnamedatum.
+  Filters zijn te combineren; wat je koos staat als labels boven het raster en gaat met één klik weer
+  weg. Sorteren kan op datum, naam, grootte of waardering.
 - Ook met 100.000 foto's blijft het vlot: het raster tekent alleen wat in beeld is en haalt de foto's
-  per 200 op als je erheen scrolt. Een album tellen of een pagina ophalen duurt op 100.000 bestanden
-  ongeveer 5 tot 50 milliseconden.
+  per 200 op als je erheen scrolt. Gemeten op 100.000 bestanden: een album tellen 4 tot 25
+  milliseconden; een pagina met het aantal erbij 6 tot 100 milliseconden vooraan, en hoogstens zo'n
+  140 milliseconden diep in de lijst, ook bij sorteren op waardering of grootte.
 - Het adres in de browser volgt wat je ziet, dus een gefilterde weergave kun je als bladwijzer bewaren
-  en later precies zo terugkrijgen.
+  en later precies zo terugkrijgen. Klopt er iets niet in een bladwijzer (een jaar dat geen getal is,
+  een album dat er niet meer is), dan laat de app dat stukje weg en zegt dat in een melding.
+- Kies je bij **Van… tot…** een einddatum vóór de begindatum, dan staat dat meteen onder de datums;
+  het raster blijft gewoon staan. Weigert de app een filter, dan zie je **Filter klopt niet** met
+  **Filters wissen**.
 - **Bewaar als album** maakt van de gekozen filters een slim album, met een naam en een icoon. Een slim
   album is een bewaarde zoekopdracht: het blijft vanzelf bij en verplaatst of kopieert nooit een
   bestand. Pas je de filters van een album aan, dan kun je de wijziging bewaren of terugzetten; via
   **Album bewerken** kun je het hernoemen, verbergen of verwijderen (je foto's blijven waar ze staan).
+  Een verborgen album gaat uit de lijst, met **Ongedaan maken** in de melding. Twee albums hebben
+  nooit dezelfde naam, ook niet als je een standaardalbum terugzet ("Video's (2)").
 - Er staan zes albums klaar: **Beste foto's** (de hoogst gewaardeerde in Shows), **Video's**, **Zonder
-  datum** (alleen de datum van het bestand, geen opnamedatum), **Met locatie**, **Dit jaar** en
-  **iPhone**. Je kunt ze verbergen of verwijderen; **Standaardalbums terugzetten** haalt ze terug.
+  datum** (alleen de datum van het bestand, geen opnamedatum), **Met locatie**, **Dit jaar** (alleen
+  met een echte opnamedatum, dus geen bestanden die dit jaar alleen gekopieerd zijn) en **iPhone**. Je kunt ze verbergen of verwijderen; **Standaardalbums terugzetten** haalt ze terug.
 - **Op deze dag** is nu een eigen scherm: alle foto's en video's van vandaag in eerdere jaren, per jaar
   ("7 jaar geleden · 2019"), met knoppen voor de vorige en volgende dag en een keuze voor een andere
-  dag. 29 februari is altijd te kiezen, en in een jaar zonder 29 februari laat 28 februari die foto's
+  dag. Alleen foto's met een echte opnamedatum tellen mee: een bestand dat alleen de datum heeft
+  waarop het gekopieerd is, is geen herinnering. 29 februari is altijd te kiezen, en in een jaar zonder 29 februari laat 28 februari die foto's
   ook zien. Het houdt rekening met de mappen die je op Home koos, en op Home staat bij **Foto op deze
-  dag** nu **Alles bekijken**. Heeft een jaar veel foto's, dan opent **Alle … bekijken** die dag in
-  het raster.
+  dag** nu **Alles bekijken**. Heeft een jaar veel foto's, dan opent **Alle … bekijken** precies
+  die foto's in het raster: dezelfde mappen en hetzelfde aantal.
 - Een foto opent in de gewone viewer; vorige en volgende gaan door alle jaren of door het hele raster
   (de viewer haalt zelf de volgende foto's op). Pijltjes, Home/End, PageUp/PageDown en Enter werken in
   beide schermen.
 - Datums zijn overal de tijd waarop de foto genomen is, zoals de camera hem schreef: een foto van
   23:30 op oudejaarsavond hoort bij dat jaar, net als in de tijdlijn.
 - Met tien onderdelen past het menu bovenin nog steeds van 1024 px breed af: het zoekveld is wat
-  smaller en het woord DataVault verdwijnt eerder.
+  smaller (met de korte tekst "Zoeken…" onder 1100 px) en het woord DataVault verdwijnt eerder.
 
 ### Herstelcentrum: alles terugzetten op één plek
 - Nieuw tabblad **Herstel**: één lijst, nieuwste eerst, van alles wat de app in je archief verplaatste:
