@@ -393,6 +393,192 @@ def _m012_recovery_actions(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_recovery_actions_created ON recovery_actions(created_at)")
 
 
+def _m060_datagatherer_core(conn: sqlite3.Connection):
+    """
+    DataGatherer (backend/datagatherer/): the state of every data source (connector), the
+    raw exports it archived or registered, its cursors, export requests and a log of
+    every network request it made.
+
+    dg_connectors       one row per connector the user touched: its (non-secret) settings,
+                        the opt-in schedule (off by default), when it was connected (OAuth,
+                        for the 6-month expiry) and the outcome of the last sync. Tokens and
+                        API keys are never here: they live in the macOS Keychain only.
+    dg_raw_imports      every raw export: a file copied into data/<owner>/<Bron>/<datum soort>/
+                        (sha256, never twice), or an existing folder registered in place
+                        (is_folder, fingerprint of its names, sizes and mtimes). status says
+                        whether its records are read (pending, importing, imported, failed).
+    dg_cursors          how far an api_sync got per stream (JSON).
+    dg_requests         an export the user asked for in their browser: while one is open, the
+                        Downloads watcher looks for the file.
+    dg_network_log      one row per HTTP request (or refused attempt), without query strings.
+
+    Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_connectors (
+            source_id TEXT PRIMARY KEY,
+            settings TEXT NOT NULL DEFAULT '{}',
+            schedule_enabled INTEGER NOT NULL DEFAULT 0,
+            schedule_minutes INTEGER,
+            connected_at REAL,
+            needs_reconnect INTEGER NOT NULL DEFAULT 0,
+            status_note TEXT,
+            retry_after REAL,
+            last_sync_at REAL,
+            last_success_at REAL,
+            last_error TEXT,
+            data_version INTEGER NOT NULL DEFAULT 0,
+            updated_at REAL NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_raw_imports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            path TEXT NOT NULL UNIQUE,
+            is_folder INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT UNIQUE,
+            fingerprint TEXT,
+            size INTEGER,
+            origin TEXT NOT NULL,
+            original_path TEXT,
+            received_at REAL NOT NULL,
+            status TEXT NOT NULL,
+            imported_at REAL,
+            parser_version INTEGER,
+            records_added INTEGER,
+            records_seen INTEGER,
+            covers_from REAL,
+            covers_until REAL,
+            stats TEXT,
+            error TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dg_raw_source ON dg_raw_imports(source_id, status)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_cursors (
+            source_id TEXT NOT NULL,
+            stream TEXT NOT NULL,
+            cursor TEXT,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (source_id, stream)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            requested_at REAL NOT NULL,
+            since TEXT,
+            status TEXT NOT NULL,
+            raw_import_id INTEGER,
+            note TEXT,
+            updated_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dg_requests_open ON dg_requests(status, source_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_network_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            at REAL NOT NULL,
+            source_id TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            method TEXT NOT NULL,
+            host TEXT NOT NULL,
+            path TEXT,
+            status INTEGER,
+            outcome TEXT NOT NULL,
+            bytes INTEGER,
+            ms INTEGER,
+            job_id INTEGER,
+            note TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dg_network_source ON dg_network_log(source_id, id)")
+
+
+def _m061_spotify_plays(conn: sqlite3.Connection):
+    """
+    Every Spotify play DataGatherer knows, merged from several sources
+    (backend/datagatherer/spotify_store.py), each with a stable key so importing the same
+    export twice adds nothing:
+
+    spotify_plays       plays from the privacy exports (source export_extended: Extended
+                        Streaming History, export_account: Account data) and from Last.fm
+                        scrobbles (source lastfm). ts_ms is when the play ended (UTC ms).
+    spotify_api_plays   plays from the Web API 'recently played' endpoint, in a table of their
+                        own: the developer terms treat API data as provisional; the exports
+                        are the lasting copy.
+
+    A play that a richer source also has is marked superseded (with what superseded it),
+    never deleted. The view spotify_plays_merged is what the Spotify dashboard reads: every
+    play that is not superseded, from both tables. Only new tables and a view.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS spotify_plays (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            play_key TEXT NOT NULL UNIQUE,
+            source TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            start_ms INTEGER,
+            ms_played INTEGER,
+            ms_estimated INTEGER NOT NULL DEFAULT 0,
+            content TEXT NOT NULL,
+            track TEXT,
+            artist TEXT,
+            album TEXT,
+            track_uri TEXT,
+            episode TEXT,
+            show TEXT,
+            episode_uri TEXT,
+            platform TEXT,
+            country TEXT,
+            reason_start TEXT,
+            reason_end TEXT,
+            shuffle INTEGER,
+            skipped INTEGER,
+            offline INTEGER,
+            incognito INTEGER,
+            raw_import_id INTEGER,
+            superseded INTEGER NOT NULL DEFAULT 0,
+            superseded_by TEXT,
+            first_seen_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spotify_plays_ts ON spotify_plays(ts_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spotify_plays_source ON spotify_plays(source, ts_ms)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS spotify_api_plays (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            play_key TEXT NOT NULL UNIQUE,
+            ts_ms INTEGER NOT NULL,
+            start_ms INTEGER,
+            duration_ms INTEGER,
+            track TEXT,
+            artist TEXT,
+            album TEXT,
+            track_uri TEXT,
+            context_uri TEXT,
+            superseded INTEGER NOT NULL DEFAULT 0,
+            superseded_by TEXT,
+            fetched_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spotify_api_plays_ts ON spotify_api_plays(ts_ms)")
+    conn.execute("""
+        CREATE VIEW IF NOT EXISTS spotify_plays_merged AS
+            SELECT 'p' || id AS row_key, source, ts_ms, start_ms, ms_played, ms_estimated, content,
+                   track, artist, album, track_uri, platform
+              FROM spotify_plays WHERE superseded = 0
+            UNION ALL
+            SELECT 'a' || id, 'api', ts_ms, start_ms, duration_ms, 1, 'track',
+                   track, artist, album, track_uri, NULL
+              FROM spotify_api_plays WHERE superseded = 0
+    """)
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -407,6 +593,9 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (10, "app_settings", _m010_app_settings),
     (11, "media_index", _m011_media_index),
     (12, "recovery_actions", _m012_recovery_actions),
+    # 60-69: DataGatherer (step 3.9a); gaps in the numbering are fine, the list stays sorted
+    (60, "datagatherer_core", _m060_datagatherer_core),
+    (61, "spotify_plays", _m061_spotify_plays),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
