@@ -300,7 +300,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 }""", photo)), 0.5)
             expect(page.is_visible("#chat-messages .chat-confirm .btn-primary") and page.is_visible("#chat-messages .chat-strip img"),
                    "chat tools: result strip or confirmation card is not visible")
-            step("chat: forged confirmation is refused", lambda: page.click("#chat-messages .chat-confirm .btn-primary"), 0.6)
+            seen = len(problems)
+            page.click("#chat-messages .chat-confirm .btn-primary")
+            page.wait_for_timeout(600)
+            # (the browser logs the expected 404 of the forged id as a console error)
+            problems[seen:] = [p for p in problems[seen:] if "404" not in p]
             expect("verlopen" in page.inner_text("#chat-messages .chat-confirm-status"),
                    "chat tools: a forged id did not give the expired message")
             page.click(".nav-tab[data-view='home']")
