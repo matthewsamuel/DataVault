@@ -567,7 +567,7 @@ def test_migration_numbers_stay_sorted_and_unique():
 
 def test_the_sources_list_builds_cards_from_metadata(client):
     data = client.get("/api/datagatherer/sources").json()
-    assert data["categories"] == ["Muziek", "Activiteit"]
+    assert data["categories"] == ["Muziek", "Berichten", "Sociaal", "Activiteit"]
     assert data["owner_folder"].endswith("/data/Matthew")
     spotify = next(s for s in data["sources"] if s["id"] == "spotify")
     # The existing export folder is there but not read yet: the one button says Inlezen

@@ -97,6 +97,11 @@ def validate(connector: Connector) -> List[str]:
             problems.append(f"setup fields {missing} are not settings")
     if "api_sync" in caps and connector.setup is None:
         problems.append("api_sync needs a setup (the Verbinden wizard)")
+    watch = getattr(connector, "watch_setting", None)
+    if watch is not None and (watch not in keys or "export_watch" not in caps):
+        problems.append("watch_setting must name a setting of an export_watch connector")
+    if getattr(connector, "holds_messages", False) and "import" not in caps and "local_import" not in caps:
+        problems.append("holds_messages needs import or local_import")
     if not 5 <= int(connector.schedule_minutes) <= 24 * 60:
         problems.append("schedule_minutes must be between 5 and 1440")
     return problems

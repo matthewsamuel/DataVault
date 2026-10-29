@@ -56,6 +56,7 @@ class ExportKind:
     folder_label: str
     expected_days: Tuple[int, int] = (1, 30)
     steps: Tuple[str, ...] = ()
+    date_range: bool = False    # the page asks for a period: the window shows 'sinds' and copies it
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,9 @@ class Connector:
     schedule_minutes: int = 30        # default interval of the opt-in schedule
     launchd: bool = False             # may also run from the optional launchd agent
     parser_version: int = 1
+    holds_messages: bool = False      # its id is a message source in the Berichten view (msg_* tables)
+    watch_setting: Optional[str] = None   # a setting holding a folder (a synced cloud folder) that the
+                                          # watcher always looks in, also without an open request
 
     # ---- derived metadata ----
     @property
@@ -197,6 +201,14 @@ class Connector:
     def coverage(self, ctx: "GatherContext") -> Coverage:
         """What the data of this source covers; shown on the card."""
         return Coverage()
+
+    def access(self, ctx: "GatherContext") -> Optional[Dict[str, Any]]:
+        """
+        local_import: None when the local data can be read; else what the card shows under
+        'Toegang nodig': {code, title, text, settings_path, settings_url, command, steps}
+        (see local_db.access).
+        """
+        return None
 
     def notes(self, ctx: "GatherContext") -> List[Dict[str, str]]:
         """Extra lines for the card: [{'tone': 'warning'|'info', 'text': ...}]."""

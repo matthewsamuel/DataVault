@@ -452,6 +452,7 @@ async function dgDoAction(src, action, button) {
     if (action === 'request_export') return dgOpenExport(src.id);
     if (action === 'find_downloads') return dgOpenDownloads(src.id);
     if (action === 'upload') return dgPickFile(src);
+    if (action === 'access') return dgOpenAccess(src.id);
     const label = button ? button.textContent : '';
     if (button) { button.disabled = true; button.classList.add('is-loading'); }
     try {
@@ -469,7 +470,7 @@ async function dgDoAction(src, action, button) {
 
 // Een exportbestand kiezen (de browser leest het, de server kopieert het naar het archief)
 function dgPickFile(src) {
-    const input = createEl('input', { type: 'file', accept: '.zip,.json,.tgz', class: 'sr-only', 'aria-hidden': 'true' });
+    const input = createEl('input', { type: 'file', accept: '.zip,.json,.tgz,.txt,.sqlite', class: 'sr-only', 'aria-hidden': 'true' });
     input.addEventListener('change', async () => {
         const file = input.files && input.files[0];
         input.remove();
@@ -567,13 +568,30 @@ async function dgOpenExport(id) {
     }
     showSteps();
     body.push(stepsBox);
+    // Een pagina die om een periode vraagt: de datum 'sinds' (je laatste gegevens min een dag) staat
+    // hier en gaat bij het openen op het klembord, zodat je alleen vraagt wat nieuw is
+    const sinceText = detail.since ? dgSinceText(detail.since) : null;
+    if (sinceText && detail.export_kinds.some(k => k.date_range)) {
+        body.push(createEl('div', { class: 'dg-since' },
+            createEl('i', { class: 'fas fa-calendar-day', 'aria-hidden': 'true' }),
+            createEl('span', {}, 'Kies als begindatum ', createEl('strong', { class: 'mono', text: sinceText }),
+                '. Die staat op je klembord zodra de pagina opent; de dag overlap wordt niet dubbel ingelezen.')));
+    }
     const open = createEl('button', { type: 'button', class: 'btn btn-primary', 'data-autofocus': '' },
         createEl('i', { class: 'fas fa-arrow-up-right-from-square', 'aria-hidden': 'true' }), 'Exportpagina openen');
     open.addEventListener('click', async () => {
         open.disabled = true;
+        let copied = false;
+        if (sinceText && kind.date_range) {
+            try { await navigator.clipboard.writeText(sinceText); copied = true; } catch (_) { /* toont hem in de melding */ }
+        }
         try {
             const data = await dgPost(`/api/datagatherer/sources/${encodeURIComponent(id)}/request-export`, { kind: kind.id });
             openExternal(data.url);
+            if (sinceText && kind.date_range) {
+                showToast('Datum sinds', copied ? `${sinceText} staat op je klembord: plak hem als begindatum.`
+                    : `Vul ${sinceText} in als begindatum.`, 'info');
+            }
             dgCloseModal('dg-export');
             const where = data.watching && data.watching.length ? 'DataVault kijkt elke 30 seconden in Downloads en leest hem dan vanzelf in.'
                 : 'Kies het bestand daarna met Bestand kiezen.';
@@ -587,6 +605,82 @@ async function dgOpenExport(id) {
     });
     dgModal('dg-export', `Export aanvragen: ${detail.name}`, 'fa-file-export', body,
         [createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Annuleren', onClick: () => dgCloseModal('dg-export') }), open]);
+}
+
+// '2026-07-14' -> '14-07-2026' (zoals Meta en Google de datum vragen)
+function dgSinceText(iso) {
+    const [y, m, d] = String(iso).split('-');
+    return d && m && y ? `${d}-${m}-${y}` : String(iso);
+}
+
+// Een waarde om letterlijk over te nemen (een opdracht, een pad), met Kopiëren
+function dgCopyRow(value, label) {
+    const copyLabel = createEl('span', { text: 'Kopiëren' });
+    const copy = createEl('button', { type: 'button', class: 'btn btn-secondary btn-sm dg-copy',
+        'aria-label': `${label} kopiëren`,
+        onClick: async () => {
+            try { await navigator.clipboard.writeText(value); copyLabel.textContent = 'Gekopieerd'; }
+            catch (_) { copyLabel.textContent = 'Selecteer en kopieer'; }
+        } }, createEl('i', { class: 'fas fa-copy', 'aria-hidden': 'true' }), copyLabel);
+    return createEl('div', { class: 'dg-copy-row' }, createEl('code', { class: 'dg-copy-value', text: value }), copy);
+}
+
+// ---------- Toegang geven (een database op deze Mac die macOS beschermt) ----------
+
+async function dgOpenAccess(id) {
+    const src = dgSource(id);
+    const access = src && src.access;
+    if (!access) return dgDoAction(src, 'sync');
+    const body = [createEl('p', { class: 'dg-modal-text', text: access.text })];
+    if (access.settings_path) {
+        body.push(createEl('h3', { class: 'dg-modal-section', text: 'Waar in macOS' }),
+            createEl('p', { class: 'dg-access-path' },
+                createEl('i', { class: 'fas fa-lock', 'aria-hidden': 'true' }),
+                createEl('span', { class: 'mono', text: access.settings_path })));
+    }
+    if (access.steps && access.steps.length) {
+        body.push(createEl('h3', { class: 'dg-modal-section', text: 'Zo gaat het' }), dgSteps(access.steps));
+    }
+    if (access.command) {
+        body.push(createEl('h3', { class: 'dg-modal-section', text: 'De hulp starten in Terminal' }),
+            dgCopyRow(access.command, 'Opdracht'),
+            createEl('p', { class: 'dg-field-help', text: 'De hulp kopieert alleen de database naar de cachemap van DataVault. '
+                + 'Hij wist en wijzigt niets en maakt geen verbinding met internet.' }));
+    }
+    const status = createEl('p', { class: 'dg-connect-status', role: 'status' });
+    body.push(status);
+    const check = createEl('button', { type: 'button', class: 'btn btn-primary', 'data-autofocus': '' },
+        createEl('i', { class: 'fas fa-rotate', 'aria-hidden': 'true' }), 'Opnieuw controleren');
+    check.addEventListener('click', async () => {
+        check.disabled = true;
+        status.textContent = 'Controleren…';
+        try {
+            const detail = await dgDetail(id);
+            if (detail.access) {
+                status.textContent = detail.access.code === 'missing' ? detail.access.title
+                    : 'Nog geen toegang en nog geen kopie van de hulp. Volg de stappen hierboven.';
+            } else {
+                dgCloseModal('dg-access');
+                const data = await dgPost(`/api/datagatherer/sources/${encodeURIComponent(id)}/sync`);
+                dgAfterJob(data.job);
+                showToast(`${detail.name} bijwerken`, 'Toegang gelukt: DataVault leest je berichten nu in.', 'success');
+            }
+        } catch (err) {
+            status.textContent = (err && err.message) || 'Controleren mislukt';
+        } finally {
+            if (check.isConnected) check.disabled = false;
+            dgRefreshSoon();
+        }
+    });
+    const footer = [];
+    if (access.settings_url) {
+        footer.push(createEl('button', { type: 'button', class: 'btn btn-secondary', onClick: () => openExternal(access.settings_url) },
+            createEl('i', { class: 'fas fa-gear', 'aria-hidden': 'true' }), 'Systeeminstellingen openen'));
+    }
+    footer.push(createEl('span', { class: 'dg-actions-spacer' }),
+        createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Sluiten', onClick: () => dgCloseModal('dg-access') }),
+        check);
+    dgModal('dg-access', `${access.title}: ${src.name}`, 'fa-lock-open', body, footer, true);
 }
 
 // ---------- In Downloads zoeken ----------
@@ -653,6 +747,18 @@ async function dgOpenDownloads(id) {
 
 function dgField(field, idPrefix) {
     const id = `${idPrefix}-${field.key}`;
+    if (field.kind === 'toggle') {
+        // Aan/uit: dezelfde schakelaar als het schema, de uitleg eronder
+        const input = createEl('input', { type: 'checkbox', id, checked: field.value === true,
+            dataset: { key: field.key, kind: 'toggle' } });
+        const help = field.help ? createEl('p', { class: 'dg-field-help', id: `${id}-help`, text: field.help }) : null;
+        if (help) input.setAttribute('aria-describedby', help.id);
+        return createEl('div', { class: 'dg-field dg-field-toggle' },
+            createEl('div', { class: 'dg-schedule-row' },
+                createEl('label', { class: 'switch' }, input, createEl('span', { class: 'slider' })),
+                createEl('label', { class: 'dg-schedule-label', for: id, text: field.label })),
+            help);
+    }
     const secret = field.kind === 'secret';
     const input = createEl('input', {
         class: `input${secret ? ' mono' : ''}`, id, type: secret ? 'password' : 'text', autocomplete: 'off', spellcheck: 'false',
@@ -690,6 +796,7 @@ async function dgSaveFields(id, fields) {
     const secrets = {};
     const settings = {};
     fields.forEach(input => {
+        if (input.dataset.kind === 'toggle') { settings[input.dataset.key] = input.checked; return; }
         const value = input.value.trim();
         if (input.dataset.kind === 'secret') { if (value) secrets[input.dataset.key] = value; }
         else settings[input.dataset.key] = value;

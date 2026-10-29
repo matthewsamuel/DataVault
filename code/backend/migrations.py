@@ -752,6 +752,116 @@ def _m040_semantic_embeddings(conn: sqlite3.Connection):
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_semantic_model ON semantic_embeddings(model)")
+def _m090_messages(conn: sqlite3.Connection):
+    """
+    Conversations and messages from every chat source DataGatherer reads
+    (backend/datagatherer/messages_store.py): WhatsApp (the Mac database, an iPhone
+    backup's ChatStorage.sqlite and 'Export chat' files), iMessage/SMS, Messenger
+    (Facebook export and the end-to-end encrypted 'secure storage' download) and
+    Instagram direct messages.
+
+    msg_conversations   one row per (source, conv_key). merged_into points at the
+                        conversation a lower-precision copy was merged into (a WhatsApp
+                        'Export chat' of a chat the Mac database also has).
+    msg_messages        one row per (source, msg_key): the stable dedupe key, so importing
+                        the same export twice adds nothing. sent_at_ms is UTC; tz is the
+                        zone a local timestamp was read in (when known); ts_precision
+                        says how exact it is (ms, s or min). attachments and reactions are
+                        JSON. A message that a more exact copy also has is marked
+                        superseded_by (that row's id), never deleted.
+    msg_fts             FTS5 full-text index over body and sender (external content,
+                        kept in step by triggers).
+    Only new tables, indexes and triggers.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS msg_conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            conv_key TEXT NOT NULL,
+            title TEXT,
+            participants TEXT NOT NULL DEFAULT '[]',
+            is_group INTEGER NOT NULL DEFAULT 0,
+            merged_into INTEGER,
+            first_ms INTEGER,
+            last_ms INTEGER,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            updated_at REAL NOT NULL,
+            UNIQUE (source, conv_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_conversations_last ON msg_conversations(last_ms)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS msg_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            conv_id INTEGER NOT NULL,
+            msg_key TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            sent_at_ms INTEGER NOT NULL,
+            tz TEXT,
+            ts_precision TEXT NOT NULL,
+            sender TEXT,
+            is_me INTEGER,
+            body TEXT,
+            kind TEXT NOT NULL DEFAULT 'text',
+            attachments TEXT,
+            reactions TEXT,
+            raw_import_id INTEGER,
+            superseded_by INTEGER,
+            first_seen_at REAL NOT NULL,
+            UNIQUE (source, msg_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_messages_conv ON msg_messages(conv_id, sent_at_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_messages_origin ON msg_messages(origin, sent_at_ms)")
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS msg_fts USING fts5(
+            body, sender, content='msg_messages', content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        )
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS msg_fts_insert AFTER INSERT ON msg_messages BEGIN
+            INSERT INTO msg_fts (rowid, body, sender) VALUES (new.id, new.body, new.sender);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS msg_fts_delete AFTER DELETE ON msg_messages BEGIN
+            INSERT INTO msg_fts (msg_fts, rowid, body, sender) VALUES ('delete', old.id, old.body, old.sender);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS msg_fts_update AFTER UPDATE OF body, sender ON msg_messages BEGIN
+            INSERT INTO msg_fts (msg_fts, rowid, body, sender) VALUES ('delete', old.id, old.body, old.sender);
+            INSERT INTO msg_fts (rowid, body, sender) VALUES (new.id, new.body, new.sender);
+        END
+    """)
+
+
+def _m091_social_items(conn: sqlite3.Connection):
+    """
+    Posts, comments, reactions and media metadata from the Facebook and Instagram exports
+    (backend/datagatherer/formats/meta_dyi.py), one row per (source, item_key): the stable
+    key, so importing the same export twice adds nothing. ts_ms is UTC; media is JSON
+    (paths into the raw export, plus metadata such as EXIF). Only a new table and indexes.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS social_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            item_key TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            title TEXT,
+            body TEXT,
+            url TEXT,
+            media TEXT,
+            raw_import_id INTEGER,
+            first_seen_at REAL NOT NULL,
+            UNIQUE (source, item_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_social_items_ts ON social_items(source, ts_ms)")
 
 
 # (version, name, function) - append only, never renumber or edit an applied migration
@@ -779,6 +889,9 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     # 60-69: DataGatherer (step 3.9a); gaps in the numbering are fine, the list stays sorted
     (60, "datagatherer_core", _m060_datagatherer_core),
     (61, "spotify_plays", _m061_spotify_plays),
+    # 90-99: DataGatherer messages and social (step 3.9b)
+    (90, "messages", _m090_messages),
+    (91, "social_items", _m091_social_items),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

@@ -30,7 +30,7 @@ from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import (
     folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, albums,
-    series, datagatherer, search, geo,
+    series, datagatherer, search, geo, messages,
 )
 from backend.datagatherer import daemon as gather_daemon, jobs as gather_jobs, registry as gather_registry
 from backend.routes import backup as backup_routes
@@ -211,6 +211,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         search.init_router(config, db, job_manager)
         geo.init_router(config, db)
         export_routes.init_router(config, db)
+        messages.init_router(config, db)
 
         _say("DataVault Dashboard initialized successfully")
 
@@ -247,6 +248,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(search.router, prefix="/api/search", tags=["search"], dependencies=vault)
     app.include_router(geo.router, prefix="/api/map", tags=["map"], dependencies=vault)
     app.include_router(export_routes.router, prefix="/api/export", tags=["export"], dependencies=vault)
+    app.include_router(messages.router, prefix="/api/messages", tags=["messages"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 

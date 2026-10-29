@@ -55,6 +55,9 @@ erbij: liever luid bij de start dan een halve kaart.
 | `help` | `HelpOption`s, van makkelijk naar moeilijk (`effort`: `makkelijk`, `gemiddeld`, `moeilijk`) |
 | `settings` | `SettingField`s. `kind='secret'` gaat naar de Sleutelhanger, de rest naar `dg_connectors.settings` |
 | `setup` | Alleen bij `api_sync`: het venster Verbinden met stappen (`{redirect_uri}` wordt ingevuld), velden, uitleg en links. `oauth=True` opent daarna de toestemmingspagina (PKCE, zie `oauth.py`) |
+| `holds_messages` | Het id van de bron is een berichtenbron in Berichten (tabellen `msg_*`, via `messages_store`) |
+| `watch_setting` | Een instelling met een gesynchroniseerde map (Dropbox, Drive, Koofr) waar de watcher altijd kijkt |
+| `ExportKind.date_range` | De exportpagina vraagt een periode: het venster toont de datum 'sinds' en kopieert hem |
 | `record_label`, `stale_days`, `schedule_minutes`, `launchd` | Hoe een record heet, wanneer de gegevens "achter" lopen, het standaardinterval van het schema (staat standaard uit), en of de launchd-agent hem ook mag bijwerken |
 
 Het netwerklabel volgt vanzelf: "Verbindt met … wanneer jij klikt", of "Alleen lokaal".
@@ -81,6 +84,12 @@ Implementeer wat je `capabilities` beloven:
 - `detect(path, names)`: herken je export aan de inhoud (`names`: de bestanden in een zip, of `None`).
   `path.name` is altijd de echte bestandsnaam, ook bij Bestand kiezen. De watcher onthoudt het
   antwoord per bron.
+- `access(ctx)`: alleen bij `local_import`. `None` als de lokale database leesbaar is, anders wat de
+  kaart onder 'Toegang nodig' toont (`local_db.access`). Lees een lokale database altijd uit een kopie:
+  `local_db.take_snapshot` (database plus `-wal` en `-shm`, of de kopie van de hulp `fda_helper.py`)
+  en daarna `local_db.finish_snapshot`.
+- Berichten: `messages_store.conversation(...)`, `message_row(...)` en `insert_messages(...)` met een
+  vaste `msg_key`; sociale items via `meta_import.insert_social`.
 - `notes(ctx)`: extra regels op de kaart, bijvoorbeeld "de koppeling verloopt over 7 dagen".
 - `forget(ctx)`: "Vergeet dit account". Standaard verwijdert dit elke geheime instelling (plus
   `extra_secret_keys`) uit de Sleutelhanger. Gegevens en exports blijven in het archief.

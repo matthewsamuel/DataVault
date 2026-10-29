@@ -13,6 +13,7 @@ any notes. The primary action follows the situation:
     find_downloads   an export was requested: look in Downloads now       In Downloads zoeken
     request_export   no data yet, or only exports (Meta, Takeout, ...)    Export aanvragen
     connect          an API source that is not connected yet             Verbinden
+    access           a local database macOS protects (Full Disk Access)  Toegang geven
 """
 import threading
 import time
@@ -31,10 +32,12 @@ ACTIONS = {
     "request_export": ("Export aanvragen", "fa-arrow-up-right-from-square"),
     "find_downloads": ("In Downloads zoeken", "fa-magnifying-glass"),
     "upload": ("Bestand kiezen", "fa-file-arrow-up"),
+    "access": ("Toegang geven", "fa-lock-open"),
 }
 STATUS = {
     "opnieuw_verbinden": ("Opnieuw verbinden", "danger"),
     "fout": ("Bijwerken mislukt", "danger"),
+    "toegang_nodig": ("Toegang nodig", "warning"),
     "export_binnen": ("Klaar om in te lezen", "info"),
     "wacht_op_export": ("Wacht op export", "info"),
     "gat": ("Gat in de gegevens", "warning"),
@@ -118,9 +121,14 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     now = time.time()
     cov = connector.coverage(gctx)
     api = connector.has("api_sync")
+    local = connector.has("local_import")
+    access = connector.access(gctx) if local else None
+    # 'Toegang nodig' leads the card, unless the app is simply not on this Mac while the
+    # source already has data from its other routes (WhatsApp chat exports): then it waits under Meer
+    blocked = access is not None and not (access.get("code") == "missing" and (cov.records or state.list_raw(db, connector.id, 1)))
     keychain_ok = True
     try:
-        configured = api and connector.is_configured(gctx)
+        configured = (api and connector.is_configured(gctx)) or (local and access is None)
     except keychain.SecretStoreError:
         # Locked, or the user clicked 'Weigeren' at the Keychain prompt: the tab still works
         configured, keychain_ok = False, False
@@ -142,6 +150,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         status = "fout"
     elif pending or unread:
         status = "export_binnen"
+    elif blocked and not cov.records:
+        status = "toegang_nodig"
     elif request:
         status = "wacht_op_export"
     elif not cov.records and not raws:
@@ -170,6 +180,12 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         primary = "import"
         what = "een export" if len(pending) + len(unread) == 1 else f"{len(pending) + len(unread)} exports"
         step = f"Er staat {what} in het archief die nog niet is ingelezen. Klik op Inlezen."
+    elif blocked and not request:
+        primary = "access"
+        step = (f"{access['title']}: {name} leest een database op deze Mac die macOS beschermt. "
+                "Klik op Toegang geven voor de stappen." if access["code"] == "denied" else access["text"])
+        if cov.records:
+            step = f"Je laatste gegevens zijn van {_date(cov.last)}. " + step
     elif configured:
         primary = "sync"
         hole_text = f"tussen {_date(hole[0])} en {_date(hole[1])}" if hole else ""
@@ -223,6 +239,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         step += f" Een export kon niet gelezen worden: {failed['error']}"
 
     actions = []
+    if local:
+        actions.append("sync" if configured else "access")
     if api:
         actions.append("sync" if configured else None)
         actions.append("reconnect" if configured or st["needs_reconnect"] else "connect")
@@ -241,6 +259,10 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         notes, keychain_ok = [], False
     if not keychain_ok:
         notes.insert(0, {"tone": "warning", "text": KEYCHAIN_NOTE})
+    watched = watch_folder(connector, st["settings"])
+    if watched is not None:
+        notes.append({"tone": "info", "text": f"DataVault kijkt altijd in je gesynchroniseerde map {watched.name} en "
+                                              "leest een nieuwe export daar vanzelf in.", "path": str(watched)})
     notice = downloads_notice(raws, now)
     if notice:
         notes.append({"tone": "info", "text": f"{notice['name']} staat in het archief. Het origineel in Downloads mag je "
@@ -279,6 +301,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         "last_sync_at": st["last_sync_at"],
         "last_success_at": st["last_success_at"],
         "last_error": st["last_error"] if sync_failed else None,
+        "access": access,
+        "holds_messages": bool(getattr(connector, "holds_messages", False)),
         "network": {
             "label": connector.network_label,
             "local": not api,
@@ -326,6 +350,16 @@ def downloads_notice(raws: List[Dict[str, Any]], now: float) -> Optional[Dict[st
     return None
 
 
+def watch_folder(connector: Connector, settings: Dict[str, Any]) -> Optional[Path]:
+    """The synced folder of a connector's watch_setting, when it is set and exists."""
+    key = getattr(connector, "watch_setting", None)
+    value = settings.get(key) if key else None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    folder = Path(value.strip()).expanduser()
+    return folder if folder.is_absolute() and folder.is_dir() else None
+
+
 def since_for(connector: Connector, gctx: GatherContext) -> Optional[str]:
     """The 'since' date for an incremental export request: the data's last day, minus one day of overlap."""
     cov = connector.coverage(gctx)
@@ -364,7 +398,8 @@ def detail(config, db, connector: Connector, port: Optional[int]) -> Dict[str, A
             "links": [{"label": label, "url": url} for label, url in connector.setup.links],
         },
         "export_kinds": [{"id": k.id, "label": k.label, "url": k.request_url, "steps": list(k.steps),
-                          "expected_days": list(k.expected_days)} for k in connector.exports],
+                          "expected_days": list(k.expected_days), "date_range": k.date_range} for k in connector.exports],
+        "since": since_for(connector, gctx) if any(k.date_range for k in connector.exports) else None,
         "raw_imports": [{k: r[k] for k in ("id", "kind", "path", "is_folder", "origin", "received_at", "status",
                                             "imported_at", "records_added", "records_seen", "error")}
                         for r in state.list_raw(db, connector.id, limit=20)],

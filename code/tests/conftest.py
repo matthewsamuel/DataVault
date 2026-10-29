@@ -42,7 +42,8 @@ def fake_ollama(monkeypatch):
 @pytest.fixture(autouse=True)
 def datagatherer_sandbox(monkeypatch, tmp_path):
     """
-    No test reaches the real Keychain, the network, ~/Downloads or ~/Library/LaunchAgents:
+    No test reaches the real Keychain, the network, ~/Downloads, ~/Library/LaunchAgents or
+    the real chat databases (DATAVAULT_GATHER_HOME is a temp folder):
     a fresh in-memory keyring, a network guard that refuses everything (tests install an
     httpx.MockTransport with net.set_transport_factory), a LaunchAgents folder and a
     launchctl stand-in in the temp folder, and nothing remembered between tests.
@@ -54,6 +55,8 @@ def datagatherer_sandbox(monkeypatch, tmp_path):
     calls = []
     launchd.set_runner(lambda args: calls.append(args) or 0)
     monkeypatch.setenv("DATAVAULT_LAUNCH_AGENTS_DIR", str(tmp_path / "LaunchAgents"))
+    # The chat databases (iMessage, WhatsApp for Mac) are looked for in a made-up home folder
+    monkeypatch.setenv("DATAVAULT_GATHER_HOME", str(tmp_path / "fake-home"))
     oauth.forget_all()
     daemon.forget_seen()
     cards.forget_existing_cache()
