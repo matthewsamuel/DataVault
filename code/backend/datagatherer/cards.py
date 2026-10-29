@@ -128,7 +128,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     blocked = access is not None and not (access.get("code") == "missing" and (cov.records or state.list_raw(db, connector.id, 1)))
     keychain_ok = True
     try:
-        configured = (api and connector.is_configured(gctx)) or (local and access is None)
+        configured = (api and connector.is_configured(gctx)) or (local and access is None and connector.is_configured(gctx))
     except keychain.SecretStoreError:
         # Locked, or the user clicked 'Weigeren' at the Keychain prompt: the tab still works
         configured, keychain_ok = False, False
@@ -216,6 +216,11 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     elif not cov.records and not raws and connector.has("export_request"):
         primary = "request_export"
         step = f"Nog geen gegevens. Vraag een export aan: {name} maakt hem voor je klaar, DataVault leest hem in."
+    elif local and not api and access is None:
+        # Not on this Mac (or not readable): a copy picked by hand still works when the source can import
+        primary = "upload" if connector.has("import") else "sync"
+        step = (f"{name} is niet gevonden op deze Mac." if not connector.has("import")
+                else f"{name} is niet gevonden op deze Mac. Kies een kopie met Bestand kiezen.")
     elif api and sync_failed:
         primary = "connect"
         step = "Bijwerken lukte de laatste keer niet. Controleer de instellingen en verbind opnieuw."
@@ -240,7 +245,10 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
 
     actions = []
     if local:
-        actions.append("sync" if configured else "access")
+        if configured:
+            actions.append("sync")
+        elif access is not None:
+            actions.append("access")
     if api:
         actions.append("sync" if configured else None)
         actions.append("reconnect" if configured or st["needs_reconnect"] else "connect")
@@ -353,6 +361,8 @@ def downloads_notice(raws: List[Dict[str, Any]], now: float) -> Optional[Dict[st
 def watch_folder(connector: Connector, settings: Dict[str, Any]) -> Optional[Path]:
     """The synced folder of a connector's watch_setting, when it is set and exists."""
     key = getattr(connector, "watch_setting", None)
+    if not key and any(f.key == "watch_folder" for f in connector.settings):
+        key = "watch_folder"
     value = settings.get(key) if key else None
     if not isinstance(value, str) or not value.strip():
         return None

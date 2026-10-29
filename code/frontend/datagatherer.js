@@ -748,9 +748,9 @@ async function dgOpenDownloads(id) {
 function dgField(field, idPrefix) {
     const id = `${idPrefix}-${field.key}`;
     if (field.kind === 'toggle') {
-        // Aan/uit: dezelfde schakelaar als het schema, de uitleg eronder
-        const input = createEl('input', { type: 'checkbox', id, checked: field.value === true,
-            dataset: { key: field.key, kind: 'toggle' } });
+        // Aan/uit (bijvoorbeeld 'Pasha mag deze gegevens gebruiken'): dezelfde schakelaar als het schema
+        const input = createEl('input', { type: 'checkbox', id, role: 'switch', checked: field.value === true,
+            dataset: { key: field.key, kind: field.kind } });
         const help = field.help ? createEl('p', { class: 'dg-field-help', id: `${id}-help`, text: field.help }) : null;
         if (help) input.setAttribute('aria-describedby', help.id);
         return createEl('div', { class: 'dg-field dg-field-toggle' },
@@ -799,6 +799,7 @@ async function dgSaveFields(id, fields) {
         if (input.dataset.kind === 'toggle') { settings[input.dataset.key] = input.checked; return; }
         const value = input.value.trim();
         if (input.dataset.kind === 'secret') { if (value) secrets[input.dataset.key] = value; }
+        else if (input.dataset.kind === 'number') settings[input.dataset.key] = value === '' ? null : Number(value);
         else settings[input.dataset.key] = value;
     });
     if (Object.keys(settings).length) {
@@ -1015,7 +1016,16 @@ async function dgOpenSettings(id) {
                     dgCloseModal('dg-settings');
                     showToast(detail.name, 'Instellingen opgeslagen.', 'success');
                 } catch (err) {
-                    toastFetchError('Opslaan mislukt', err);
+                    // 'Label: reden' van de server: onder dat veld, anders een melding
+                    const field = plain.find(f => err && err.message && err.message.startsWith(`${f.label}:`));
+                    const input = field && document.getElementById(`dg-settings-${field.key}`);
+                    if (input) {
+                        const reason = err.message.slice(field.label.length + 1).trim();
+                        dgFieldError(input, reason.charAt(0).toUpperCase() + reason.slice(1));
+                        input.focus();
+                    } else {
+                        toastFetchError('Opslaan mislukt', err);
+                    }
                     button.disabled = false;
                 }
                 dgRefreshSoon();

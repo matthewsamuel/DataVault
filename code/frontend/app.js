@@ -177,7 +177,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== VIEW SWITCHING ====================
 
-const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map', 'berichten'];
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map', 'berichten', 'activity'];
 
 function currentMainView() {
     return MAIN_VIEWS.find(v => {
@@ -252,6 +252,8 @@ function switchMainView(view) {
         if (typeof mapInit === 'function') mapInit();
     } else if (view === 'berichten') {
         if (typeof msgInit === 'function') msgInit();
+    } else if (view === 'activity') {
+        if (typeof activityInit === 'function') activityInit();
     }
 }
 

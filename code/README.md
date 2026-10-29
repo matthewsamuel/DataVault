@@ -406,6 +406,14 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
   Downloads-watcher kijkt alleen zolang een export aangevraagd is.
 - Optionele configuratie in `config.json`: `"data_owner": "Matthew"` (de map onder `data/`, standaard
   de eerste) en `"datagatherer_watch_folders": ["/Users/…/Dropbox/Exports"]` (extra mappen naast `~/Downloads`).
+- Stap 3.9c: Google Takeout (nl/en) en de Tijdlijn van de telefoon, Chrome- en Safari-geschiedenis
+  (`local_import`, uit een kopie), Netflix, Snapchat, TikTok, Apple (privacy.apple.com) en Apple
+  Gezondheid. Migratie 110: `activity_events`, `location_points`, `location_visits` en
+  `media_location_inferred` (geschatte plek van foto's zonder GPS, alleen in de database). API's:
+  `/api/activity/{facets,days,events}`, `/api/location/{summary,days,track,settings,geotag}` en
+  `/api/map/inferred`; de taak `datagatherer.geotag` schat opnieuw. Tijdzones offline via de Natural
+  Earth-landen en `backend/data/country_zones.json` (uit de tz-database). Het scherm Activiteit
+  (`activity.js`, `g c`) hangt onder DataGatherer.
 - Migraties 60 (DataGatherer) en 61 (samengevoegde Spotify-plays). Het Spotify-scherm leest
   `spotify_plays_merged` pas als elk exportbestand onder `data/` in een ingelezen export ligt
   (`dg_raw_imports.status = 'imported'`, ingelezen na de laatste wijziging van het bestand);

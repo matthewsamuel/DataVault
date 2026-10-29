@@ -102,10 +102,11 @@ def test_new_scripts_load_after_the_helpers_they_use():
 def test_the_datagatherer_page_has_no_code_per_source():
     """A new source is one Python file: the page knows no connector by name (it reads their metadata)."""
     from backend.datagatherer import registry
-    js = re.sub(r"/\*.*?\*/|//[^\n]*", "", _sources()["datagatherer.js"], flags=re.S).lower()
-    for connector in registry.connectors():
-        for word in {connector.id, connector.name.lower()}:
-            assert word not in js, word
+    for page in ("datagatherer.js", "activity.js"):
+        js = re.sub(r"/\*.*?\*/|//[^\n]*", "", _sources()[page], flags=re.S).lower()
+        for connector in registry.connectors():
+            for word in {connector.id, connector.name.lower()}:
+                assert word not in js, (page, word)
 
 
 # Colours come from the design tokens (style.css, between @tokens:start and @tokens:end),

@@ -111,6 +111,26 @@ Een fout die de gebruiker kan oplossen is een `ConnectorError` met een Nederland
 - Een schema per bron (standaard uit) en, voor `launchd = True`, de achtergrondtaak in Instellingen.
 - Instellingen per bron (velden, sleutels in de Sleutelhanger, schema, netwerklog, exports).
 
+## Gedeelde bouwstenen (stap 3.9c)
+
+- `activity_store`: één tabel `activity_events` voor alles wat je deed (`kind` met een Nederlands
+  label in `KINDS`). Bouw records met `activity_store.event(kind, ts_ms, key(...), title, url,
+  details)` en schrijf ze met `activity_store.insert(db, bron, raw_id, events)`; dezelfde sleutel
+  twee keer voegt niets toe. Het scherm Activiteit toont elke bron vanzelf.
+- `location_store`: `parse_bytes` herkent de vier Google-formaten aan de inhoud, `insert` schrijft
+  `location_points` en `location_visits`. Na een import met nieuwe punten roept je bron
+  `geotag.run(...)` aan (zie `google_timeline.after_import`).
+- `export_kit`: `files(raw_path, wanted)` leest ook zips in een map of in een zip, zonder uit te
+  pakken; `PASHA` is de opt-in voor de assistent (standaard uit); `watch_setting(...)` geeft je bron
+  een eigen map om op te volgen (een gesynchroniseerde cloudmap), die altijd bekeken wordt, ook
+  zonder openstaande aanvraag.
+- Een `local_import`-bron (Chrome, Safari) leest een database op deze Mac: `is_configured` zegt of
+  hij gevonden is, `sync` leest een kopie via `browser_history.snapshot` (nooit het origineel), en in
+  testmodus nooit de echte mappen.
+- Apple Foto's: DataVault leest de Foto's-bibliotheek niet. Wie wil, exporteert zelf met het
+  open-source programma osxphotos (`osxphotos export <map in het archief> --update`, nooit
+  `--cleanup`); de media-index pakt die map op zoals elke andere.
+
 ## Testen
 
 Voeg je bron toe aan de tests: `test_every_connector_has_valid_dutch_metadata` loopt al over elke

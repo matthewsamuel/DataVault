@@ -71,6 +71,8 @@ def run_sync(config, db, connector, trigger: str, job=None, sleep=None) -> Dict[
     state.update(db, connector.id, last_sync_at=time.time())
     try:
         if not connector.is_configured(gctx):
+            if not connector.has("api_sync"):
+                raise ConnectorError(f"{connector.name} is niet gevonden op deze Mac")
             raise ConnectorError(f"{connector.name} is nog niet verbonden: klik Verbinden")
         stats = connector.sync(gctx)
     except ConnectorError as e:
@@ -345,8 +347,37 @@ def watch_type(config, db, get_jobs: Callable[[], Any]) -> JobType:
                    describe=lambda p: p.get("name") or Path(p.get("path") or "").name)
 
 
+# ---------- geotag: estimated positions for photos without GPS ----------
+
+GEOTAG_TYPE = "datagatherer.geotag"
+
+
+def geotag_type(config, db) -> JobType:
+    """Estimate positions again for every photo without GPS (params {full: bool}); see geotag.py."""
+    from backend.datagatherer import geotag
+
+    def prepare(params: Dict[str, Any]) -> Dict[str, Any]:
+        full = params.get("full", True)
+        if not isinstance(full, bool):
+            raise HTTPException(status_code=400, detail="full moet waar of onwaar zijn")
+        return {"full": full}
+
+    def run(ctx: JobContext) -> Dict[str, Any]:
+        _vault(config)
+        ctx.progress(0, None, "Foto's zonder GPS zoeken…")
+        stats = geotag.run(db, check=ctx.check, progress=ctx.progress, full=ctx.params["full"])
+        ctx.progress(stats["checked"], max(1, stats["checked"]),
+                     f"Klaar: {_plural(stats['estimated'], 'foto', 'foto’s')} met een geschatte locatie")
+        return {**stats, "complete": True, "errors": 0}
+
+    return JobType(GEOTAG_TYPE, "Locaties schatten uit de Tijdlijn", prepare, run,
+                   summarize=lambda r: {k: r.get(k) for k in ("checked", "estimated", "skipped", "complete")},
+                   results_to_keep=3, jobs_to_keep=10,
+                   describe=lambda p: "alle foto's zonder GPS" if p.get("full") else "nieuwe foto's")
+
+
 def build(config, db, get_jobs: Callable[[], Any]) -> List[JobType]:
-    types = []
+    types = [geotag_type(config, db)]
     for connector in registry.connectors():
         if connector.has("api_sync") or connector.has("local_import"):
             types.append(sync_type(config, db, connector))

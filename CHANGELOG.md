@@ -454,6 +454,42 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Een paar dagen niet luisteren geldt niet meer als gat; alleen het stuk tussen een export en je
   eerste latere nummer kan echt ontbreken.
 - Een geannuleerde upload laat geen tijdelijke kopie meer achter.
+### DataGatherer: Google, locatie, browsers en meer bronnen
+- **Google Takeout wordt nu echt ingelezen**, ook je bestaande Nederlandstalige Takeouts in
+  `RAW_google` (ter plekke, niets wordt verplaatst of uitgepakt): Mijn activiteit (YouTube,
+  Zoeken, Maps, ook de HTML-versie met Nederlandse datums), je YouTube-kijk- en zoekgeschiedenis,
+  Chrome, Agenda en Keep. Nederlandse en Engelse mapnamen werken allebei, en hetzelfde filmpje uit
+  twee Takeouts telt maar één keer.
+- **Takeout volgens schema**: stel bij Google Takeout een map in om op te volgen (bijvoorbeeld je
+  Google Drive-map met Takeout-exports). Elke nieuwe export daarin kopieert DataVault vanzelf naar
+  het archief, ook zonder dat je eerst op Export aanvragen klikt.
+- **Nieuwe bron: Google Maps Tijdlijn.** Exporteer je Tijdlijn op je iPhone naar een iCloud
+  Drive-map en vul die map in bij de instellingen; DataVault leest elke nieuwe export in. De oude
+  Tijdlijn uit Takeout (Records.json en Semantic Location History) en de nieuwe export van de
+  telefoon (iPhone en Android) worden herkend aan de inhoud en samengevoegd zonder dubbels.
+- **Locatie geschat uit Tijdlijn**: foto's zonder GPS krijgen een geschatte plek uit je
+  locatiegeschiedenis rond het moment van de foto (hoogstens 30 minuten ernaast, met hoe zeker
+  dat is). Dat staat alleen in DataVault, **nooit in je fotobestanden**. Op de Kaart zet je de laag
+  "Locatie geschat uit Tijdlijn" aan (een open groene ring), en in de viewer zie je
+  "Locatie (geschat)". Tijdzones: de tijdzone uit de foto als die er is, anders die van de plek
+  (offline bepaald), anders Brussel met zomertijd.
+- **Route per dag op de Kaart**: kies een dag en zie je route en de plekken waar je was, met
+  knoppen naar de vorige en volgende dag met locatie.
+- **Nieuw scherm: Activiteit** (in DataGatherer, of g c): per dag wat je deed, met filters op bron
+  en soort en zoeken in de titels. Websites, YouTube, zoekopdrachten, agenda, notities, Netflix,
+  TikTok, trainingen en meer staan samen op één tijdlijn.
+- **Chrome- en Safari-geschiedenis** van deze Mac: Bijwerken leest een kopie van de database (de
+  browser mag open blijven) en voegt alleen nieuwe bezoeken toe. Safari vraagt Volledige
+  schijftoegang; de kaart zegt hoe, of je kiest een kopie van History.db.
+- **Meer bronnen**, elk met hulp en een knop naar de juiste pagina: **Netflix** (kijkactiviteit,
+  zonder trailers), **Snapchat** (bewaarde Memories met plek, en je chats), **TikTok** (bekeken,
+  leuk gevonden, gezocht), **Apple** (je Apple Music-luistergeschiedenis van privacy.apple.com) en
+  **Apple Gezondheid** (stappen per dag en je trainingen uit export.zip). Twee keer dezelfde
+  export inlezen voegt niets toe. Apple Foto's via het programma osxphotos staat als optionele
+  route in de hulp.
+- **Pasha weet waar je was**, als jij dat wilt: zet per bron "Pasha mag deze gegevens gebruiken"
+  aan (standaard uit). Vraag dan bijvoorbeeld "Waar was ik op 14 juli 2019?".
+
 ### Back-ups van de database
 - Je scores, vergelijkingen, Keurer-keuzes, herstelgegevens en instellingen staan in de database
   op de T7. Die wordt nu elke dag gekopieerd naar de schijf van deze Mac

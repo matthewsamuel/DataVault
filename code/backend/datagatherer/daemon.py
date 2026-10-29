@@ -32,7 +32,7 @@ from backend.datagatherer import raw_store, registry, state
 INTERVAL = 30.0
 STABLE_AGE = 60.0                  # a file untouched this long is complete, also on the first look
 DOWNLOADING_SUFFIXES = (".crdownload", ".download", ".part", ".partial", ".opdownload")
-EXPORT_SUFFIXES = (".zip", ".json", ".tgz", ".tar.gz", ".txt", ".csv", ".sqlite")
+EXPORT_SUFFIXES = (".zip", ".json", ".tgz", ".tar.gz", ".txt", ".csv", ".sqlite", ".db")
 
 
 def _testing() -> bool:
@@ -40,25 +40,43 @@ def _testing() -> bool:
 
 
 def connector_folders(db, connector) -> List[Path]:
-    """The synced folder a connector's watch_setting names (Meta's recurring export to Dropbox/Drive/Koofr)."""
-    from backend.datagatherer import cards
-    if connector is None or not getattr(connector, "watch_setting", None):
+    """
+    The synced folder a connector follows on its own: its watch_setting (Meta's recurring export to
+    Dropbox/Drive/Koofr) or its 'watch_folder' setting (a scheduled Takeout, iCloud Drive Timeline
+    exports). Watched ALWAYS, not only while an export is requested, because the user chose it for
+    exactly this.
+    """
+    if connector is None:
         return []
-    folder = cards.watch_folder(connector, state.get_settings(db, connector.id))
-    return [folder] if folder is not None else []
+    key = getattr(connector, "watch_setting", None)
+    if not key and any(f.key == "watch_folder" for f in connector.settings):
+        key = "watch_folder"
+    if not key:
+        return []
+    value = state.get_settings(db, connector.id).get(key)
+    if not isinstance(value, str) or not value.strip():
+        return []
+    folder = Path(os.path.expanduser(value.strip()))
+    return [folder] if folder.is_absolute() and folder.is_dir() else []
 
 
-def watch_folders(config, extra: Optional[List[Path]] = None) -> List[Path]:
+def watch_folders(config, extra: Optional[List[Path]] = None, base: bool = True) -> List[Path]:
     """
     The folders the watcher looks in (only those that exist): ~/Downloads plus the extra
     folders of config 'datagatherer_watch_folders' (for example a synced cloud folder),
     plus `extra` (a connector's own synced folder).
     """
-    folders = ([] if _testing() else [Path.home() / "Downloads"]) + list(config.GATHER_WATCH_FOLDERS or []) \
-        + list(extra or [])
+    folders = ([] if (_testing() or not base) else [Path.home() / "Downloads"]) \
+        + (list(config.GATHER_WATCH_FOLDERS or []) if base else []) + list(extra or [])
     if _testing():
         temp = Path(tempfile.gettempdir()).resolve()
         folders = [f for f in folders if Path(f).resolve().is_relative_to(temp)]
+    # never a folder inside the vault (the archive is not a place to drop exports)
+    try:
+        vault = config.VAULT_ROOT.resolve()
+        folders = [f for f in folders if not Path(f).resolve().is_relative_to(vault)]
+    except (OSError, RuntimeError, AttributeError):
+        pass
     unique = []
     for f in folders:
         if Path(f).is_dir() and Path(f) not in unique:
@@ -95,16 +113,20 @@ def _downloading(entry: os.DirEntry, names: set) -> bool:
     return any(f"{entry.name}{suffix}" in names for suffix in DOWNLOADING_SUFFIXES)
 
 
-def candidates(config, db, connector, now: Optional[float] = None) -> List[Dict[str, Any]]:
+def candidates(config, db, connector, now: Optional[float] = None,
+               folders: Optional[List[Path]] = None) -> List[Dict[str, Any]]:
     """
-    Exports of connector in the watch folders: [{path, name, size, mtime, kind, stable,
-    already}] (already: this file was copied into the vault before). Reads only zip
-    directories and the start of JSON files, and only once per (path, size, mtime).
+    Exports of connector in the watch folders (default: Downloads and the extra folders, plus
+    the connector's own folder): [{path, name, size, mtime, kind, stable, already}] (already:
+    this file was copied into the vault before). Reads only zip directories and the start of
+    files, and only once per (path, size, mtime).
     """
     now = time.time() if now is None else now
     found = []
     patterns = [p.lower() for p in connector.file_patterns]
-    for folder in watch_folders(config, connector_folders(db, connector)):
+    if folders is None:
+        folders = watch_folders(config, connector_folders(db, connector))
+    for folder in folders:
         try:
             entries = list(os.scandir(folder))
         except OSError:
@@ -210,11 +232,14 @@ class Daemon:
                 _seen.sizes.clear()
             return []
         started = []
-        for source_id in sorted({r["source_id"] for r in requests} | always):
+        requested = {r["source_id"] for r in requests}
+        for source_id in sorted(requested | always):
             connector = registry.get(source_id)
             if connector is None or not connector.has("export_watch"):
                 continue
-            for cand in candidates(self.config, self.db, connector, now):
+            # Downloads only while an export is requested; the own folder always
+            folders = None if source_id in requested else watch_folders(self.config, connector_folders(self.db, connector), base=False)
+            for cand in candidates(self.config, self.db, connector, now, folders):
                 key = (cand["path"], cand["size"], cand["mtime"])
                 if cand["already"] or key in _seen.started:
                     continue

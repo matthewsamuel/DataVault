@@ -34,6 +34,7 @@ const SHORTCUT_VIEWS = [
     { view: 'datagatherer', key: null, g: 'v', label: 'DataGatherer' },
     { view: 'map', key: null, g: 'm', label: 'Kaart' },
     { view: 'berichten', key: null, g: 'e', label: 'Berichten' },
+    { view: 'activity', key: null, g: 'c', label: 'Activiteit' },
 ];
 
 const SHORTCUT_GROUPS = [
