@@ -177,7 +177,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== VIEW SWITCHING ====================
 
-const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums'];
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'map'];
 
 function currentMainView() {
     return MAIN_VIEWS.find(v => {
@@ -245,6 +245,8 @@ function switchMainView(view) {
         if (typeof settingsInit === 'function') settingsInit();
     } else if (view === 'albums') {
         if (typeof albumsInit === 'function') albumsInit();
+    } else if (view === 'map') {
+        if (typeof mapInit === 'function') mapInit();
     }
 }
 
@@ -1296,6 +1298,7 @@ function renderViewerFile() {
     if (media) modalBody.insertBefore(media, modalBody.firstChild);
 
     modalMetadata.replaceChildren(viewerMetadata(file));
+    if (typeof mapViewerHook === 'function') mapViewerHook(file);   // 'Op kaart tonen' (map.js)
 }
 
 // Alleen echte gegevens: de datum van het bestand (of de opnamedatum uit de tijdlijn) en
@@ -1985,6 +1988,7 @@ function reloadAfterVaultReturn() {
     else if (view === 'shows') loadShows();
     else if (view === 'spotify') loadSpotifyStats();
     else if (view === 'timeline' && typeof timelineVaultReturned === 'function') timelineVaultReturned();
+    else if (view === 'map' && typeof mapVaultReturned === 'function') mapVaultReturned();
     else if (view === 'keurer' && typeof keurerVaultReturned === 'function') keurerVaultReturned();
     else if (view === 'duplicates' && typeof duplicatesInit === 'function') duplicatesInit();
     else if (view === 'recovery' && typeof recoveryLoad === 'function') recoveryLoad();

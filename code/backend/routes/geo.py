@@ -2,6 +2,7 @@
 DataVault Dashboard - Kaart: geotagged photos and videos on a map
 
 GET  /api/map/points      the media with a GPS position as compact arrays, in chunks
+GET  /api/map/locate     {id, lat, lon, has_gps} of one file (for 'Op kaart tonen' in the viewer)
 GET  /api/map/items       full items (for the viewer and popups) for a few ids
 GET  /api/map/settings    {osm_tiles}: the opt-in OpenStreetMap tiles
 PUT  /api/map/settings    {osm_tiles: bool}
@@ -132,6 +133,18 @@ def items(ids: str = Query(..., description="comma-separated media ids")) -> Dic
             f"WHERE m.missing = 0 AND m.id IN ({', '.join('?' * len(wanted))})", wanted).fetchall()
     by_id = {row[0]: media_index._item(row) for row in rows}
     return {"items": [album_item(by_id[i]) for i in wanted if i in by_id]}
+
+
+@router.get("/locate")
+def locate(path: str = Query(..., min_length=1)) -> Dict[str, Any]:
+    """{has_gps, id?, lat?, lon?} for one file; the path is checked like every path from a request."""
+    from backend.paths import resolve_in_vault
+    resolved = str(resolve_in_vault(path, config))
+    with db._connect() as conn:
+        row = conn.execute("SELECT id, lat, lon FROM media WHERE path = ? AND missing = 0", (resolved,)).fetchone()
+    if row is None or row[1] is None:
+        return {"has_gps": False}
+    return {"has_gps": True, "id": row[0], "lat": row[1], "lon": row[2]}
 
 
 @router.get("/settings")

@@ -8,7 +8,9 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=54">
+    <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
+    <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
+    <link rel="stylesheet" href="style.css?v=55">
 </head>
 
 <body>
@@ -51,6 +53,9 @@
                 </button>
                 <button class="nav-tab" data-view="albums" onclick="switchMainView('albums')" title="Albums: filters, slimme albums en op deze dag (g a)">
                     Albums
+                </button>
+                <button class="nav-tab" data-view="map" onclick="switchMainView('map')" title="Kaart: foto's op de plek waar ze genomen zijn (g m)">
+                    Kaart
                 </button>
                 <button class="nav-tab" data-view="recovery" onclick="switchMainView('recovery')" title="Herstelcentrum: alles terugzetten wat de app verplaatste (8)">
                     Herstelcentrum
@@ -697,6 +702,46 @@
         </div>
 
         <!-- ALBUMS: de bibliotheek met filters, slimme albums en 'op deze dag' (library.js) -->
+        <!-- KAART: foto's en video's met een GPS-positie (map.js, /api/map) -->
+        <div id="section-map" class="section hidden">
+            <div class="map-page">
+                <div class="page-header map-header">
+                    <div>
+                        <h1 class="page-title" id="map-title" tabindex="-1"><i class="fas fa-map-location-dot" aria-hidden="true"></i> Kaart</h1>
+                        <p class="page-subtitle" id="map-subtitle">Foto's en video's op de plek waar ze genomen zijn.</p>
+                    </div>
+                    <label class="map-osm-toggle" title="Haalt kaarttegels van OpenStreetMap via internet. Uit: de kaart werkt helemaal zonder internet.">
+                        <span class="switch">
+                            <input type="checkbox" id="map-osm-toggle" role="switch">
+                            <span class="slider"></span>
+                        </span>
+                        <span>Gedetailleerde kaart (OpenStreetMap, online)</span>
+                    </label>
+                </div>
+
+                <div class="map-filters" role="group" aria-label="Filters voor de kaart">
+                    <select class="select select-sm" id="map-year" aria-label="Jaar"></select>
+                    <label class="map-date-field"><span>Van</span>
+                        <input type="date" class="input input-sm" id="map-date-from" aria-label="Van datum"></label>
+                    <label class="map-date-field"><span>Tot</span>
+                        <input type="date" class="input input-sm" id="map-date-to" aria-label="Tot en met datum"></label>
+                    <select class="select select-sm" id="map-camera" aria-label="Camera"></select>
+                    <select class="select select-sm" id="map-album" aria-label="Album"></select>
+                    <button type="button" class="btn btn-ghost btn-sm" id="map-reset" hidden>Filters wissen</button>
+                    <span class="map-filter-spacer"></span>
+                    <span class="map-count" id="map-count" role="status" aria-live="polite"></span>
+                    <button type="button" class="pill map-nogps" id="map-nogps" hidden aria-label="Foto's zonder locatie"
+                        title="Toon deze foto's in Albums"></button>
+                </div>
+
+                <div class="map-stage">
+                    <div id="map-canvas" class="map-canvas" aria-label="Kaart met foto's op locatie. Pijltjestoetsen verschuiven, plus en min zoomen, Enter opent een groep of foto."></div>
+                    <div class="map-overlay" id="map-overlay" hidden></div>
+                    <div class="map-progress" id="map-progress" hidden role="status"></div>
+                </div>
+            </div>
+        </div>
+
         <div id="section-albums" class="section hidden">
             <div class="albums-layout">
                 <nav class="albums-sidebar" aria-label="Albums">
@@ -1021,6 +1066,9 @@
                 <div class="viewer-actions">
                     <button class="btn btn-secondary" id="btn-open-finder" onclick="openInFinder()" title="Toon in Finder (f)">
                         <i class="fas fa-up-right-from-square" aria-hidden="true"></i> Toon in Finder
+                    </button>
+                    <button class="btn btn-secondary" id="btn-show-on-map" onclick="mapShowViewerFile()" hidden title="Toon deze foto op de kaart">
+                        <i class="fas fa-location-dot" aria-hidden="true"></i> Op kaart tonen
                     </button>
                     <button class="btn btn-primary" id="btn-move-file" onclick="openMoveFileModal()" title="Verplaatsen (m)">
                         <i class="fas fa-folder-open" aria-hidden="true"></i> Verplaatsen
@@ -1412,7 +1460,9 @@
     <script src="dom.js?v=1"></script>
     <script src="ui.js?v=2"></script>
     <script src="folder-tree.js?v=7"></script>
-    <script src="app.js?v=63"></script>
+    <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
+    <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
+    <script src="app.js?v=64"></script>
     <script src="jobs.js?v=11"></script>
     <script src="duplicates.js?v=26"></script>
     <script src="series.js?v=2"></script>
@@ -1422,7 +1472,8 @@
     <script src="resizable-sidebar.js?v=1"></script>
     <script src="recovery.js?v=6"></script>
     <script src="settings.js?v=4"></script>
-    <script src="shortcuts.js?v=6"></script>
+    <script src="map.js?v=1"></script>
+    <script src="shortcuts.js?v=7"></script>
     <script src="library.js?v=2"></script>
 </body>
 

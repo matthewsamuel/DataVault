@@ -31,6 +31,7 @@ const SHORTCUT_VIEWS = [
     { view: 'settings', key: '9', g: 'i', label: 'Instellingen' },
     // Meer dan negen onderdelen: de rest alleen met g + letter
     { view: 'albums', key: null, g: 'a', label: 'Albums' },
+    { view: 'map', key: null, g: 'm', label: 'Kaart' },
 ];
 
 const SHORTCUT_GROUPS = [

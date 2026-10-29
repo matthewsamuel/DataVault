@@ -122,3 +122,11 @@ def test_osm_tiles_are_off_until_the_user_switches_them_on(client):
     assert client.put("/api/map/settings", json={}).status_code == 400
     client.put("/api/map/settings", json={"osm_tiles": False})
     assert client.get("/api/map/settings").json() == {"osm_tiles": False}
+
+
+def test_locate_gives_the_position_of_one_file(indexed, config):
+    r = indexed.get("/api/map/locate", params={"path": str(config.VAULT_ROOT / "RAW/2019/zomer vakantie/IMG_0002.JPG")})
+    assert r.status_code == 200 and r.json()["has_gps"] is True and abs(r.json()["lat"] - 43.7) < 0.01
+    no_gps = indexed.get("/api/map/locate", params={"path": str(config.VAULT_ROOT / "RAW/2021/🎉 feest/no exif.jpg")})
+    assert no_gps.json() == {"has_gps": False}
+    assert indexed.get("/api/map/locate", params={"path": "/etc/passwd"}).status_code == 403
