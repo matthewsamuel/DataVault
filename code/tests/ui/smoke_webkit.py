@@ -540,6 +540,38 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 page.select_option("#albums-when", "y:2019")), 0.8)
             expect(page.evaluate("location.hash") == "#albums?kind=photo&year=2019" and page.evaluate(tiles) == 4,
                    f"albums: photos of 2019 gave {page.evaluate('location.hash')} and {page.evaluate(tiles)} tiles")
+            # Export (step 3.7): select with space and shift-click, 'alles selecteren', export to a temp folder
+            export_dir = Path(tempfile.mkdtemp(prefix="dv-export-smoke-")) / "uit"
+            step("export: space selects", lambda: (page.focus("#albums-content .albums-tile[tabindex='0']"),
+                                                   page.keyboard.press("Space")), 0.3)
+            expect(page.evaluate("document.querySelectorAll('#albums-content .albums-tile.selected').length") == 1
+                   and page.is_visible("#export-bar"), "export: space did not select the focused tile")
+            step("export: shift-click selects a range", lambda: page.click("#albums-content .albums-tile[data-index='2']",
+                                                                           modifiers=["Shift"]), 0.3)
+            expect(page.evaluate("DVExport.count") == 3, f"export: shift-click gave {page.evaluate('DVExport.count')} selected, expected 3")
+            step("export: select all of the filter", lambda: page.click("#export-select-all"), 1.0)
+            expect(page.evaluate("DVExport.count") == 4, "export: 'alles selecteren' did not select all 4 photos")
+            step("export: open the window", lambda: (page.click("#export-open"),
+                                                     page.wait_for_selector("#export-status.is-ok", timeout=8000)), 0.3)
+            expect_focus_trapped("modal-export", "export: window")
+            step("export: refuses a destination in the archive", lambda: (
+                page.fill("#export-base", str(vault / "RAW")), page.wait_for_selector("#export-status.is-error", timeout=5000)), 0.2)
+            expect(not page.is_enabled("#export-start"), "export: a destination inside the archive can be started")
+            step("export: start", lambda: (page.fill("#export-base", str(export_dir.parent)), page.fill("#export-name", export_dir.name),
+                                           page.wait_for_selector("#export-status.is-ok", timeout=5000),
+                                           page.click("#export-start")), 2.0)
+            copied = sorted(p.name for p in export_dir.iterdir() if p.suffix.lower() in (".jpg", ".jpeg")) if export_dir.exists() else []
+            expect(len(copied) == 4 and (export_dir / "manifest.csv").exists(), f"export: copied {copied}")
+            step("export: best of a period window", lambda: (page.keyboard.press("Escape"), page.click("#albums-best"),
+                                                             page.click("#best-preview"),
+                                                             page.wait_for_selector("#best-summary", timeout=8000)), 0.3)
+            expect_focus_trapped("modal-best", "export: best window")
+            step("export: close", lambda: page.keyboard.press("Escape"), 0.3)
+            # A finished export stays in the job dock (with 'Toon in Finder')
+            expect(page.evaluate("jobDock.jobs.some(j => j.type === 'export' && j.status === 'done' && j.summary.destination)"),
+                   "export: the finished job has no destination for 'Toon in Finder'")
+            shutil.rmtree(export_dir.parent, ignore_errors=True)
+
             # Save as a smart album (Enter in the name field), then change it and delete it again
             step("albums: save as album", lambda: (page.click("#albums-save-new"),
                                                    page.wait_for_function("document.activeElement.id === 'album-name'")), 0.3)
@@ -767,6 +799,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Library (media index): the app indexed the vault by itself; the dock shows it,
             # and 'Bibliotheek bijwerken' starts a full pass from the keyboard
+            # The finished export would keep the dock folded: hide it like a user would
+            page.evaluate("jobDock.jobs.filter(j => j.type === 'export').forEach(j => jobDock.dismissed.add(j.id)); renderJobDock()")
             step("library: line after the automatic pass", lambda: page.wait_for_function(
                 "/Bibliotheek: \\d/.test((document.getElementById('job-library') || {}).textContent || '')",
                 timeout=60000, polling=250), 0.2)

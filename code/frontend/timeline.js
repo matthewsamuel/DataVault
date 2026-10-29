@@ -736,11 +736,33 @@
         card.setAttribute('aria-label', `${file.name}, ${dateStr} ${timeStr}${file.type === 'video' ? ', video' : ''}`);
 
         // Click handler - open in viewer modal
-        card.onclick = () => {
+        if (window.DVExport && DVExport.has(file.path)) card.classList.add('selected');
+        card.onclick = (e) => {
+            if (window.DVExport && DVExport.wantsSelect(e)) return selectTimelineFile(file, index, e.shiftKey);
             openTimelinePhoto(file, index);
         };
 
         return card;
+    }
+
+    // Selecteren voor export: klik met shift of cmd, of spatie
+    let tlAnchor = null;
+    function selectTimelineFile(file, index, range) {
+        if (range && tlAnchor !== null) {
+            DVExport.selectRange(tlFiles.slice(Math.min(tlAnchor, index), Math.max(tlAnchor, index) + 1));
+        } else {
+            DVExport.toggle(file);
+        }
+        tlAnchor = index;
+    }
+    if (window.DVExport) {
+        DVExport.onChange(() => {
+            if (!tlContentEl) return;
+            tlContentEl.querySelectorAll('.tl-photo-card').forEach(card => {
+                const f = tlFiles[Number(card.getAttribute('data-index'))];
+                if (f) card.classList.toggle('selected', DVExport.has(f.path));
+            });
+        });
     }
 
     // De gedeelde viewer van app.js, met de tijdlijn als eigen lijst: bladeren gaat door de
@@ -864,8 +886,11 @@
             case 'PageUp': next = rowsAway(-rowsPerPage); break;
             case 'Home': next = 0; break;
             case 'End': next = tlFiles.length - 1; break;
-            case 'Enter':
             case ' ':
+                e.preventDefault();
+                if (window.DVExport && tlFiles[index]) selectTimelineFile(tlFiles[index], index, e.shiftKey);
+                return;
+            case 'Enter':
                 e.preventDefault();
                 card.click();
                 return;

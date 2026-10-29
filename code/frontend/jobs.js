@@ -260,6 +260,9 @@ function createJobItem(job) {
     if (job.type === 'dup_scan' && job.status === 'done' && job.has_result) {
         actions.push(jobButton('Bekijk', 'Toon dit resultaat in Duplicaten', () => openDuplicateScanJob(job.id)));
     }
+    if (job.type === 'export' && job.status === 'done' && job.summary && job.summary.destination) {
+        actions.push(jobButton('Toon in Finder', 'Open de exportmap', () => exportRevealFolder(job.summary.destination)));
+    }
     if (job.can_pause && !job.stopping) {
         actions.push(jobButton('Pauzeren', 'Pauzeer; hervatten gaat verder waar hij was', () => jobsAction(job.id, 'pause')));
     }
@@ -447,6 +450,7 @@ function jobsInit() {
     jobsOnFinished(job => {
         // Een automatische ronde meldt zich alleen als er iets misging
         if (jobIsAuto(job) && job.status !== 'failed') return;
+        if (job.type === 'export') return;   // export.js meldt dit zelf (met 'Toon in Finder')
         const kind = job.status === 'done' ? 'success' : job.status === 'failed' ? 'error' : 'info';
         const text = job.status === 'failed' ? (job.error || 'Mislukt') : (job.message || JOB_STATUS_LABELS[job.status]);
         showToast(`${job.label}: ${JOB_STATUS_LABELS[job.status] || job.status}`, text, kind);
