@@ -1,10 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import heapq
 import os
 import random
 import stat
+import threading
+import time
+from backend import elo, media_index
 from backend.config import Config, is_photo, is_video
 from backend.paths import resolve_in_vault, vault_folder_or_none, walk_archive
 
@@ -284,3 +287,317 @@ def get_folder_content(path: str):
     ratings = db.get_all_ratings() if db else {}
     paths = collect_show_files(target_path, get_disabled_folders())
     return pick_show_files(paths, ratings, SHOW_MAX_FILES)
+
+
+# --- 'Welke is mooier?': comparisons and the leaderboard (backend/elo.py) ------
+#
+# A scope is a folder: a show (a folder below library), the whole library (no folder
+# given), or any other folder in the vault. Its photos come from the media index once a
+# pass has finished (cached until the selection changes), else from a walk (cached for
+# CANDIDATE_TTL seconds). Disabled show folders never take part, as in the shows.
+# Other collections (albums) plug in with elo.register_scope(kind, resolve) and are asked
+# for with scope=<kind>:<value> instead of folder; their photos are looked up in the index.
+
+CANDIDATE_TTL = 60
+LEADERBOARD_MAX = 200
+MAX_COMPARISON_ID = 2 ** 63 - 1
+_candidates_lock = threading.Lock()
+_candidates_cache: Dict[str, Any] = {}
+
+
+class _Scope:
+    """Where a round runs: key (stored in the history), title, and either a folder or the
+    paths of a registered collection."""
+
+    def __init__(self, key: str, title: str, folder: Optional[Path] = None, paths: Optional[List[str]] = None):
+        self.key, self.title, self.folder, self.paths = key, title, folder, paths
+
+    def info(self) -> Dict[str, Any]:
+        return {"key": self.key, "path": str(self.folder) if self.folder is not None else None, "title": self.title}
+
+
+def _scope_folder(folder: Optional[str]) -> Path:
+    """The folder a comparison round runs in: the given one (inside the vault) or library."""
+    if folder:
+        target = resolve_in_vault(folder, config, folder=True)
+    else:
+        target = vault_folder_or_none("library", config)
+        if target is None:
+            raise HTTPException(status_code=404, detail="De map library bestaat niet")
+    if not target.is_dir():
+        raise HTTPException(status_code=404, detail="Map niet gevonden")
+    return target
+
+
+def _scope_title(target: Path) -> str:
+    library_root = vault_folder_or_none("library", config)
+    return "Hele bibliotheek" if library_root is not None and target == library_root else target.name
+
+
+def _scope(folder: Optional[str] = None, scope: Optional[str] = None) -> _Scope:
+    """A folder scope, or a registered collection ('album:12'); 400/404 when it is not there."""
+    if scope:
+        if not isinstance(scope, str) or ":" not in scope:
+            raise HTTPException(status_code=400, detail="Ongeldige collectie")
+        found = elo.resolve_scope(scope)
+        if found is None:
+            raise HTTPException(status_code=404, detail="Collectie niet gevonden")
+        return _Scope(found["key"], found["title"], paths=found["paths"])
+    target = _scope_folder(folder)
+    return _Scope(str(target), _scope_title(target), folder=target)
+
+
+def _base_candidates(target: Path) -> List[Dict[str, Any]]:
+    """Every photo below target that may take part: [{path, id, size, taken, taken_source,
+    series}] (series: see elo.mark_series)."""
+    folder = str(target)
+    disabled = get_disabled_folders()
+    base = None
+    if db is not None and media_index.usable(db):
+        base = _index_candidates(target, disabled)
+        # A folder made since the last pass is not in the index yet: then the walk answers
+        # (and the index is asked to catch up), instead of 'too few photos'
+        if len(base) < 2 and not media_index.fresh_for(db, [target]):
+            media_index.request_update()
+            base = None
+    if base is None:
+        key = ("walk", tuple(disabled))
+        with _candidates_lock:
+            cached = _candidates_cache.get(folder)
+        if cached and cached[0] == key and time.monotonic() - cached[1] < CANDIDATE_TTL:
+            return cached[2]
+        base = [{"path": p, "id": None, "size": None, "taken": None, "taken_source": None}
+                for p in collect_show_files(target, disabled) if elo.is_elo_photo(p)]
+        elo.mark_series(base)
+        with _candidates_lock:
+            _candidates_cache[folder] = (key, time.monotonic(), base)
+    return base
+
+
+def _index_candidates(target: Path, disabled: List[str]) -> List[Dict[str, Any]]:
+    """The photos below target as the media index knows them (cached until the selection changes)."""
+    folder = str(target)
+    filters = {"kind": "photo", "folder": folder}
+    key = ("index", media_index.selection_version(db, filters), tuple(disabled))
+    with _candidates_lock:
+        cached = _candidates_cache.get(folder)
+    if cached and cached[0] == key:
+        return cached[2]
+    rows, offset = [], 0
+    while True:
+        page = media_index.query(db, filters, sort="path", offset=offset, limit=media_index.MAX_LIMIT)
+        rows.extend(page)
+        if len(page) < media_index.MAX_LIMIT:
+            break
+        offset += len(page)
+    base = [{"path": r["path"], "id": r["id"], "size": r["size"], "taken": r["taken"],
+             "taken_source": r["taken_source"]}
+            for r in rows if elo.is_elo_photo(r["path"]) and is_folder_enabled(Path(r["folder"]), disabled)]
+    elo.mark_series(base)
+    with _candidates_lock:
+        _candidates_cache[folder] = (key, time.monotonic(), base)
+    return base
+
+
+def _collection_candidates(paths: List[str]) -> List[Dict[str, Any]]:
+    """The photos of a registered collection that may take part (inside the vault, a photo
+    a browser can show, not in a disabled show folder), with what the index knows of them."""
+    root = str(config.VAULT_ROOT).rstrip("/") + "/"
+    disabled = get_disabled_folders()
+    wanted = sorted({p for p in paths if isinstance(p, str) and p.startswith(root) and elo.is_elo_photo(p)
+                     and is_folder_enabled(Path(p).parent, disabled)})
+    known: Dict[str, Tuple] = {}
+    if db is not None and wanted:
+        with db._connect() as conn:
+            for start in range(0, len(wanted), 400):
+                chunk = wanted[start:start + 400]
+                for row in conn.execute(
+                        f"SELECT path, id, size, taken, taken_source FROM media WHERE missing = 0 "
+                        f"AND path IN ({','.join('?' * len(chunk))})", chunk):
+                    known[row[0]] = row[1:]
+    base = []
+    for path in wanted:
+        media_id, size, taken, source = known.get(path, (None, None, None, None))
+        base.append({"path": path, "id": media_id, "size": size, "taken": taken, "taken_source": source})
+    elo.mark_series(base)
+    return base
+
+
+def _scope_candidates(sc: _Scope) -> List[Dict[str, Any]]:
+    if sc.folder is not None:
+        base = _base_candidates(sc.folder)
+        ratings = elo.ratings_below(db, str(sc.folder))
+    else:
+        base = _collection_candidates(sc.paths)
+        ratings = elo.ratings_of(db, [item["path"] for item in base])
+    return _with_ratings(base, ratings)
+
+
+def _scope_stats(sc: _Scope, candidates: List[Dict[str, Any]]) -> Dict[str, int]:
+    return {"photos": len(candidates), "compared": sum(1 for c in candidates if c["games"]),
+            "comparisons": elo.comparisons_in_scope(db, sc.key)}
+
+
+def forget_candidates() -> None:
+    with _candidates_lock:
+        _candidates_cache.clear()
+
+
+def _with_ratings(base: List[Dict[str, Any]], ratings: Dict[str, Tuple[int, int, int]]) -> List[Dict[str, Any]]:
+    out = []
+    for item in base:
+        rating, games, votes = ratings.get(item["path"], (RATING_START, 0, 0))
+        out.append({**item, "rating": rating, "games": games, "votes": votes})
+    return out
+
+
+def _photo_info(item: Dict[str, Any]) -> Dict[str, Any]:
+    p = Path(item["path"])
+    return {"path": item["path"], "name": p.name, "folder": p.parent.name,
+            "rating": item["rating"], "games": item["games"], "votes": item.get("votes", 0)}
+
+
+def _require_db():
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+
+@router.get("/compare/pair")
+def compare_pair(folder: Optional[str] = None, scope: Optional[str] = None,
+                 prev: Optional[List[str]] = Query(None)) -> Dict[str, Any]:
+    """
+    The next two photos to compare in a scope (folder, or scope=<kind>:<value> for a
+    registered collection): {scope: {key, path, title}, pair: [a, b] or null, reason (when
+    null: 'too_few' or 'no_pair'), stats: {photos, compared, comparisons}}.
+    prev (twice): the pair on screen now, which never comes back straight away; neither
+    does the last pair compared in this scope.
+    """
+    _require_db()
+    sc = _scope(folder, scope)
+    candidates = _scope_candidates(sc)
+    avoid = []
+    if prev and len(prev) == 2:
+        avoid.append(prev)
+    last = elo.last_comparison(db, sc.key)
+    if last:
+        avoid.append((last["path_a"], last["path_b"]))
+    stats = _scope_stats(sc, candidates)
+    pair, gone = None, False
+    pool = candidates
+    for _ in range(6):
+        pair = elo.choose_pair(pool, avoid)
+        if pair is None:
+            break
+        missing = [c["path"] for c in pair if not elo.still_there(c["path"])]
+        if not missing:
+            break
+        # Deleted or moved outside the app since the index or walk saw it: try without it
+        gone = True
+        pool = [c for c in pool if c["path"] not in missing]
+        pair = None
+    if gone:
+        forget_candidates()
+        media_index.request_update()
+    reason = None
+    if pair is None:
+        reason = "too_few" if len(pool) < 2 else "no_pair"
+    return {
+        "scope": sc.info(),
+        "pair": [_photo_info(c) for c in pair] if pair else None,
+        "reason": reason,
+        "stats": stats,
+    }
+
+
+def _comparison_photo(value: Any) -> str:
+    path = resolve_in_vault(value, config)
+    if not elo.still_there(str(path)) or not elo.is_elo_photo(str(path)):
+        raise HTTPException(status_code=404, detail="Foto niet gevonden")
+    return str(path)
+
+
+@router.post("/compare")
+def compare(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Save one comparison: { a, b, winner: 'a'|'b', folder? | scope? }. Both ratings change
+    in one transaction (Elo, see backend/elo.py). Answers the history row with both new ratings.
+    """
+    _require_db()
+    winner = payload.get("winner")
+    if winner not in ("a", "b"):
+        raise HTTPException(status_code=400, detail="Kies 'a' of 'b' als winnaar")
+    a, b = _comparison_photo(payload.get("a")), _comparison_photo(payload.get("b"))
+    if a == b:
+        raise HTTPException(status_code=400, detail="Een foto kan niet tegen zichzelf")
+    sc = _scope(payload.get("folder"), payload.get("scope"))
+    return elo.record_comparison(db, a, b, winner, sc.key)
+
+
+def _stats_for_key(key: Optional[str]) -> Optional[Dict[str, int]]:
+    """The progress numbers of the scope a history row names, or None when that scope is gone."""
+    if not key:
+        return None
+    try:
+        sc = _scope(scope=key) if not key.startswith("/") else _scope(folder=key)
+        return _scope_stats(sc, _scope_candidates(sc))
+    except HTTPException:
+        return None
+
+
+@router.post("/compare/undo")
+def compare_undo(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Take back a comparison: { id } (or { folder } / { scope }: the newest one there). Both
+    ratings go back to exactly what they were; 409 when one of the photos changed since.
+    The answer has the scope's progress numbers again (stats).
+    """
+    _require_db()
+    comparison_id = payload.get("id")
+    if comparison_id is not None and (not isinstance(comparison_id, int) or isinstance(comparison_id, bool)
+                                      or not 0 < comparison_id <= MAX_COMPARISON_ID):
+        raise HTTPException(status_code=400, detail="Ongeldige vergelijking")
+    scope = None
+    if comparison_id is None:
+        scope = _scope(payload.get("folder"), payload.get("scope")).key
+    try:
+        result = elo.undo_comparison(db, comparison_id, scope)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except elo.ComparisonConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    result["stats"] = _stats_for_key(result.get("scope"))
+    return result
+
+
+@router.get("/leaderboard")
+def leaderboard(folder: Optional[str] = None, scope: Optional[str] = None,
+                limit: int = Query(50, ge=1, le=LEADERBOARD_MAX)) -> Dict[str, Any]:
+    """
+    The best-rated photos and videos in a scope (folder, or scope=<kind>:<value>): {scope,
+    total (judged files), items: [{rank, path, name, folder, rating, games, votes, wins}]},
+    highest rating first. Files that are gone or in a disabled show folder are left out.
+    """
+    _require_db()
+    sc = _scope(folder, scope)
+    disabled = get_disabled_folders()
+    if sc.folder is not None:
+        judged = elo.ratings_below(db, str(sc.folder))
+    else:
+        judged = elo.ratings_of(db, [p for p in sc.paths if isinstance(p, str)])
+    rows = [(path, value) for path, value in judged.items()
+            if is_show_media(path) and is_folder_enabled(Path(path).parent, disabled)]
+    rows.sort(key=lambda item: (-item[1][0], -item[1][1], item[0]))
+    items = []
+    for path, (rating, games, votes) in rows:
+        if len(items) >= limit:
+            break
+        if not elo.still_there(path):
+            continue
+        p = Path(path)
+        items.append({"rank": len(items) + 1, "path": path, "name": p.name, "folder": p.parent.name,
+                      "rating": rating, "games": games, "votes": votes, "wins": 0})
+    if items:
+        wins = elo.wins_of(db, [item["path"] for item in items])
+        for item in items:
+            item["wins"] = wins.get(item["path"], 0)
+    return {"scope": sc.info(), "total": len(rows), "items": items}

@@ -300,15 +300,9 @@ function renderShows(data) {
     // Data structure: { "featured": {...}, "shows": [...] }
     const { featured, shows } = data || {};
 
-    if (!data || (!featured && (!shows || shows.length === 0))) {
-        container.replaceChildren(emptyState({
-            icon: 'fa-folder-open', title: 'Nog geen shows',
-            text: 'Shows komen uit de mappen in de map library. Zet er een paar aan bij Bronnen beheren.',
-            action: { label: 'Bronnen beheren', onClick: openSettingsModal, primary: true },
-        }));
-        return;
-    }
+    const empty = !data || (!featured && (!shows || shows.length === 0));
 
+    // De kop staat er ook zonder shows: 'Welke is mooier?' werkt dan nog op de hele bibliotheek
     container.innerHTML = `
         <div class="page-header shows-header">
             <div>
@@ -316,6 +310,9 @@ function renderShows(data) {
                 <p class="page-subtitle">Diavoorstellingen van je mappen, met je mooiste foto's vaker in beeld.</p>
             </div>
             <div class="shows-header-actions">
+            <button class="btn btn-secondary" id="btn-elo" onclick="openElo()">
+                <i class="fas fa-scale-balanced" aria-hidden="true"></i> Welke is mooier?
+            </button>
             <button class="btn btn-secondary" id="btn-shuffle-shows" onclick="shuffleShows()">
                 <i class="fas fa-random" aria-hidden="true"></i> Shows husselen
             </button>
@@ -325,6 +322,18 @@ function renderShows(data) {
             </div>
         </div>
     `;
+
+    if (empty) {
+        // Husselen en Bronnen beheren staan dan al in de lege staat (of hebben niets om te doen)
+        container.querySelectorAll('#btn-shuffle-shows, .shows-header-actions [onclick="openSettingsModal()"]')
+            .forEach(btn => btn.remove());
+        container.appendChild(emptyState({
+            icon: 'fa-folder-open', title: 'Nog geen shows',
+            text: 'Shows komen uit de mappen in de map library. Zet er een paar aan bij Bronnen beheren.',
+            action: { label: 'Bronnen beheren', onClick: openSettingsModal, primary: true },
+        }));
+        return;
+    }
 
     // 1. Hero Section (Featured - Random from Vault)
     if (featured && featured.files && featured.files.length > 0) {

@@ -87,10 +87,13 @@ def test_new_scripts_load_after_the_helpers_they_use():
     index = _sources()["index.html"]
     scripts = [s.split("?")[0] for s in re.findall(r'<script src="([^"]+)"', index)]
     assert scripts.index("ui.js") < scripts.index("app.js")
-    for late in ("recovery.js", "settings.js", "shortcuts.js", "library.js", "datagatherer.js"):
+    for late in ("recovery.js", "settings.js", "shortcuts.js", "library.js", "datagatherer.js", "elo.js", "backup-settings.js"):
         assert scripts.index(late) > scripts.index("jobs.js"), late
     # DataGatherer registers its Instellingen section, so it loads after settings.js
     assert scripts.index("datagatherer.js") > scripts.index("settings.js")
+    # elo.js adds a shortcut group and backup-settings.js a settings section
+    assert scripts.index("elo.js") > scripts.index("shortcuts.js")
+    assert scripts.index("backup-settings.js") > scripts.index("settings.js")
 
 
 def test_the_datagatherer_page_has_no_code_per_source():

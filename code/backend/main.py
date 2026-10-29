@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend import errors, file_ops, media_index, restart, security, thumbnail
+from backend import backup, errors, file_ops, media_index, restart, security, thumbnail
 from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import (
@@ -33,6 +33,7 @@ from backend.routes import (
     series, datagatherer,
 )
 from backend.datagatherer import daemon as gather_daemon, jobs as gather_jobs, registry as gather_registry
+from backend.routes import backup as backup_routes
 
 
 def _say(message: str) -> None:
@@ -53,11 +54,17 @@ async def _lifespan(app: FastAPI):
     gather = getattr(app.state, "gather_daemon", None)
     if gather is not None:
         gather.start()
+    # A database backup on start when the newest is older than a day, then daily
+    auto_backup = getattr(app.state, "auto_backup", None)
+    if auto_backup is not None:
+        auto_backup.start()
     yield
     if gather is not None:
         await run_in_threadpool(gather.stop)
     if auto_index is not None:
         await run_in_threadpool(auto_index.stop)
+    if auto_backup is not None:
+        await run_in_threadpool(auto_backup.stop)
     # Stop background jobs at their next check (they stay resumable as 'interrupted'),
     # then close the database connections
     job_manager = getattr(app.state, "jobs", None)
@@ -66,6 +73,9 @@ async def _lifespan(app: FastAPI):
     database = getattr(app.state, "db", None)
     if database is not None:
         database.close_all()
+    config = getattr(app.state, "config", None)
+    if config is not None:
+        backup.release_app_lock(config)
 
 
 def create_app(config_path: Optional[str] = None) -> FastAPI:
@@ -104,6 +114,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.state.db = None
     app.state.auto_index = None
     app.state.gather_daemon = None
+    app.state.auto_backup = None
     try:
         # Load configuration
         config = Config(config_path)
@@ -156,6 +167,13 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         if os.environ.get("DATAVAULT_GATHER_DAEMON", "1") != "0":
             app.state.gather_daemon = gather_daemon.Daemon(config, db, lambda: app.state.jobs)
 
+        # The database is copied to the Mac's own disk (backend/backup.py): on start when the
+        # newest backup is older than a day, then daily (DATAVAULT_AUTO_BACKUP=0: tests). While
+        # the app has the database open it holds a lock, so restore_backup.py waits for a stop.
+        db.when_ready(lambda: backup.hold_app_lock(config))
+        if os.environ.get("DATAVAULT_AUTO_BACKUP", "1") != "0":
+            app.state.auto_backup = backup.AutoBackup(config, db)
+
         # Initialize routes with config and database: always, also without the vault
         folders.init_router(config)
         media.init_router(config, db)
@@ -171,6 +189,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         recovery.init_router(config, db)
         series.init_router(config, db, job_manager)
         datagatherer.init_router(config, db, job_manager)
+        backup_routes.init_router(config, app.state.auto_backup)
 
         _say("DataVault Dashboard initialized successfully")
 
@@ -202,6 +221,8 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(recovery.router, prefix="/api/recovery", tags=["recovery"], dependencies=vault)
     app.include_router(series.router, prefix="/api/series", tags=["series"], dependencies=vault)
     app.include_router(datagatherer.router, prefix="/api/datagatherer", tags=["datagatherer"], dependencies=vault)
+    # Not behind require_vault: the backups are on the Mac's own disk (a backup itself needs the database)
+    app.include_router(backup_routes.router, prefix="/api/backup", tags=["backup"])
     app.include_router(security.router)
     app.include_router(core_router)
 

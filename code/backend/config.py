@@ -26,13 +26,34 @@ def resolve_config_path(explicit: Optional[str] = None) -> Path:
     return DEFAULT_CONFIG_PATH
 
 
+# Where database backups go unless config.json says "backup_folder" (see backend/backup.py)
+DEFAULT_BACKUP_FOLDER = Path.home() / "Library" / "Application Support" / "DataVault" / "backups"
+
+
+def _positive_int(value: Any, default: int) -> int:
+    """A count from config.json (at least 1), or the default when it is missing or not a number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    return max(1, int(value))
+
+
+def _expand(value: str) -> Path:
+    """The path with a leading '~' turned into the home folder (kept as written without one)."""
+    try:
+        return Path(value).expanduser()
+    except RuntimeError:
+        return Path(value)
+
+
 def _real_path(value: str) -> Path:
     """
     The configured path with symlinks resolved, so every path the app walks, compares or
     stores uses one spelling (a vault_root through a symlink would otherwise give two).
+    A leading '~' is the user's home folder (as the README writes the backup folder), not a
+    folder named '~' below wherever the app was started.
     A disk that is not mounted yet resolves as far as it exists; on failure keep it as given.
     """
-    path = Path(value)
+    path = _expand(value)
     try:
         return path.resolve()
     except (OSError, RuntimeError):
@@ -75,6 +96,26 @@ class Config:
         self.TRASH_FOLDER = _real_path(trash_folder) if trash_folder else self.VAULT_ROOT / 'TRASH'
 
         self.CACHE_FOLDER = _real_path(data["cache_folder"])
+
+        # Database backups (backend/backup.py): on the Mac's own disk, not next to the
+        # database on the T7. In test mode the default stays inside the temp directory.
+        # A relative backup_folder would depend on the folder the app was started from (and
+        # put the backups next to the app on the T7): it is not used, and Instellingen says so.
+        backup_folder = data.get('backup_folder')
+        self.BACKUP_FOLDER_NOTE = None
+        if backup_folder and not _expand(backup_folder).is_absolute():
+            self.BACKUP_FOLDER_NOTE = (
+                f'De back-upmap "{backup_folder}" in config.json is geen volledig pad, dus de app gebruikt '
+                'de standaardmap. Schrijf het pad helemaal uit (beginnend met / of ~/).')
+            backup_folder = None
+        if backup_folder:
+            self.BACKUP_FOLDER = _real_path(backup_folder)
+        elif os.environ.get("DATAVAULT_TESTING") == "1":
+            self.BACKUP_FOLDER = self.CACHE_FOLDER / "backups"
+        else:
+            self.BACKUP_FOLDER = _real_path(str(DEFAULT_BACKUP_FOLDER))
+        self.BACKUP_KEEP_DAILY = _positive_int(data.get('backup_keep_daily'), 7)
+        self.BACKUP_KEEP_WEEKLY = _positive_int(data.get('backup_keep_weekly'), 4)
         
         # Derived paths
         self.DB_PATH = self.CACHE_FOLDER / "datavault.db"
@@ -104,6 +145,7 @@ class Config:
             ("duplicates_folder", self.DUPLICATES_FOLDER),
             ("trash_folder", self.TRASH_FOLDER),
             ("cache_folder", self.CACHE_FOLDER),
+            ("backup_folder", self.BACKUP_FOLDER),
         ]:
             if not path.resolve().is_relative_to(temp_root):
                 raise RuntimeError(

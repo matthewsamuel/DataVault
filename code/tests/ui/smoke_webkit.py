@@ -11,7 +11,8 @@ viewer, Tab staying inside every window, focus going back where it was, Keurer k
 act from the theme menu or the search field), moves a file and puts it back from the
 Herstelcentrum, compares photos on the Beste uit reeks tab and keeps the best of a series
 with the keyboard (and undoes that), checks Instellingen and the storage window, walks through
-DataGatherer (help, the menu, the connect window, reading the existing Spotify export, the network log), and runs
+DataGatherer (help, the menu, the connect window, reading the existing Spotify export, the network log),
+makes a backup from Instellingen, compares photos in 'Welke is mooier?' (keys, undo, leaderboard), and runs
 a11y_checks.js on every screen in the light and the dark theme:
 all visible text must reach WCAG AA contrast and every control must have a name. On the way
 it saves a screenshot of every screen in both themes (for a look at the design), in a temp
@@ -394,8 +395,36 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Instellingen: every built-in part is there and the theme can be chosen there
             step("settings: 9 opens Instellingen", lambda: page.keyboard.press("9"), 1.0)
-            for part in ("weergave", "taalmodel", "bibliotheek", "shows", "herstel", "over"):
+            for part in ("weergave", "taalmodel", "bibliotheek", "shows", "herstel", "backups", "over"):
                 expect(page.is_visible(f"#settings-{part}"), f"settings: part {part} missing")
+            # Back-ups: 'Nu back-uppen' makes one (checked and compressed, next to the vault in this
+            # test), the part then shows it, and the focus stays on the button
+            # ... in place: the page does not jump while the part is drawn again
+            button_top = "document.getElementById('settings-backup-now').getBoundingClientRect().top"
+            page.evaluate("document.getElementById('settings-backup-now').scrollIntoView({block: 'center'})")
+            top_before = page.evaluate(button_top)
+            try:
+                step("settings: Nu back-uppen", lambda: (
+                    page.focus("#settings-backup-now"), page.keyboard.press("Enter"),
+                    page.wait_for_selector("#settings-backups .backup-kind", timeout=15000)), 0.5)
+            except PlaywrightError:
+                problems.append("settings: 'Nu back-uppen' did not show the new backup")
+            top_after = page.evaluate(button_top)
+            expect(abs(top_after - top_before) < 4,
+                   f"settings: 'Nu back-uppen' moved on screen ({top_before:.0f} -> {top_after:.0f} px)")
+            made = sorted(vault.parent.glob("vault_backups/datavault-*-handmatig.db.gz"))
+            expect(len(made) == 1, f"settings: expected one backup file, found {[m.name for m in made]}")
+            expect("vandaag" in (page.text_content("#settings-backups") or ""), "settings: the last backup time is not shown")
+            expect(page.evaluate("document.activeElement.id") == "settings-backup-now",
+                   f"settings: focus left 'Nu back-uppen' ({page.evaluate('document.activeElement.id')})")
+            expect(page.is_visible("#settings-backups .backup-restore-chevron"),
+                   "settings: the restore steps have no chevron that shows they open")
+            page.evaluate("document.querySelector('#settings-backups .backup-restore').open = true")
+            restore_text = page.text_content("#settings-backups .backup-restore") or ""
+            expect("restore_backup.py" in restore_text, "settings: the restore steps do not show the command")
+            # The smoke server runs with its own config: the command must name it, never code/config.json
+            expect("--config" in restore_text and "vault_config.json" in restore_text,
+                   "settings: the restore command does not name the config the app runs with")
             expect(page.evaluate("getComputedStyle(document.querySelector('.nav-tab-settings.active'), '::after').content") != "none",
                    "settings: the gear has no active indicator")
             step("settings: dark theme", lambda: page.check("input[data-theme-choice='dark']"), 0.3)
@@ -753,6 +782,178 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                        "shows: the score badge has no name")
                 step("shows: next slide", lambda: page.keyboard.press("ArrowRight"), 0.8)
                 step("shows: close slideshow", lambda: page.keyboard.press("Escape"), 0.8)
+
+            # Welke is mooier?: two photos side by side; ← / 2 pick, z takes the last pick back exactly,
+            # spatie skips, the pair just compared never comes straight back, Tab stays in the window
+            def board():
+                return page.evaluate("""(async () => (await fetchJSON(`${API_BASE}/api/shows/leaderboard?limit=200`))
+                    .items.map(i => [i.path, i.rating, i.games]).sort())()""")
+
+            def shown_pair():
+                return page.evaluate("elo.pair ? elo.pair.map(p => p.path) : []")
+
+            def comparisons():
+                return page.evaluate("(async () => (await fetchJSON(`${API_BASE}/api/shows/compare/pair`)).stats.comparisons)()")
+
+            try:
+                step("elo: open from Shows", lambda: (
+                    page.click(".nav-tab[data-view='shows']"), page.click("#btn-elo"),
+                    page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=10000)), 0.6)
+            except PlaywrightError:
+                problems.append("elo: the window showed no pair")
+            expect(page.evaluate("document.getElementById('elo-overlay').contains(document.activeElement)"),
+                   "elo: the focus is not in the window")
+            before_board, first = board(), shown_pair()
+            step("elo: ← picks the left photo", lambda: page.keyboard.press("ArrowLeft"), 1.4)
+            scores = {path: rating for path, rating, _ in board()}
+            expect(len(first) == 2 and scores.get(first[0], 0) > 1000 and scores.get(first[1], 9999) < 1000,
+                   f"elo: ← did not make the left photo win ({first}, {scores})")
+            expect(set(shown_pair()) != set(first), "elo: the pair just compared came straight back")
+            step("elo: z takes it back", lambda: page.keyboard.press("z"), 1.0)
+            expect(board() == before_board, "elo: z did not put both scores back exactly")
+            expect(shown_pair() == first, "elo: after z the same pair is not shown again")
+            server_stats = page.evaluate("(async () => (await fetchJSON(`${API_BASE}/api/shows/compare/pair`)).stats)()")
+            expect(page.evaluate("elo.stats && elo.stats.compared") == server_stats["compared"],
+                   f"elo: after z the progress line still counts the undone comparison ({page.text_content('#elo-progress')})")
+            step("elo: 2 picks the right photo", lambda: page.keyboard.press("2"), 1.4)
+            scores = {path: rating for path, rating, _ in board()}
+            expect(scores.get(first[1], 0) > 1000, f"elo: 2 did not make the right photo win ({scores})")
+            count, current = comparisons(), shown_pair()
+            step("elo: spatie skips", lambda: page.keyboard.press(" "), 0.8)
+            expect(comparisons() == count and shown_pair() != current, "elo: spatie did not just skip the pair")
+            page.focus("#elo-scope")
+            page.keyboard.press("1")
+            page.wait_for_timeout(400)
+            expect(comparisons() == count, "elo: a key in the collection list picked a photo")
+
+            # A second key while the next pair loads (slowed down here), and a held key, pick nothing more
+            page.evaluate("""(() => { window.__eloPosts = 0; window.__realFetchJSON = fetchJSON;
+                fetchJSON = async (url, options) => {
+                    if (url.includes('/api/shows/compare/pair')) await new Promise(r => setTimeout(r, 900));
+                    if (url.endsWith('/api/shows/compare') && options && options.method === 'POST') window.__eloPosts++;
+                    return window.__realFetchJSON(url, options);
+                }; })()""")
+            page.focus("#elo-overlay")
+            page.keyboard.press("1")
+            for _ in range(10):
+                page.wait_for_timeout(80)
+                page.keyboard.press("1")
+            page.keyboard.down("2")
+            page.keyboard.down("2")      # a repeat, as when the key is held
+            page.keyboard.up("2")
+            page.wait_for_timeout(1600)
+            expect(page.evaluate("window.__eloPosts") == 1,
+                   f"elo: a second key while the next pair loaded made {page.evaluate('window.__eloPosts')} comparisons")
+            page.evaluate("() => { fetchJSON = window.__realFetchJSON; }")
+
+            # Tab to a photo, Enter picks it, and the keys still work after that (focus stays on a photo);
+            # everything Tab reaches in the window shows a focus ring
+            ring = """(() => { const a = document.activeElement; if (!a || a === document.body) return 'none';
+                const probe = document.createElement('i'); probe.style.color = 'var(--focus-ring)';
+                document.body.appendChild(probe); const colour = getComputedStyle(probe).color; probe.remove();
+                const rgb = colour.slice(colour.indexOf('(') + 1, colour.indexOf(')'));
+                const el = a.classList.contains('elo-choice') ? a.querySelector('.elo-frame') : a;
+                const cs = getComputedStyle(el);
+                const ok = (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 && cs.outlineColor === colour)
+                    || cs.boxShadow.includes(rgb);
+                return ok ? 'ok' : (a.id || a.className || a.tagName); })()"""
+            page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=5000)
+            page.focus("#elo-overlay")
+            missing_rings = []
+            for _ in range(8):
+                page.keyboard.press("Tab")
+                page.wait_for_timeout(300)      # the ring fades in (--duration-base)
+                at = page.evaluate(ring)
+                if at != "ok":
+                    missing_rings.append(at)
+            expect(not missing_rings, f"elo: no visible focus ring on {missing_rings}")
+            for _ in range(8):
+                if page.evaluate("!!document.activeElement.closest('.elo-choice')"):
+                    break
+                page.keyboard.press("Tab")
+            count = comparisons()
+            step("elo: Enter on a photo", lambda: page.keyboard.press("Enter"), 1.4)
+            expect(comparisons() == count + 1, "elo: Enter on a photo did not pick it")
+            expect(page.evaluate("!!document.activeElement.closest('.elo-choice')"),
+                   f"elo: after Enter the focus fell to {page.evaluate('document.activeElement.tagName')}")
+            step("elo: 1 after Enter", lambda: page.keyboard.press("1"), 1.4)
+            expect(comparisons() == count + 2, "elo: after Tab + Enter the key 1 did nothing")
+
+            # Ranglijst right after a pick (during the short pause before the next pair): the board
+            # stays, no dead pair is drawn over it, and Vergelijken then shows a new pair
+            page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=5000)
+            picked = shown_pair()
+            page.focus("#elo-overlay")
+            page.keyboard.press("1")
+            page.click("#elo-tab-board")
+            page.wait_for_timeout(1400)
+            race = page.evaluate("""({tab: elo.tab, rows: document.querySelectorAll('#elo-body .elo-board-row').length,
+                choices: document.querySelectorAll('#elo-body .elo-choice').length})""")
+            expect(race["tab"] == "board" and race["rows"] > 0 and race["choices"] == 0,
+                   f"elo: Ranglijst right after a pick showed a pair instead of the board ({race})")
+            step("elo: back to Vergelijken", lambda: (page.click("#elo-tab-compare"),
+                 page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=5000)), 0.3)
+            expect(len(shown_pair()) == 2 and set(shown_pair()) != set(picked),
+                   f"elo: after the board the pair just compared came back ({picked})")
+
+            # z says so in the footer (no toast over the photos); an undo that fails on the way (no
+            # connection) keeps the comparison, so z can try again
+            page.evaluate("""(() => { window.__realFetchJSON = fetchJSON;
+                fetchJSON = async (url, options) => {
+                    if (url.endsWith('/api/shows/compare/undo')) throw new TypeError('Load failed');
+                    return window.__realFetchJSON(url, options);
+                }; })()""")
+            undo_before = page.evaluate("elo.undo.length")
+            page.focus("#elo-overlay")
+            seen = len(problems)
+            page.keyboard.press("z")
+            page.wait_for_timeout(400)
+            # (the console error of that failed undo is expected here)
+            problems[seen:] = [p for p in problems[seen:] if "Terugdraaien lukte niet" not in p]
+            expect(undo_before > 0 and page.evaluate("elo.undo.length") == undo_before,
+                   f"elo: a failed undo dropped the comparison ({undo_before} -> {page.evaluate('elo.undo.length')})")
+            page.evaluate("() => { fetchJSON = window.__realFetchJSON; document.querySelectorAll('.toast').forEach(t => t.remove()); }")
+            page.focus("#elo-overlay")
+            step("elo: z again", lambda: page.keyboard.press("z"), 1.0)
+            expect(page.evaluate("elo.undo.length") == undo_before - 1, "elo: z after a failed undo did nothing")
+            expect("Teruggedraaid" in (page.text_content("#elo-progress") or "")
+                   and not page.query_selector(".toast"), f"elo: the undo is not told in the footer, or a toast covers the photos "
+                   f"({page.text_content('#elo-progress')})")
+
+            # A collection with too few photos: Overslaan is off and the round counter starts again
+            familie = str((vault / "library" / "Familie").resolve())
+            step("elo: Familie", lambda: page.select_option("#elo-scope", familie), 1.0)
+            expect(page.is_disabled("#elo-skip"), "elo: Overslaan looks usable without a pair")
+            expect("in deze ronde" not in (page.text_content("#elo-progress") or ""),
+                   f"elo: the round counter of another collection is shown ({page.text_content('#elo-progress')})")
+            step("elo: back to the library", lambda: page.select_option("#elo-scope", ""), 1.0)
+            page.focus("#elo-overlay")
+            expect_focus_trapped("elo-overlay", "elo: window")
+            step("elo: Ranglijst", lambda: page.click("#elo-tab-board"), 1.0)
+            ranks = page.evaluate("[...document.querySelectorAll('.elo-board-score')].map(e => Number(e.textContent.replace(/\\./g, '')))")
+            expect(len(ranks) >= 2 and ranks == sorted(ranks, reverse=True), f"elo: the leaderboard is not sorted ({ranks})")
+            for theme in ("light", "dark"):
+                page.evaluate(f"setTheme('{theme}')")
+                for tab in ("board", "compare"):
+                    page.evaluate(f"eloShowTab('{tab}')")
+                    page.wait_for_timeout(900)
+                    page.screenshot(path=str(shots / f"elo-{tab}_{theme}.png"))
+                    page.add_script_tag(path=str(A11Y_CHECKS))
+                    for fail in page.evaluate("__contrastFailures()"):
+                        problems.append(f"contrast {theme} elo {tab}: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+                    for control in page.evaluate("__unnamedControls()"):
+                        problems.append(f"unnamed control in elo {tab}: {control}")
+            page.evaluate("setTheme('auto')")
+            step("elo: Escape closes", lambda: page.keyboard.press("Escape"), 0.5)
+            expect(not page.is_visible("#elo-overlay") and page.evaluate("document.activeElement.id") == "btn-elo",
+                   f"elo: Escape did not close the window and return to its button ({page.evaluate('document.activeElement.id')})")
+            # Without any show the header (and 'Welke is mooier?') stays above the empty state
+            empty_shows = page.evaluate("""(() => { const before = _lastShowsData; renderShows({featured: null, shows: []});
+                const r = {elo: !!document.getElementById('btn-elo'), empty: !!document.querySelector('#shows-container .empty-state'),
+                           shuffle: !!document.getElementById('btn-shuffle-shows')};
+                renderShows(before); return r; })()""")
+            expect(empty_shows == {"elo": True, "empty": True, "shuffle": False},
+                   f"shows: without shows 'Welke is mooier?' cannot be reached ({empty_shows})")
 
             # Spotify: both top lists show everything the export has (never cut to the shorter one),
             # the shorter one ends with a quiet closing line, and the stat labels in a row line up

@@ -64,6 +64,9 @@
     --control-h: 34px;
     --control-h-lg: 40px;
 
+    /* Kleine vierkante miniaturen in lijsten (ranglijst) */
+    --thumb-sm: 56px;
+
     /* Rondingen */
     --radius-xs: 4px;
     --radius-sm: 6px;
@@ -11000,4 +11003,619 @@ button.otd-settings-icon:hover {
     .dg-log-trigger {
         display: none;
     }
+}
+
+/* ==================== WELKE IS MOOIER? (elo.js) ==================== */
+/* Een groot venster: kop met collectie en tabbladen, twee foto's op een donker vlak, onderaan
+   de voortgang en Terugdraaien / Overslaan. De ranglijst gebruikt hetzelfde venster. */
+
+.elo-overlay {
+    padding: var(--space-lg);
+}
+
+.elo-panel {
+    display: flex;
+    flex-direction: column;
+    width: min(1440px, 100%);
+    height: calc(100vh - 2 * var(--space-lg));
+    max-height: none;
+    overflow: hidden;
+    padding: var(--space-lg) var(--space-xl) var(--space-lg);
+}
+
+.elo-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-lg);
+    padding-bottom: var(--space-md);
+}
+
+.elo-heading {
+    flex: 1 1 260px;
+    min-width: 0;
+}
+
+.elo-heading .modal-title {
+    margin: 0;
+}
+
+.elo-subtitle {
+    margin: var(--space-xs) 0 0;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-snug);
+}
+
+.elo-controls {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.elo-scope {
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.elo-body {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.elo-body > .empty-state {
+    margin: auto;
+}
+
+/* ---------- Twee foto's ---------- */
+
+.elo-stage {
+    position: relative;
+    flex: 1 1 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-lg);
+}
+
+.elo-choice {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    min-height: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.elo-frame {
+    position: relative;
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background-color: var(--media-bg);
+    border: 1px solid var(--media-border);
+    transition: box-shadow var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out),
+        opacity var(--duration-base) var(--ease-out);
+}
+
+.elo-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    opacity: 0;
+    transition: opacity var(--duration-base) var(--ease-out);
+    user-select: none;
+}
+
+.elo-img.is-loaded {
+    opacity: 1;
+}
+
+.elo-choice:hover .elo-frame {
+    box-shadow: 0 0 0 2px var(--accent-border), var(--shadow-md);
+}
+
+.elo-choice:focus-visible {
+    outline: none;
+}
+
+.elo-choice:focus-visible .elo-frame,
+.elo-overlay.is-keyboard .elo-choice:focus .elo-frame {
+    box-shadow: 0 0 0 2px var(--focus-ring), var(--shadow-md);
+}
+
+.elo-choice:focus {
+    outline: none;
+}
+
+/* WebKit geeft :focus-visible hier niet altijd (de focus wordt met de hand verplaatst); na Tab of
+   Enter krijgt het venster .is-keyboard, en dan heeft wat de focus heeft altijd een ring */
+.elo-overlay.is-keyboard .btn:focus {
+    outline: none;
+    box-shadow: var(--focus-shadow);
+    border-color: var(--focus-ring);
+}
+
+.elo-overlay.is-keyboard :is(button, select):not(.btn):not(.elo-choice):focus {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.elo-choice.is-chosen .elo-frame {
+    box-shadow: 0 0 0 3px var(--accent), var(--shadow-lg);
+}
+
+/* Alleen de foto zelf dooft uit: het donkere vlak eromheen en de −N blijven goed leesbaar */
+.elo-choice.is-passed .elo-img.is-loaded {
+    opacity: 0.4;
+}
+
+.elo-check {
+    position: absolute;
+    top: var(--space-md);
+    right: var(--space-md);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: var(--icon-2xl);
+    height: var(--icon-2xl);
+    border-radius: var(--radius-full);
+    background-color: var(--accent);
+    color: var(--text-on-accent);
+    font-size: var(--icon-sm);
+    box-shadow: var(--shadow-md);
+}
+
+.elo-choice.is-chosen .elo-check {
+    display: inline-flex;
+    animation: dv-pop-in var(--duration-base) var(--ease-out);
+}
+
+/* Hoeveel de score veranderde, kort op de foto */
+.elo-delta {
+    position: absolute;
+    left: var(--space-md);
+    top: var(--space-md);
+    display: none;
+    padding: var(--space-2xs) var(--space-sm);
+    border-radius: var(--radius-full);
+    background-color: var(--media-scrim);
+    color: var(--on-media);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+}
+
+.elo-delta.is-up,
+.elo-delta.is-down {
+    display: inline-block;
+    animation: dv-fade-in var(--duration-base) var(--ease-out);
+}
+
+/* De winnaar in het groen van het vinkje; de ander blijft rustig op het donkere vlak */
+.elo-delta.is-up {
+    background-color: var(--accent);
+    color: var(--text-on-accent);
+}
+
+.elo-vs {
+    position: absolute;
+    left: 50%;
+    top: calc(50% - var(--space-xl));
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-h-lg);
+    height: var(--control-h-lg);
+    border-radius: var(--radius-full);
+    background-color: var(--surface-overlay);
+    border: 1px solid var(--border-hairline);
+    box-shadow: var(--shadow-md);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.elo-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: var(--control-h-sm);
+    font-size: var(--fs-sm);
+}
+
+.elo-keys {
+    display: inline-flex;
+    gap: var(--space-xs);
+}
+
+.elo-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-weight: var(--fw-medium);
+}
+
+.elo-score {
+    flex: none;
+    color: var(--text-secondary);
+}
+
+.elo-score .tabular {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+.elo-games {
+    color: var(--text-tertiary);
+}
+
+.elo-choice.is-loading {
+    cursor: default;
+}
+
+.elo-choice.is-loading .elo-frame {
+    border: none;
+}
+
+.elo-choice.is-loading .skeleton-line {
+    width: 40%;
+}
+
+/* ---------- Onderbalk ---------- */
+
+.elo-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-lg);
+    flex-wrap: wrap;
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-hairline);
+}
+
+.elo-footer[hidden] {
+    display: none;
+}
+
+.elo-progress {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+}
+
+.elo-scope-name {
+    color: var(--text-primary);
+    font-weight: var(--fw-medium);
+}
+
+.elo-notice {
+    color: var(--text-primary);
+    font-weight: var(--fw-medium);
+}
+
+.elo-notice i {
+    color: var(--accent-text);
+}
+
+.elo-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+
+.elo-empty-actions .empty-state-action {
+    margin-top: 0;
+}
+
+.elo-actions {
+    flex: none;
+    display: flex;
+    gap: var(--space-sm);
+    margin-left: auto;
+}
+
+.elo-actions kbd {
+    margin-left: var(--space-xs);
+}
+
+/* ---------- Ranglijst ---------- */
+
+.elo-board {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: var(--space-xs);
+}
+
+.elo-board-caption {
+    margin: 0 0 var(--space-md);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+}
+
+.elo-board-caption strong {
+    color: var(--text-primary);
+    font-weight: var(--fw-semibold);
+}
+
+.elo-board-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.elo-board-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-sm) var(--space-sm);
+    border-radius: var(--radius-md);
+}
+
+.elo-board-row + .elo-board-row {
+    border-top: 1px solid var(--border-hairline);
+}
+
+.elo-board-row:hover {
+    background-color: var(--surface-hover);
+}
+
+.elo-rank {
+    flex: none;
+    width: var(--control-h-sm);
+    height: var(--control-h-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.elo-board-row.is-top .elo-rank {
+    background-color: var(--accent-subtle);
+    color: var(--accent-text);
+    font-weight: var(--fw-semibold);
+}
+
+.elo-board-thumb {
+    flex: none;
+    width: var(--thumb-sm);
+    height: var(--thumb-sm);
+    border-radius: var(--radius-thumb);
+    overflow: hidden;
+    background-color: var(--thumb-bg);
+}
+
+.elo-board-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.elo-board-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+}
+
+.elo-board-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+}
+
+.elo-board-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+}
+
+.elo-board-score {
+    flex: none;
+    min-width: var(--space-4xl);
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+}
+
+@media (max-width: 900px) {
+    .elo-panel {
+        padding: var(--space-md) var(--space-lg);
+    }
+
+    .elo-subtitle,
+    .elo-keys {
+        display: none;
+    }
+
+    .elo-stage {
+        gap: var(--space-md);
+    }
+
+    .elo-games {
+        display: none;
+    }
+}
+
+/* ==================== INSTELLINGEN > BACK-UPS (backup-settings.js) ==================== */
+
+.backup-status {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    overflow-anchor: none;      /* opnieuw tekenen verschuift de pagina niet (backup-settings.js) */
+}
+
+.backup-kind {
+    margin-left: var(--space-sm);
+}
+
+.backup-size {
+    color: var(--text-secondary);
+}
+
+.backup-none,
+.backup-muted {
+    color: var(--text-tertiary);
+}
+
+.backup-note {
+    margin: 0;
+    max-width: 640px;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.backup-error {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    background-color: var(--warning-subtle);
+    color: var(--warning-text);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-snug);
+}
+
+.backup-error i {
+    margin-top: var(--space-2xs);
+}
+
+.backup-restore {
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    background-color: var(--surface-sunken);
+    max-width: 720px;
+}
+
+.backup-restore > summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: var(--control-h);
+    padding: var(--space-sm) var(--space-md);
+    cursor: pointer;
+    list-style: none;
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.backup-restore > summary::-webkit-details-marker {
+    display: none;
+}
+
+.backup-restore > summary:hover {
+    background-color: var(--surface-hover);
+}
+
+/* Het pijltje rechts draait open, zoals een uitklapbaar stuk overal */
+.backup-restore > summary .backup-restore-chevron {
+    margin-left: auto;
+    font-size: var(--icon-xs);
+    transition: transform var(--duration-base) var(--ease-out);
+}
+
+.backup-restore[open] > summary .backup-restore-chevron {
+    transform: rotate(90deg);
+}
+
+.backup-restore > summary:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+.backup-restore > summary i {
+    color: var(--text-tertiary);
+}
+
+.backup-restore[open] > summary {
+    border-bottom: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.backup-restore > .backup-note {
+    padding: 0 var(--space-md) var(--space-md);
+}
+
+.backup-steps {
+    margin: 0;
+    padding: var(--space-md) var(--space-md) var(--space-md) var(--space-2xl);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.backup-command {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+    padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-sm);
+    background-color: var(--surface-card);
+}
+
+.backup-command-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+.backup-command-option {
+    white-space: nowrap;
 }

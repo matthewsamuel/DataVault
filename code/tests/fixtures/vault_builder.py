@@ -192,6 +192,8 @@ def write_config(vault: Path, config_path: Path) -> Path:
         "duplicates_folder": str(vault / "RAW_DUPLICATES"),
         "trash_folder": str(vault / "TRASH"),
         "cache_folder": str(vault / ".datavault_cache"),
+        # Database backups go next to the vault, like the real ones go to the Mac's own disk
+        "backup_folder": str(vault.parent / f"{vault.name}_backups"),
     }, indent=2))
     return config_path
 
