@@ -57,8 +57,13 @@ def _number(value: Any) -> Optional[float]:
 
 def _dms(value: Any) -> Optional[float]:
     """Degrees from an EXIF (degrees, minutes, seconds) triple of rationals."""
+    def part(v):
+        # An IFDRational or a number, or a bare (numerator, denominator) pair as some writers leave it
+        if isinstance(v, (tuple, list)) and len(v) == 2:
+            return float(v[0]) / float(v[1])
+        return float(v)
     try:
-        d, m, s = (float(v) for v in value)
+        d, m, s = (part(v) for v in value)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
     total = d + m / 60.0 + s / 3600.0

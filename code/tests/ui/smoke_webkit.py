@@ -67,7 +67,7 @@ def server_python() -> str:
 BIG_FOLDER = "Groot"
 BIG_FILES = 1500
 MAX_THUMBS_ON_OPEN = 100
-VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings", "albums", "datagatherer"]
+VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings", "albums", "datagatherer", "map"]
 A11Y_CHECKS = Path(__file__).with_name("a11y_checks.js")
 
 
@@ -838,6 +838,68 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"albums: at 1024 the header buttons sit at {head[0]}, search says {head[1]!r}")
             page.set_viewport_size({"width": 1400, "height": 900})
             page.evaluate("albumsShow(null, {}, '-taken')")
+
+            # Kaart: clusters and pins for the GPS photos, a popup that opens the shared viewer, the
+            # opt-in OpenStreetMap tiles that stay off by default (nothing may leave this machine
+            # until the user switches them on), and the filter bar
+            outside = []
+            local = ("http://127.0.0.1:", "data:", "blob:", "about:")
+            page.on("request", lambda r: outside.append(r.url) if not r.url.startswith(local) else None)
+            pins = "document.querySelectorAll('#map-canvas .map-pin-wrap, #map-canvas .map-cluster-wrap').length"
+            step("map: open (g m)", lambda: (page.keyboard.press("g"), page.keyboard.press("m"),
+                                             page.wait_for_selector("#map-canvas .map-pin-wrap, #map-canvas .map-cluster-wrap", timeout=10000)), 0.8)
+            geo = page.evaluate("fetchJSON(`${API_BASE}/api/map/points`).then(d => [d.total, d.without_gps])")
+            expect(geo[0] >= 2 and geo[1] > 0 and f"{geo[1]:,}".replace(",", ".") in page.text_content("#map-nogps"),
+                   f"map: {geo} points and the 'zonder locatie' button says {page.text_content('#map-nogps')!r}")
+            expect(page.evaluate(pins) >= 1 and page.evaluate("mapView().markers") == geo[0],
+                   f"map: {page.evaluate(pins)} markers on screen, {page.evaluate('mapView().markers')} loaded, expected {geo[0]}")
+            expect(not page.is_checked("#map-osm-toggle") and page.evaluate("mapView().tiles") is False,
+                   "map: the OpenStreetMap tiles are not off by default")
+            step("map: a pin opens a popup", lambda: page.locator("#map-canvas .map-pin-wrap").first.click(), 1.0)
+            page.wait_for_selector(".map-popup .map-popup-open", timeout=8000)
+            expect(page.is_visible(".map-popup .map-popup-thumb img"), "map: the popup shows no thumbnail")
+            step("map: the popup opens the viewer", lambda: page.click(".map-popup .map-popup-open"), 0.8)
+            expect(page.evaluate("isViewerOpen() && viewer.items.length >= 1"), "map: Openen did not open the viewer")
+            page.wait_for_function("!document.getElementById('btn-show-on-map').hidden", timeout=5000)
+            step("map: 'Op kaart tonen' goes back to the photo", lambda: page.click("#btn-show-on-map"), 1.5)
+            expect(page.evaluate("currentMainView()") == "map" and not page.evaluate("isViewerOpen()"),
+                   "map: 'Op kaart tonen' did not return to the map")
+            page.wait_for_selector(".map-popup .map-popup-open", timeout=8000)
+            page.keyboard.press("Escape")
+            zoom, alone = page.evaluate("mapView().zoom"), page.evaluate("document.querySelectorAll('#map-canvas .map-pin-wrap').length")
+            # (the test vault's three beach photos share one spot: that cluster fans out instead of zooming)
+            step("map: a cluster zooms in or fans out on click", lambda: page.locator("#map-canvas .map-cluster-wrap").first.click(), 1.2)
+            expect(page.evaluate("mapView().zoom") > zoom or page.evaluate("document.querySelectorAll('#map-canvas .map-pin-wrap').length") > alone,
+                   "map: clicking a cluster neither zoomed in nor fanned it out")
+            zoom = page.evaluate("mapView().zoom")
+            step("map: keyboard zoom (+)", lambda: (page.focus("#map-canvas"), page.keyboard.press("+")), 0.8)
+            expect(page.evaluate("mapView().zoom") > zoom, "map: + on the focused map did not zoom in")
+            # The filter bar: a year narrows the points, 'Filters wissen' brings them back
+            step("map: a year filter", lambda: page.select_option("#map-year", "2019"), 1.2)
+            expect(page.evaluate("mapView().markers") >= 1 and page.is_visible("#map-reset"), "map: the year filter shows nothing")
+            step("map: a year without photos", lambda: page.select_option("#map-year", index=page.evaluate(
+                "document.getElementById('map-year').options.length") - 1), 1.0)
+            expect(page.evaluate("mapView().markers") <= geo[0], "map: the oldest year shows more than everything")
+            step("map: clear the filters", lambda: page.click("#map-reset"), 1.0)
+            expect(page.evaluate("mapView().markers") == geo[0], "map: clearing the filters did not bring every point back")
+            expect(not outside, f"map: requests left this machine while the tiles were off: {outside}")
+            # The opt-in: only after the switch does the browser ask OpenStreetMap for tiles (answered here by
+            # a blank tile, so nothing really goes out), and the choice is kept by the server
+            blank = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360606060000000050001a5f645400000000049454e44ae426082")
+            page.route("https://tile.openstreetmap.org/**", lambda route: route.fulfill(status=200, content_type="image/png", body=blank))
+            step("map: switch the OpenStreetMap tiles on", lambda: page.click("label.map-osm-toggle .slider"), 1.5)
+            expect(page.evaluate("mapView().tiles") is True and any("tile.openstreetmap.org" in u for u in outside)
+                   and page.evaluate("fetchJSON(`${API_BASE}/api/map/settings`).then(d => d.osm_tiles)") is True,
+                   f"map: tiles on gave {page.evaluate('mapView()')} and requests {outside[:2]}")
+            expect(page.is_visible("#map-canvas .leaflet-control-attribution a"), "map: no OpenStreetMap attribution while the tiles are on")
+            step("map: switch the tiles off again", lambda: page.click("label.map-osm-toggle .slider"), 1.0)
+            expect(page.evaluate("mapView().tiles") is False
+                   and page.evaluate("fetchJSON(`${API_BASE}/api/map/settings`).then(d => d.osm_tiles)") is False,
+                   "map: tiles did not switch off")
+            step("map: the setting in Instellingen", lambda: page.evaluate("switchMainView('settings')"), 0.8)
+            expect(page.is_visible("#settings-kaart #settings-map-osm, #settings-kaart .map-osm-input")
+                   or page.locator("#settings-kaart").count() == 1, "map: no Kaart section in Instellingen")
+            page.evaluate("switchMainView('home')")
 
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
             # and a screenshot to look at

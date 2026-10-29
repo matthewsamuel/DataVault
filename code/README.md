@@ -307,6 +307,22 @@ hits = semantic.search_photos(db, config, "hond op het strand", filters={"kind":
 `semantic.search_text(...)` en `semantic.search_similar(db, config, media_id, ...)` geven ook `total`
 en paging.
 
+### Kaart (foto's met GPS)
+
+Het tabblad Kaart (`frontend/map.js`, `backend/routes/geo.py`) toont de media met een GPS-positie
+uit de media-index (`media.lat/lon`, door `media_meta.py` gelezen; 0,0 en waarden buiten bereik
+tellen als "geen locatie"). Leaflet en Leaflet.markercluster staan in `frontend/vendor/`.
+De basiskaart is Natural Earth (`vendor/naturalearth/`, publiek domein) en werkt offline.
+Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instelling
+`map_osm_tiles` in app_settings); het enige internetadres in de frontend is het tegelsjabloon in
+`map.js`, toegestaan in `tests/test_frontend_offline.py`.
+
+- `GET /api/map/points?<filters van Albums>|album=&bbox=zuid,west,noord,oost&after=&limit=`:
+  `{total, without_gps, bounds, version, next, points: [[id, lat, lon, taken, soort], ...]}`
+  (stukken van hoogstens 50.000, op id; `next` is de `after` voor het volgende stuk).
+- `GET /api/map/items?ids=1,2,3` (viewer en popups), `GET /api/map/locate?path=`,
+  `GET|PUT /api/map/settings {osm_tiles}`.
+
 ### Herstelcentrum
 - Eén lijst (tab **Herstel**, sneltoets 8) van alles wat de app in het archief verplaatste: Keurer
   (prullenmand, verplaatsen), duplicaten opruimen en Verplaatsen in de viewer, nieuwste eerst, met per

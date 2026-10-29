@@ -75,6 +75,8 @@ def item(row: Dict[str, Any]) -> Dict[str, Any]:
         "camera": " ".join(p for p in (row["camera_make"], row["camera_model"]) if p) or None,
         "has_gps": row["lat"] is not None,
     }
+    if row["lat"] is not None:
+        out["lat"], out["lon"] = row["lat"], row["lon"]
     if "rating" in row:
         out["rating"] = row["rating"]
         out["votes"] = row["votes"]

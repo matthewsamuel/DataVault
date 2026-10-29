@@ -292,6 +292,28 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   scrolt in een laag venster binnen het venster, met de voetnoot altijd heel in beeld. In het
   themamenu zie je ook na openen met de muis welke keuze de pijltjes gemarkeerd hebben.
 
+### Kaart: foto's op de plek waar ze genomen zijn
+
+- Nieuw tabblad **Kaart** (sneltoets `g m`): al je foto's en video's met een GPS-positie in EXIF,
+  gegroepeerd met aantallen. Klik op een groep om in te zoomen, klik op een foto voor een
+  voorbeeld met datum en open hem in de gewone viewer; vorige en volgende bladeren door de
+  foto's op die plek. De kaart past zich bij het openen aan je foto's aan.
+- Filterbalk voor jaar, van-tot-datum, camera en slim album, met "Foto's zonder locatie: N"
+  (een klik toont ze in Albums). Werkt met het toetsenbord: Tab naar de kaart, pijltjes om te
+  schuiven, plus en min om te zoomen, Enter op een groep of foto.
+- In de viewer staat bij een foto met locatie een knop **Op kaart tonen**.
+- De basiskaart werkt zonder internet: landsgrenzen en grote steden van Natural Earth
+  (publiek domein), in de kleuren van het lichte of donkere thema.
+- **Gedetailleerde kaart (OpenStreetMap, online)**: standaard uit, aan te zetten op de Kaart of
+  in Instellingen. Alleen dan haalt de browser kaarttegels van OpenStreetMap via internet
+  (met bronvermelding); zolang het uit staat verlaat er geen enkel verzoek je Mac.
+  De keuze wordt bewaard in de app-instellingen.
+- Een GPS-positie van precies 0,0 (geen fix), buiten bereik of met alleen een breedte of
+  lengte telt als "geen locatie"; ook breuken als (teller, noemer) worden nu gelezen.
+- Techniek: `GET /api/map/points` (compacte rijen in stukken, filters van Albums, `bbox`),
+  `/api/map/items`, `/api/map/locate`, `/api/map/settings`; Leaflet 1.9.4 en
+  Leaflet.markercluster 1.5.3 staan met licentie in `frontend/vendor/`. Geen databasewijziging.
+
 ### Beste uit reeks: bijna-duplicaten en bursts
 - Nieuw tabblad **Beste uit reeks** op de pagina Duplicaten (naast **Exacte kopieën**). Het vindt foto's
   die op elkaar *lijken*: een verkleinde of opnieuw opgeslagen kopie (zoals een foto uit WhatsApp), een
