@@ -39,6 +39,9 @@
         filters: { year: '', date_from: '', date_to: '', camera: '', album: '' },
         points: [], markers: new Map(), total: 0, withoutGps: 0, version: '', bounds: null,
         loadToken: 0, loading: false, popup: null, popupToken: 0, facetsLoaded: false,
+        // Locatiegeschiedenis (DataGatherer): geschatte plekken van foto's zonder GPS, en de route van één dag
+        history: null, showInferred: false, inferredIds: new Set(), inferredTotal: 0,
+        track: null, trackDay: '', trackDays: [], trackOn: false, trackToken: 0,
     };
 
     // ---------- instellingen: tegels van OpenStreetMap ----------
@@ -127,6 +130,7 @@
 
         const pin = L_.divIcon({ className: 'map-pin-wrap', html: '<span class="map-pin"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
         state.pinIcon = pin;
+        state.estimatedIcon = L_.divIcon({ className: 'map-pin-wrap', html: '<span class="map-pin map-pin-estimated"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
         state.cluster = L_.markerClusterGroup({
             chunkedLoading: true, chunkInterval: 120, chunkDelay: 30,
             maxClusterRadius: 56, showCoverageOnHover: false, spiderfyOnMaxZoom: true, zoomToBoundsOnClick: true,
@@ -359,6 +363,7 @@
 
     function renderCounts() {
         const total = state.total;
+        // Het aantal geschatte plekken staat op de knop 'Locatie geschat uit Tijdlijn'
         $('map-count').textContent = total
             ? `${fmt(total)} ${total === 1 ? 'foto' : 'foto’s'} op de kaart`
             : '';
@@ -372,7 +377,9 @@
     }
 
     function makeMarker(p) {
-        const marker = L.marker([p[1], p[2]], { icon: state.pinIcon, pid: p[0], keyboard: true, title: markerTitle(p) });
+        const estimated = p.length > 5;
+        const marker = L.marker([p[1], p[2]], { icon: estimated ? state.estimatedIcon : state.pinIcon, pid: p[0], keyboard: true,
+            title: markerTitle(p) + (estimated ? ' · locatie geschat uit Tijdlijn' : '') });
         state.markers.set(p[0], marker);
         return marker;
     }
@@ -388,6 +395,7 @@
         state.cluster.clearLayers();
         state.markers.clear();
         state.points = [];
+        state.inferredIds.clear();
         closePopup();
         setOverlay(null);
         setProgress('Kaart laden…');
@@ -404,7 +412,7 @@
                     state.version = data.version;
                     state.bounds = data.bounds;
                     renderCounts();
-                    if (!data.total) {
+                    if (!data.total && !state.showInferred) {
                         setProgress('');
                         setOverlay(noPointsState(data));
                         if (fit) state.map.setView([30, 10], 2);
@@ -418,6 +426,7 @@
                 after = data.next;
                 setProgress(`Kaart laden… ${fmt(state.points.length)} van ${fmt(state.total)}`);
             }
+            if (state.showInferred && token === state.loadToken) await loadInferred(token);
             setProgress('');
         } catch (err) {
             if (token !== state.loadToken) return;
@@ -515,7 +524,9 @@
                 file.type === 'video' ? createEl('i', { class: 'fas fa-play map-popup-badge', 'aria-hidden': 'true' }) : null),
             createEl('div', { class: 'map-popup-meta' },
                 createEl('div', { class: 'map-popup-name', title: file.name, text: file.name }),
-                createEl('div', { class: 'map-popup-date', text: date + (items.length > 1 ? ` · ${index + 1} van ${items.length} op deze plek` : '') })),
+                createEl('div', { class: 'map-popup-date', text: date + (items.length > 1 ? ` · ${index + 1} van ${items.length} op deze plek` : '') }),
+                state.inferredIds.has(file.id) ? createEl('div', { class: 'map-popup-estimated' },
+                    createEl('i', { class: 'fas fa-route', 'aria-hidden': 'true' }), ' Locatie geschat uit Tijdlijn') : null),
             createEl('button', { type: 'button', class: 'btn btn-primary btn-sm map-popup-open', onClick: open },
                 createEl('i', { class: `fas ${KIND_ICON[['photo', 'video', 'audio'].indexOf(file.type)] || 'fa-image'}`, 'aria-hidden': 'true' }),
                 items.length > 1 ? ` Openen (${items.length})` : ' Openen'));
@@ -529,17 +540,44 @@
         const known = file.has_gps === true || typeof file.lat === 'number';
         if (known) { btn.hidden = false; return; }
         btn.hidden = true;
-        if (file.has_gps === false || !['photo', 'video'].includes(file.type) || !file.path) return;
+        // Zonder GPS toch even vragen: misschien is er een plek geschat uit de Tijdlijn
+        if (!['photo', 'video'].includes(file.type) || !file.path) return;
         fetchJSON(`${API_BASE}/api/map/locate?path=${encodeURIComponent(file.path)}`).then(found => {
             file.has_gps = found.has_gps;
             if (found.has_gps) { file.lat = found.lat; file.lon = found.lon; file.map_id = found.id; }
-            if (viewerFile() === file) btn.hidden = !found.has_gps;
+            if (viewerFile() !== file) return;
+            btn.hidden = !found.has_gps && !found.inferred;
+            if (found.inferred) { file.map_estimate = found; showEstimate(found); }
         }).catch(() => { });
     };
+
+    // 'Locatie (geschat)' in de gegevens van de viewer: alleen in DataVault, nooit in het bestand
+    function showEstimate(found) {
+        const meta = $('modal-metadata') && $('modal-metadata').querySelector('.metadata-grid');
+        if (!meta || meta.querySelector('.metadata-estimated')) return;
+        const est = found.inferred;
+        const how = { bezoek: 'een bezochte plek', interpolatie: 'twee punten ervoor en erna', dichtstbij: 'het dichtstbijzijnde punt' }[est.method] || 'je Tijdlijn';
+        const tz = { exif: 'tijdzone uit de foto', locatie: 'tijdzone van de plek', aangenomen: 'tijdzone aangenomen: Brussel', utc: 'tijd van de video' }[est.tz_source] || '';
+        meta.append(
+            createEl('span', { class: 'metadata-label metadata-estimated', text: 'Locatie (geschat)' }),
+            createEl('span', { class: 'metadata-value', title: `Afgeleid uit ${how}; ${tz}. Alleen in DataVault, niet in het bestand.` },
+                createEl('span', { class: 'mono', text: `${est.lat.toFixed(4)}, ${est.lon.toFixed(4)}` }),
+                ` · ${Math.round(est.confidence * 100)}% zeker · ±${fmt(Math.round(est.accuracy_m || 0))} m`));
+    }
 
     window.mapShowViewerFile = async function () {
         const file = viewerFile();
         if (!file) return;
+        if (file.map_estimate && !file.has_gps) {
+            // Geen GPS, wel een plek geschat uit de Tijdlijn: die laag aan en daarheen
+            const found = file.map_estimate;
+            closeModal();
+            switchMainView('map');
+            await state.inited;
+            if (!state.showInferred) await setInferred(true);
+            focusPoint(found.id, found.inferred.lat, found.inferred.lon);
+            return;
+        }
         let id = file.map_id !== undefined ? file.map_id : file.id;
         let lat = file.lat, lon = file.lon;
         if (typeof lat !== 'number' || id === undefined) {
@@ -555,6 +593,137 @@
         await state.inited;
         focusPoint(id, lat, lon);
     };
+
+    // ---------- locatiegeschiedenis: geschatte plekken en de route van een dag ----------
+
+    async function loadHistorySummary() {
+        try {
+            state.history = await fetchJSON(`${API_BASE}/api/location/summary`);
+        } catch (err) {
+            state.history = null;
+        }
+        renderHistoryControls();
+    }
+
+    function renderHistoryControls() {
+        const bar = $('map-layers');
+        const h = state.history;
+        const any = h && (h.points > 0 || h.inferred > 0);
+        bar.hidden = !any;
+        if (!any) return;
+        const inferred = $('map-inferred');
+        inferred.hidden = !h.inferred;
+        inferred.setAttribute('aria-pressed', state.showInferred ? 'true' : 'false');
+        $('map-inferred-count').textContent = fmt(h.inferred);
+        const trackBtn = $('map-track');
+        trackBtn.hidden = !h.points;
+        trackBtn.setAttribute('aria-pressed', state.trackOn ? 'true' : 'false');
+        $('map-track-controls').hidden = !state.trackOn;
+        $('map-track-day').value = state.trackDay;
+        const i = state.trackDays.indexOf(state.trackDay);
+        $('map-track-prev').disabled = i <= 0;
+        $('map-track-next').disabled = i < 0 || i >= state.trackDays.length - 1;
+    }
+
+    async function loadInferred(token) {
+        let after = 0;
+        for (;;) {
+            const data = await fetchJSON(`${API_BASE}/api/map/inferred?${params({ after, limit: CHUNK })}`);
+            if (token !== state.loadToken) return;
+            state.inferredTotal = data.total;
+            data.points.forEach(p => { state.inferredIds.add(p[0]); state.points.push(p); });
+            state.cluster.addLayers(data.points.map(makeMarker));
+            if (data.next === null) break;
+            after = data.next;
+        }
+        if (!state.total && state.inferredTotal && state.points.length) {
+            const lats = state.points.map(p => p[1]);
+            const lons = state.points.map(p => p[2]);
+            state.bounds = [Math.min(...lats), Math.min(...lons), Math.max(...lats), Math.max(...lons)];
+            fitToData();
+        }
+        renderCounts();
+    }
+
+    async function setInferred(on) {
+        state.showInferred = on;
+        renderHistoryControls();
+        await loadPoints({ fit: false });
+    }
+
+    async function setTrack(on) {
+        state.trackOn = on;
+        if (on && !state.trackDays.length) {
+            try {
+                state.trackDays = (await fetchJSON(`${API_BASE}/api/location/days`)).days.map(d => d.day);
+            } catch (err) { toastFetchError('De Tijdlijn laden mislukte', err); }
+        }
+        if (on && !state.trackDay && state.trackDays.length) state.trackDay = state.trackDays[state.trackDays.length - 1];
+        renderHistoryControls();
+        if (on) drawTrack(); else clearTrack();
+        if (on) $('map-track-day').focus();
+    }
+
+    function clearTrack() {
+        state.trackToken++;
+        if (state.track) { state.map.removeLayer(state.track); state.track = null; }
+        $('map-track-info').textContent = '';
+    }
+
+    async function drawTrack() {
+        clearTrack();
+        const day = state.trackDay;
+        if (!day) return;
+        const token = state.trackToken;
+        $('map-track-info').textContent = 'Laden…';
+        try {
+            const data = await fetchJSON(`${API_BASE}/api/location/track?day=${encodeURIComponent(day)}`);
+            if (token !== state.trackToken) return;
+            const layer = L.layerGroup();
+            const line = data.points.map(p => [p[1], p[2]]);
+            if (line.length > 1) L.polyline(line, { className: 'map-track-line', interactive: false, smoothFactor: 1.5 }).addTo(layer);
+            data.visits.forEach(v => {
+                const from = new Date(v.start).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+                const until = new Date(v.end).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+                L.circleMarker([v.lat, v.lon], { radius: 7, className: 'map-track-visit' })
+                    .bindTooltip(`${v.name || v.address || 'Bezochte plek'} · ${from}–${until}`, { className: 'map-track-tip', direction: 'top' })
+                    .addTo(layer);
+            });
+            if (line.length === 1) L.circleMarker(line[0], { radius: 5, className: 'map-track-visit' }).addTo(layer);
+            layer.addTo(state.map);
+            state.track = layer;
+            const all = line.concat(data.visits.map(v => [v.lat, v.lon]));
+            $('map-track-info').textContent = all.length
+                ? `${fmt(data.points.length)} ${data.points.length === 1 ? 'punt' : 'punten'}, ${fmt(data.visits.length)} ${data.visits.length === 1 ? 'plek' : 'plekken'}`
+                : 'Geen locatie op deze dag';
+            if (all.length) state.map.fitBounds(L.latLngBounds(all), { padding: [64, 64], maxZoom: 15 });
+        } catch (err) {
+            if (token !== state.trackToken) return;
+            $('map-track-info').textContent = '';
+            toastFetchError('De route laden mislukte', err);
+        }
+    }
+
+    function stepTrack(delta) {
+        const i = state.trackDays.indexOf(state.trackDay);
+        const next = state.trackDays[i + delta];
+        if (!next) return;
+        state.trackDay = next;
+        renderHistoryControls();
+        drawTrack();
+    }
+
+    function bindHistoryControls() {
+        $('map-inferred').addEventListener('click', () => setInferred(!state.showInferred));
+        $('map-track').addEventListener('click', () => setTrack(!state.trackOn));
+        $('map-track-prev').addEventListener('click', () => stepTrack(-1));
+        $('map-track-next').addEventListener('click', () => stepTrack(1));
+        $('map-track-day').addEventListener('change', e => {
+            state.trackDay = e.target.value;
+            renderHistoryControls();
+            drawTrack();
+        });
+    }
 
     async function focusPoint(id, lat, lon) {
         if (state.loading) await new Promise(done => { const t = setInterval(() => { if (!state.loading) { clearInterval(t); done(); } }, 80); });
@@ -578,6 +747,8 @@
                 await loadOsmSetting();
                 build();
                 bindControls();
+                bindHistoryControls();
+                loadHistorySummary();
                 loadFilterChoices();
                 await loadPoints({ fit: true });
             })();
@@ -585,6 +756,7 @@
         }
         // Teruggekomen: de kaart houdt zijn plek, tenzij de bibliotheek intussen veranderde
         state.map.invalidateSize();
+        loadHistorySummary();
         state.inited.then(async () => {
             if (state.loading) return;
             try {
@@ -599,6 +771,7 @@
     window.mapView = () => (state.map ? {
         zoom: state.map.getZoom(), markers: state.markers.size, osm: state.osm, popup: !!(state.popup && state.map.hasLayer(state.popup)),
         tiles: !!(state.tiles && state.map.hasLayer(state.tiles)),
+        estimated: state.inferredIds.size, track: !!state.track, trackDay: state.trackDay,
     } : null);
 
     window.mapVaultReturned = function () {

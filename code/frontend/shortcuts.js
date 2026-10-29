@@ -33,6 +33,7 @@ const SHORTCUT_VIEWS = [
     { view: 'albums', key: null, g: 'a', label: 'Albums' },
     { view: 'datagatherer', key: null, g: 'v', label: 'DataGatherer' },
     { view: 'map', key: null, g: 'm', label: 'Kaart' },
+    { view: 'activity', key: null, g: 'c', label: 'Activiteit' },
 ];
 
 const SHORTCUT_GROUPS = [

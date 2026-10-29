@@ -12340,3 +12340,408 @@ button.otd-settings-icon:hover {
         transition: none;
     }
 }
+
+/* ==================== DataGatherer 3.9c: Activiteit, Tijdlijn op de kaart ==================== */
+
+/* Bronnen | Activiteit: dezelfde hoogte als de knoppen ernaast */
+.dg-header-actions {
+    align-items: center;
+}
+
+.dg-switch > button {
+    height: calc(var(--control-h) - 6px);
+}
+
+.dg-field-toggle .dg-schedule-label {
+    font-weight: var(--fw-medium);
+}
+
+.dg-field-toggle .dg-field-help {
+    margin-top: var(--space-xs);
+}
+
+/* ---------- Activiteit ---------- */
+
+.act-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.act-sources {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.act-source i {
+    font-size: var(--icon-xs);
+}
+
+.act-pill-count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    color: var(--text-tertiary);
+}
+
+.pill[aria-pressed="true"] .act-pill-count {
+    color: var(--accent-text);
+}
+
+.act-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.act-search-field {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.act-search-field i {
+    position: absolute;
+    left: var(--space-md);
+    color: var(--text-tertiary);
+    font-size: var(--icon-xs);
+    pointer-events: none;
+}
+
+.act-search-field .input {
+    width: 240px;
+    padding-left: calc(var(--space-md) + var(--icon-xs) + var(--space-sm));
+}
+
+.act-summary {
+    margin-left: auto;
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+}
+
+.act-layout {
+    display: grid;
+    grid-template-columns: 264px minmax(0, 1fr);
+    gap: var(--space-xl);
+    align-items: start;
+}
+
+.act-layout.act-empty {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.act-layout.act-empty .act-days-panel {
+    display: none;
+}
+
+.act-days-panel {
+    position: sticky;
+    top: var(--space-lg);
+    max-height: calc(100vh - var(--nav-h) - 2 * var(--space-2xl));
+    overflow-y: auto;
+    padding: var(--space-sm);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-card);
+    background: var(--surface-card);
+    box-shadow: var(--shadow-xs);
+}
+
+.act-days {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.act-month {
+    padding: var(--space-md) var(--space-sm) var(--space-xs);
+}
+
+.act-month:first-child {
+    padding-top: var(--space-xs);
+}
+
+.act-day {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    min-height: var(--control-h);
+    padding: 0 var(--space-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+
+.act-day:hover {
+    background: var(--surface-hover);
+}
+
+.act-day[aria-pressed="true"] {
+    background: var(--accent-subtle);
+    border-color: var(--accent-border);
+    color: var(--accent-text);
+}
+
+.act-day:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+.act-day-label {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.act-day-icons {
+    display: inline-flex;
+    gap: var(--space-xs);
+    color: var(--text-tertiary);
+    font-size: var(--icon-xs);
+}
+
+.act-day[aria-pressed="true"] .act-day-icons {
+    color: var(--accent-text);
+}
+
+.act-day-count {
+    min-width: 2.5em;
+    text-align: right;
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.act-events-panel {
+    min-width: 0;
+    padding: var(--space-xl) var(--space-xl) var(--space-lg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-card);
+    background: var(--surface-card);
+    box-shadow: var(--shadow-xs);
+}
+
+.act-layout.act-empty .act-events-panel {
+    padding: var(--space-3xl) var(--space-xl);
+}
+
+.act-events-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+}
+
+.act-events-head .section-title {
+    margin-bottom: 0;
+}
+
+.act-events-head .section-title::first-letter {
+    text-transform: uppercase;
+}
+
+.act-events-count {
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    white-space: nowrap;
+}
+
+.act-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.act-event {
+    display: grid;
+    grid-template-columns: 48px 32px minmax(0, 1fr);
+    gap: var(--space-md);
+    align-items: start;
+    padding: var(--space-md) 0;
+    border-top: 1px solid var(--border-hairline);
+}
+
+.act-event:first-child {
+    border-top: 0;
+}
+
+.act-time {
+    padding-top: 6px;
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+    text-align: right;
+}
+
+.act-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-full);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    font-size: var(--icon-sm);
+}
+
+.act-body {
+    min-width: 0;
+    padding-top: 4px;
+}
+
+.act-title {
+    display: block;
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    line-height: var(--lh-snug);
+    overflow-wrap: anywhere;
+    text-decoration: none;
+}
+
+a.act-title:hover {
+    color: var(--accent-text);
+    text-decoration: underline;
+}
+
+a.act-title:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+}
+
+.act-text {
+    margin: var(--space-xs) 0 0;
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal);
+    white-space: pre-line;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.act-meta {
+    margin-top: var(--space-xs);
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal);
+}
+
+.act-meta i {
+    font-size: var(--icon-xs);
+}
+
+.act-more {
+    margin: var(--space-md) 0 0;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+}
+
+@media (max-width: 1100px) {
+    .act-layout {
+        grid-template-columns: 224px minmax(0, 1fr);
+        gap: var(--space-lg);
+    }
+
+    .act-events-panel {
+        padding: var(--space-lg);
+    }
+
+    .act-search-field .input {
+        width: 200px;
+    }
+}
+
+/* ---------- Kaart: geschatte plekken en de route van een dag ---------- */
+
+.map-layers {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+}
+
+.map-layers-title {
+    margin-right: var(--space-xs);
+}
+
+.map-pin.map-pin-estimated {
+    background: var(--surface-card);
+    border: 3px solid var(--accent);
+    box-shadow: var(--shadow-sm);
+}
+
+.map-legend-pin {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    margin: 0;
+    vertical-align: middle;
+}
+
+.map-track-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.map-track-controls .input {
+    width: var(--input-date-w);
+}
+
+.map-track-info {
+    margin-left: var(--space-sm);
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+}
+
+.map-canvas .map-track-line {
+    stroke: var(--info);
+    stroke-width: 4;
+    stroke-opacity: 0.85;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+}
+
+.map-canvas .map-track-visit {
+    stroke: var(--surface-card);
+    stroke-width: 2;
+    fill: var(--info);
+    fill-opacity: 1;
+}
+
+.map-track-tip {
+    font-family: var(--font-sans);
+    font-size: var(--fs-xs);
+}
+
+.map-popup-estimated {
+    margin-top: var(--space-xs);
+    color: var(--accent-text);
+    font-size: var(--fs-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .act-day, .pill {
+        transition: none;
+    }
+}
+
+/* Een knop met 'hidden' is echt weg (.btn zet anders display) */
+.btn[hidden] {
+    display: none;
+}

@@ -177,7 +177,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== VIEW SWITCHING ====================
 
-const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map'];
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map', 'activity'];
 
 function currentMainView() {
     return MAIN_VIEWS.find(v => {
@@ -190,7 +190,8 @@ function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
     // Update tabs (ook de tandwielknop van Instellingen)
     document.querySelectorAll('.top-nav [data-view]').forEach(tab => {
-        const on = tab.dataset.view === view;
+        // Activiteit hoort bij DataGatherer: dezelfde knop in het menu licht op
+        const on = tab.dataset.view === view || (view === 'activity' && tab.dataset.view === 'datagatherer');
         tab.classList.toggle('active', on);
         if (on) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current');
         // In een smal venster schuift het menu: het actieve onderdeel altijd in beeld
@@ -249,6 +250,8 @@ function switchMainView(view) {
         if (typeof datagathererInit === 'function') datagathererInit();
     } else if (view === 'map') {
         if (typeof mapInit === 'function') mapInit();
+    } else if (view === 'activity') {
+        if (typeof activityInit === 'function') activityInit();
     }
 }
 

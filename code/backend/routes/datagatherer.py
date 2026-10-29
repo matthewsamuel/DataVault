@@ -144,15 +144,15 @@ def _check_watch_folder(value: str) -> None:
     """A folder to follow must exist, be a full path, and not lie inside the vault."""
     folder = Path(os.path.expanduser(value))
     if not folder.is_absolute():
-        raise HTTPException(status_code=400, detail="Geef de volledige map, die begint met /")
+        raise HTTPException(status_code=400, detail="Map om op te volgen: geef de volledige map, die begint met /")
     if not folder.is_dir():
-        raise HTTPException(status_code=400, detail="Deze map bestaat niet (of is niet bereikbaar)")
+        raise HTTPException(status_code=400, detail="Map om op te volgen: deze map bestaat niet (of is niet bereikbaar)")
     try:
         inside = folder.resolve().is_relative_to(config.VAULT_ROOT.resolve())
     except (OSError, RuntimeError):
         inside = False
     if inside:
-        raise HTTPException(status_code=400, detail="Kies een map buiten het archief")
+        raise HTTPException(status_code=400, detail="Map om op te volgen: kies een map buiten het archief")
 
 
 @router.put("/sources/{source_id}/secrets")

@@ -202,9 +202,10 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         primary = "request_export"
         step = f"Nog geen gegevens. Vraag een export aan: {name} maakt hem voor je klaar, DataVault leest hem in."
     elif local and not api:
-        primary = "sync"
+        # Not on this Mac (or not readable): a copy picked by hand still works when the source can import
+        primary = "upload" if connector.has("import") else "sync"
         step = (f"{name} is niet gevonden op deze Mac." if not connector.has("import")
-                else f"{name} is niet gevonden op deze Mac. Je kunt ook een kopie kiezen met Bestand kiezen.")
+                else f"{name} is niet gevonden op deze Mac. Kies een kopie met Bestand kiezen.")
     elif api and sync_failed:
         primary = "connect"
         step = "Bijwerken lukte de laatste keer niet. Controleer de instellingen en verbind opnieuw."

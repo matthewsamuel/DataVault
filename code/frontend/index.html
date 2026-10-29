@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=60">
+    <link rel="stylesheet" href="style.css?v=61">
 </head>
 
 <body>
@@ -739,6 +739,24 @@
                         title="Toon deze foto's in Albums"></button>
                 </div>
 
+                <div class="map-layers" id="map-layers" role="group" aria-label="Locatiegeschiedenis" hidden>
+                    <span class="overline map-layers-title">Uit je Tijdlijn</span>
+                    <button type="button" class="pill" id="map-inferred" aria-pressed="false"
+                        title="Foto's zonder GPS op de plek waar je volgens je locatiegeschiedenis was (alleen in DataVault)">
+                        <span class="map-pin map-pin-estimated map-legend-pin" aria-hidden="true"></span>
+                        Locatie geschat uit Tijdlijn <span class="act-pill-count" id="map-inferred-count"></span></button>
+                    <button type="button" class="pill" id="map-track" aria-pressed="false">
+                        <i class="fas fa-route" aria-hidden="true"></i> Route per dag</button>
+                    <span class="map-track-controls" id="map-track-controls" hidden>
+                        <button type="button" class="btn btn-ghost btn-icon btn-sm" id="map-track-prev" aria-label="Vorige dag met locatie" title="Vorige dag met locatie">
+                            <i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+                        <input type="date" class="input input-sm" id="map-track-day" aria-label="Dag van de route">
+                        <button type="button" class="btn btn-ghost btn-icon btn-sm" id="map-track-next" aria-label="Volgende dag met locatie" title="Volgende dag met locatie">
+                            <i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                        <span class="map-track-info" id="map-track-info" role="status" aria-live="polite"></span>
+                    </span>
+                </div>
+
                 <div class="map-stage">
                     <div id="map-canvas" class="map-canvas" aria-label="Kaart met foto's op locatie. Pijltjestoetsen verschuiven, plus en min zoomen, Enter opent een groep of foto."></div>
                     <div class="map-overlay" id="map-overlay" hidden></div>
@@ -880,6 +898,40 @@
         </div>
 
         <!-- DATAGATHERER: één kaart per gegevensbron, gebouwd uit wat elke bron van zichzelf zegt (datagatherer.js) -->
+        <div id="section-activity" class="section hidden">
+            <div class="page act-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="act-page-title" tabindex="-1"><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Activiteit</h1>
+                        <p class="page-subtitle">Wat je deed, per dag: uit Google, je browsers en de andere bronnen van DataGatherer.
+                            Alles staat alleen op deze Mac.</p>
+                    </div>
+                    <div class="dg-header-actions">
+                        <div class="segmented dg-switch" role="group" aria-label="DataGatherer-weergave">
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('datagatherer')"><i class="fas fa-plug" aria-hidden="true"></i> Bronnen</button>
+                            <button type="button" class="active" aria-pressed="true" data-view="activity" onclick="switchMainView('activity')"><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Activiteit</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="act-toolbar">
+                    <div class="act-sources" id="act-sources" role="group" aria-label="Bronnen"></div>
+                    <div class="act-tools">
+                        <select class="select select-sm" id="act-kind" aria-label="Soort"></select>
+                        <label class="act-search-field"><i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                            <input type="search" class="input input-sm" id="act-search" placeholder="Zoeken in titels" aria-label="Zoeken in titels" autocomplete="off"></label>
+                        <button type="button" class="btn btn-ghost btn-sm" id="act-reset" hidden>Filters wissen</button>
+                        <span class="act-summary" id="act-summary" role="status" aria-live="polite"></span>
+                    </div>
+                </div>
+                <div class="act-layout" id="act-layout">
+                    <nav class="act-days-panel" aria-label="Dagen">
+                        <ul class="act-days" id="act-days"></ul>
+                    </nav>
+                    <section class="act-events-panel" id="act-events" aria-live="polite"></section>
+                </div>
+            </div>
+        </div>
+
         <div id="section-datagatherer" class="section hidden">
             <div class="page dg-page">
                 <div class="page-header">
@@ -889,11 +941,15 @@
                             online als jij op een knop drukt; exports vraag je zelf aan in je eigen browser.</p>
                     </div>
                     <div class="dg-header-actions">
+                        <div class="segmented dg-switch" role="group" aria-label="DataGatherer-weergave">
+                            <button type="button" class="active" aria-pressed="true" onclick="switchMainView('datagatherer')"><i class="fas fa-plug" aria-hidden="true"></i> Bronnen</button>
+                            <button type="button" class="" aria-pressed="false" data-view="activity" onclick="switchMainView('activity')"><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Activiteit</button>
+                        </div>
                         <button type="button" class="btn btn-secondary" onclick="dgOpenNetworkLog()">
                             <i class="fas fa-globe" aria-hidden="true"></i> Netwerklog
                         </button>
-                        <button type="button" class="btn btn-secondary" onclick="dgLoad()" title="Opnieuw laden">
-                            <i class="fas fa-rotate" aria-hidden="true"></i> Vernieuwen
+                        <button type="button" class="btn btn-secondary btn-icon" onclick="dgLoad()" title="Vernieuwen" aria-label="Vernieuwen">
+                            <i class="fas fa-rotate" aria-hidden="true"></i>
                         </button>
                     </div>
                 </div>
@@ -1496,7 +1552,7 @@
     <script src="folder-tree.js?v=7"></script>
     <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
     <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
-    <script src="app.js?v=67"></script>
+    <script src="app.js?v=68"></script>
     <script src="jobs.js?v=13"></script>
     <script src="duplicates.js?v=27"></script>
     <script src="series.js?v=2"></script>
@@ -1506,10 +1562,11 @@
     <script src="resizable-sidebar.js?v=1"></script>
     <script src="recovery.js?v=6"></script>
     <script src="settings.js?v=4"></script>
-    <script src="map.js?v=2"></script>
-    <script src="shortcuts.js?v=7"></script>
+    <script src="map.js?v=3"></script>
+    <script src="shortcuts.js?v=8"></script>
     <script src="library.js?v=2"></script>
-    <script src="datagatherer.js?v=2"></script>
+    <script src="datagatherer.js?v=3"></script>
+    <script src="activity.js?v=1"></script>
     <script src="elo.js?v=3"></script>
     <script src="backup-settings.js?v=5"></script>
     <script src="search.js?v=3"></script>
