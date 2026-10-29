@@ -711,8 +711,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"map: {page.evaluate(pins)} markers on screen, {page.evaluate('mapView().markers')} loaded, expected {geo[0]}")
             expect(not page.is_checked("#map-osm-toggle") and page.evaluate("mapView().tiles") is False,
                    "map: the OpenStreetMap tiles are not off by default")
-            step("map: a pin opens a popup", lambda: page.evaluate(
-                "(() => { const p = document.querySelector('#map-canvas .map-pin-wrap'); if (p) p.click(); })()"), 1.0)
+            step("map: a pin opens a popup", lambda: page.locator("#map-canvas .map-pin-wrap").first.click(), 1.0)
             page.wait_for_selector(".map-popup .map-popup-open", timeout=8000)
             expect(page.is_visible(".map-popup .map-popup-thumb img"), "map: the popup shows no thumbnail")
             step("map: the popup opens the viewer", lambda: page.click(".map-popup .map-popup-open"), 0.8)
@@ -723,11 +722,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    "map: 'Op kaart tonen' did not return to the map")
             page.wait_for_selector(".map-popup .map-popup-open", timeout=8000)
             page.keyboard.press("Escape")
+            zoom, alone = page.evaluate("mapView().zoom"), page.evaluate("document.querySelectorAll('#map-canvas .map-pin-wrap').length")
+            # (the test vault's three beach photos share one spot: that cluster fans out instead of zooming)
+            step("map: a cluster zooms in or fans out on click", lambda: page.locator("#map-canvas .map-cluster-wrap").first.click(), 1.2)
+            expect(page.evaluate("mapView().zoom") > zoom or page.evaluate("document.querySelectorAll('#map-canvas .map-pin-wrap').length") > alone,
+                   "map: clicking a cluster neither zoomed in nor fanned it out")
             zoom = page.evaluate("mapView().zoom")
             step("map: keyboard zoom (+)", lambda: (page.focus("#map-canvas"), page.keyboard.press("+")), 0.8)
             expect(page.evaluate("mapView().zoom") > zoom, "map: + on the focused map did not zoom in")
-            step("map: a cluster zooms in on click", lambda: page.evaluate(
-                "(() => { const c = document.querySelector('#map-canvas .map-cluster-wrap'); if (c) c.click(); })()"), 1.2)
             # The filter bar: a year narrows the points, 'Filters wissen' brings them back
             step("map: a year filter", lambda: page.select_option("#map-year", "2019"), 1.2)
             expect(page.evaluate("mapView().markers") >= 1 and page.is_visible("#map-reset"), "map: the year filter shows nothing")

@@ -567,7 +567,7 @@
         const marker = state.markers.get(id);
         state.map.invalidateSize();
         if (!marker) { state.map.setView([lat, lon], 15); return; }
-        state.cluster.zoomToShowLayer(marker, () => marker.fire('click'));
+        state.cluster.zoomToShowLayer(marker, () => markerClicked(marker));
     }
 
     // ---------- openen ----------
