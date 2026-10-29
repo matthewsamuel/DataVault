@@ -9,6 +9,7 @@ thumbnails  make the missing thumbnails of a folder (or the whole vault) ahead o
 index       bring the media index (backend/media_index.py) up to date with the disk
 phash       fingerprint every photo of the index and find near-duplicates and bursts
             (backend/near_dups.py)
+export      copy chosen files out of the archive to another folder (backend/export.py)
 
 None of them moves or changes an archive file: they read the archive and write the
 app's own cache (hashes and the media index in the database, thumbnails in the
@@ -25,6 +26,7 @@ from typing import Any, Dict, List
 from fastapi import HTTPException
 
 from backend import scanner
+from backend.export import export_type
 from backend.config import Config, is_audio, is_media_file, is_video
 from backend.jobs import JobContext, JobType, VaultUnavailable, bounded_map
 from backend.paths import resolve_in_vault, walk_archive
@@ -454,4 +456,5 @@ def build_job_types(config: Config, db, on_dup_scan_done=None) -> List[JobType]:
         thumbnails_type(config),
         index_type(config, db),
         phash_type(config, db),
+        export_type(config, db),
     ]

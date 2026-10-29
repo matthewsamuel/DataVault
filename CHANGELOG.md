@@ -102,6 +102,22 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - Met tien onderdelen past het menu bovenin nog steeds van 1024 px breed af: het zoekveld is wat
   smaller (met de korte tekst "Zoeken…" onder 1100 px) en het woord DataVault verdwijnt eerder.
 
+### Exporteren: een selectie of de beste foto's van een periode
+- In Albums en de Tijdlijn selecteer je foto's met een klik met shift of cmd, of met de spatiebalk
+  (Esc wist de selectie). Een balk onderaan toont het aantal en de totale grootte; in Albums
+  kies je met "Alles selecteren" alles van de huidige filter.
+- "Beste van een periode" (knop in Albums) kiest de beste foto's van een jaar, maand of eigen
+  periode, eventueel binnen een map of slim album: op waardering in Shows, "gehouden" in de Keurer
+  en (als die er is) de kwaliteitsscore, hoogstens één foto per burst of reeks en verspreid over de
+  periode. Je ziet eerst een voorbeeld en kunt foto's weglaten.
+- Exporteren kopieert naar een map buiten het archief (standaard Afbeeldingen/DataVault Export), als
+  achtergrondtaak met voortgang, annuleren en hervatten. Het archief verandert nooit en er wordt niets
+  overschreven (een bestaande naam krijgt " (2)"). Vooraf wordt de totale grootte berekend en de export
+  geweigerd als er te weinig ruimte is. Mappen binnen het archief en systeemmappen worden geweigerd.
+- Opties: originelen (exact dezelfde bestanden, datum behouden) of verkleind als JPEG (langste zijde
+  1024, 2048 of 4096 px, EXIF en staande stand behouden, HEIC wordt JPEG); alles in één map, per maand
+  of zoals in het archief; een overzicht (CSV of JSON) met de bronpaden. "Toon in Finder" opent de map.
+
 ### Herstelcentrum: alles terugzetten op één plek
 - Nieuw tabblad **Herstel**: één lijst, nieuwste eerst, van alles wat de app in je archief verplaatste:
   Keurer (prullenmand en verplaatsen), duplicaten opruimen en Verplaatsen in de viewer. Per actie zie

@@ -482,6 +482,10 @@
                 onClick: () => openAlbumDialog(null),
             }, createEl('i', { class: 'fas fa-plus', 'aria-hidden': 'true' }), 'Bewaar als album'));
         }
+        // Bij een aangepast album zijn er al drie knoppen (zie boven): dan past deze niet meer naast elkaar
+        if (!(album && changed)) buttons.push(createEl('button', { type: 'button', class: 'btn btn-secondary', id: 'albums-best',
+            title: "De beste foto's van een periode kiezen en exporteren", onClick: () => window.DVExport && DVExport.openBest() },
+            createEl('i', { class: 'fas fa-trophy', 'aria-hidden': 'true' }), 'Beste van een periode'));
         actions.replaceChildren(...buttons);
         renderNewHint();
         // Weg was de knop met de focus (bijv. na Wijzigingen bewaren): dan de titel, niet de pagina
@@ -735,6 +739,7 @@
         if (state.total === null) { el.replaceChildren(); return; }
         el.replaceChildren(createEl('span', { class: 'albums-count-number tabular', text: formatNumberNl(state.total) }),
             ` ${state.total === 1 ? 'bestand' : 'bestanden'}`);
+        updateSelectAll();
     }
 
     async function loadFacets() {
@@ -1094,9 +1099,59 @@
             date ? createEl('span', { class: 'albums-tile-date', text: date }) : null));
         const kind = file.type === 'video' ? ', video' : file.type === 'audio' ? ', audio' : '';
         card.setAttribute('aria-label', `${file.name}${date ? ', ' + date : ''}${kind}`);
-        card.addEventListener('click', () => (onOpen ? onOpen(index) : openAt(index)));
+        if (!onOpen) {
+            if (window.DVExport && DVExport.has(file.path)) card.classList.add('selected');
+            card.setAttribute('aria-pressed', card.classList.contains('selected') ? 'true' : 'false');
+        }
+        card.addEventListener('click', (e) => {
+            if (onOpen) return onOpen(index);
+            if (window.DVExport && DVExport.wantsSelect(e)) return selectTile(file, index, e.shiftKey);
+            openAt(index);
+        });
         return card;
     }
+
+    // ── Selecteren (export) ──────────────────────────────
+
+    let anchorIndex = null;
+    function selectTile(file, index, range) {
+        if (range && anchorIndex !== null) {
+            const files = [];
+            for (let i = Math.min(anchorIndex, index); i <= Math.max(anchorIndex, index); i++) {
+                const f = itemAt(i);
+                if (f) files.push(f);
+            }
+            DVExport.selectRange(files);
+        } else {
+            DVExport.toggle(file);
+        }
+        anchorIndex = index;
+    }
+
+    function paintSelection() {
+        $('albums-content').querySelectorAll('.albums-tile[data-index]').forEach(tile => {
+            const file = itemAt(Number(tile.dataset.index));
+            if (!file) return;
+            const on = DVExport.has(file.path);
+            tile.classList.toggle('selected', on);
+            tile.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
+    // Alles van de huidige filter, pagina voor pagina (hoogstens 20.000)
+    async function allOfFilter() {
+        const files = [];
+        for (let offset = 0; offset < Math.min(state.total, 20000); offset += 1000) {
+            const data = await fetchJSON(`${API_BASE}/api/library/browse?${apiParams(offset, 1000)}`);
+            files.push(...data.items);
+        }
+        return files;
+    }
+
+    function updateSelectAll() {
+        if (window.DVExport) DVExport.setSelectAll(state.mode === 'browse' ? allOfFilter : null, state.total);
+    }
+    if (window.DVExport) DVExport.onChange(paintSelection);
 
     let scrollTicking = false;
     function onScroll() {
@@ -1187,6 +1242,10 @@
             e.preventDefault();
             if ((e.key === 'ArrowDown' && moves.ArrowDown >= state.total) || (e.key === 'ArrowUp' && moves.ArrowUp < 0)) return;
             focusTile(moves[e.key]);
+        } else if (e.key === ' ' && window.DVExport) {
+            e.preventDefault();
+            const file = itemAt(index);
+            if (file) selectTile(file, index, e.shiftKey);
         } else if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             tile.click();
@@ -1577,6 +1636,7 @@
         addShortcutGroup('Albums', [
             [['←', '→', '↑', '↓'], 'Door de foto\'s'],
             [['Enter'], 'Foto openen in de viewer'],
+            [['Spatie'], 'Foto selecteren voor export'],
             [['Home', 'End'], 'Naar de eerste of laatste foto'],
             [['PageUp', 'PageDown'], 'Een scherm terug of verder (ook in Op deze dag)'],
         ]);

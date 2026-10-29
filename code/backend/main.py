@@ -34,6 +34,7 @@ from backend.routes import (
 )
 from backend.datagatherer import daemon as gather_daemon, jobs as gather_jobs, registry as gather_registry
 from backend.routes import backup as backup_routes
+from backend.routes import export as export_routes
 
 
 def _say(message: str) -> None:
@@ -209,6 +210,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         backup_routes.init_router(config, app.state.auto_backup)
         search.init_router(config, db, job_manager)
         geo.init_router(config, db)
+        export_routes.init_router(config, db)
 
         _say("DataVault Dashboard initialized successfully")
 
@@ -244,6 +246,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(backup_routes.router, prefix="/api/backup", tags=["backup"])
     app.include_router(search.router, prefix="/api/search", tags=["search"], dependencies=vault)
     app.include_router(geo.router, prefix="/api/map", tags=["map"], dependencies=vault)
+    app.include_router(export_routes.router, prefix="/api/export", tags=["export"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 
