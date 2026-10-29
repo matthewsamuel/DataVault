@@ -288,6 +288,21 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                  lambda: page.evaluate("executeAIAction({action: 'open_folder', target: 'misc'})"), 1.2)
             expect(not page.evaluate(fullscreen_open) and page.is_visible("#section-viewer"),
                    "chat open_folder: the folder stays hidden behind the full-screen chat")
+            # Pasha's tools: a result strip with a link, and a confirmation card that does nothing
+            # until 'Uitvoeren' (the server is asked to confirm a forged id: a clear message, no move)
+            step("chat: tool result and confirmation card", lambda: (
+                page.click(".nav-tab[data-view='home']"),
+                page.evaluate("""(photo) => {
+                    chatRenderToolEvent({tool: 'library_filter', result: {title: '3 bestanden: je selectie', total: 3,
+                        items: [{path: photo, name: 'foto.jpg'}], link: {view: 'albums', filters: {year: 2019}, label: 'Alles bekijken'}}});
+                    chatRenderToolEvent({tool: 'propose_move', pending: {id: 'nep', kind: 'move', title: '1 bestand verplaatsen naar library',
+                        count: 1, expires_in: 600, items: [{name: 'foto.jpg', to: 'library'}], more: 0}});
+                }""", photo)), 0.5)
+            expect(page.is_visible("#chat-messages .chat-confirm .btn-primary") and page.is_visible("#chat-messages .chat-strip img"),
+                   "chat tools: result strip or confirmation card is not visible")
+            step("chat: forged confirmation is refused", lambda: page.click("#chat-messages .chat-confirm .btn-primary"), 0.6)
+            expect("verlopen" in page.inner_text("#chat-messages .chat-confirm-status"),
+                   "chat tools: a forged id did not give the expired message")
             page.click(".nav-tab[data-view='home']")
             for theme in ("light", "dark", "auto"):
                 step(f"theme {theme}", lambda: (page.click(".theme-button"),

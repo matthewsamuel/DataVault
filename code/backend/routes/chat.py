@@ -272,18 +272,31 @@ Acties (jij zegt wat; de app zoekt zelf de bestanden):
 Tonen en zoeken (voert de app direct uit):
 - foto's zoeken op inhoud ("strand", "hond"): {{"action": "find_photos", "query": "strand", "year": 2023}} (year mag weg)
 - selectie uit de bibliotheek: {{"action": "library_filter", "year": 2023, "month": 7, "kind": "photo"|"video", "camera_contains": "iPhone", "folder": "mapnaam", "min_rating": 1050, "has_gps": true, "date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD"}} (alleen wat nodig is)
-- slim album openen: {{"action": "open_smart_album", "name": "Favorieten"}}
+- slim album openen: {{"action": "open_smart_album", "name": "albumnaam"}}
 - foto's van deze dag in eerdere jaren: {{"action": "on_this_day"}}
-- foto's bij een stad of land: {{"action": "photos_at_place", "place": "Parijs"}}
+- foto's bij een stad of land (alleen een echte plaatsnaam): {{"action": "photos_at_place", "place": "Parijs"}}
 - reeksen bijna-dezelfde foto's: {{"action": "series_overview"}}
 - stand van achtergrondtaken: {{"action": "job_status"}}; laatste verplaatsingen: {{"action": "recovery_summary"}}
-- op naam zoeken: {{"action": "search_photos", "query": "IMG_1234"}}; datum: {{"action": "show_photos", "date": "YYYY-MM-DD"}}
+- op bestandsnaam zoeken: {{"action": "search_photos", "query": "IMG_1234"}}; datum: {{"action": "show_photos", "date": "YYYY-MM-DD"}}
 - map openen: {{"action": "open_folder", "target": "mapnaam"}}; tab: {{"action": "open_tab", "target": "viewer"}} (ook spotify, shows, home)
 - duplicaten scannen: {{"action": "scan_duplicates"}}
 Voorstellen (er verschijnt een kaart; de gebruiker moet zelf bevestigen, jij verplaatst niets):
 - bestanden naar een map: {{"action": "propose_move", "query": "bestandsnaam", "folder": "bestaande mapnaam"}}
 - beste foto van de grootste reeksen houden: {{"action": "propose_keep_best", "count": 3}}
 - exporteren: {{"action": "propose_export", "year": 2023}} (of "query": "strand")
+
+Voorbeelden (let op: altijd tussen << en >>):
+"foto's uit 2019" -> Hier zijn ze. <<ACTION: {{"action": "library_filter", "year": 2019}}>>
+"foto's van juli 2019" -> Alsjeblieft. <<ACTION: {{"action": "library_filter", "year": 2019, "month": 7}}>>
+"laat foto's van het strand zien" -> Dit vond ik. <<ACTION: {{"action": "find_photos", "query": "strand"}}>>
+"zijn er foto's in Frankrijk?" -> Even kijken. <<ACTION: {{"action": "photos_at_place", "place": "Frankrijk"}}>>
+"foto's uit Spanje" -> Hier zijn ze. <<ACTION: {{"action": "photos_at_place", "place": "Spanje"}}>>
+"zijn er bijna-dubbele foto's?" -> Dit zijn je reeksen. <<ACTION: {{"action": "series_overview"}}>>
+"is er een taak bezig?" -> Ik kijk het na. <<ACTION: {{"action": "job_status"}}>>
+"overzicht van mijn fotoreeksen" -> Dit zijn je reeksen. <<ACTION: {{"action": "series_overview"}}>>
+"bewaar de beste foto van mijn 3 grootste reeksen" -> Ik stel het voor. <<ACTION: {{"action": "propose_keep_best", "count": 3}}>>
+"exporteer mijn foto's van 2019" -> Ik bereid het voor. <<ACTION: {{"action": "propose_export", "year": 2019}}>>
+"verplaats strand 001 naar library" -> Ik stel het voor. <<ACTION: {{"action": "propose_move", "query": "strand 001", "folder": "library"}}>>
 
 Regels:
 - Een <<ACTION: {{...}}>> staat op de LAATSTE regel; gebruik hem altijd als iemand iets wil zien, zoeken, openen of verplaatsen. Vul alleen de genoemde velden in.
@@ -427,15 +440,19 @@ async def stream_with_tools(ollama_messages: list, model: str) -> AsyncGenerator
             text += event.get("token") or ""
             if event.get("done"):
                 ctx = assistant.Context(config, db, manager)
-                for action in assistant.parse_actions(text):
+                actions = assistant.parse_actions(text)
+                if actions:
+                    # The model wrote the action in its own spelling: the chat shows the answer without it
+                    yield _sse({"replace": assistant.strip_actions(text)})
+                for action in actions:
                     yield _sse(await run_in_threadpool(assistant.run_action, ctx, action))
         yield chunk
 
 
 @router.post("/api/chat/actions/{action_id}/confirm")
-async def confirm_action(action_id: str):
+def confirm_action(action_id: str):
     """The user clicked 'Uitvoeren' on a card: do that one pending action (the id works once)."""
-    return await run_in_threadpool(assistant.confirm, assistant.Context(config, db, manager), action_id)
+    return assistant.confirm(assistant.Context(config, db, manager), action_id)
 
 
 @router.post("/api/chat/actions/{action_id}/cancel")

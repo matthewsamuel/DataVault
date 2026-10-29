@@ -595,6 +595,13 @@
         return state.inited;
     };
 
+    // Vanuit de chat (Pasha): de kaart op een gebied zetten, [zuid, west, noord, oost]
+    window.mapFocus = async function (bounds) {
+        await mapInit();
+        state.map.invalidateSize();
+        state.map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: [48, 48], maxZoom: 12, animate: false });
+    };
+
     // Voor de browsertest (tests/ui/smoke_webkit.py): wat de kaart nu toont
     window.mapView = () => (state.map ? {
         zoom: state.map.getZoom(), markers: state.markers.size, osm: state.osm, popup: !!(state.popup && state.map.hasLayer(state.popup)),

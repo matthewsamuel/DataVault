@@ -66,6 +66,14 @@ def test_only_allowlisted_actions_with_valid_arguments_are_kept():
     assert kept == [{"action": "propose_keep_best", "count": 2}]
 
 
+def test_the_models_other_spellings_of_an_action_are_understood_and_hidden():
+    for text in ('Ja. <|ACTION: {"action": "on_this_day"}|>', 'Ja.\n{"action": "on_this_day"}',
+                 'Ja. <<ACTION {"action": "on_this_day"}>>'):
+        assert assistant.parse_actions(text) == [{"action": "on_this_day"}], text
+        assert assistant.strip_actions(text) == "Ja."
+    assert assistant.strip_actions('Even <<ACTION: {"action": "on_th') == "Even"
+
+
 # ---------- read-only tools ----------
 
 def test_library_filter_returns_a_strip_and_a_link(indexed, fake_ollama):

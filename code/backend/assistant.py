@@ -30,8 +30,10 @@ from fastapi import HTTPException
 
 from backend import library_filters, media_index, near_dups, places, semantic
 
-TAG = re.compile(r"<<ACTION:?\s*(\{[\s\S]*?\})\s*>>")
-STRIP_FROM = re.compile(r"<<ACTION[\s\S]*$")
+# qwen2.5:3b mostly writes <<ACTION: {...}>>, but sometimes <|ACTION: {...}|> or just the bare JSON object
+TAG = re.compile(r"(?:<<|<\|)\s*ACTION:?\s*(\{[\s\S]*?\})\s*(?:>>|\|>)")
+BARE = re.compile(r'\{[^{}]*"action"\s*:[^{}]*\}')
+UNFINISHED = re.compile(r'(?:<<|<\|)\s*ACTION[\s\S]*$|\{\s*"action"[^}]*$')
 PENDING_TTL = 600.0
 PENDING_MAX = 20
 STRIP_ITEMS = 12          # photos in a result strip
@@ -133,12 +135,21 @@ def clean_action(data: Any) -> Optional[Dict[str, Any]]:
     return out
 
 
+def strip_actions(text: str) -> str:
+    """The answer without its action tags or bare action objects (what the user reads)."""
+    text = TAG.sub("", text or "")
+    text = BARE.sub("", text)
+    return UNFINISHED.sub("", text).strip()
+
+
 def parse_actions(text: str) -> List[Dict[str, Any]]:
     """The valid server-side actions in a model answer, in order (at most 2)."""
     found = []
-    for match in TAG.finditer(text or ""):
+    text = text or ""
+    candidates = [m.group(1) for m in TAG.finditer(text)] or [m.group(0) for m in BARE.finditer(text)]
+    for raw in candidates:
         try:
-            action = clean_action(json.loads(match.group(1)))
+            action = clean_action(json.loads(raw))
         except ValueError:
             continue
         if action:
@@ -517,11 +528,11 @@ def run_action(ctx: Context, action: Dict[str, Any]) -> Dict[str, Any]:
     name = action["action"]
     try:
         if name in READ_TOOLS:
-            return {"tool": name, "result": READ_TOOLS[name](ctx, action)}
+            return {"tool": name, "args": action, "result": READ_TOOLS[name](ctx, action)}
         proposal = PROPOSE_TOOLS[name](ctx, action)
-        return {"tool": name, **proposal}
+        return {"tool": name, "args": action, **proposal}
     except ToolError as e:
-        return {"tool": name, "error": str(e)}
+        return {"tool": name, "args": action, "error": str(e)}
     except Exception as e:   # never a stack trace in the chat
         print(f"Pasha-tool {name} mislukt: {e!r}")
         return {"tool": name, "error": "Dat lukte niet. Probeer het nog eens of gebruik het scherm zelf."}
