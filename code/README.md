@@ -298,6 +298,31 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   geheugen, een netwerkbewaker die alles weigert (`net.set_transport_factory` voor een
   `httpx.MockTransport`), en een LaunchAgents-map in de tijdelijke map.
 
+
+### DataGatherer: berichten en sociaal
+- Bronnen: **WhatsApp** (WhatsApp voor Mac, een uitgepakte iPhone-`ChatStorage.sqlite`, en
+  'Exporteer chat' als .txt/.zip van iOS en Android, NL en EN), **iMessage en sms** (`chat.db`),
+  **Messenger** (de download uit de beveiligde opslag, `messages.zip`), **Facebook** en **Instagram**
+  ('Je gegevens exporteren' in JSON). Alles komt in één winkel: `msg_conversations`,
+  `msg_messages` (met FTS5-index `msg_fts`) en `social_items` (migraties 90 en 91).
+- Twee keer inlezen voegt niets toe: elk bericht heeft een vaste sleutel per bron (iMessage-guid,
+  WhatsApp-stanza-id, of gesprek + tijd + afzender + tekst). Een chat-export van WhatsApp wordt
+  samengevoegd met de chat uit de database; berichten die de database ook heeft krijgen
+  `superseded_by` en worden nooit gewist. Facebook-export en Messenger-download komen samen in één
+  gesprek (op deelnemers). Meta's mojibake wordt hersteld; Nederlandse en Engelse mapnamen werken.
+- **Volledige schijftoegang**: de server heeft ze niet nodig. Hij leest de database als hij mag;
+  anders kopieert de kleine hulp `backend/datagatherer/fda_helper.py` (alleen standaardbibliotheek,
+  start je zelf in een Terminal met Volledige schijftoegang) de database met `-wal` en `-shm` naar
+  `<cache>/datagatherer-local/<bron>/`. De kaart toont 'Toegang nodig' met het pad in
+  Systeeminstellingen en de exacte opdracht. DataVault leest altijd een kopie en ruimt die daarna op.
+- Een gesynchroniseerde map (Dropbox, Google Drive, Koofr) voor Meta's terugkerende export stel je per
+  bron in (`watch_setting`); de watcher kijkt daar altijd, ook zonder openstaande aanvraag.
+- Het scherm **Berichten** (`g e`, of de knop Berichten op de DataGatherer-pagina) toont alle
+  gesprekken, zoekt in alle bronnen (`/api/messages/...`) en toont bijlagen uit het archief.
+- **Pasha** leest berichten alleen van bronnen waarvoor je 'Pasha mag deze berichten lezen' aanzette
+  (standaard uit), en dan alleen de paar treffers die bij je vraag passen.
+- Tests gebruiken alleen verzonnen databases en exports (`tests/fake_messages.py`); de
+  'thuismap' met de chatdatabases is `DATAVAULT_GATHER_HOME` (in testmodus nooit je echte thuismap).
 ### Achtergrondtaken
 - Duplicaten zoeken, vooraf indexeren, miniaturen maken, de bibliotheek bijwerken en foto's vergelijken (Beste uit reeks) lopen als taak op de achtergrond
 - Het takenpaneel rechtsonder toont voortgang en resterende tijd, met Pauzeren, Hervatten en Annuleren

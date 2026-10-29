@@ -410,6 +410,35 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   eerste latere nummer kan echt ontbreken.
 - Een geannuleerde upload laat geen tijdelijke kopie meer achter.
 
+### DataGatherer: berichten en sociaal
+- **Nieuwe bronnen in DataGatherer**: WhatsApp, iMessage en sms, Messenger, Facebook en Instagram.
+  Je vraagt exports zelf aan in je eigen browser of op je telefoon; DataVault opent de juiste pagina,
+  ziet het bestand in Downloads en leest het in. Er gaat geen wachtwoord door DataVault en er is geen
+  bot.
+- **Berichten**: een nieuw scherm met al je gesprekken op één plek. Zoek in alle bronnen tegelijk
+  (ook zonder accenten: 'cafe' vindt 'café'), filter per bron en lees een gesprek als chatbubbels met
+  datums, reacties en voorbeelden van foto's uit je export. Met de pijltjes door de lijst, Enter
+  opent. Te openen met de knop Berichten op de DataGatherer-pagina of met `g e`.
+- **WhatsApp zonder dubbels**: WhatsApp voor Mac, een ChatStorage.sqlite uit een iPhone-backup en
+  losse chat-exports (iPhone en Android, Nederlands en Engels) komen samen in één gesprek. Wat in
+  meerdere bronnen staat, zie je één keer; niets wordt gewist.
+- **iMessage en sms** uit Berichten op je Mac, ook de tekst die nieuwere macOS-versies verpakt
+  opslaat, met reacties (tapbacks) en de namen van bijlagen.
+- **Facebook, Instagram en Messenger**: berichten, reacties, likes en de gegevens van je
+  Instagram-foto's. Vreemde tekens zoals 'CafÃ©' worden weer 'Café'. Een export in het Nederlands
+  werkt net zo goed. Je versleutelde Messenger-chats (beveiligde opslag) en de chats uit je
+  Facebook-export komen samen in één gesprek.
+- **Alleen wat nieuw is**: bij Facebook en Instagram toont het venster Export aanvragen de datum
+  'sinds' en zet hem op je klembord, zodat je alleen een korte periode aanvraagt. Laat je Meta
+  automatisch exporteren naar Dropbox, Google Drive of Koofr, vul dan die map in bij Instellingen:
+  DataVault leest nieuwe exports daar vanzelf in.
+- **Toegang nodig**: macOS beschermt je berichten. De kaart zegt precies waar je toegang geeft
+  (Systeeminstellingen > Privacy en beveiliging > Volledige schijftoegang) en geeft een opdracht om te
+  kopiëren voor een kleine hulp die je zelf start. De DataVault-server zelf heeft die toegang niet
+  nodig.
+- **Pasha en je berichten**: Pasha leest je berichten alleen van de bronnen die je zelf aanzet
+  (standaard alles uit), en dan alleen de paar berichten die bij je vraag passen.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden
