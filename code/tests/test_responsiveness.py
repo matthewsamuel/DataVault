@@ -39,7 +39,7 @@ def test_only_truly_async_routes_are_async_def(app):
     from backend.routes import chat
     for name in CHAT_ASYNC:
         source = inspect.getsource(getattr(chat, name))
-        assert "build_system_prompt()" not in source and "run_in_threadpool(build_system_prompt)" in source
+        assert "build_system_prompt()" not in source and "run_in_threadpool(build_system_prompt" in source
     from backend.routes import datagatherer
     source = inspect.getsource(datagatherer.upload)
     # Receiving the stream is async; writing, recognising and starting the copy job run in the thread pool

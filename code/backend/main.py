@@ -30,7 +30,7 @@ from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import (
     folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, albums,
-    series, datagatherer,
+    series, datagatherer, messages,
 )
 from backend.datagatherer import daemon as gather_daemon, jobs as gather_jobs, registry as gather_registry
 
@@ -171,6 +171,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         recovery.init_router(config, db)
         series.init_router(config, db, job_manager)
         datagatherer.init_router(config, db, job_manager)
+        messages.init_router(config, db)
 
         _say("DataVault Dashboard initialized successfully")
 
@@ -202,6 +203,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(recovery.router, prefix="/api/recovery", tags=["recovery"], dependencies=vault)
     app.include_router(series.router, prefix="/api/series", tags=["series"], dependencies=vault)
     app.include_router(datagatherer.router, prefix="/api/datagatherer", tags=["datagatherer"], dependencies=vault)
+    app.include_router(messages.router, prefix="/api/messages", tags=["messages"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 
