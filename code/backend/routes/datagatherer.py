@@ -119,6 +119,8 @@ def save_settings(source_id: str, body: Any = Body(...)) -> Dict[str, Any]:
                 if not isinstance(value, str) or len(value) > 500:
                     raise HTTPException(status_code=400, detail=f"{field.label} moet tekst zijn")
                 value = value.strip()
+                if key == "watch_folder" and value:
+                    _check_watch_folder(value)
             current[key] = value
         state.set_settings(db, connector.id, current)
     fields = {}
@@ -136,6 +138,21 @@ def save_settings(source_id: str, body: Any = Body(...)) -> Dict[str, Any]:
     if fields:
         state.update(db, connector.id, **fields)
     return cards.card(config, db, connector)
+
+
+def _check_watch_folder(value: str) -> None:
+    """A folder to follow must exist, be a full path, and not lie inside the vault."""
+    folder = Path(os.path.expanduser(value))
+    if not folder.is_absolute():
+        raise HTTPException(status_code=400, detail="Geef de volledige map, die begint met /")
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail="Deze map bestaat niet (of is niet bereikbaar)")
+    try:
+        inside = folder.resolve().is_relative_to(config.VAULT_ROOT.resolve())
+    except (OSError, RuntimeError):
+        inside = False
+    if inside:
+        raise HTTPException(status_code=400, detail="Kies een map buiten het archief")
 
 
 @router.put("/sources/{source_id}/secrets")
@@ -262,6 +279,8 @@ def start_sync(source_id: str):
     except keychain.SecretStoreError as e:
         raise HTTPException(status_code=503, detail=str(e))
     if not configured:
+        if not connector.has("api_sync"):
+            raise HTTPException(status_code=409, detail=f"{connector.name} is niet gevonden op deze Mac")
         raise HTTPException(status_code=409, detail=f"{connector.name} is nog niet verbonden: klik Verbinden")
     return _start(sync_type_name(connector.id), {"trigger": "user"})
 
@@ -339,7 +358,7 @@ async def upload(source_id: str, request: Request, name: str = ""):
     base = os.path.basename(name or "")
     if (not base or base.startswith(".") or len(base) > 200 or any(ord(c) < 32 or ord(c) == 127 for c in base)
             or not base.lower().endswith(daemon.EXPORT_SUFFIXES)):
-        raise HTTPException(status_code=400, detail="Kies een exportbestand (.zip of .json)")
+        raise HTTPException(status_code=400, detail="Kies een exportbestand (.zip, .json, .csv of .db)")
     token, temp = await run_in_threadpool(_upload_temp, base)
     started = False
     try:

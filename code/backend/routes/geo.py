@@ -2,6 +2,7 @@
 DataVault Dashboard - Kaart: geotagged photos and videos on a map
 
 GET  /api/map/points      the media with a GPS position as compact arrays, in chunks
+GET  /api/map/inferred    the media without GPS with a position estimated from the Tijdlijn (DataGatherer)
 GET  /api/map/locate     {id, lat, lon, has_gps} of one file (for 'Op kaart tonen' in the viewer)
 GET  /api/map/items       full items (for the viewer and popups) for a few ids
 GET  /api/map/settings    {osm_tiles}: the opt-in OpenStreetMap tiles
@@ -115,6 +116,33 @@ def points(request: Request, album: Optional[int] = Query(None, ge=0, le=MAX_INT
     }
 
 
+@router.get("/inferred")
+def inferred_points(request: Request, album: Optional[int] = Query(None, ge=0, le=MAX_INT),
+                    after: int = Query(0, ge=0, le=MAX_INT), limit: int = Query(CHUNK_DEFAULT, ge=1)) -> Dict[str, Any]:
+    """
+    The media WITHOUT GPS that have a position estimated from the location history
+    (DataGatherer, backend/datagatherer/geotag.py), with the same filters as /points:
+    {total, next, points: [[id, lat, lon, taken, kind, confidence], ...]}. Kept apart from
+    /points: an estimate is never shown as if the photo itself said where it was taken.
+    """
+    query = _selection(request, album)
+    limit = min(limit, CHUNK_MAX)
+    where, args = media_index._where({**query, "has_gps": False})
+    join = "JOIN media_location_inferred i ON i.media_id = m.id"
+    with db._connect() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM media m {join} WHERE {where}", args).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT m.id, i.lat, i.lon, m.taken, m.kind, i.confidence FROM media m {join} WHERE {where} AND m.id > ? "
+            f"ORDER BY m.id LIMIT ?", (*args, after, limit + 1)).fetchall()
+    more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "total": total,
+        "next": rows[-1][0] if more and rows else None,
+        "points": [[r[0], r[1], r[2], None if r[3] is None else int(r[3]), KIND_CODES.get(r[4], 0), r[5]] for r in rows],
+    }
+
+
 @router.get("/items")
 def items(ids: str = Query(..., description="comma-separated media ids")) -> Dict[str, Any]:
     """{items: [...]}: the media rows for these ids (at most 200), in the order asked, with lat and lon."""
@@ -142,8 +170,13 @@ def locate(path: str = Query(..., min_length=1)) -> Dict[str, Any]:
     resolved = str(resolve_in_vault(path, config))
     with db._connect() as conn:
         row = conn.execute("SELECT id, lat, lon FROM media WHERE path = ? AND missing = 0", (resolved,)).fetchone()
-    if row is None or row[1] is None:
+    if row is None:
         return {"has_gps": False}
+    if row[1] is None:
+        # No GPS in the file: perhaps a position estimated from the location history ('Locatie (geschat)')
+        from backend.datagatherer import geotag
+        estimate = geotag.inferred(db, row[0])
+        return {"has_gps": False, "id": row[0], "inferred": estimate} if estimate else {"has_gps": False}
     return {"has_gps": True, "id": row[0], "lat": row[1], "lon": row[2]}
 
 
