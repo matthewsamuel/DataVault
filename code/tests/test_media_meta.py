@@ -86,3 +86,42 @@ def test_an_unreadable_file_raises_so_it_is_read_again(tmp_path):
             _meta(photo)
     finally:
         os.chmod(photo, 0o644)
+
+
+class _Exif:
+    """An EXIF stand-in whose GPS block is the given dict (tag -> value)."""
+    def __init__(self, gps):
+        self.gps = gps
+
+    def get_ifd(self, tag):
+        return self.gps
+
+
+def test_gps_hemispheres_rationals_and_missing_references():
+    gps = media_meta._exif_gps
+    # S and W make the numbers negative
+    assert gps(_Exif({1: "S", 2: (33.0, 51.0, 24.48), 3: "W", 4: (151.0, 12.0, 54.0)})) == {
+        "lat": pytest.approx(-33.8568, abs=1e-4), "lon": pytest.approx(-151.215, abs=1e-4)}
+    # N and E (also bytes or lower case) stay positive; a missing reference means N and E
+    assert gps(_Exif({1: "N", 2: (52, 22, 12), 3: "E", 4: (4, 53, 42)}))["lat"] == pytest.approx(52.37, abs=1e-3)
+    assert gps(_Exif({2: (52, 22, 12), 4: (4, 53, 42)}))["lon"] == pytest.approx(4.895, abs=1e-3)
+    assert gps(_Exif({1: "s", 2: (10, 0, 0), 3: "w", 4: (20, 0, 0)})) == {"lat": -10.0, "lon": -20.0}
+    # Rationals as (numerator, denominator) pairs
+    got = gps(_Exif({1: "N", 2: ((52, 1), (22, 1), (1224, 100)), 3: "E", 4: ((4, 1), (53, 1), (42, 1))}))
+    assert got["lat"] == pytest.approx(52.3701, abs=1e-4)
+    # Altitude below sea level
+    assert gps(_Exif({2: (1, 0, 0), 4: (1, 0, 0), 5: 1, 6: 3.5}))["altitude"] == -3.5
+
+
+def test_gps_unusable_positions_count_as_missing():
+    gps = media_meta._exif_gps
+    assert gps(_Exif({1: "N", 2: (0, 0, 0), 3: "E", 4: (0, 0, 0)})) == {}          # null island: no fix
+    assert gps(_Exif({1: "S", 2: (0, 0, 0), 3: "W", 4: (0, 0, 0)})) == {}
+    assert gps(_Exif({2: (95, 0, 0), 4: (10, 0, 0)})) == {}                         # latitude out of range
+    assert gps(_Exif({2: (10, 0, 0), 4: (181, 0, 0)})) == {}
+    assert gps(_Exif({2: (10, 0, 0)})) == {}                                        # only a latitude
+    assert gps(_Exif({2: (10, 0, 0), 4: (1, 2, 0)})) != {}
+    assert gps(_Exif({2: ("x", 0, 0), 4: (1, 0, 0)})) == {}                         # junk
+    assert gps(_Exif({2: (1, 0, float("nan")), 4: (1, 0, 0)})) == {}
+    assert gps(_Exif({2: ((1, 0), 0, 0), 4: (1, 0, 0)})) == {}                      # zero denominator
+    assert gps(_Exif({})) == {}

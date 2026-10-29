@@ -24,15 +24,26 @@ ALLOWED_HOSTS = {
     "127.0.0.1",
 }
 
+# The one URL the frontend may LOAD from the internet: the OpenStreetMap tile template of the
+# Kaart view. It is only used after the user switched 'Gedetailleerde kaart (OpenStreetMap,
+# online)' on in Instellingen or on the map (off by default; see map.js and the Playwright
+# check in tests/ui/smoke_webkit.py that nothing leaves the machine while it is off).
+ALLOWED_URLS = {
+    "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+}
+
 # Identifiers that look like URLs but are never fetched (XML namespaces).
 NAMESPACE_URLS = {
     "http://www.w3.org/2000/svg",
+    # Leaflet's default attribution prefix (a link in the map corner, never fetched; map.js turns it off)
+    "https://leafletjs.com",
 }
 
 # Hosts the user can open by clicking a link (a new browser tab). The app itself
 # never requests them: no fetch, no <img>/<script>/<link>, no CSS url().
 CLICK_ONLY_HOSTS = {
     "open.spotify.com",  # "zoek dit nummer op Spotify" in Spotify Wrapped
+    "www.openstreetmap.org",  # the attribution link on the map while the OpenStreetMap tiles are on
 }
 
 URL_RE = re.compile(r"""https?://[^\s'"`)<>\\]+""", re.IGNORECASE)
@@ -50,7 +61,8 @@ def _frontend_text_files():
 
 def _code(path: Path) -> str:
     text = path.read_text(encoding="utf-8", errors="replace")
-    if path.suffix.lower() == ".css":
+    vendored_js = path.suffix.lower() == ".js" and "vendor" in path.parts
+    if path.suffix.lower() == ".css" or vendored_js:
         # License headers (/*! Font Awesome ... https://fontawesome.com */) are not requests
         text = CSS_COMMENT_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
     return text
@@ -72,7 +84,7 @@ def test_frontend_names_no_external_hosts():
     offending = []
     for rel, lineno, line, url in _external_urls():
         host = (urlsplit(url).hostname or "").lower()
-        if host in ALLOWED_HOSTS or url in NAMESPACE_URLS:
+        if host in ALLOWED_HOSTS or url in NAMESPACE_URLS or url in ALLOWED_URLS:
             continue
         if host in CLICK_ONLY_HOSTS and not LOAD_CONTEXT_RE.search(line):
             continue
@@ -125,3 +137,20 @@ def test_api_docs_pages_load_nothing_from_a_cdn(client):
     r = client.get("/openapi.json")
     assert r.status_code == 200
     assert r.json()["info"]["title"] == "DataVault Dashboard"
+
+
+def test_the_only_internet_url_is_the_opt_in_tile_template():
+    """The tile URL appears in map.js only, and only the one template (no other tile server)."""
+    using = {str(rel) for rel, _, _, url in _external_urls() if url in ALLOWED_URLS}
+    assert using == {"map.js"}
+    assert {urlsplit(u).hostname for u in ALLOWED_URLS} == {"tile.openstreetmap.org"}
+
+
+def test_the_offline_basemap_and_map_libraries_are_vendored_with_licenses():
+    vendor = FRONTEND / "vendor"
+    assert (vendor / "leaflet-1.9.4" / "LICENSE").is_file() and (vendor / "leaflet-1.9.4" / "leaflet.js").is_file()
+    assert (vendor / "leaflet.markercluster-1.5.3" / "LICENSE").is_file()
+    assert (vendor / "naturalearth" / "countries-50m.geojson").is_file() and (vendor / "naturalearth" / "README.txt").is_file()
+    for ref in re.findall(r"url\(([^)]+)\)", _code(vendor / "leaflet-1.9.4" / "leaflet.css")):
+        if not ref.strip("'\"").startswith(("data:", "#")):
+            assert (vendor / "leaflet-1.9.4" / ref.strip("'\"")).resolve().is_file(), ref
