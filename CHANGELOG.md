@@ -250,6 +250,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   themamenu zie je ook na openen met de muis welke keuze de pijltjes gemarkeerd hebben.
 
 ### Slim zoeken: foto's vinden op wat erop staat
+
+- Slim zoeken laat bij korte zoekopdrachten zoals 'food' of 'een auto' weer de juiste foto's zien (de
+  drempel was te streng), en lege datumvelden zien er niet meer uit als een actief filter.
 - Verbeterd na de review: nieuwe foto's blijven niet meer onzichtbaar nadat verwijderde foto's zijn
   opgeruimd, een onderwerp dat een groot deel van de map beslaat (bijvoorbeeld "hond") wordt gewoon
   gevonden, onzin als zoekopdracht geeft "Niets gevonden", "Vergelijkbaar" verbergt gelijkende foto's niet

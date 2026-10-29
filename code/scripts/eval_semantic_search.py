@@ -76,6 +76,25 @@ def metrics(emb, names, labels, queries, encoder, lang_index):
             "text_ms": float(np.median(times)) * 1000}, misses
 
 
+def strong_report(emb, names, labels, queries, encoder, index) -> None:
+    """Precision and recall of the 'strong' set (the relevance cut of semantic.py, background = this set)."""
+    tp = fp = fn = empty = 0
+    for q in queries:
+        need, text = q[0], q[index]
+        scores = emb @ encoder.encode_text(text)
+        median = float(np.median(scores))
+        mad = float(np.median(np.abs(scores - median))) * 1.4826
+        cut = max(semantic.MIN_SCORE, float(scores.max()) - semantic.SCORE_SPREAD, median + semantic.SCORE_Z * mad)
+        if float(scores.max()) >= semantic.CLEAR_SCORE and cut > float(scores.max()):
+            cut = max(semantic.MIN_SCORE, float(scores.max()) - semantic.SCORE_SPREAD)
+        strong = {names[i] for i in np.flatnonzero(scores >= cut)}
+        rel = {n for n in names if need <= labels[n]}
+        tp += len(strong & rel); fp += len(strong - rel); fn += len(rel - strong)
+        empty += (not strong) and bool(rel)
+    print(f"    strong set: recall {tp / (tp + fn):.3f} precision {tp / max(1, tp + fp):.3f}; "
+          f"queries empty although right photos exist: {empty}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--images", required=True, help="folder with the eval photos (<name>.jpg)")
@@ -118,6 +137,7 @@ def main() -> int:
         print(f"{lang}: " + "  ".join(f"{k} {v:.3f}" if k != "text_ms" else f"text {v:.0f} ms" for k, v in result.items()))
         for miss in misses:
             print(f"    {miss}")
+        strong_report(emb, names, labels, queries, encoder, index)
     return 0
 
 

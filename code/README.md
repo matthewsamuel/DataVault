@@ -182,10 +182,15 @@ sneller te lezen. Vertalen via Ollama hielp weinig ("hond" werd "honduras").
 | Eerste zoekopdracht na het starten (model en 100.000 vectoren laden) | 1,4 s; trager als de T7 druk is |
 | Geheugen | tekstmodel ~1,7 GB (na 15 min niet zoeken weer vrij), vectoren 150 MB per 100.000 foto's |
 
+Na een herstart van de Mac kan de allereerste zoekopdracht 10 tot 20 s duren (het model staat dan nog
+niet in het geheugen van het besturingssysteem). Foto's worden een voor een herkend, omdat de gebruikte
+ONNX-export een vaste batchgrootte van 1 heeft; de gemeten snelheid (hierboven) is ruim genoeg.
+
 Het zoekveld laadt het model al zodra het focus krijgt, zodat de eerste zoekopdracht meestal direct is.
-Een resultaat telt als "goed" als de score minstens 0,05 is, hooguit 0,06 onder de beste ligt en twee
-standaardafwijkingen boven het gemiddelde van de selectie (op de set: 90% van de goede foto's, 70%
-precisie); de rest staat achter **Meer foto's die minder goed passen**.
+Een resultaat telt als "goed" als de score minstens 0,085 is, hooguit 0,06 onder de beste ligt en twee
+standaardafwijkingen boven de mediaan van de hele index (gemeten op 179 foto's met 50 Nederlandse en
+50 Engelse zoekopdrachten: 73% / 81% van de goede foto's bij 67% / 72% precisie, en geen enkele
+zoekopdracht met goede foto's blijft leeg); de rest staat achter **Meer foto's die minder goed passen**.
 
 **API** (filters zoals `/api/library/media`: `kind`, `date_from`, `date_to`, `folder`, `recursive`,
 `camera`, `has_gps`, `min_rating`, `orientation`):

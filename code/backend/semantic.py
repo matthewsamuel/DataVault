@@ -18,6 +18,8 @@ tokenizers only (no torch):
 - the text encoder is the fp16 ONNX export of onnx-community (half the size, the same
   rankings as fp32 on our set; the int8 one loses most of its Dutch); it runs on the
   CPU in about 35 ms per query.
+Images are encoded one at a time (the export has a static batch of 1); the measured
+throughput above is enough, so no dynamic-batch re-export was made.
 Both exports give the same vectors (cosine 0.99999 against each other).
 
 Files: the model lives in config.MODELS_FOLDER/<model id> (code/models on the T7 by
@@ -88,17 +90,21 @@ MAX_RANKED = 5000                 # a query never ranks more than this many phot
 # The relevance cut (measured on the labelled set, scripts/eval_semantic_search.py): a result
 # is 'strong' when its cosine is at least MIN_SCORE, at most SCORE_SPREAD below the best one,
 # and SCORE_Z standard deviations above the mean of the selection (a real match stands out
-# from the rest; a query of nonsense lifts nothing out of the crowd). On the set that keeps
-# 90% of the right photos at 70% precision; the rest is one click away (include_weak).
+# from the rest; a query of nonsense lifts nothing out of the crowd). Measured on the 179-photo
+# set with 50 Dutch and 50 English queries: the strong set holds 73% (NL) / 81% (EN) of the
+# right photos at 67% / 72% precision, and no query with right photos comes up empty; the rest
+# is one click away (include_weak).
 # The background (median and MAD) is taken over the whole index, not the filtered selection:
 # when a concept is a fifth of a folder, the folder's own mean would rise above the matches.
-# MIN_SCORE is calibrated for SigLIP 2: true matches score 0.11-0.16, nonsense 0.06-0.09.
+# MIN_SCORE is calibrated for SigLIP 2: true matches score 0.09-0.16, nonsense 0.06-0.09
+# (a wider net, 0.07, gives 81-84% recall at 60-64% precision but lets more nonsense through).
 # A best score of at least CLEAR_SCORE is never emptied by the background rule.
-MIN_SCORE = 0.10
+MIN_SCORE = 0.085
 SCORE_SPREAD = 0.06
 SCORE_Z = 2.0
 SCORE_Z_MIN_COUNT = 30            # with fewer photos the spread says too little
-CLEAR_SCORE = 0.11
+CLEAR_SCORE = 0.095
+WEAK_FALLBACK = 5                 # search_photos: weaker hits returned when nothing is strong
 # Image to image cosines sit on another scale (0.6-0.95): a near-copy must not set the cut
 NEAR_COPY = 0.93
 SIMILAR_SPREAD = 0.12
@@ -1037,10 +1043,15 @@ def search_photos(db, config, text: str, filters: Optional[Dict[str, Any]] = Non
     """
     For the assistant and other Python callers: the best matching photos and videos for a
     text as media rows (media_index.ROW_COLUMNS plus 'score'), best first, at most limit,
-    only those above the relevance cut. filters are media_index filters (kind, date_from,
+    only those above the relevance cut (when nothing is above it, the best few weaker hits,
+    so a short query like 'food' never comes back empty). filters are media_index filters (kind, date_from,
     date_to, folder, camera, has_gps, min_rating, orientation, ...). Raises NotReady.
     """
-    return search_text(db, config, text, filters, offset=0, limit=limit)["items"]
+    result = search_text(db, config, text, filters, offset=0, limit=limit)
+    if not result["items"] and result["total"] == 0 and result["ranked"]:
+        result = search_text(db, config, text, filters, offset=0, limit=min(limit, WEAK_FALLBACK),
+                             include_weak=True)
+    return result["items"]
 
 
 def media_id_for_path(db, path: str) -> Optional[int]:

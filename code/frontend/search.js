@@ -87,7 +87,7 @@ function buildSearchOverlay() {
     const dateInput = (id, label, key) => createEl('label', { class: 'search-date' },
         createEl('span', { text: label }),
         createEl('input', {
-            type: 'date', class: 'input input-sm', id, 'aria-label': `${label} (datum)`,
+            type: 'date', class: 'input input-sm is-empty', id, 'aria-label': `${label} (datum)`,
             onChange: (e) => { searchState[key] = e.target.value; searchRenderFilters(); searchRun(); },
         }));
     const overlay = createEl('div', {
@@ -136,6 +136,8 @@ function buildSearchOverlay() {
 function searchResetDates() {
     document.getElementById('search-date-from').value = '';
     document.getElementById('search-date-to').value = '';
+    document.getElementById('search-date-from').classList.add('is-empty');
+    document.getElementById('search-date-to').classList.add('is-empty');
 }
 
 // Waar de focus heen gaat als het venster sluit: het element dat het opende (niet het zoekveld
@@ -258,6 +260,8 @@ function searchRenderFilters() {
         pill.classList.toggle('active', on);
         pill.setAttribute('aria-pressed', String(on));
     });
+    overlay.querySelector('#search-date-from').classList.toggle('is-empty', !searchState.dateFrom);
+    overlay.querySelector('#search-date-to').classList.toggle('is-empty', !searchState.dateTo);
     overlay.querySelector('#search-dates-clear').hidden = !(searchState.dateFrom || searchState.dateTo);
 }
 

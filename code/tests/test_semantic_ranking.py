@@ -111,3 +111,13 @@ def test_file_names_match_without_regard_to_case_for_every_letter(lib):
     add(mix(query, 0.0), name="Église Ühlingen.jpg")
     assert semantic.search_filename(db, "église")["total"] == 1
     assert semantic.search_filename(db, "ÜHLINGEN")["total"] == 1
+
+
+def test_search_photos_falls_back_to_the_best_weak_hits(lib):
+    db, cfg, add, mix, query = lib
+    for _ in range(40):
+        add(mix(query, 0.0))
+    best = add(mix(query, 0.08))      # under the cut, still the best of a weak crowd
+    assert semantic.search_text(db, cfg, "kort")["total"] == 0
+    found = semantic.search_photos(db, cfg, "kort", limit=10)
+    assert found and found[0]["id"] == best and len(found) <= semantic.WEAK_FALLBACK

@@ -576,3 +576,40 @@ def test_the_real_model_finds_the_right_photo_for_dutch_queries():
         top3 = [names[i] for i in order[:3]]
         assert photo in top3, (query, top3)
         assert names[order[0]] == photo, (query, top3)
+
+
+@pytest.mark.skipif(_real_models_folder() is None, reason="Slim zoeken model not installed (scripts/download_models.py)")
+def test_the_real_model_gives_results_through_search_text(tmp_path):
+    """The relevance cut must not hide right photos: short queries find something strong."""
+    import time
+    from PIL import Image
+    from backend import semantic
+    from backend.database import Database
+    semantic._index.reset()
+    semantic._rankings.clear()
+    semantic._allowed_cache.clear()
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(MODELS_FOLDER=_real_models_folder())
+    db = Database(tmp_path / "datavault.db")
+    spec = semantic.current_model()
+    encoder = semantic.get_encoder(cfg)
+    encoder.load_image("cpu")
+    photos = sorted((Path(__file__).parent / "fixtures" / "semantic").glob("*.jpg"))
+    now = time.time()
+    rows = []
+    with db._connect() as conn:
+        for i, p in enumerate(photos, 1):
+            conn.execute(
+                "INSERT INTO media (id, path, folder, name, kind, ext, size, mtime_ns, added_at, indexed_at, seen_at) "
+                "VALUES (?,?,?,?, 'photo', 'jpg', 1, 1, ?, ?, ?)", (i, f"/v/{p.name}", "/v", p.name, now, now, now))
+            with Image.open(p) as img:
+                rows.append((i, encoder.encode_image(encoder.preprocess(img)), "ok", 1, 1, "thumb"))
+    semantic._write(db, spec, rows)
+    try:
+        for query, name in (("pizza", "pizza"), ("een kat", "kat"), ("hond op het strand", "hond_strand")):
+            result = semantic.search_text(db, cfg, query, {}, 0, 20)
+            assert result["total"] > 0, query
+            assert name in result["items"][0]["name"], (query, result["items"][0]["name"])
+    finally:
+        semantic._index.reset()
+        semantic._rankings.clear()

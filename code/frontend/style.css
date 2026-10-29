@@ -8968,6 +8968,15 @@ button.otd-settings-icon:hover {
     width: var(--input-date-w);
 }
 
+/* An empty date shows the browser's placeholder date: mute it so it does not read as a filter */
+.search-date .input.is-empty,
+.search-date .input.is-empty::-webkit-datetime-edit,
+.search-date .input.is-empty::-webkit-datetime-edit-year-field,
+.search-date .input.is-empty::-webkit-datetime-edit-month-field,
+.search-date .input.is-empty::-webkit-datetime-edit-day-field {
+    color: var(--text-tertiary);
+}
+
 .search-status {
     display: flex;
     align-items: center;
