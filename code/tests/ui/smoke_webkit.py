@@ -65,7 +65,8 @@ def server_python() -> str:
 BIG_FOLDER = "Groot"
 BIG_FILES = 1500
 MAX_THUMBS_ON_OPEN = 100
-VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings", "albums", "datagatherer"]
+VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings", "albums", "datagatherer",
+         "berichten"]   # berichten after datagatherer: it opens from there
 A11Y_CHECKS = Path(__file__).with_name("a11y_checks.js")
 
 
@@ -88,9 +89,20 @@ def start_server(workdir: Path):
                   if f.suffix == ".jpg" and not f.name.startswith(".")).read_bytes()
     for i in range(BIG_FILES):
         (big / f"foto_{i:04d}.jpg").write_bytes(sample + str(i).encode())   # distinct bytes, still a JPEG
+    # A made-up home folder with a synthetic Messages database (never the real ~/Library/Messages)
+    sys.path.insert(0, str(CODE_DIR / "tests"))
+    from fake_messages import T0, make_chat_db, typedstream
+    messages = workdir / "home" / "Library" / "Messages"
+    messages.mkdir(parents=True)
+    make_chat_db(messages / "chat.db", {1: "+32470000001", 2: "lotte@example.com"}, [
+        {"rowid": 1, "guid": "iMessage;-;+32470000001", "style": 45, "handles": [1]},
+        {"rowid": 2, "guid": "iMessage;+;chat1", "style": 43, "name": "Weekend", "handles": [1, 2]}], [
+        {"rowid": 1, "guid": "S-1", "chat": 1, "handle": 1, "text": "Zal ik pasta maken?", "ts": T0},
+        {"rowid": 2, "guid": "S-2", "chat": 1, "me": True, "body": typedstream("Ja graag!"), "ts": T0 + 60},
+        {"rowid": 3, "guid": "S-3", "chat": 2, "handle": 2, "text": "Wie rijdt zaterdag?", "ts": T0 + 120}])
     port = free_port()
     env = dict(os.environ, DATAVAULT_TESTING="1", DATAVAULT_CONFIG=str(workdir / "vault_config.json"),
-               DATAVAULT_LOG_FILE=str(workdir / "server.log"))
+               DATAVAULT_LOG_FILE=str(workdir / "server.log"), DATAVAULT_GATHER_HOME=str(workdir / "home"))
     log = open(workdir / "uvicorn.log", "w")
     proc = subprocess.Popen(
         [python, "-m", "uvicorn", "--factory", "backend.main:create_app",
@@ -149,8 +161,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             print(f"{engine} against {base}")
 
             # Every tab, by clicking it like a user
+            # (Berichten has no button of its own in the menu: it opens from the DataGatherer page)
+            via = {"berichten": "#section-datagatherer .dg-header-actions button:has-text('Berichten')"}
             for view in VIEWS:
-                step(f"tab {view}", lambda: page.click(f".top-nav [data-view='{view}']"), 1.5)
+                step(f"tab {view}", lambda: page.click(via.get(view) or f".top-nav [data-view='{view}']"), 1.5)
                 if not page.is_visible(f"#section-{view}"):
                     problems.append(f"tab {view}: section not visible")
 
@@ -1215,6 +1229,36 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(not page.is_visible("#dg-network"), "datagatherer: Escape did not close the network log")
             step("datagatherer: Instellingen", lambda: page.click(".top-nav [data-view='settings']"), 0.8)
             expect(page.is_visible("#settings-datagatherer"), "datagatherer: no section in Instellingen")
+
+            # Berichten: read the synthetic Messages database, then the list, the thread, search and Pasha
+            page.evaluate("switchMainView('datagatherer')")
+            page.wait_for_selector(".dg-card[data-source='imessage'] .dg-primary", timeout=10000)
+            label = page.inner_text(".dg-card[data-source='imessage'] .dg-primary").strip()
+            expect(label == "Bijwerken", f"berichten: the iMessage card offers {label!r}, not Bijwerken")
+            step("berichten: Bijwerken iMessage", lambda: page.click(".dg-card[data-source='imessage'] .dg-primary"), 2.5)
+            step("berichten: g e opens it", lambda: (page.click("#dg-title"), page.keyboard.press("g"), page.keyboard.press("e")), 1.2)
+            expect(page.evaluate(view_now) == "berichten", "berichten: g e did not open the view")
+            try:
+                page.wait_for_selector("#msg-list .msg-item", timeout=10000)
+            except PlaywrightError:
+                pass   # reported below
+            expect(page.locator("#msg-list .msg-item").count() == 2, "berichten: the list does not show both conversations")
+            step("berichten: ArrowDown from the search to the list", lambda: (page.focus("#msg-search"), page.keyboard.press("ArrowDown"),
+                                                                            page.keyboard.press("ArrowDown")), 0.3)
+            expect(page.evaluate("document.activeElement.classList.contains('msg-item')"), "berichten: the arrows do not move through the list")
+            step("berichten: Enter opens a conversation", lambda: page.keyboard.press("Enter"), 0.8)
+            expect(page.locator("#msg-thread .msg-row").count() >= 1, "berichten: the thread shows no bubbles")
+            step("berichten: search", lambda: page.fill("#msg-search", "pasta"), 1.0)
+            expect(page.locator("#msg-list .msg-hit mark").count() == 1, "berichten: the search hit is not marked")
+            step("berichten: open the hit", lambda: page.click("#msg-list .msg-hit"), 0.8)
+            expect(page.locator("#msg-thread .msg-row.is-hit").count() == 1, "berichten: the hit is not highlighted in the thread")
+            step("berichten: Escape clears the search", lambda: (page.focus("#msg-search"), page.keyboard.press("Escape")), 0.8)
+            expect(page.input_value("#msg-search") == "", "berichten: Escape did not clear the search")
+            step("berichten: Pasha window", lambda: page.click("#section-berichten button:has-text('Pasha en je berichten')"), 0.6)
+            expect(page.locator("#msg-pasha input[type=checkbox]:checked").count() == 0, "berichten: Pasha may read messages by default")
+            expect_focus_trapped("msg-pasha", "berichten: Pasha window")
+            step("berichten: Escape closes the Pasha window", lambda: page.keyboard.press("Escape"), 0.5)
+            expect(not page.is_visible("#msg-pasha"), "berichten: Escape did not close the Pasha window")
 
             # An archive without any folder: 'Het archief is leeg', not 'Kies een map'
             page.route("**/api/folders", lambda route: route.fulfill(json={"folders": []}))

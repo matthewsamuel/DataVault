@@ -123,6 +123,9 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     api = connector.has("api_sync")
     local = connector.has("local_import")
     access = connector.access(gctx) if local else None
+    # 'Toegang nodig' leads the card, unless the app is simply not on this Mac while the
+    # source already has data from its other routes (WhatsApp chat exports): then it waits under Meer
+    blocked = access is not None and not (access.get("code") == "missing" and (cov.records or state.list_raw(db, connector.id, 1)))
     keychain_ok = True
     try:
         configured = (api and connector.is_configured(gctx)) or (local and access is None)
@@ -147,7 +150,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         status = "fout"
     elif pending or unread:
         status = "export_binnen"
-    elif access is not None and not cov.records:
+    elif blocked and not cov.records:
         status = "toegang_nodig"
     elif request:
         status = "wacht_op_export"
@@ -177,7 +180,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         primary = "import"
         what = "een export" if len(pending) + len(unread) == 1 else f"{len(pending) + len(unread)} exports"
         step = f"Er staat {what} in het archief die nog niet is ingelezen. Klik op Inlezen."
-    elif access is not None and not request:
+    elif blocked and not request:
         primary = "access"
         step = (f"{access['title']}: {name} leest een database op deze Mac die macOS beschermt. "
                 "Klik op Toegang geven voor de stappen." if access["code"] == "denied" else access["text"])
