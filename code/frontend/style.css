@@ -3512,7 +3512,8 @@ a.breadcrumb-item:hover {
 
 /* ==================== SMALLERE SCHERMEN ==================== */
 
-@media (max-width: 1360px) {
+/* Elf onderdelen sinds Kaart: het themalabel verdwijnt al onder 1440 px (navgap in de smoke-test) */
+@media (max-width: 1440px) {
     .theme-button #theme-label,
     .theme-button .theme-caret {
         display: none;
@@ -3542,7 +3543,7 @@ a.breadcrumb-item:hover {
     }
 }
 
-@media (max-width: 1140px) {
+@media (max-width: 1200px) {
     .nav-tab {
         padding: 0 10px;
     }
@@ -3561,16 +3562,16 @@ a.breadcrumb-item:hover {
    de /-hint, zodat het hele menu blijft passen (navgap in de smoke-test) */
 @media (max-width: 1100px) {
     .nav-tab {
-        padding: 0 var(--space-sm);
+        padding: 0 6px;
     }
 
     .nav-tab.active::after {
-        left: var(--space-sm);
-        right: var(--space-sm);
+        left: 6px;
+        right: 6px;
     }
 
     .search-input {
-        width: 148px;
+        width: 132px;
         padding-right: var(--space-md);
     }
 
@@ -10551,8 +10552,8 @@ button.otd-settings-icon:hover {
 .map-canvas .leaflet-control-attribution {
     padding: 2px var(--space-sm);
     border-radius: var(--radius-sm) 0 0 0;
-    background: color-mix(in srgb, var(--surface-overlay) 85%, transparent);
-    color: var(--text-tertiary);
+    background: var(--surface-overlay);
+    color: var(--text-secondary);
     font-size: var(--fs-2xs);
 }
 
