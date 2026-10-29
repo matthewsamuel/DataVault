@@ -272,6 +272,32 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - De rooktest bewaart van elk scherm een schermafbeelding in beide thema's (het pad staat in de
   uitvoer, of zet `DATAVAULT_SMOKE_SHOTS`).
 
+### DataGatherer
+- De tab **DataGatherer** (wolkje naast Instellingen, `g a`) brengt je eigen gegevens bij: Spotify
+  (export, Web API, Last.fm) en Google Takeout. Elke bron is één module in
+  `backend/datagatherer/connectors/` (zie `docs/DATAGATHERER_CONNECTORS.md` en `_template.py`); de
+  tab bouwt zich op uit hun beschrijving (`GET /api/datagatherer/sources`).
+- Geen wachtwoorden en geen browserautomatisering. Tokens en API-sleutels staan alleen in de
+  macOS-Sleutelhanger (`keyring`). Netwerk alleen na een klik of een schema dat je zelf aanzette,
+  alleen naar de hosts van die bron, en elk verzoek staat in `dg_network_log` (zichtbaar als Netwerklog).
+- Exports worden gekopieerd naar `data/<eigenaar>/<Bron>/<datum soort>/` (nooit verplaatst of
+  overschreven, sha256 tegen dubbels); bestaande exportmappen worden ter plekke geregistreerd. De
+  Downloads-watcher kijkt alleen zolang een export aangevraagd is.
+- Optionele configuratie in `config.json`: `"data_owner": "Matthew"` (de map onder `data/`, standaard
+  de eerste) en `"datagatherer_watch_folders": ["/Users/…/Dropbox/Exports"]` (extra mappen naast `~/Downloads`).
+- Migraties 60 (DataGatherer) en 61 (samengevoegde Spotify-plays). Het Spotify-scherm leest
+  `spotify_plays_merged` pas als elk exportbestand onder `data/` in een ingelezen export ligt
+  (`dg_raw_imports.status = 'imported'`, ingelezen na de laatste wijziging van het bestand);
+  anders de exportbestanden zoals vroeger (`/api/spotify/coverage` zegt dan `waiting_for_import`).
+- Bestand kiezen (`POST /sources/<id>/upload?name=`) zet het bestand onder zijn echte naam in een
+  eigen map in `<cache>/datagatherer-upload/` en start een `datagatherer.watch`-taak
+  (`{source, upload, name}`) die het naar het archief kopieert en inleest; daarna is de tijdelijke
+  kopie weg. `raw_store.archive_file` slaat één export tegelijk op (sha256-controle, kopie en rij
+  onder één slot).
+- Tests: `DATAVAULT_GATHER_DAEMON=0` (de tests tikken de watcher zelf), een sleutelhanger in het
+  geheugen, een netwerkbewaker die alles weigert (`net.set_transport_factory` voor een
+  `httpx.MockTransport`), en een LaunchAgents-map in de tijdelijke map.
+
 ### Achtergrondtaken
 - Duplicaten zoeken, vooraf indexeren, miniaturen maken, de bibliotheek bijwerken en foto's vergelijken (Beste uit reeks) lopen als taak op de achtergrond
 - Het takenpaneel rechtsonder toont voortgang en resterende tijd, met Pauzeren, Hervatten en Annuleren
@@ -288,7 +314,7 @@ python3 tests/ui/smoke_webkit.py chromium      # of in Chromium; --headed om mee
 
 De rooktest bouwt zelf een wegwerp-testkluis, start een eigen server op een vrije poort
 (`DATAVAULT_TESTING=1`), klikt door alle tabbladen (en viewer, verplaatsvenster, chat,
-thema's, Shows, sneltoetsen, Herstelcentrum, Instellingen, contrast in beide thema's) en faalt bij elke JavaScript-fout, consolefout of mislukte API-aanroep. Hij
+thema's, Shows, sneltoetsen, Herstelcentrum, Instellingen, DataGatherer, contrast in beide thema's) en faalt bij elke JavaScript-fout, consolefout of mislukte API-aanroep. Hij
 heeft een Python met Playwright nodig (`pip install playwright && playwright install webkit`)
 en wordt niet door pytest meegenomen.
 

@@ -297,6 +297,78 @@ def is_inside(path: Path, folder: Path) -> bool:
     return False
 
 
+COPY_CHUNK = 4 * 1024 * 1024
+
+
+def copy_no_overwrite(src: Path, dst: Path, expected_sha256: Optional[str] = None,
+                      check: Optional[Callable[[int], None]] = None) -> Tuple[Path, str, int]:
+    """
+    Copy a file INTO the vault (DataGatherer's raw exports) without ever overwriting.
+    The source is only read; it stays where it is, untouched.
+
+    The bytes go to a hidden temporary file next to dst (created exclusively), are
+    fsync'ed, and only then get their real name with the same exclusive rename as
+    move_no_overwrite. When dst is taken, 'name 2.ext', 'name 3.ext', ... is used. If the
+    copy fails halfway, only that temporary file (made by this call, never an archive
+    file) is removed again. expected_sha256: the copy must have exactly these bytes (the
+    source changed while being copied otherwise). check(bytes_done) is called between
+    chunks and may raise to stop (a job's cancel or pause).
+
+    Returns (final path, sha256, size). The mtime of the source is kept.
+    """
+    import hashlib
+    import uuid
+    src, dst = Path(src), Path(dst)
+    src_st = os.stat(src)
+    if not stat.S_ISREG(src_st.st_mode):
+        raise FileOperationError(f"Refusing to copy something that is not a regular file: {src}")
+    for path in (dst,):
+        protected = protected_path_for(path)
+        if protected is not None:
+            raise ProtectedPathError(f"Refusing to copy into {protected}: {dst}")
+    temp = dst.parent / f".{dst.name}.datavault-partial-{uuid.uuid4().hex[:8]}"
+    digest = hashlib.sha256()
+    size = 0
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        with os.fdopen(fd, "wb") as out, open(src, "rb") as source:
+            while True:
+                chunk = source.read(COPY_CHUNK)
+                if not chunk:
+                    break
+                out.write(chunk)
+                digest.update(chunk)
+                size += len(chunk)
+                if check is not None:
+                    check(size)
+            out.flush()
+            os.fsync(out.fileno())
+        sha = digest.hexdigest()
+        if expected_sha256 is not None and sha != expected_sha256:
+            raise FileOperationError(f"{src} changed while it was being copied")
+        os.utime(temp, ns=(src_st.st_atime_ns, src_st.st_mtime_ns))
+        candidate, counter = dst, 1
+        while True:
+            try:
+                _exclusive_rename(temp, candidate)
+                return candidate, sha, size
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise FileOperationError(f"Failed to copy {src} -> {candidate}: {e}") from e
+                counter += 1
+                if counter > MAX_CONFLICT_SUFFIX:
+                    raise FileOperationError(f"Too many conflicting files for {dst}") from e
+                candidate = dst.parent / f"{dst.stem} {counter}{dst.suffix}"
+    except BaseException:
+        # Only the partial copy this call made itself (exclusive create above); never an archive file
+        try:
+            if temp.exists():
+                os.unlink(temp)
+        except OSError:
+            pass
+        raise
+
+
 def same_folder(a: Path, b: Path) -> bool:
     """True if a and b are the same folder, also when spelled differently."""
     if _same_existing_file(a, b):

@@ -3511,8 +3511,9 @@ a.breadcrumb-item:hover {
         padding: 0 var(--space-lg);
     }
 
+    /* Ruimte voor het DataGatherer-icoon naast Instellingen (minstens 24 px voor het zoekveld) */
     .search-input {
-        width: 200px;
+        width: 168px;
     }
 }
 
@@ -3535,12 +3536,12 @@ a.breadcrumb-item:hover {
     }
 
     .search-input {
-        width: 184px;
+        width: 144px;
     }
 }
 
 /* Onder 1100 px (tien onderdelen sinds Albums): iets smallere tabs en een kort zoekveld zonder
-   de /-hint, zodat het hele menu blijft passen (navgap in de smoke-test) */
+   de /-hint (en ruimte voor het DataGatherer-icoon), zodat het hele menu blijft passen (navgap in de smoke-test) */
 @media (max-width: 1100px) {
     .nav-tab {
         padding: 0 var(--space-sm);
@@ -3552,7 +3553,7 @@ a.breadcrumb-item:hover {
     }
 
     .search-input {
-        width: 148px;
+        width: 112px;
         padding-right: var(--space-md);
     }
 
@@ -10232,5 +10233,771 @@ button.otd-settings-icon:hover {
         width: 200px;
         padding-left: var(--space-sm);
         padding-right: var(--space-sm);
+    }
+}
+
+/* ==================== DATAGATHERER ====================
+ * Eén kaart per gegevensbron (datagatherer.js), alleen uit de gedeelde bouwstenen:
+ * .card, .badge, .btn, .pill, .menu, .progress, .switch. Groen alleen voor de hoofdknop,
+ * de dekkingsbalk en 'actueel'. */
+
+.dg-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.dg-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    margin-bottom: var(--space-xl);
+}
+
+.dg-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-lg);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+}
+
+.dg-summary .mono {
+    color: var(--text-primary);
+    font-weight: var(--fw-semibold);
+}
+
+.dg-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.dg-groups {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xl);
+}
+
+.dg-group-title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+}
+
+.dg-group-count {
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-regular);
+    color: var(--text-tertiary);
+}
+
+/* 400px: room for the longest main button, 'Meer' and the two icon buttons on one line */
+.dg-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: var(--space-lg);
+    align-items: start;
+}
+
+.skeleton-grid.dg-skeleton {
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: var(--space-lg);
+}
+
+.skeleton-grid.dg-skeleton .skeleton-card {
+    aspect-ratio: auto;
+    height: 260px;
+    border-radius: var(--radius-card);
+}
+
+/* ---------- De kaart ---------- */
+
+.dg-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    min-width: 0;
+    padding: var(--space-xl);
+    transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.dg-card:hover {
+    border-color: var(--border-default);
+}
+
+.dg-card-head {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+}
+
+.dg-card-icon {
+    flex: none;
+    width: 40px;
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-hairline);
+    color: var(--text-primary);
+    font-size: var(--icon-md);
+}
+
+.dg-card-titles {
+    flex: 1;
+    min-width: 0;
+}
+
+.dg-card-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+}
+
+.dg-card-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+    letter-spacing: var(--tracking-tight);
+    color: var(--text-primary);
+    line-height: var(--lh-tight);
+}
+
+.dg-card-desc {
+    margin-top: var(--space-xs);
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-snug);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.dg-status {
+    flex: none;
+}
+
+.dg-data {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    background: var(--surface-sunken);
+}
+
+.dg-until {
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+}
+
+.dg-until-date {
+    color: var(--text-primary);
+    font-weight: var(--fw-semibold);
+}
+
+.dg-records {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+/* De dekkingsbalk: vol waar een export het dekt, gestreept waar de luistertijd een schatting is */
+.dg-coverage-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+}
+
+.dg-coverage {
+    position: relative;
+    height: 8px;
+    border-radius: var(--radius-full);
+    background: var(--surface-active);
+    overflow: hidden;
+}
+
+.dg-coverage-seg {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+}
+
+.dg-coverage-seg.is-estimated,
+.dg-legend-swatch.is-estimated {
+    background: repeating-linear-gradient(135deg, var(--accent) 0 3px, transparent 3px 6px);
+    box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+
+.dg-coverage-axis {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    font-size: var(--fs-2xs);
+    color: var(--text-tertiary);
+}
+
+/* Onder de jaren, elk op een eigen regel: wat geschat is en waar gegevens ontbreken */
+.dg-coverage-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: var(--fs-2xs);
+    color: var(--text-secondary);
+}
+
+.dg-legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.dg-legend-swatch {
+    flex: none;
+    display: inline-block;
+    width: 14px;
+    height: 8px;
+    border-radius: var(--radius-full);
+}
+
+/* Een gat: een stukje lege balk met een rand, zodat het als 'niets' leest */
+.dg-legend-swatch.is-hole {
+    background: var(--surface-active);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.dg-next {
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.dg-note {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: flex-start;
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-snug);
+    background: var(--info-subtle);
+    color: var(--text-primary);
+}
+
+.dg-note i {
+    margin-top: 2px;
+    color: var(--info-text);
+}
+
+.dg-note-warning {
+    background: var(--warning-subtle);
+}
+
+.dg-note-warning i {
+    color: var(--warning-text);
+}
+
+.dg-note-danger {
+    background: var(--danger-subtle);
+}
+
+.dg-note-danger i {
+    color: var(--danger-text);
+}
+
+.dg-progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.dg-progress-text {
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+/* ---------- Knoppen ---------- */
+
+.dg-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-xs);
+}
+
+.dg-actions-spacer {
+    flex: 1;
+}
+
+/* Hulp en instellingen: samen rechts, nooit los op een eigen regel */
+.dg-actions-tools {
+    display: flex;
+    flex-shrink: 0;
+    gap: var(--space-xs);
+    margin-left: auto;
+}
+
+.dg-more {
+    position: relative;
+}
+
+.dg-more-btn i {
+    font-size: var(--icon-xs);
+    color: var(--text-tertiary);
+    transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.dg-more.open .dg-more-btn i {
+    transform: rotate(180deg);
+}
+
+.dg-more-menu {
+    position: absolute;
+    top: calc(100% + var(--space-xs));
+    left: 0;
+    min-width: 220px;
+}
+
+.dg-more-menu[hidden] {
+    display: none;
+}
+
+/* Met de muis geopend en dan met pijltjes verder: Safari toont dan geen :focus-visible */
+.dg-more.keyboard .menu-item:focus {
+    background-color: var(--surface-active);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
+/* ---------- Hulp ---------- */
+
+.dg-help {
+    border-top: 1px solid var(--border-hairline);
+    padding-top: var(--space-md);
+}
+
+.dg-help-title {
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+    margin-bottom: var(--space-sm);
+}
+
+.dg-help-loading {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+.dg-help-options {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    padding: 0;
+    margin: 0;
+}
+
+.dg-help-option-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-xs);
+}
+
+.dg-help-option-title {
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    color: var(--text-primary);
+}
+
+.dg-help-steps,
+.dg-steps {
+    margin: 0;
+    padding-left: var(--space-xl);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.dg-help-note {
+    margin-top: var(--space-xs);
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    line-height: var(--lh-snug);
+}
+
+/* ---------- Voet: netwerk en schema ---------- */
+
+.dg-card-foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-hairline);
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    line-height: var(--lh-snug);
+}
+
+.dg-net {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: flex-start;
+    flex-basis: 100%;
+    color: var(--text-secondary);
+}
+
+.dg-net i {
+    margin-top: 2px;
+    color: var(--text-tertiary);
+}
+
+/* ---------- Vensters ---------- */
+
+.dg-modal-container.is-wide {
+    max-width: 680px;
+}
+
+.dg-modal-body {
+    gap: var(--space-md);
+}
+
+.dg-modal-text {
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.dg-modal-note {
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-snug);
+}
+
+.dg-modal-note i {
+    color: var(--text-tertiary);
+}
+
+.dg-modal-section {
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    color: var(--text-primary);
+    margin-top: var(--space-sm);
+}
+
+.dg-modal-section:first-child {
+    margin-top: 0;
+}
+
+.dg-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+}
+
+.dg-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.dg-steps li::marker {
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+}
+
+.dg-copy-value {
+    padding: 1px var(--space-xs);
+    border-radius: var(--radius-xs);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    font-size: var(--fs-xs);
+    word-break: break-all;
+}
+
+.dg-copy-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin: var(--space-xs) 0;
+}
+
+.dg-copy-row .dg-copy-value {
+    flex: 1;
+    min-width: 0;
+    padding: var(--space-xs) var(--space-sm);
+}
+
+.dg-copy {
+    flex: none;
+}
+
+.dg-fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.dg-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.dg-field-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    color: var(--text-primary);
+}
+
+.dg-field .input {
+    width: 100%;
+    font-size: var(--fs-sm);
+}
+
+.dg-field .input.mono {
+    font-family: var(--font-mono);
+}
+
+.dg-field-help {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    line-height: var(--lh-snug);
+}
+
+.dg-settings-note {
+    max-width: 640px;
+    margin: var(--space-xs) 0 var(--space-sm);
+}
+
+.dg-connect-status {
+    min-height: 1.4em;
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+}
+
+.dg-connect-status.is-error {
+    color: var(--danger-text);
+}
+
+.dg-field-error {
+    font-size: var(--fs-xs);
+    color: var(--danger-text);
+}
+
+.dg-field .input[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
+.dg-kind-choice {
+    align-self: flex-start;
+}
+
+.dg-schedule-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.dg-schedule-label {
+    font-size: var(--fs-sm);
+    color: var(--text-primary);
+    flex: 1;
+}
+
+.dg-candidate-list,
+.dg-raw-list,
+.dg-log {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.dg-candidate,
+.dg-raw,
+.dg-log-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid var(--border-hairline);
+    font-size: var(--fs-sm);
+}
+
+.dg-candidate:last-child,
+.dg-raw:last-child,
+.dg-log-row:last-child {
+    border-bottom: none;
+}
+
+.dg-candidate-icon,
+.dg-raw > i {
+    color: var(--text-tertiary);
+}
+
+.dg-candidate-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.dg-candidate-name {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dg-candidate-meta {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+.dg-raw .path-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dg-log-time {
+    flex: none;
+    width: 128px;
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+.dg-log-what {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+
+.dg-log-url {
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+/* Waarom een verbinding geweigerd werd of mislukte: zichtbaar, niet alleen als tooltip */
+.dg-log-note {
+    display: block;
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+    white-space: normal;
+}
+
+.dg-log-trigger {
+    flex: none;
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+/* ---------- Na 'Verbinden': de pagina die de browser terugkrijgt ---------- */
+
+.dg-callback-body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xl);
+    background: var(--surface-page);
+}
+
+.dg-callback {
+    max-width: 440px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-md);
+    text-align: center;
+}
+
+.dg-callback .page-title {
+    justify-content: center;
+}
+
+.dg-callback-icon {
+    font-size: var(--icon-3xl);
+    color: var(--accent);
+}
+
+.dg-callback-icon.is-error {
+    color: var(--danger-text);
+}
+
+/* ---------- Spotify: tot wanneer de gegevens gaan ---------- */
+
+.spotify-coverage.chip {
+    margin-top: var(--space-md);
+    height: auto;
+    min-height: 26px;
+    padding: var(--space-xs) var(--space-md);
+    gap: var(--space-sm);
+    color: var(--text-secondary);
+    white-space: normal;
+    flex-wrap: wrap;
+}
+
+.spotify-coverage[hidden] {
+    display: none;
+}
+
+.spotify-coverage i {
+    color: var(--text-tertiary);
+}
+
+.spotify-coverage .mono {
+    color: var(--text-primary);
+}
+
+.spotify-coverage-hole,
+.spotify-coverage-hole .mono {
+    color: var(--warning-text);
+}
+
+.spotify-coverage-link {
+    margin-left: var(--space-xs);
+    font-size: var(--fs-xs);
+}
+
+@media (max-width: 900px) {
+    .dg-grid,
+    .skeleton-grid.dg-skeleton {
+        grid-template-columns: 1fr;
+    }
+
+    .dg-log-time {
+        width: auto;
+    }
+
+    .dg-log-trigger {
+        display: none;
     }
 }

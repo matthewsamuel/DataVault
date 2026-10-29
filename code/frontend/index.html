@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=54">
+    <link rel="stylesheet" href="style.css?v=56">
 </head>
 
 <body>
@@ -60,7 +60,7 @@
             <div class="nav-actions">
                 <div class="search-field nav-search search-elsewhere">
                     <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                    <input type="search" class="search-input" id="global-search" placeholder="Zoek in Bestanden…"
+                    <input type="search" class="search-input" id="global-search" placeholder="Zoeken…"
                         aria-label="Zoek in de geopende map van Bestanden: typ en druk op Enter (sneltoets /)"
                         oninput="queueGlobalSearch(this.value)" onkeydown="globalSearchKeydown(event)">
                     <kbd class="search-kbd" aria-hidden="true">/</kbd>
@@ -90,6 +90,10 @@
                 <button type="button" class="nav-icon-btn" onclick="toggleShortcutHelp()" title="Sneltoetsen (?)"
                     aria-label="Sneltoetsen tonen">
                     <i class="fas fa-keyboard" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="nav-icon-btn nav-tab-gather" data-view="datagatherer" onclick="switchMainView('datagatherer')"
+                    title="DataGatherer: je gegevens bijwerken (g v)" aria-label="DataGatherer">
+                    <i class="fas fa-cloud-arrow-down" aria-hidden="true"></i>
                 </button>
                 <button type="button" class="nav-icon-btn nav-tab-settings" data-view="settings" onclick="switchMainView('settings')"
                     title="Instellingen (9)" aria-label="Instellingen">
@@ -460,6 +464,7 @@
                 <div>
                     <h1 class="page-title"><i class="fab fa-spotify" aria-hidden="true"></i> Jouw jaar in muziek</h1>
                     <p class="page-subtitle">Uit je eigen Spotify-export, alleen op deze Mac.</p>
+                    <p class="spotify-coverage chip" id="spotify-coverage" hidden></p>
                 </div>
                 <div class="year-selector">
                     <select class="select" id="spotify-year-select" onchange="loadSpotifyStats()" aria-label="Jaar">
@@ -826,6 +831,32 @@
                 <div class="recovery-more" id="recovery-more" hidden>
                     <button type="button" class="btn btn-secondary btn-small" onclick="recoveryLoadMore()">Meer laden</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- DATAGATHERER: één kaart per gegevensbron, gebouwd uit wat elke bron van zichzelf zegt (datagatherer.js) -->
+        <div id="section-datagatherer" class="section hidden">
+            <div class="page dg-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="dg-title" tabindex="-1"><i class="fas fa-cloud-arrow-down" aria-hidden="true"></i> DataGatherer</h1>
+                        <p class="page-subtitle">Haal je eigen gegevens binnen en vul je archief aan. DataVault gaat alleen
+                            online als jij op een knop drukt; exports vraag je zelf aan in je eigen browser.</p>
+                    </div>
+                    <div class="dg-header-actions">
+                        <button type="button" class="btn btn-secondary" onclick="dgOpenNetworkLog()">
+                            <i class="fas fa-globe" aria-hidden="true"></i> Netwerklog
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="dgLoad()" title="Opnieuw laden">
+                            <i class="fas fa-rotate" aria-hidden="true"></i> Vernieuwen
+                        </button>
+                    </div>
+                </div>
+                <div class="dg-toolbar">
+                    <div class="dg-summary" id="dg-summary" aria-live="polite"></div>
+                    <div class="dg-filters" id="dg-filters" role="group" aria-label="Categorie"></div>
+                </div>
+                <div class="dg-groups" id="dg-groups"></div>
             </div>
         </div>
 
@@ -1412,8 +1443,8 @@
     <script src="dom.js?v=1"></script>
     <script src="ui.js?v=2"></script>
     <script src="folder-tree.js?v=7"></script>
-    <script src="app.js?v=63"></script>
-    <script src="jobs.js?v=11"></script>
+    <script src="app.js?v=64"></script>
+    <script src="jobs.js?v=12"></script>
     <script src="duplicates.js?v=26"></script>
     <script src="series.js?v=2"></script>
     <script src="keurer.js?v=21"></script>
@@ -1424,6 +1455,7 @@
     <script src="settings.js?v=4"></script>
     <script src="shortcuts.js?v=6"></script>
     <script src="library.js?v=2"></script>
+    <script src="datagatherer.js?v=2"></script>
 </body>
 
 </html>

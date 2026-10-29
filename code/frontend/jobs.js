@@ -125,8 +125,10 @@ function noticeJob(job) {
     }
 }
 
-// Een automatische bijwerkronde van de bibliotheek (door de app zelf gestart)
+// Een automatische bijwerkronde van de bibliotheek (door de app zelf gestart), of een DataGatherer-
+// bron die volgens het schema bijwerkt: die blijven alleen staan zolang ze lopen (of als ze mislukken)
 function jobIsAuto(job) {
+    if (job.type.startsWith('datagatherer.sync.')) return !!(job.params && job.params.trigger === 'schedule');
     return job.type === 'index' && !!(job.params && job.params.auto);
 }
 

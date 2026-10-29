@@ -80,6 +80,16 @@ class Config:
         self.DB_PATH = self.CACHE_FOLDER / "datavault.db"
         self.THUMB_CACHE_PATH = self.CACHE_FOLDER / "thumbs"
 
+        # DataGatherer (backend/datagatherer/): the person folder under <vault>/data that raw
+        # exports go into (default: the first folder there), and extra folders the Downloads
+        # watcher looks in (besides ~/Downloads) while an export is pending
+        owner = data.get("data_owner")
+        self.DATA_OWNER = owner if isinstance(owner, str) and owner.strip() and "/" not in owner \
+            and not owner.startswith(".") else None
+        watch = data.get("datagatherer_watch_folders")
+        self.GATHER_WATCH_FOLDERS = [_real_path(p) for p in watch if isinstance(p, str) and p] \
+            if isinstance(watch, list) else None
+
     def _guard_test_mode(self):
         """
         Safety net: with DATAVAULT_TESTING=1 every configured folder must live

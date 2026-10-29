@@ -15,8 +15,10 @@ from fastapi.routing import APIRoute
 from test_restart import CODE_DIR, _free_port, _wait_health
 
 # Routes that may be 'async def': they await Ollama over HTTP and build their prompt
-# (which reads the disk) via run_in_threadpool
-ASYNC_ALLOWED = {"chat_stream", "chat_with_ollama"}
+# (which reads the disk) via run_in_threadpool; DataGatherer's upload awaits the request body
+# and does every disk step in the thread pool
+ASYNC_ALLOWED = {"chat_stream", "chat_with_ollama", "upload"}
+CHAT_ASYNC = {"chat_stream", "chat_with_ollama"}
 
 
 def _api_routes(routes):
@@ -35,9 +37,14 @@ def test_only_truly_async_routes_are_async_def(app):
     async_routes = {route.endpoint.__name__ for route in routes if inspect.iscoroutinefunction(route.endpoint)}
     assert async_routes == ASYNC_ALLOWED
     from backend.routes import chat
-    for name in ASYNC_ALLOWED:
+    for name in CHAT_ASYNC:
         source = inspect.getsource(getattr(chat, name))
         assert "build_system_prompt()" not in source and "run_in_threadpool(build_system_prompt)" in source
+    from backend.routes import datagatherer
+    source = inspect.getsource(datagatherer.upload)
+    # Receiving the stream is async; writing, recognising and starting the copy job run in the thread pool
+    assert "run_in_threadpool(_start" in source and "run_in_threadpool(lambda: connector.detect" in source
+    assert ".write(" not in source.replace("out.write, ", "")
 
 
 SLOW_FACTORY = '''

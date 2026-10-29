@@ -344,6 +344,72 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   trager omdat de hele foto gelezen wordt. Het zoeken van reeksen in 100.000 foto's duurt daarna een
   paar seconden.
 
+### DataGatherer: je eigen gegevens bijwerken
+- Nieuwe tab **DataGatherer** (het wolkje naast Instellingen, sneltoets g a): één kaart per bron,
+  gegroepeerd per categorie. Per kaart zie je tot welke datum je gegevens gaan en hoeveel dagen je
+  achter zit, een balk met wat gedekt is (gestreept waar de luistertijd een schatting is), de
+  volgende stap in één zin, één hoofdknop (Verbinden, Bijwerken, Export aanvragen of Inlezen),
+  hulp van makkelijk naar moeilijk, en met welke servers de bron verbinding maakt.
+- **Geen wachtwoorden, geen bots.** Een export vraag je zelf aan in je eigen browser; DataVault
+  opent alleen de juiste pagina en leest het bestand daarna in. Sleutels (tokens, API-sleutels)
+  staan alleen in de Sleutelhanger van macOS. Per bron is er **Vergeet dit account**.
+- **Alleen online als jij het wilt.** DataVault maakt alleen verbinding als jij op een knop drukt,
+  of voor een bron waarvan je zelf het schema aanzette (standaard uit). Het mag dan alleen naar de
+  officiële servers van die bron. Elke verbinding, ook een geweigerde, staat in het **Netwerklog**.
+- **Exports blijven onaangeroerd.** Een export wordt gekopieerd naar
+  `data/Matthew/<Bron>/<datum> <soort>/`, nooit verplaatst of overschreven, en dezelfde export
+  nooit twee keer. Je bestaande mappen ("Spotify Extended Streaming History", "RAW_google") worden
+  ter plekke herkend en blijven waar ze staan.
+- **Downloads in de gaten houden.** Zolang je een export aangevraagd hebt, kijkt DataVault elke
+  30 seconden in Downloads. Het wacht tot de download klaar is en herkent de export aan de inhoud.
+  Daarna kopieert het hem naar de T7 en leest hem in. Het origineel blijft in Downloads staan; de
+  kaart zegt dat je het mag weggooien.
+- **Spotify**: je Extended Streaming History en Accountgegevens worden ingelezen, met de
+  Spotify-ID van elk nummer. Een nummer dat tussen twee exports een andere titel kreeg, telt zo
+  niet meer dubbel. Twee keer dezelfde export inlezen voegt niets toe.
+- **Spotify tot gisteren**: via de Spotify-API (Verbinden, met een stappenplan voor je eigen gratis
+  ontwikkelaarsapp; Premium nodig) haalt Bijwerken je laatste 50 nummers op. Zet je het schema aan,
+  dan gebeurt dat elk half uur. In Instellingen > DataGatherer kun je een achtergrondtaak (launchd)
+  aanzetten, die ook ophaalt als DataVault dicht is. Elke 6 maanden vraagt Spotify opnieuw om
+  toestemming: de kaart waarschuwt 14 dagen vooraf en toont daarna "Opnieuw verbinden".
+- **Last.fm** vult aan wat de Spotify-API niet meer teruggeeft, met je gebruikersnaam en een
+  API-sleutel. De eerste keer haalt het je hele geschiedenis op, daarna alleen wat nieuw is.
+- **Samengevoegd, nooit dubbel**: komt een nieuwe export binnen, dan gelden de plays van de API en
+  Last.fm uit die periode als vervangen. Ze worden gemarkeerd, nooit gewist. Het Spotify-scherm leest
+  de samengevoegde gegevens en toont "Bijgewerkt t/m … · luistertijd na … is een schatting". Pasha
+  krijgt geen plays van de Spotify-API: dat staan de voorwaarden van Spotify niet toe.
+- **Google Takeout**: de knop opent Takeout. Een Takeout-zip in Downloads wordt herkend en
+  gekopieerd, en je bestaande Takeouts in RAW_google worden geregistreerd. De inhoud wordt in een
+  volgende versie ingelezen.
+- Een nieuwe bron is één Python-bestand; zie `docs/DATAGATHERER_CONNECTORS.md`.
+- **Je statistieken krimpen nooit meer.** Het Spotify-scherm las de samengevoegde gegevens al zodra
+  er iets in stond: na één upload, de eerste keer Bijwerken of een afgebroken eerste inleesbeurt
+  zag je maar een deel van je geschiedenis. Nu blijft het je exportbestanden lezen tot elk
+  exportbestand ook echt ingelezen is; het label zegt dan "je nieuwste gegevens zijn nog niet
+  ingelezen", met een knop Inlezen.
+- **Gaten zie je.** Ligt er tijd tussen je laatste export en je nieuwste nummers van de API, dan
+  zegt de kaart "Gat van … dagen", noemt de periode en raadt een nieuwe export aan. De balk laat die
+  periode leeg, en het Spotify-scherm zegt "schatting vanaf …" en "geen gegevens van … tot …".
+- **Bestand kiezen** werkt nu ook met een losse `StreamingHistory*.json` of
+  `Streaming_History_Audio_*.json`. Kopiëren naar het archief loopt als taak, met voortgang en
+  Annuleren. Hetzelfde bestand twee keer tegelijk kiezen geeft nooit meer een extra kopie.
+- **In Downloads zoeken** vindt elke export bij de juiste bron, ook als er een Spotify-zip en een
+  Takeout-zip tegelijk in Downloads staan.
+- Een vergrendelde Sleutelhanger (of "Weigeren" bij de vraag van macOS) laat de tab niet meer
+  vastlopen: de kaart zegt wat er is. Een export met een vreemd getal erin slaat die ene regel over;
+  een export die echt niet te lezen is, wordt als mislukt gemarkeerd en de rest gaat door.
+- **Duidelijkere kaarten**: lukte Bijwerken niet, dan staat de reden in rood op de kaart (en in het
+  Netwerklog waarom een verbinding geweigerd werd). "Meer" werkt als een echt menu: pijltjes,
+  Home/End, Escape, klikken ernaast sluit het, en na een venster komt de focus terug op "Meer". De
+  knoppen van een kaart blijven op één regel, een filter kiezen met het toetsenbord houdt de focus,
+  lege schermen hebben een knop om verder te gaan, en de teksten zijn overal Nederlands
+  ("luisterbeurten", "API-sleutel", "19 sep 2023", "meestal binnen 2 dagen").
+- Een export die je in een al ingelezen map uitpakt wordt herkend: de kaart biedt dan Inlezen aan
+  (ook altijd in het menu Meer) en de Spotify-pagina blijft zolang op de bestanden.
+- Een paar dagen niet luisteren geldt niet meer als gat; alleen het stuk tussen een export en je
+  eerste latere nummer kan echt ontbreken.
+- Een geannuleerde upload laat geen tijdelijke kopie meer achter.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden

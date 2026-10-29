@@ -39,6 +39,10 @@ XSS_PHOTOS = [f"RAW/{XSS_FOLDER}/{XSS_FILE}", f"library/{XSS_FOLDER}/{XSS_FILE}"
 # sideways with EXIF orientation 6 ("turn 90 degrees to stand upright"), both with
 # a DateTimeOriginal
 HEIC_PHOTO = "RAW/2023/iphone/IMG_4001.heic"
+
+# The owner folder under data/ and the existing Spotify export in it (DataGatherer registers it in place)
+DATA_OWNER = "Matthew"
+SPOTIFY_FOLDER = f"data/{DATA_OWNER}/Spotify Extended Streaming History"
 PORTRAIT = "RAW/2023/iphone/portret.jpg"
 
 
@@ -159,8 +163,8 @@ def build_test_vault(root: Path, with_media: bool = True) -> Path:
         _ffmpeg("-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(raw / "audio/toon 🎵.mp3"))
         (raw / "video/kapot.mp4").write_bytes(b"\x00" * 4096)
 
-    # Spotify extended streaming history sample
-    spotify = root / "data/spotify"
+    # Spotify extended streaming history sample, where the user keeps theirs: data/<owner>/...
+    spotify = root / SPOTIFY_FOLDER
     spotify.mkdir(parents=True, exist_ok=True)
     history = [
         {

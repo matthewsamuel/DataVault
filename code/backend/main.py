@@ -30,8 +30,9 @@ from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import (
     folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, albums,
-    series,
+    series, datagatherer,
 )
+from backend.datagatherer import daemon as gather_daemon, jobs as gather_jobs, registry as gather_registry
 
 
 def _say(message: str) -> None:
@@ -48,7 +49,13 @@ async def _lifespan(app: FastAPI):
     auto_index = getattr(app.state, "auto_index", None)
     if auto_index is not None:
         auto_index.start()
+    # DataGatherer: the Downloads watcher (only while an export is requested) and the opt-in schedules
+    gather = getattr(app.state, "gather_daemon", None)
+    if gather is not None:
+        gather.start()
     yield
+    if gather is not None:
+        await run_in_threadpool(gather.stop)
     if auto_index is not None:
         await run_in_threadpool(auto_index.stop)
     # Stop background jobs at their next check (they stay resumable as 'interrupted'),
@@ -96,6 +103,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.state.jobs = None
     app.state.db = None
     app.state.auto_index = None
+    app.state.gather_daemon = None
     try:
         # Load configuration
         config = Config(config_path)
@@ -124,7 +132,10 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
 
         # Background jobs (scans, hashing, thumbnails); what a previous run left
         # running can only be resumed by hand
-        job_manager = JobManager(db, config, build_job_types(config, db, on_dup_scan_done=duplicates.remember_scan))
+        # DataGatherer: every connector is checked here (a broken one stops the start, loudly)
+        gather_registry.load()
+        job_manager = JobManager(db, config, build_job_types(config, db, on_dup_scan_done=duplicates.remember_scan)
+                                 + gather_jobs.build(config, db, lambda: app.state.jobs))
         db.when_ready(lambda: _recover_jobs(job_manager))
         # Old-style thumbnails (made before EXIF rotation, path-only key) and stored
         # placeholders are made again on demand; clear them out in the background
@@ -141,12 +152,15 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             media_index.set_updater(app.state.auto_index.request)
         else:
             media_index.set_updater(None)
+        # DATAVAULT_GATHER_DAEMON=0 turns the DataGatherer thread off (tests tick it themselves)
+        if os.environ.get("DATAVAULT_GATHER_DAEMON", "1") != "0":
+            app.state.gather_daemon = gather_daemon.Daemon(config, db, lambda: app.state.jobs)
 
         # Initialize routes with config and database: always, also without the vault
         folders.init_router(config)
         media.init_router(config, db)
         duplicates.init_router(config, db)
-        spotify.init_router(config)
+        spotify.init_router(config, db)
         shows.init_router(config, db)
         stats.init_router(config, db)
         chat.init_router(config, db)
@@ -156,10 +170,11 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         albums.init_router(config, db)
         recovery.init_router(config, db)
         series.init_router(config, db, job_manager)
+        datagatherer.init_router(config, db, job_manager)
 
         _say("DataVault Dashboard initialized successfully")
 
-    except RuntimeError:
+    except (RuntimeError, gather_registry.InvalidConnector):
         # Safety guards (e.g. test mode pointing at a real vault) must stop startup
         raise
     except Exception as e:
@@ -186,6 +201,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(albums.router, prefix="/api/library", tags=["library"], dependencies=vault)
     app.include_router(recovery.router, prefix="/api/recovery", tags=["recovery"], dependencies=vault)
     app.include_router(series.router, prefix="/api/series", tags=["series"], dependencies=vault)
+    app.include_router(datagatherer.router, prefix="/api/datagatherer", tags=["datagatherer"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 

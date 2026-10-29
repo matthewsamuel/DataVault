@@ -177,7 +177,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== VIEW SWITCHING ====================
 
-const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums'];
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer'];
 
 function currentMainView() {
     return MAIN_VIEWS.find(v => {
@@ -245,6 +245,8 @@ function switchMainView(view) {
         if (typeof settingsInit === 'function') settingsInit();
     } else if (view === 'albums') {
         if (typeof albumsInit === 'function') albumsInit();
+    } else if (view === 'datagatherer') {
+        if (typeof datagathererInit === 'function') datagathererInit();
     }
 }
 
@@ -1127,23 +1129,20 @@ function globalSearchKeydown(event) {
 }
 
 // Wat het zoekveld doet, zichtbaar in de plaatshouder en (op andere schermen) de Enter-hint
-// Onder 1100 px is het zoekveld smal (het menu heeft tien onderdelen): dan een korte tekst die past
-const SEARCH_NARROW = window.matchMedia ? window.matchMedia('(max-width: 1100px)') : null;
+// In een smaller venster is het zoekveld korter (er staan meer knoppen rechts): dan een korte tekst
+const SEARCH_COMPACT = window.matchMedia('(max-width: 1240px)');
+SEARCH_COMPACT.addEventListener('change', () => updateSearchFieldForView(currentMainView()));
+document.addEventListener('DOMContentLoaded', () => updateSearchFieldForView(currentMainView()));
 
 function updateSearchFieldForView(view) {
     const input = document.getElementById('global-search');
     if (!input) return;
     const here = view === 'viewer';
-    input.placeholder = SEARCH_NARROW && SEARCH_NARROW.matches ? 'Zoeken…' : here ? 'Zoek in deze map…' : 'Zoek in Bestanden…';
+    input.placeholder = SEARCH_COMPACT.matches ? (here ? 'Zoek in map…' : 'Zoeken…')
+        : (here ? 'Zoek in deze map…' : 'Zoek in Bestanden…');
     input.setAttribute('aria-label', here ? 'Zoek in de geopende map (sneltoets /)'
         : 'Zoek in de geopende map van Bestanden: typ en druk op Enter (sneltoets /)');
     input.closest('.search-field').classList.toggle('search-elsewhere', !here);
-}
-
-if (SEARCH_NARROW) {
-    const onNarrowChange = () => updateSearchFieldForView(typeof currentMainView === 'function' ? currentMainView() : 'home');
-    if (SEARCH_NARROW.addEventListener) SEARCH_NARROW.addEventListener('change', onNarrowChange);
-    else if (SEARCH_NARROW.addListener) SEARCH_NARROW.addListener(onNarrowChange);
 }
 
 function handleGlobalSearch(query) {
@@ -3299,8 +3298,45 @@ function startShow(story) {
 
 let spotifyLoadSeq = 0; // alleen het antwoord op de laatste aanvraag telt (snel van jaar wisselen)
 
+// De regel onder de titel: tot wanneer de gegevens gaan, en sinds wanneer de luistertijd een
+// schatting is (plays van de Spotify-API en Last.fm na de laatste export); met een knop naar DataGatherer
+async function loadSpotifyCoverage() {
+    const chip = document.getElementById('spotify-coverage');
+    if (!chip) return;
+    try {
+        const cov = await fetchJSON(`${API_BASE}/api/spotify/coverage`);
+        if (!cov.last) { chip.hidden = true; return; }
+        const day = (s) => new Date(s * 1000).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
+        chip.replaceChildren();
+        // Het grootste gat (bijv. tussen een oude export en de laatste nummers van de API) noemen we altijd
+        const hole = (cov.holes || []).reduce((big, h) => (!big || h.until - h.from > big.until - big.from ? h : big), null);
+        appendChildren(chip, [
+            createEl('i', { class: `fas ${hole ? 'fa-calendar-xmark' : 'fa-calendar-check'}`, 'aria-hidden': 'true' }),
+            createEl('span', {}, 'Bijgewerkt t/m ', createEl('span', { class: 'mono', text: day(cov.last) })),
+            cov.estimated_since ? createEl('span', { class: 'spotify-coverage-estimate' },
+                ' · schatting vanaf ', createEl('span', { class: 'mono', text: day(cov.estimated_since) })) : null,
+            hole ? createEl('span', { class: 'spotify-coverage-hole' },
+                ' · geen gegevens van ', createEl('span', { class: 'mono', text: day(hole.from) }),
+                ' tot ', createEl('span', { class: 'mono', text: day(hole.until) })) : null,
+            cov.waiting_for_import ? createEl('span', { class: 'spotify-coverage-estimate' },
+                ' · je nieuwste gegevens zijn nog niet ingelezen') : null,
+            createEl('button', { type: 'button', class: 'link-button spotify-coverage-link',
+                text: cov.waiting_for_import ? 'Inlezen' : 'Bijwerken', onClick: () => switchMainView('datagatherer') })]);
+        chip.hidden = false;
+    } catch (_) {
+        chip.hidden = true;   // de statistieken zelf melden een fout al
+    }
+}
+
+// Na nieuwe gegevens uit DataGatherer (Spotify, Last.fm): de eerder opgehaalde statistieken gelden niet meer
+window.addEventListener('datavault:data-changed', (e) => {
+    if (!['spotify', 'lastfm'].includes(e.detail && e.detail.source)) return;
+    Object.keys(_prefetchCache).filter(url => url.includes('/api/spotify/')).forEach(url => delete _prefetchCache[url]);
+});
+
 async function loadSpotifyStats() {
     const seq = ++spotifyLoadSeq;
+    loadSpotifyCoverage();
     const loading = document.getElementById('spotify-loading');
     const content = document.getElementById('spotify-content');
     const yearSelect = document.getElementById('spotify-year-select');

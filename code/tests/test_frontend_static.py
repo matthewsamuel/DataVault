@@ -87,8 +87,19 @@ def test_new_scripts_load_after_the_helpers_they_use():
     index = _sources()["index.html"]
     scripts = [s.split("?")[0] for s in re.findall(r'<script src="([^"]+)"', index)]
     assert scripts.index("ui.js") < scripts.index("app.js")
-    for late in ("recovery.js", "settings.js", "shortcuts.js", "library.js"):
+    for late in ("recovery.js", "settings.js", "shortcuts.js", "library.js", "datagatherer.js"):
         assert scripts.index(late) > scripts.index("jobs.js"), late
+    # DataGatherer registers its Instellingen section, so it loads after settings.js
+    assert scripts.index("datagatherer.js") > scripts.index("settings.js")
+
+
+def test_the_datagatherer_page_has_no_code_per_source():
+    """A new source is one Python file: the page knows no connector by name (it reads their metadata)."""
+    from backend.datagatherer import registry
+    js = re.sub(r"/\*.*?\*/|//[^\n]*", "", _sources()["datagatherer.js"], flags=re.S).lower()
+    for connector in registry.connectors():
+        for word in {connector.id, connector.name.lower()}:
+            assert word not in js, word
 
 
 # Colours come from the design tokens (style.css, between @tokens:start and @tokens:end),

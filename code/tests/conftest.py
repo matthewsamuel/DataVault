@@ -13,6 +13,7 @@ import pytest
 os.environ["DATAVAULT_TESTING"] = "1"
 os.environ["OTEL_SDK_DISABLED"] = "true"
 os.environ["DATAVAULT_AUTO_INDEX"] = "0"   # tests start index passes themselves (see test_media_index)
+os.environ["DATAVAULT_GATHER_DAEMON"] = "0"   # tests tick the DataGatherer watcher/schedules themselves
 os.environ.pop("DATAVAULT_CONFIG", None)
 
 CODE_DIR = Path(__file__).resolve().parent.parent
@@ -35,6 +36,29 @@ def fake_ollama(monkeypatch):
     chat.forget_ollama_status()
     yield fake
     chat.forget_ollama_status()
+
+
+@pytest.fixture(autouse=True)
+def datagatherer_sandbox(monkeypatch, tmp_path):
+    """
+    No test reaches the real Keychain, the network, ~/Downloads or ~/Library/LaunchAgents:
+    a fresh in-memory keyring, a network guard that refuses everything (tests install an
+    httpx.MockTransport with net.set_transport_factory), a LaunchAgents folder and a
+    launchctl stand-in in the temp folder, and nothing remembered between tests.
+    """
+    import keyring
+    from backend.datagatherer import cards, daemon, keychain, launchd, net, oauth
+    keyring.set_keyring(keychain.MemoryKeyring())
+    net.set_transport_factory(None)
+    calls = []
+    launchd.set_runner(lambda args: calls.append(args) or 0)
+    monkeypatch.setenv("DATAVAULT_LAUNCH_AGENTS_DIR", str(tmp_path / "LaunchAgents"))
+    oauth.forget_all()
+    daemon.forget_seen()
+    cards.forget_existing_cache()
+    yield calls
+    net.set_transport_factory(None)
+    launchd.set_runner(None)
 
 
 @pytest.fixture(scope="session")

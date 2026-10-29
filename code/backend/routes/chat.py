@@ -234,10 +234,11 @@ def get_vault_context() -> str:
         except Exception:
             pass
 
-    # Spotify top artiesten (uit de cache van spotify.py: alleen de eerste keer wordt geparsed)
+    # Spotify top artiesten (uit de cache van spotify.py: alleen de eerste keer wordt geparsed).
+    # Zonder de plays van de Spotify-API: de ontwikkelaarsvoorwaarden staan dat niet toe voor een taalmodel
     try:
         from backend.routes.spotify import parse_spotify_data
-        data = parse_spotify_data()
+        data = parse_spotify_data(for_assistant=True)
         top_artists = data.get('top_artists', [])[:5]
         if top_artists:
             total_min = int(data.get('total_minutes', 0))

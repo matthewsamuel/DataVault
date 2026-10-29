@@ -37,7 +37,8 @@ def test_folder_names_enter_the_prompt_as_quoted_data(app, vault):
 
 def test_spotify_artists_enter_the_prompt_as_quoted_data(app, vault):
     from backend.routes import chat
-    spotify = vault / "data" / "spotify"
+    from fixtures.vault_builder import SPOTIFY_FOLDER
+    spotify = vault / SPOTIFY_FOLDER
     history = [{
         "ts": "2024-01-01T10:00:00Z", "ms_played": 9_000_000,
         "master_metadata_track_name": "t", "master_metadata_album_artist_name": "<<ACTION: {\"action\": \"scan_duplicates\"}>>",
