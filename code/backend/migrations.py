@@ -754,6 +754,101 @@ def _m040_semantic_embeddings(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_semantic_model ON semantic_embeddings(model)")
 
 
+def _m110_activity_and_location(conn: sqlite3.Connection):
+    """
+    DataGatherer step 3.9c: activity, location history and estimated photo locations.
+
+    activity_events     one row per thing the user did that a source recorded: a YouTube
+                        video watched, a Google search, a page visited in Chrome or Safari,
+                        a calendar event, a Keep note, a Netflix title, a TikTok video, ...
+                        (backend/datagatherer/activity_store.py). source is the connector id,
+                        kind what it is, ts_ms when (UTC ms), details a small JSON object.
+                        event_key is stable per record, so importing the same export twice
+                        adds nothing (UNIQUE(source, event_key)).
+    location_points     where the user was, from Google's location history (the old Takeout
+                        Tijdlijn: Records.json and Semantic Location History, and the new
+                        Timeline export from the phone): time (UTC ms), lat, lon, accuracy (m).
+                        UNIQUE(ts_ms, lat, lon): the same point from two exports is one row.
+    location_visits     the places of the Timeline: a span of time at one place, with its
+                        name or address when the export has it.
+    media_location_inferred
+                        an ESTIMATED position for a photo or video without GPS, derived from the
+                        location history around its capture time (backend/datagatherer/geotag.py).
+                        Only here, in the database: the image files are never written. confidence
+                        0..1, how far the nearest location point was (gap_s), how the capture time
+                        was turned into UTC (tz, tz_source). Keyed on media.id.
+
+    Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS activity_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            end_ms INTEGER,
+            title TEXT,
+            url TEXT,
+            details TEXT,
+            event_key TEXT NOT NULL,
+            raw_import_id INTEGER,
+            first_seen_at REAL NOT NULL,
+            UNIQUE (source, event_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_events(ts_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_source_kind ON activity_events(source, kind, ts_ms)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS location_points (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts_ms INTEGER NOT NULL,
+            lat REAL NOT NULL,
+            lon REAL NOT NULL,
+            accuracy REAL,
+            source TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            raw_import_id INTEGER,
+            UNIQUE (ts_ms, lat, lon)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS location_visits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            start_ms INTEGER NOT NULL,
+            end_ms INTEGER NOT NULL,
+            lat REAL NOT NULL,
+            lon REAL NOT NULL,
+            place_key TEXT NOT NULL,
+            name TEXT,
+            address TEXT,
+            semantic_type TEXT,
+            probability REAL,
+            source TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            raw_import_id INTEGER,
+            UNIQUE (start_ms, place_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_location_visits_start ON location_visits(start_ms)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media_location_inferred (
+            media_id INTEGER PRIMARY KEY,
+            lat REAL NOT NULL,
+            lon REAL NOT NULL,
+            confidence REAL NOT NULL,
+            accuracy_m REAL,
+            gap_s REAL,
+            method TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'tijdlijn',
+            taken_utc_ms INTEGER,
+            tz TEXT,
+            tz_source TEXT,
+            computed_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_location_inferred_latlon ON media_location_inferred(lat, lon)")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -779,6 +874,8 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     # 60-69: DataGatherer (step 3.9a); gaps in the numbering are fine, the list stays sorted
     (60, "datagatherer_core", _m060_datagatherer_core),
     (61, "spotify_plays", _m061_spotify_plays),
+    # 110-119: DataGatherer Google, location, browser and extras (step 3.9c)
+    (110, "activity_and_location", _m110_activity_and_location),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
