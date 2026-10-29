@@ -12369,6 +12369,10 @@ button.otd-settings-icon:hover {
     margin-bottom: var(--space-lg);
 }
 
+.act-toolbar[hidden] {
+    display: none;
+}
+
 .act-sources {
     display: flex;
     flex-wrap: wrap;
@@ -12741,7 +12745,8 @@ a.act-title:focus-visible {
     }
 }
 
-/* Een knop met 'hidden' is echt weg (.btn zet anders display) */
-.btn[hidden] {
+/* Een knop met 'hidden' is echt weg (.btn en .pill zetten anders display) */
+.btn[hidden],
+.pill[hidden] {
     display: none;
 }

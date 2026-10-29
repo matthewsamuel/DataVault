@@ -54,6 +54,8 @@ async function actLoad() {
         if (seq !== actState.seq) return;
         actState.facets = facets;
         actRenderFilters();
+        // Zonder gegevens hebben de filters geen zin: alleen de lege staat
+        document.querySelector('.act-toolbar').hidden = !facets.sources.length;
         if (!facets.sources.length) {
             document.getElementById('act-layout').classList.add('act-empty');
             days.replaceChildren();

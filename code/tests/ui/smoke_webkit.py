@@ -11,7 +11,8 @@ viewer, Tab staying inside every window, focus going back where it was, Keurer k
 act from the theme menu or the search field), moves a file and puts it back from the
 Herstelcentrum, compares photos on the Beste uit reeks tab and keeps the best of a series
 with the keyboard (and undoes that), checks Instellingen and the storage window, walks through
-DataGatherer (help, the menu, the connect window, reading the existing Spotify export, the network log),
+DataGatherer (help, the menu, the connect window, reading the existing Spotify export, the network log,
+the Dutch Takeout and Chrome history, the Activiteit view, the Tijdlijn route on the Kaart),
 makes a backup from Instellingen, compares photos in 'Welke is mooier?' (keys, undo, leaderboard), and runs
 a11y_checks.js on every screen in the light and the dark theme:
 all visible text must reach WCAG AA contrast and every control must have a name. On the way
@@ -96,9 +97,15 @@ def start_server(workdir: Path):
                   if f.suffix == ".jpg" and not f.name.startswith(".")).read_bytes()
     for i in range(BIG_FILES):
         (big / f"foto_{i:04d}.jpg").write_bytes(sample + str(i).encode())   # distinct bytes, still a JPEG
+    # DataGatherer 3.9c: an unpacked Dutch Takeout in RAW_google and a Chrome profile (both synthetic)
+    sys.path.insert(0, str(CODE_DIR / "tests"))
+    import fake_exports
+    fake_exports.dutch_takeout_folder(vault / "data" / "Matthew" / "RAW_google")
+    fake_exports.chrome_history_db(workdir / "Chrome" / "Default" / "History",
+                                   [(1563091200 + i * 1800, f"https://voorbeeld{i}.be/", f"Pagina {i}") for i in range(12)])
     port = free_port()
     env = dict(os.environ, DATAVAULT_TESTING="1", DATAVAULT_CONFIG=str(workdir / "vault_config.json"),
-               DATAVAULT_LOG_FILE=str(workdir / "server.log"))
+               DATAVAULT_LOG_FILE=str(workdir / "server.log"), DATAVAULT_CHROME_DIR=str(workdir / "Chrome"))
     log = open(workdir / "uvicorn.log", "w")
     proc = subprocess.Popen(
         [python, "-m", "uvicorn", "--factory", "backend.main:create_app",
@@ -907,7 +914,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             shots.mkdir(parents=True, exist_ok=True)
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
-                for view in VIEWS:
+                for view in VIEWS + ["activity"]:    # Activiteit has no menu tab of its own (it hangs under DataGatherer)
                     page.evaluate(f"switchMainView('{view}')")
                     page.wait_for_timeout(700)
                     page.screenshot(path=str(shots / f"{view}_{theme}.png"))
@@ -1592,6 +1599,112 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(not page.is_visible("#dg-network"), "datagatherer: Escape did not close the network log")
             step("datagatherer: Instellingen", lambda: page.click(".top-nav [data-view='settings']"), 0.8)
             expect(page.is_visible("#settings-datagatherer"), "datagatherer: no section in Instellingen")
+
+            # DataGatherer 3.9c: reading the Dutch Takeout in place, Chrome from a copy, the Activiteit
+            # view (filters, days with the arrow keys, g c), the Tijdlijn route on the Kaart, and the
+            # toggle and the inline folder error in a source's settings
+            page.evaluate("switchMainView('datagatherer')")
+            takeout = ".dg-card[data-source='google_takeout'] .dg-primary"
+            page.wait_for_selector(takeout, timeout=10000)
+            expect(page.evaluate(f"document.querySelector({json.dumps(takeout)}).dataset.action") == "import",
+                   "takeout: the Takeout in RAW_google does not ask to be read")
+            step("takeout: read RAW_google in place", lambda: page.click(takeout), 0.4)
+            try:
+                page.wait_for_function(f"(document.querySelector({json.dumps(takeout)}) || {{dataset: {{}}}}).dataset.action !== 'import'",
+                                       timeout=30000)
+            except PlaywrightError:
+                pass   # reported below
+            expect((vault / "data" / "Matthew" / "RAW_google" / "takeout-20190801T000000Z-001").is_dir(),
+                   "takeout: the Takeout folder moved")
+            chrome = ".dg-card[data-source='chrome_history'] .dg-primary"
+            expect(page.evaluate(f"(document.querySelector({json.dumps(chrome)}) || {{dataset: {{}}}}).dataset.action") == "sync",
+                   "chrome: the card does not offer Bijwerken")
+            step("chrome: Bijwerken reads a copy", lambda: page.click(chrome), 0.4)
+            try:
+                page.wait_for_function("(document.querySelector(\".dg-card[data-source='chrome_history'] .dg-until-date\") || {}).textContent",
+                                       timeout=20000)
+            except PlaywrightError:
+                problems.append("chrome: after Bijwerken the card shows no 'Gegevens t/m'")
+            step("activity: the switch in the header", lambda: page.click("#section-datagatherer .dg-switch [data-view='activity']"), 0.6)
+            expect(page.evaluate(view_now) == "activity", "activity: the header switch did not open it")
+            expect(page.evaluate("document.querySelector(\".top-nav [data-view='datagatherer']\").classList.contains('active')"),
+                   "activity: the DataGatherer menu button is not lit")
+            try:
+                page.wait_for_selector(".act-event", timeout=10000)
+            except PlaywrightError:
+                pass   # reported below
+            days = page.evaluate("[...document.querySelectorAll('.act-day')].map(b => b.dataset.day)")
+            expect(len(days) >= 3 and page.evaluate("document.querySelectorAll('.act-event').length") > 0,
+                   f"activity: days {days}, no events")
+            page.focus(".act-day[aria-pressed='true']")
+            step("activity: ArrowDown goes to the previous day", lambda: page.keyboard.press("ArrowDown"), 0.6)
+            expect(page.evaluate("document.activeElement.dataset.day") == (days[1] if len(days) > 1 else None)
+                   and page.evaluate("document.activeElement.getAttribute('aria-pressed')") == "true",
+                   "activity: the arrow keys do not move between days")
+            sources = page.evaluate("[...document.querySelectorAll('.act-source')].map(b => b.textContent)")
+            expect(any("Chrome" in s for s in sources) and any("Takeout" in s for s in sources), f"activity: sources {sources}")
+            step("activity: one source", lambda: page.click(".act-source:has-text('Chrome-geschiedenis')"), 0.8)
+            only = page.evaluate("[...document.querySelectorAll('.act-event .act-meta')].map(m => m.textContent)")
+            expect(only and all("Chrome-geschiedenis" in m for m in only), f"activity: the source filter shows {only[:3]}")
+            step("activity: search", lambda: page.fill("#act-search", "Pagina 3"), 1.0)
+            expect(page.evaluate("document.querySelectorAll('.act-event').length") == 1, "activity: search did not narrow to one")
+            step("activity: Filters wissen", lambda: page.click("#act-reset"), 0.8)
+            expect(page.evaluate("document.getElementById('act-reset').offsetParent === null"),
+                   "activity: 'Filters wissen' stays visible without filters")
+            page.click(".nav-tab[data-view='home']")
+            step("activity: g c opens it", lambda: (page.keyboard.press("g"), page.keyboard.press("c")), 0.6)
+            expect(page.evaluate(view_now) == "activity", "activity: g c did not open it")
+            step("map: the Tijdlijn layer", lambda: page.click(".top-nav [data-view='map']"), 1.2)
+            try:
+                page.wait_for_selector("#map-layers:not([hidden]) #map-track", timeout=10000)
+            except PlaywrightError:
+                pass   # reported below
+            expect(page.is_visible("#map-track"), "map: the route button is missing")
+            summary = page.evaluate("fetchJSON(API_BASE + '/api/location/summary')")
+            expect(page.is_visible("#map-inferred") == bool(summary["inferred"]),
+                   f"map: 'Locatie geschat uit Tijdlijn' does not follow the estimates ({summary['inferred']})")
+            if summary["inferred"]:
+                step("map: the estimated locations", lambda: page.click("#map-inferred"), 1.2)
+                expect((page.evaluate("window.mapView()") or {}).get("estimated") == summary["inferred"],
+                       "map: the estimated locations are not on the map")
+            step("map: Route per dag", lambda: page.click("#map-track"), 1.2)
+            view = page.evaluate("window.mapView()") or {}
+            expect(view.get("track") and view.get("trackDay"), f"map: no route drawn ({view})")
+            step("map: the previous day", lambda: page.click("#map-track-prev"), 1.0)
+            expect((page.evaluate("window.mapView()") or {}).get("trackDay") != view.get("trackDay"),
+                   "map: the previous-day button did not change the day")
+            page.evaluate("switchMainView('datagatherer')")
+            page.wait_for_selector(".dg-card[data-source='google_timeline']", timeout=10000)
+            step("timeline: its settings", lambda: page.evaluate("dgOpenSettings('google_timeline')"), 0.8)
+            expect(page.is_visible("#dg-settings-pasha") or page.evaluate("!!document.getElementById('dg-settings-pasha')"),
+                   "timeline: no Pasha switch in the settings")
+            page.fill("#dg-settings-watch_folder", "/bestaat/niet")
+            seen = len(problems)
+            step("timeline: a folder that does not exist", lambda: page.click("#dg-settings .btn-primary"), 0.8)
+            try:
+                page.wait_for_selector("#dg-settings-watch_folder-error:not([hidden])", timeout=5000)
+            except PlaywrightError:
+                pass   # reported below
+            page.wait_for_timeout(500)
+            # (the 400 of the refused folder is expected here)
+            problems[seen:] = [p for p in problems[seen:] if "400" not in p and "PROBLEM" not in p]
+            expect(page.is_visible("#dg-settings-watch_folder-error")
+                   and page.evaluate("document.activeElement.id") == "dg-settings-watch_folder",
+                   "timeline: the folder error is not shown under the field")
+            page.keyboard.press("Escape")
+            # With data: the Activiteit view and the Tijdlijn route, both themes, AA contrast and names
+            for theme in ("light", "dark"):
+                page.evaluate(f"setTheme('{theme}')")
+                for view in ("activity", "map"):
+                    page.evaluate(f"switchMainView('{view}')")
+                    page.wait_for_timeout(900)
+                    page.screenshot(path=str(shots / f"{view}-data_{theme}.png"))
+                    page.add_script_tag(path=str(A11Y_CHECKS))
+                    for fail in page.evaluate("__contrastFailures()"):
+                        problems.append(f"contrast {theme} {view} with data: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+                    for control in page.evaluate("__unnamedControls()"):
+                        problems.append(f"unnamed control on {view} with data: {control}")
+            page.evaluate("setTheme('auto')")
 
             # An archive without any folder: 'Het archief is leeg', not 'Kies een map'
             page.route("**/api/folders", lambda route: route.fulfill(json={"folders": []}))
