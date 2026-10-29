@@ -4,6 +4,13 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 
 ## Fase 3 – Nieuwe functies
 
+### Pasha: zoeken, tonen en voorstellen met bevestiging
+
+- Pasha kan nu ook zoeken op inhoud (Slim zoeken), je bibliotheek filteren op jaar, maand, camera of map, een slim album openen, foto's van deze dag tonen, foto's bij een stad of land vinden (volledig offline, met de kaartgegevens van de Kaart), je reeksen van bijna-dezelfde foto's laten zien en vertellen hoe het met de achtergrondtaken en het Herstelcentrum staat.
+- Het antwoord komt als een strook miniaturen met een knop die het juiste scherm opent met de juiste filters. Ontbreekt er iets (het zoekmodel, de index, de reeksen), dan zegt Pasha dat duidelijk.
+- Bestanden verplaatsen, de beste foto van een reeks houden en exporteren stelt Pasha alleen voor. Er verschijnt een kaart met wat er waarheen gaat; pas na jouw klik op Uitvoeren gebeurt er iets, op dezelfde veilige manier als in de schermen zelf (niets wordt overschreven of verwijderd). Verplaatsen staat daarna als een actie in het Herstelcentrum, met terugzetten. Een voorstel geldt tien minuten en één keer.
+- Pasha kent geen verwijderen en kan geen mappen buiten het archief gebruiken.
+
 ### Bibliotheek: één index van het hele archief
 - De app houdt nu een bibliotheek bij: van elke foto, video en elk audiobestand weet hij de
   opnamedatum, de afmetingen, de camera en lens, de GPS-positie en (bij video en m4a) de duur. Dat

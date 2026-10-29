@@ -4064,6 +4064,7 @@ async function sendChat({ inputEl, btn }) {
     };
 
     let fullText = '';
+    const toolEvents = [];
 
     try {
         const response = await fetch(`${API_BASE}/api/chat/stream`, {
@@ -4095,6 +4096,8 @@ async function sendChat({ inputEl, btn }) {
                 let event;
                 try { event = JSON.parse(line.slice(6)); } catch (_) { continue; } // ongeldige JSON negeren
 
+                if (event.tool) { toolEvents.push(event); continue; }
+
                 if (event.error) {
                     showError(String(event.error));
                     // Ollama weg of model ontbreekt: de status bovenin bijwerken
@@ -4102,10 +4105,12 @@ async function sendChat({ inputEl, btn }) {
                     return;
                 }
 
+                if (typeof event.replace === 'string') { fullText = event.replace; showText(fullText); continue; }
+
                 if (typeof event.token === 'string' && event.token) {
                     fullText += event.token;
                     // Een half binnengekomen ACTION-tag niet laten zien
-                    showText(fullText.replace(/<<ACTION[\s\S]*$/, '').trimEnd());
+                    showText(fullText.replace(/(?:<<|<\|)ACTION[\s\S]*$|\{\s*"action"[^}]*$/, '').trimEnd());
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
 
@@ -4114,6 +4119,9 @@ async function sendChat({ inputEl, btn }) {
                     const reply = parseChatReply(fullText);
                     fullText = reply.text;
                     showText(fullText);
+                    // Alleen een actie en geen tekst: de lege ballon weglaten, de resultaten komen eronder
+                    if (!fullText && toolEvents.length) { aiMsg.remove(); fullText = 'Ik heb het opgezocht.'; }
+                    toolEvents.forEach(chatRenderToolEvent);
                     if (reply.action) setTimeout(() => executeAIAction(reply.action), 1000);
                     window.chatHistory.push({ role: 'assistant', content: fullText });
                 }

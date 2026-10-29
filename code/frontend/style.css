@@ -12909,3 +12909,95 @@ button.otd-settings-icon:hover {
         transition: none;
     }
 }
+
+/* ==================== Pasha: tools en bevestigingskaarten (stap 3.8) ==================== */
+.chat-tool,
+.chat-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    min-width: 0;
+}
+
+.chat-tool-title {
+    font-size: var(--fs-base);
+    line-height: 1.5;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.chat-tool-title .fa-shield-halved {
+    color: var(--accent-text);
+    margin-right: var(--space-xs);
+}
+
+.chat-tool-error {
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.chat-strip .chat-photo {
+    width: 84px;
+    height: 84px;
+    display: block;
+}
+
+.chat-strip-item {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    align-items: center;
+}
+
+.chat-strip-item figcaption {
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.chat-tool-link {
+    align-self: flex-start;
+}
+
+.chat-tool-lines,
+.chat-confirm-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.chat-confirm-list li {
+    overflow-wrap: anywhere;
+}
+
+.chat-confirm-to,
+.chat-confirm-more {
+    color: var(--text-tertiary);
+}
+
+.chat-confirm-note {
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+    color: var(--text-tertiary);
+}
+
+.chat-confirm-actions {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.chat-confirm-status {
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.chat-confirm-status:empty {
+    display: none;
+}
