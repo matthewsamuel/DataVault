@@ -32,6 +32,7 @@ const SHORTCUT_VIEWS = [
     // Meer dan negen onderdelen: de rest alleen met g + letter
     { view: 'albums', key: null, g: 'a', label: 'Albums' },
     { view: 'datagatherer', key: null, g: 'v', label: 'DataGatherer' },
+    { view: 'berichten', key: null, g: 'e', label: 'Berichten' },
 ];
 
 const SHORTCUT_GROUPS = [

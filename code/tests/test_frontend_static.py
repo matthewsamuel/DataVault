@@ -80,14 +80,17 @@ def test_every_main_view_has_a_section_a_menu_entry_and_a_shortcut():
     assert len({g for _, _, g in shortcuts}) == len(views), "two views share a g + letter shortcut"
     for view in views:
         assert f'id="section-{view}"' in sources["index.html"], view
-        assert f'data-view="{view}"' in sources["index.html"], view
+        # A menu entry of its own, or (no room in the menu) under another one with data-also: Berichten
+        # opens from DataGatherer, whose icon stays active while it is open
+        assert f'data-view="{view}"' in sources["index.html"] or re.search(
+            rf'data-also="[^"]*\b{view}\b', sources["index.html"]), view
 
 
 def test_new_scripts_load_after_the_helpers_they_use():
     index = _sources()["index.html"]
     scripts = [s.split("?")[0] for s in re.findall(r'<script src="([^"]+)"', index)]
     assert scripts.index("ui.js") < scripts.index("app.js")
-    for late in ("recovery.js", "settings.js", "shortcuts.js", "library.js", "datagatherer.js"):
+    for late in ("recovery.js", "settings.js", "shortcuts.js", "library.js", "datagatherer.js", "messages.js"):
         assert scripts.index(late) > scripts.index("jobs.js"), late
     # DataGatherer registers its Instellingen section, so it loads after settings.js
     assert scripts.index("datagatherer.js") > scripts.index("settings.js")

@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=56">
+    <link rel="stylesheet" href="style.css?v=57">
 </head>
 
 <body>
@@ -91,7 +91,7 @@
                     aria-label="Sneltoetsen tonen">
                     <i class="fas fa-keyboard" aria-hidden="true"></i>
                 </button>
-                <button type="button" class="nav-icon-btn nav-tab-gather" data-view="datagatherer" onclick="switchMainView('datagatherer')"
+                <button type="button" class="nav-icon-btn nav-tab-gather" data-view="datagatherer" data-also="berichten" onclick="switchMainView('datagatherer')"
                     title="DataGatherer: je gegevens bijwerken (g v)" aria-label="DataGatherer">
                     <i class="fas fa-cloud-arrow-down" aria-hidden="true"></i>
                 </button>
@@ -834,6 +834,41 @@
             </div>
         </div>
 
+        <!-- BERICHTEN: alle gesprekken die DataGatherer inlas (messages.js) -->
+        <div id="section-berichten" class="section hidden">
+            <div class="page msg-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="msg-title" tabindex="-1"><i class="fas fa-comments" aria-hidden="true"></i> Berichten</h1>
+                        <p class="page-subtitle">Al je gesprekken uit DataGatherer op één plek. Ze blijven op deze Mac.</p>
+                    </div>
+                    <div class="dg-header-actions">
+                        <button type="button" class="btn btn-secondary" onclick="msgOpenPasha()">
+                            <i class="fas fa-shield-halved" aria-hidden="true"></i> Pasha en je berichten
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="switchMainView('datagatherer')">
+                            <i class="fas fa-cloud-arrow-down" aria-hidden="true"></i> Bijwerken
+                        </button>
+                    </div>
+                </div>
+                <div class="msg-layout">
+                    <section class="card msg-sidebar" aria-label="Gesprekken">
+                        <div class="msg-sidebar-top">
+                            <div class="search-field msg-search">
+                                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                                <input type="search" class="input" id="msg-search" placeholder="Zoek in gesprekken en berichten"
+                                    aria-label="Zoek in gesprekken en berichten" autocomplete="off" spellcheck="false">
+                            </div>
+                            <div class="msg-filters" id="msg-filters" role="group" aria-label="Bron"></div>
+                            <p class="msg-summary" id="msg-summary" aria-live="polite"></p>
+                        </div>
+                        <div class="msg-list" id="msg-list"></div>
+                    </section>
+                    <section class="card msg-thread" id="msg-thread" aria-label="Gesprek"></section>
+                </div>
+            </div>
+        </div>
+
         <!-- DATAGATHERER: één kaart per gegevensbron, gebouwd uit wat elke bron van zichzelf zegt (datagatherer.js) -->
         <div id="section-datagatherer" class="section hidden">
             <div class="page dg-page">
@@ -844,6 +879,9 @@
                             online als jij op een knop drukt; exports vraag je zelf aan in je eigen browser.</p>
                     </div>
                     <div class="dg-header-actions">
+                        <button type="button" class="btn btn-secondary" onclick="switchMainView('berichten')" title="Berichten (g e)">
+                            <i class="fas fa-comments" aria-hidden="true"></i> Berichten
+                        </button>
                         <button type="button" class="btn btn-secondary" onclick="dgOpenNetworkLog()">
                             <i class="fas fa-globe" aria-hidden="true"></i> Netwerklog
                         </button>
@@ -1443,7 +1481,7 @@
     <script src="dom.js?v=1"></script>
     <script src="ui.js?v=2"></script>
     <script src="folder-tree.js?v=7"></script>
-    <script src="app.js?v=64"></script>
+    <script src="app.js?v=65"></script>
     <script src="jobs.js?v=12"></script>
     <script src="duplicates.js?v=26"></script>
     <script src="series.js?v=2"></script>
@@ -1453,9 +1491,10 @@
     <script src="resizable-sidebar.js?v=1"></script>
     <script src="recovery.js?v=6"></script>
     <script src="settings.js?v=4"></script>
-    <script src="shortcuts.js?v=6"></script>
+    <script src="shortcuts.js?v=7"></script>
     <script src="library.js?v=2"></script>
-    <script src="datagatherer.js?v=2"></script>
+    <script src="datagatherer.js?v=3"></script>
+    <script src="messages.js?v=1"></script>
 </body>
 
 </html>
