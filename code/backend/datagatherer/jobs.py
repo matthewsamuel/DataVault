@@ -281,7 +281,8 @@ def watch_type(config, db, get_jobs: Callable[[], Any]) -> JobType:
         if not connector.has("export_watch"):
             raise HTTPException(status_code=400, detail="Onbekende bron")
         path = params.get("path")
-        if not isinstance(path, str) or not daemon.in_watch_folder(config, Path(path)):
+        if not isinstance(path, str) or not daemon.in_watch_folder(config, Path(path),
+                                                                    daemon.connector_folders(db, connector)):
             raise HTTPException(status_code=400, detail="Dit bestand staat niet in een map die DataVault bekijkt")
         return {"source": connector.id, "path": path}
 

@@ -32,32 +32,47 @@ from backend.datagatherer import raw_store, registry, state
 INTERVAL = 30.0
 STABLE_AGE = 60.0                  # a file untouched this long is complete, also on the first look
 DOWNLOADING_SUFFIXES = (".crdownload", ".download", ".part", ".partial", ".opdownload")
-EXPORT_SUFFIXES = (".zip", ".json", ".tgz", ".tar.gz", ".txt", ".csv")
+EXPORT_SUFFIXES = (".zip", ".json", ".tgz", ".tar.gz", ".txt", ".csv", ".sqlite")
 
 
 def _testing() -> bool:
     return os.environ.get("DATAVAULT_TESTING") == "1"
 
 
-def watch_folders(config) -> List[Path]:
+def connector_folders(db, connector) -> List[Path]:
+    """The synced folder a connector's watch_setting names (Meta's recurring export to Dropbox/Drive/Koofr)."""
+    from backend.datagatherer import cards
+    if connector is None or not getattr(connector, "watch_setting", None):
+        return []
+    folder = cards.watch_folder(connector, state.get_settings(db, connector.id))
+    return [folder] if folder is not None else []
+
+
+def watch_folders(config, extra: Optional[List[Path]] = None) -> List[Path]:
     """
     The folders the watcher looks in (only those that exist): ~/Downloads plus the extra
-    folders of config 'datagatherer_watch_folders' (for example a synced cloud folder).
+    folders of config 'datagatherer_watch_folders' (for example a synced cloud folder),
+    plus `extra` (a connector's own synced folder).
     """
-    folders = ([] if _testing() else [Path.home() / "Downloads"]) + list(config.GATHER_WATCH_FOLDERS or [])
+    folders = ([] if _testing() else [Path.home() / "Downloads"]) + list(config.GATHER_WATCH_FOLDERS or []) \
+        + list(extra or [])
     if _testing():
         temp = Path(tempfile.gettempdir()).resolve()
         folders = [f for f in folders if Path(f).resolve().is_relative_to(temp)]
-    return [Path(f) for f in folders if Path(f).is_dir()]
+    unique = []
+    for f in folders:
+        if Path(f).is_dir() and Path(f) not in unique:
+            unique.append(Path(f))
+    return unique
 
 
-def in_watch_folder(config, path: Path) -> bool:
+def in_watch_folder(config, path: Path, extra: Optional[List[Path]] = None) -> bool:
     """True if path is a file directly in one of the watch folders (no subfolders, no symlinks)."""
     try:
         parent = path.parent.resolve()
     except (OSError, RuntimeError):
         return False
-    return not path.is_symlink() and any(parent == f.resolve() for f in watch_folders(config))
+    return not path.is_symlink() and any(parent == f.resolve() for f in watch_folders(config, extra))
 
 
 class _Seen:
@@ -89,7 +104,7 @@ def candidates(config, db, connector, now: Optional[float] = None) -> List[Dict[
     now = time.time() if now is None else now
     found = []
     patterns = [p.lower() for p in connector.file_patterns]
-    for folder in watch_folders(config):
+    for folder in watch_folders(config, connector_folders(db, connector)):
         try:
             entries = list(os.scandir(folder))
         except OSError:
@@ -188,12 +203,14 @@ class Daemon:
 
     def watch_tick(self, now: float) -> List[str]:
         requests = state.open_requests(self.db)
-        if not requests:
+        # A connector with its own synced folder is watched always (only that folder adds no request)
+        always = {c.id for c in registry.connectors() if connector_folders(self.db, c)}
+        if not requests and not always:
             with _seen_lock:
                 _seen.sizes.clear()
             return []
         started = []
-        for source_id in sorted({r["source_id"] for r in requests}):
+        for source_id in sorted({r["source_id"] for r in requests} | always):
             connector = registry.get(source_id)
             if connector is None or not connector.has("export_watch"):
                 continue

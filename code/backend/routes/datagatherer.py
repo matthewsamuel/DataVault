@@ -96,6 +96,19 @@ def source_detail(source_id: str, request: Request) -> Dict[str, Any]:
     return cards.detail(config, db, _connector(source_id), request.url.port)
 
 
+def _check_watch_folder(value: str) -> None:
+    """A synced folder to watch: an existing absolute folder outside the archive."""
+    folder = Path(value).expanduser()
+    if not folder.is_absolute() or not folder.is_dir():
+        raise HTTPException(status_code=400, detail="Deze map bestaat niet; kies de map waar je cloud-app de exports neerzet")
+    try:
+        inside = folder.resolve().is_relative_to(config.VAULT_ROOT.resolve())
+    except OSError:
+        inside = False
+    if inside:
+        raise HTTPException(status_code=400, detail="Kies een map buiten het archief, bijvoorbeeld in Dropbox of Google Drive")
+
+
 @router.put("/sources/{source_id}/settings")
 def save_settings(source_id: str, body: Any = Body(...)) -> Dict[str, Any]:
     connector = _connector(source_id)
@@ -119,6 +132,8 @@ def save_settings(source_id: str, body: Any = Body(...)) -> Dict[str, Any]:
                 if not isinstance(value, str) or len(value) > 500:
                     raise HTTPException(status_code=400, detail=f"{field.label} moet tekst zijn")
                 value = value.strip()
+                if key == getattr(connector, "watch_setting", None) and value:
+                    _check_watch_folder(value)
             current[key] = value
         state.set_settings(db, connector.id, current)
     fields = {}
@@ -288,7 +303,8 @@ def request_export(source_id: str, body: Any = Body(default=None)) -> Dict[str, 
     request_id = state.open_request(db, connector.id, kind.id, since)
     return {"request_id": request_id, "url": kind.request_url, "label": kind.label, "steps": list(kind.steps),
             "since": since, "expected_days": list(kind.expected_days),
-            "watching": [str(f) for f in daemon.watch_folders(config)] if connector.has("export_watch") else [],
+            "watching": [str(f) for f in daemon.watch_folders(config, daemon.connector_folders(db, connector))]
+            if connector.has("export_watch") else [],
             "card": cards.card(config, db, connector)}
 
 
@@ -308,7 +324,8 @@ def list_candidates(source_id: str) -> Dict[str, Any]:
     if not connector.has("export_watch"):
         raise HTTPException(status_code=400, detail=f"{connector.name} heeft geen exports om te zoeken")
     found = daemon.candidates(config, db, connector)
-    return {"folders": [str(f) for f in daemon.watch_folders(config)], "candidates": found}
+    return {"folders": [str(f) for f in daemon.watch_folders(config, daemon.connector_folders(db, connector))],
+            "candidates": found}
 
 
 @router.post("/sources/{source_id}/candidates/import")
