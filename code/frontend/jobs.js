@@ -129,7 +129,7 @@ function noticeJob(job) {
 // bron die volgens het schema bijwerkt: die blijven alleen staan zolang ze lopen (of als ze mislukken)
 function jobIsAuto(job) {
     if (job.type.startsWith('datagatherer.sync.')) return !!(job.params && job.params.trigger === 'schedule');
-    return job.type === 'index' && !!(job.params && job.params.auto);
+    return (job.type === 'index' || job.type === 'semantic') && !!(job.params && job.params.auto);
 }
 
 async function jobsLibraryRefresh() {

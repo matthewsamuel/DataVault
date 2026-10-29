@@ -71,7 +71,7 @@ def test_a_backup_is_compact_checked_and_keeps_every_user_row(client, app, confi
     assert made["integrity"] == "ok" and made["kind"] == "handmatig"
     assert made["schema_version"] == migrations.LATEST_VERSION
     assert made["emptied"] == {"file_hashes": 3000, "job_results": 0, "media_dates": 2000, "media_folders": 1,
-                               "media_phash": 0}
+                               "media_phash": 0, "semantic_embeddings": 0}
     assert made["size"] == path.stat().st_size < made["plain_size"] < made["live_size"]
     assert path.read_bytes()[:2] == b"\x1f\x8b"                                   # gzip
     assert not list(config.BACKUP_FOLDER.glob(".*partial"))

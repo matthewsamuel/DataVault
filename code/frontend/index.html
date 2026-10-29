@@ -8,7 +8,7 @@
     <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=57">
+    <link rel="stylesheet" href="style.css?v=58">
 </head>
 
 <body>
@@ -61,7 +61,7 @@
                 <div class="search-field nav-search search-elsewhere">
                     <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
                     <input type="search" class="search-input" id="global-search" placeholder="Zoeken…"
-                        aria-label="Zoek in de geopende map van Bestanden: typ en druk op Enter (sneltoets /)"
+                        aria-label="Zoek in de hele bibliotheek: typ en druk op Enter (sneltoets /)"
                         oninput="queueGlobalSearch(this.value)" onkeydown="globalSearchKeydown(event)">
                     <kbd class="search-kbd" aria-hidden="true">/</kbd>
                     <kbd class="search-kbd search-enter" aria-hidden="true">Enter</kbd>
@@ -1050,6 +1050,9 @@
 
             <div class="modal-footer">
                 <div class="viewer-actions">
+                    <button class="btn btn-secondary" id="btn-similar" onclick="similarFromViewer()" title="Foto's die hierop lijken (v)">
+                        <i class="fas fa-images" aria-hidden="true"></i> Vergelijkbaar
+                    </button>
                     <button class="btn btn-secondary" id="btn-open-finder" onclick="openInFinder()" title="Toon in Finder (f)">
                         <i class="fas fa-up-right-from-square" aria-hidden="true"></i> Toon in Finder
                     </button>
@@ -1443,9 +1446,9 @@
     <script src="dom.js?v=1"></script>
     <script src="ui.js?v=2"></script>
     <script src="folder-tree.js?v=7"></script>
-    <script src="app.js?v=65"></script>
-    <script src="jobs.js?v=12"></script>
-    <script src="duplicates.js?v=26"></script>
+    <script src="app.js?v=66"></script>
+    <script src="jobs.js?v=13"></script>
+    <script src="duplicates.js?v=27"></script>
     <script src="series.js?v=2"></script>
     <script src="keurer.js?v=21"></script>
     <script src="timeline.js?v=12"></script>
@@ -1458,6 +1461,7 @@
     <script src="datagatherer.js?v=2"></script>
     <script src="elo.js?v=3"></script>
     <script src="backup-settings.js?v=5"></script>
+    <script src="search.js?v=3"></script>
 </body>
 
 </html>

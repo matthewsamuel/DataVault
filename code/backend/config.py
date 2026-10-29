@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 
 # Default config location: code/config.json (next to the backend package)
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
+DEFAULT_MODELS_FOLDER = Path(__file__).resolve().parent.parent / "models"
 
 
 def resolve_config_path(explicit: Optional[str] = None) -> Path:
@@ -116,6 +117,11 @@ class Config:
             self.BACKUP_FOLDER = _real_path(str(DEFAULT_BACKUP_FOLDER))
         self.BACKUP_KEEP_DAILY = _positive_int(data.get('backup_keep_daily'), 7)
         self.BACKUP_KEEP_WEEKLY = _positive_int(data.get('backup_keep_weekly'), 4)
+        # Downloaded ML models (the 'Slim zoeken' model): code/models/ next to the backend
+        # by default (on the T7 with the app), or wherever 'models_folder' points. Models
+        # are only ever downloaded when the user asks (backend/semantic.py).
+        models_folder = data.get('models_folder')
+        self.MODELS_FOLDER = _real_path(models_folder) if models_folder else DEFAULT_MODELS_FOLDER
         
         # Derived paths
         self.DB_PATH = self.CACHE_FOLDER / "datavault.db"

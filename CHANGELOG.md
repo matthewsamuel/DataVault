@@ -480,6 +480,38 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   winnaar krijgt zijn +N in het groen. Lange shownamen in de keuzelijst eindigen netjes op "…".
 - Ook zonder shows staat **Welke is mooier?** bovenaan bij Shows, voor de hele bibliotheek.
 
+### Slim zoeken: foto's vinden op wat erop staat
+
+- Slim zoeken laat bij korte zoekopdrachten zoals 'food' of 'een auto' weer de juiste foto's zien (de
+  drempel was te streng), en lege datumvelden zien er niet meer uit als een actief filter.
+- Verbeterd na de review: nieuwe foto's blijven niet meer onzichtbaar nadat verwijderde foto's zijn
+  opgeruimd, een onderwerp dat een groot deel van de map beslaat (bijvoorbeeld "hond") wordt gewoon
+  gevonden, onzin als zoekopdracht geeft "Niets gevonden", "Vergelijkbaar" verbergt gelijkende foto's niet
+  meer achter een bijna-kopie, de pagina's van de resultaten schuiven niet meer terwijl foto's nog
+  herkend worden, bestandsnamen met é of ü worden ook op hoofdletters gevonden en het zoekmodel wordt
+  bij het starten alvast geladen. Het venster geeft de focus netjes terug, 'Periode wissen' verschijnt
+  direct en een leeg resultaat heeft een knop om de filters te wissen.
+- Zoek in je foto's en video's op wat erop staat, gewoon in het Nederlands (of Engels): "hond op het
+  strand", "verjaardagstaart", "zonsondergang boven zee", "sneeuw in de bergen". Typ in het zoekveld
+  bovenaan en druk op Enter, of druk op **s**: het zoekvenster zoekt in de hele bibliotheek, met de
+  keuze **Slim zoeken** of **Bestandsnaam**, filters op foto's of video's en een periode, en de beste
+  resultaten eerst. Met de pijltjes loop je door de resultaten, Enter opent ze in de viewer en Esc
+  brengt je terug naar de resultaten.
+- In de viewer zoekt **Vergelijkbaar** (toets **v**) foto's die op de getoonde foto lijken.
+- Alles gebeurt op deze Mac: je foto's en zoekopdrachten gaan nergens heen. Het zoekmodel (ongeveer
+  926 MB) wordt alleen gedownload als je in **Instellingen > Slim zoeken** op **Zoekmodel installeren**
+  klikt; de app vraagt eerst en laat zien waar het vandaan komt. Daarna herkent de app je foto's op de
+  achtergrond (op de grafische chip zo'n 70 foto's per seconde, en daarna alleen nieuwe of gewijzigde
+  foto's); de voortgang staat in het takenpaneel, en pauzeren, hervatten en annuleren werken zoals bij
+  elke taak. Zoeken in 100.000 foto's duurt ongeveer een tiende seconde.
+- Zonder zoekmodel werkt alles zoals eerst, en zegt het zoekvenster hoe je het installeert. Zoeken op
+  bestandsnaam in de hele bibliotheek werkt altijd.
+- Een verplaatste foto blijft gewoon vindbaar, en een foto die naar de prullenmand ging, verschijnt niet
+  meer in de resultaten.
+- Gekozen na een eerlijke vergelijking van vijf zoekmodellen op 179 echte foto's met 50 Nederlandse en
+  Engelse zoekopdrachten: het gekozen model (SigLIP 2) zet bij 49 van de 50 Nederlandse zoekopdrachten
+  een goede foto bovenaan en bij alle 50 in de top 5. Een model dat alleen Engels kent, deed dat bij 33.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden

@@ -1,0 +1,50 @@
+dog beach | hond op het strand | a dog on the beach
+dog | hond | a dog
+dog | puppy op het gras | a puppy on the grass
+cat | kat | a cat
+cat | poes | a kitten
+cat snow | kat in de sneeuw | a cat in the snow
+dog snow | hond in de sneeuw | a dog in the snow
+cake birthday | verjaardagstaart | birthday cake
+cake birthday | taart met kaarsjes | a cake with candles
+birthday | verjaardagsfeestje | birthday party
+sunset sea | zonsondergang boven zee | sunset over the sea
+sunset | zonsondergang | sunset
+snow mountains | sneeuw in de bergen | snow in the mountains
+mountains | bergen | mountains
+city night | stad bij nacht | a city at night
+canal | grachtenpanden in Amsterdam | canal houses in Amsterdam
+food | eten | food
+pasta | bord met pasta | a plate of pasta
+pizza | pizza | pizza
+car | auto | a car
+forest | bos | forest
+forest | wandelpad door het bos | a path through the forest
+bicycle | fiets | a bicycle
+tulips | tulpenveld | a field of tulips
+sailboat | zeilboot op het water | a sailing boat on the water
+horse | paard in de wei | a horse in a meadow
+christmas_tree | kerstboom | a christmas tree
+beach | strand | a beach
+sea | de zee | the sea
+waterfall | waterval | a waterfall
+beach child | kind op het strand | a child on the beach
+dog ball | twee honden spelen met een bal | two dogs playing with a ball
+dog frisbee | hond met een frisbee | a dog catching a frisbee
+horse drinking | paard dat water drinkt | a horse drinking water
+car racing | racewagen | a racing car
+car wreck | autowrak | a rusty car wreck
+sailboat tallship | groot zeilschip met veel zeilen | a tall ship with many sails
+bicycle canal | fiets bij de gracht | a bicycle by a canal
+christmas_tree night | verlichte kerstboom in de avond | a lit christmas tree at night
+tulips painting | schilderij van een tulpenveld | a painting of a tulip field
+canal night | grachten bij nacht | canals at night
+food sea | eten met uitzicht op zee | a meal with a sea view
+horse sunset | paarden bij zonsopkomst | horses at sunrise
+car sunset | auto bij zonsondergang | a car at sunset
+bird | vogel | a bird
+abstract | abstracte kunst | abstract art
+rocks sea | rotsen in de zee | rocks in the sea
+shrimp | pasta met garnalen | pasta with shrimp
+cat rug | kat op een tapijt | a cat on a rug
+dog cake | hond met een verjaardagstaart | a dog with a birthday cake

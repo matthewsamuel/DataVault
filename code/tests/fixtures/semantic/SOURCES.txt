@@ -1,0 +1,12 @@
+Small copies (256 px) of openly licensed photos from Wikimedia Commons, used by
+tests/test_semantic.py to check the real search model. Source, author and licence per file:
+
+hond_strand.jpg: File:Dog on a beach (Unsplash).jpg by Meg Sanchez megsanchez, CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en), https://commons.wikimedia.org/wiki/File:Dog_on_a_beach_(Unsplash).jpg
+hond_gras.jpg: File:Portrait of a labrador retriever.jpg by Dktue, CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en), https://commons.wikimedia.org/wiki/File:Portrait_of_a_labrador_retriever.jpg
+taart_kaarsjes.jpg: File:Creative Commons Birthday Cake and Candles (4825652728).jpg by Pink Sherbet Photography from USA, CC BY 2.0 (https://creativecommons.org/licenses/by/2.0), https://commons.wikimedia.org/wiki/File:Creative_Commons_Birthday_Cake_and_Candles_(4825652728).jpg
+zonsondergang_zee.jpg: File:Sunset over the North Sea in Ostend.jpg by Reda Kerbush, CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0), https://commons.wikimedia.org/wiki/File:Sunset_over_the_North_Sea_in_Ostend.jpg
+besneeuwde_bergen.jpg: File:Glarus Kloentalersee.jpg by Ikiwaner, CC BY-SA 3.0 (http://creativecommons.org/licenses/by-sa/3.0/), https://commons.wikimedia.org/wiki/File:Glarus_Kloentalersee.jpg
+kat.jpg: File:Domestic cat 2011 G02.jpg by George Chernilevsky, Public domain (None), https://commons.wikimedia.org/wiki/File:Domestic_cat_2011_G02.jpg
+stad_nacht.jpg: File:Price Building illuminated at night in Quebec City.jpg by Wilfredor, CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en), https://commons.wikimedia.org/wiki/File:Price_Building_illuminated_at_night_in_Quebec_City.jpg
+pizza.jpg: File:Margherita pizza on plate.jpg by Shisma, CC BY 4.0 (https://creativecommons.org/licenses/by/4.0), https://commons.wikimedia.org/wiki/File:Margherita_pizza_on_plate.jpg
+strand.jpg: File:Child standing on sandy beach wearing a colorful towel undefined.jpg by Shixart1985, CC BY 2.0 (https://creativecommons.org/licenses/by/2.0), https://commons.wikimedia.org/wiki/File:Child_standing_on_sandy_beach_wearing_a_colorful_towel_undefined.jpg

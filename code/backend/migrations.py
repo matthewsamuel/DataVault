@@ -685,6 +685,8 @@ def _m061_spotify_plays(conn: sqlite3.Connection):
                    track, artist, album, track_uri, NULL
               FROM spotify_api_plays WHERE superseded = 0
     """)
+
+
 def _m050_elo_comparisons(conn: sqlite3.Connection):
     """
     'Welke is mooier?' in Shows (backend/elo.py): two photos side by side, the user picks
@@ -723,6 +725,35 @@ def _m050_elo_comparisons(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_scope ON elo_comparisons(scope, id)")
 
 
+def _m040_semantic_embeddings(conn: sqlite3.Connection):
+    """
+    'Slim zoeken' (backend/semantic.py): one image embedding per photo or video per search
+    model, keyed on media.id (stable across moves, so a moved photo keeps its embedding).
+    size and mtime_ns are the file's when it was embedded: a file that changed since is
+    embedded again. vector is the L2-normalised embedding as float16 (dim values), or
+    NULL with status 'undecodable' for a file that could not be read as an image, so it
+    is not tried again until it changes. Rows whose media row is gone are ignored by
+    every query and removed by the next embedding run. Only a new table: no existing
+    row is touched. (Version 40: the numbers below it are left to the steps built
+    alongside this one; migrations run in list order.)
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS semantic_embeddings (
+            media_id INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            dim INTEGER NOT NULL,
+            vector BLOB,
+            status TEXT NOT NULL DEFAULT 'ok',
+            size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            source TEXT,
+            created_at REAL NOT NULL,
+            PRIMARY KEY (media_id, model)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_semantic_model ON semantic_embeddings(model)")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -741,6 +772,8 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (21, "keurer_path_index", _m021_keurer_path_index),
     (30, "near_duplicates", _m030_near_duplicates),
     (31, "near_duplicates_content", _m031_near_duplicates_content),
+    # 40-49: Slim zoeken (step 3.5)
+    (40, "semantic_embeddings", _m040_semantic_embeddings),
     # 50-59: Elo comparisons (step 3.9b)
     (50, "elo_comparisons", _m050_elo_comparisons),
     # 60-69: DataGatherer (step 3.9a); gaps in the numbering are fine, the list stays sorted

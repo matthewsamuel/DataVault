@@ -25,12 +25,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend import backup, errors, file_ops, media_index, restart, security, thumbnail
+from backend import backup, errors, file_ops, media_index, restart, security, semantic, thumbnail
 from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import (
     folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, albums,
-    series, datagatherer,
+    series, datagatherer, search,
 )
 from backend.datagatherer import daemon as gather_daemon, jobs as gather_jobs, registry as gather_registry
 from backend.routes import backup as backup_routes
@@ -58,9 +58,14 @@ async def _lifespan(app: FastAPI):
     auto_backup = getattr(app.state, "auto_backup", None)
     if auto_backup is not None:
         auto_backup.start()
+    auto_semantic = getattr(app.state, "auto_semantic", None)
+    if auto_semantic is not None:
+        auto_semantic.start()
     yield
     if gather is not None:
         await run_in_threadpool(gather.stop)
+    if auto_semantic is not None:
+        await run_in_threadpool(auto_semantic.stop)
     if auto_index is not None:
         await run_in_threadpool(auto_index.stop)
     if auto_backup is not None:
@@ -115,6 +120,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.state.auto_index = None
     app.state.gather_daemon = None
     app.state.auto_backup = None
+    app.state.auto_semantic = None
     try:
         # Load configuration
         config = Config(config_path)
@@ -146,7 +152,8 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         # DataGatherer: every connector is checked here (a broken one stops the start, loudly)
         gather_registry.load()
         job_manager = JobManager(db, config, build_job_types(config, db, on_dup_scan_done=duplicates.remember_scan)
-                                 + gather_jobs.build(config, db, lambda: app.state.jobs))
+                                 + gather_jobs.build(config, db, lambda: app.state.jobs)
+                                 + semantic.build_job_types(config, db))
         db.when_ready(lambda: _recover_jobs(job_manager))
         # Old-style thumbnails (made before EXIF rotation, path-only key) and stored
         # placeholders are made again on demand; clear them out in the background
@@ -161,6 +168,16 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         if os.environ.get("DATAVAULT_AUTO_INDEX", "1") != "0":
             app.state.auto_index = media_index.AutoIndexer(job_manager)
             media_index.set_updater(app.state.auto_index.request)
+            # Slim zoeken: photos are recognised after the index, once the model is installed
+            app.state.auto_semantic = semantic.SemanticAuto(job_manager, config, db)
+            # ... and the text model is read from disk now (10-20 s the first time after a boot),
+            # so the first query does not wait for it
+            def _warm():
+                try:
+                    semantic.warm_up(config)
+                except Exception:
+                    pass    # the first query reports a model that does not load
+            threading.Thread(target=_warm, daemon=True, name="semantic-warm").start()
         else:
             media_index.set_updater(None)
         # DATAVAULT_GATHER_DAEMON=0 turns the DataGatherer thread off (tests tick it themselves)
@@ -190,6 +207,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         series.init_router(config, db, job_manager)
         datagatherer.init_router(config, db, job_manager)
         backup_routes.init_router(config, app.state.auto_backup)
+        search.init_router(config, db, job_manager)
 
         _say("DataVault Dashboard initialized successfully")
 
@@ -223,6 +241,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(datagatherer.router, prefix="/api/datagatherer", tags=["datagatherer"], dependencies=vault)
     # Not behind require_vault: the backups are on the Mac's own disk (a backup itself needs the database)
     app.include_router(backup_routes.router, prefix="/api/backup", tags=["backup"])
+    app.include_router(search.router, prefix="/api/search", tags=["search"], dependencies=vault)
     app.include_router(security.router)
     app.include_router(core_router)
 
