@@ -118,9 +118,10 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     now = time.time()
     cov = connector.coverage(gctx)
     api = connector.has("api_sync")
+    local = connector.has("local_import")      # a database on this Mac (Chrome, Safari): 'configured' = found
     keychain_ok = True
     try:
-        configured = api and connector.is_configured(gctx)
+        configured = (api or local) and connector.is_configured(gctx)
     except keychain.SecretStoreError:
         # Locked, or the user clicked 'Weigeren' at the Keychain prompt: the tab still works
         configured, keychain_ok = False, False
@@ -200,6 +201,10 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     elif not cov.records and not raws and connector.has("export_request"):
         primary = "request_export"
         step = f"Nog geen gegevens. Vraag een export aan: {name} maakt hem voor je klaar, DataVault leest hem in."
+    elif local and not api:
+        primary = "sync"
+        step = (f"{name} is niet gevonden op deze Mac." if not connector.has("import")
+                else f"{name} is niet gevonden op deze Mac. Je kunt ook een kopie kiezen met Bestand kiezen.")
     elif api and sync_failed:
         primary = "connect"
         step = "Bijwerken lukte de laatste keer niet. Controleer de instellingen en verbind opnieuw."
@@ -223,6 +228,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         step += f" Een export kon niet gelezen worden: {failed['error']}"
 
     actions = []
+    if local and configured:
+        actions.append("sync")
     if api:
         actions.append("sync" if configured else None)
         actions.append("reconnect" if configured or st["needs_reconnect"] else "connect")
