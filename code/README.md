@@ -557,6 +557,14 @@ heeft een Python met Playwright nodig (`pip install playwright && playwright ins
 en wordt niet door pytest meegenomen. Voor de server gebruikt hij `code/venv`, of de Python in
 `DATAVAULT_PYTHON` (handig in een git worktree zonder eigen venv).
 
+Voor schermafbeeldingen en ontwerpreviews is er een voller voorbeeldarchief:
+`tests/fixtures/showcase_vault.py DIR` maakt ongeveer 190 gegenereerde foto's over 2015-2025 en een
+dozijn landen (met GPS, bursts, kopieën, video, audio, Spotify en DataGatherer-bronnen), en
+`--populate URL` vult het via de API van een testserver (index, reeksen, albums, stemmen, Keurer,
+terug te zetten acties, een export). Start die server met `DATAVAULT_TESTING=1`,
+`DATAVAULT_CONFIG=DIR_config.json`, `DATAVAULT_GATHER_HOME=DIR/../home` en
+`DATAVAULT_CHROME_DIR=DIR/../Chrome`, met DIR in de tijdelijke map.
+
 Geen enkele pytest-test praat met een echte Ollama: `tests/conftest.py` zet de chat voor elke
 test op een nep-Ollama (`FakeOllama` in `tests/helpers.py`), die je per test kunt laten
 uitvallen, een model kunt laten missen of een fout kunt laten sturen. De testkluis bevat ook
