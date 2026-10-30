@@ -1358,6 +1358,13 @@ textarea.input {
     gap: var(--space-sm);
 }
 
+/* Een korte uitleg links in de voettekst, de knoppen rechts */
+.modal-footer-note {
+    margin-right: auto;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+}
+
 /* Vensters zoals het sneltoetsenoverzicht (ui.js) */
 .dv-overlay {
     position: fixed;

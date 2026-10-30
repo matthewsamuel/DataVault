@@ -986,6 +986,7 @@
             box.replaceChildren(emptyState({
                 icon: 'fa-images', title: 'Het archief is nog leeg',
                 text: 'Zodra er foto\'s, video\'s of audio in het archief staan, zie je ze hier.',
+                action: { label: 'Naar Bestanden', primary: true, onClick: () => switchMainView('viewer') },
             }));
         }
     }

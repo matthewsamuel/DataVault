@@ -2805,6 +2805,8 @@ async function storageNavigateToPath(folderPath) {
                 text: folderPath ? 'Deze map heeft geen submappen.' : 'Het archief heeft nog geen mappen.' }));
         }
 
+        // Bovenaan is het aandeel in het hele archief; in een map het aandeel in die map
+        const shareOf = folderPath ? 'van deze map' : 'van het totaal';
         entries.forEach(([folder, size]) => {
             const percent = total > 0 ? (size / total * 100).toLocaleString('nl-NL', { maximumFractionDigits: 1 }) : '0';
             const newPath = folderPath ? `${folderPath}/${folder}` : folder;
@@ -2820,7 +2822,7 @@ async function storageNavigateToPath(folderPath) {
                 <div class="storage-progress-bar">
                     <div class="storage-progress-fill" style="width: ${total > 0 ? size / total * 100 : 0}%"></div>
                 </div>
-                <div class="storage-folder-percent"><span class="storage-folder-percent-value">${percent}%</span> van deze map</div>
+                <div class="storage-folder-percent"><span class="storage-folder-percent-value">${percent}%</span> ${shareOf}</div>
             `;
             list.appendChild(li);
         });
@@ -2964,6 +2966,10 @@ async function openSettingsModal() {
                 <div id="settings-folders-list" class="settings-list">
                     <div class="loading-spinner"></div>
                 </div>
+            </div>
+            <div class="modal-footer">
+                <span class="modal-footer-note">Een wijziging wordt meteen bewaard.</span>
+                <button type="button" class="btn btn-secondary" onclick="closeSettingsModal()">Sluiten</button>
             </div>
         </div>
     `;
