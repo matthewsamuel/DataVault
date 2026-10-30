@@ -132,6 +132,24 @@ def test_show_list_is_consistent(client, vault):
         assert show["preview"]["path"].startswith(show["path"] + "/")
 
 
+def test_a_show_has_a_small_cover_stack_of_its_own_files(client, vault):
+    lib = vault / "library"
+    _fill(lib / "Veel", 5)
+    _fill(lib / "Twee", 2)
+    _fill(lib / "Een", 1)
+    (lib / "Een" / "._f0001.jpg").write_bytes(b"junk")
+    (lib / "Alleen onder").mkdir()
+    _fill(lib / "Alleen onder" / "sub", 3)
+    by_title = {s["title"]: s for s in client.get("/api/shows/stories").json()["shows"]}
+    for title, size in (("Veel", 2), ("Twee", 1), ("Een", 0), ("Alleen onder", 0)):
+        show = by_title[title]
+        stack = [item["path"] for item in show["stack"]]
+        assert len(stack) == size, title
+        # Different photos than the cover, from the folder itself, never Finder litter
+        assert show["preview"]["path"] not in stack and len(set(stack)) == len(stack)
+        assert all(p.startswith(show["path"] + "/") and "/." not in p and p.rsplit("/", 1)[0] == show["path"] for p in stack)
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a chmod-000 folder")
 def test_one_unreadable_folder_does_not_end_the_show_list(client, vault):
     lib = vault / "library"
