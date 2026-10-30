@@ -125,8 +125,9 @@ WEAK_FALLBACK = 5                 # search_photos: weaker hits returned when not
 # Image to image cosines sit on another scale (0.6-0.95): a near-copy must not set the cut
 NEAR_COPY = 0.93
 # Text results show one tile per picture: a photo whose vector is this close to a better
-# result (the same picture in another folder, or saved again) is folded into that result
-# ('copies'). Burst shots and edits stay apart (they sit around 0.93-0.97).
+# result and that has the same file name or size (the same picture in another folder, or
+# saved again under its name) is folded into that result ('copies'). Burst shots and edits
+# stay apart: they can look as alike, but differ in name and size.
 COPY_COSINE = 0.985
 COPY_SCORE_GAP = 0.01             # copies score (almost) the same for any text
 COPY_WINDOW = 64                  # better results compared with, at most
@@ -1079,25 +1080,52 @@ def relevance_cut(scores: np.ndarray, background: np.ndarray, spread: float = SC
     return cut
 
 
-def collapse_copies(ids: np.ndarray, scores: np.ndarray, vectors: np.ndarray):
+def collapse_copies(ids: np.ndarray, scores: np.ndarray, vectors: np.ndarray,
+                    files: Dict[int, Tuple[str, int]]):
     """
     Fold copies of one picture into their best result (ids and scores are best first,
-    vectors the image vectors of the first rows). Returns (keep mask, {kept id: [copy ids]}).
+    vectors the image vectors of the first rows, files {id: (name, size)}). A copy looks
+    the same (COPY_COSINE) and has the same file name or the same size: two shots of one
+    scene look as alike but are not copies. Returns (keep mask, {kept id: [copy ids]}).
     """
     n = min(len(ids), len(vectors))
     keep = np.ones(len(ids), dtype=bool)
     copies: Dict[int, List[int]] = {}
+    group: Dict[int, List[Tuple[str, int]]] = {}       # kept id -> names and sizes of it and its copies
+
+    def same_file(kept_id: int, name: str, size: int) -> bool:
+        members = group.setdefault(kept_id, [files.get(kept_id, ("", -1))])
+        return any(name.casefold() == str(n).casefold() or size == s for n, s in members)
+
     for i in range(1, n):
         lo = max(0, i - COPY_WINDOW)
         near = lo + np.flatnonzero(keep[lo:i] & (scores[lo:i] - scores[i] <= COPY_SCORE_GAP))
         if not len(near):
             continue
         sims = vectors[near] @ vectors[i]
-        j = int(np.argmax(sims))
-        if sims[j] >= COPY_COSINE:
-            keep[i] = False
-            copies.setdefault(int(ids[near[j]]), []).append(int(ids[i]))
+        name, size = files.get(int(ids[i]), (None, None))
+        for k in np.argsort(-sims):
+            if sims[k] < COPY_COSINE:
+                break
+            kept_id = int(ids[near[k]])
+            if name is not None and same_file(kept_id, name, size):
+                keep[i] = False
+                copies.setdefault(kept_id, []).append(int(ids[i]))
+                group[kept_id].append((name, size))
+                break
     return keep, copies
+
+
+def _files_by_id(db, ids: Sequence[int]) -> Dict[int, Tuple[str, int]]:
+    out: Dict[int, Tuple[str, int]] = {}
+    ids = [int(i) for i in ids]
+    with db._connect() as conn:
+        for start in range(0, len(ids), 900):
+            chunk = ids[start:start + 900]
+            for media_id, name, size in conn.execute(
+                    f"SELECT id, name, size FROM media WHERE id IN ({', '.join('?' * len(chunk))})", chunk):
+                out[media_id] = (name, size)
+    return out
 
 
 def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: Dict[str, Any],
@@ -1139,7 +1167,8 @@ def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: D
     copies: Dict[int, List[int]] = {}
     if key[0] == "text" and len(ids) > 1:
         head = min(len(ids), COLLAPSE_LIMIT)
-        kept, copies = collapse_copies(ids[:head], scores[:head], _index.vectors_of(ids[:head]))
+        kept, copies = collapse_copies(ids[:head], scores[:head], _index.vectors_of(ids[:head]),
+                                       _files_by_id(db, ids[:head]))
         if copies:
             kept = np.concatenate([kept, np.ones(len(ids) - head, dtype=bool)])
             ids, scores = ids[kept], scores[kept]

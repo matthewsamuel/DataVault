@@ -213,11 +213,12 @@ def test_photos_are_recognised_and_found_by_text(client, config, vault, fake):
     assert result["made_thumbs"] == result["embedded"]   # the thumbnails were made on the way
     answer = client.get("/api/search/semantic", params={"q": "iets blauws"}).json()
     strand_names = {Path(STRAND).name, "strand 001 kopie.jpg", "dup van strand.jpg", "strand klein.jpg"}
-    # The four copies of the strand photo are one tile, with the other three as its copies
-    first = answer["items"][0]
-    assert first["name"] in strand_names and first["copies"] == 3
-    assert {Path(first["path"]).name, *(Path(p).name for p in first["copy_paths"])} == strand_names
-    assert not strand_names & set(_names(answer)[1:])
+    # The three exact copies of the strand photo are one tile; the smaller one saved under
+    # another name is a picture of its own
+    copies = strand_names - {"strand klein.jpg"}
+    tile = next(i for i in answer["items"] if i["name"] in copies)
+    assert tile["copies"] == 2 and {tile["name"], *(Path(p).name for p in tile["copy_paths"])} == copies
+    assert set(_names(answer)[:2]) == {tile["name"], "strand klein.jpg"}
     assert answer["items"][0]["score"] >= answer["items"][-1]["score"]
     assert answer["total"] >= 1 and answer["indexed"] == result["embedded"] and answer["pending"] == 0
     first = answer["items"][0]

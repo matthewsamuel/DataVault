@@ -18,14 +18,14 @@ def lib(tmp_path):
     rng = np.random.default_rng(7)
     state = {"n": 0}
 
-    def add(vector, name=None):
+    def add(vector, name=None, size=None):
         state["n"] += 1
         i, now = state["n"], time.time()
         with db._connect() as conn:
             conn.execute(
                 "INSERT INTO media (id, path, folder, name, kind, ext, size, mtime_ns, added_at, indexed_at, seen_at) "
-                "VALUES (?,?,?,?, 'photo', 'jpg', 1, 1, ?, ?, ?)",
-                (i, f"/v/{i}.jpg", "/v", name or f"{i}.jpg", now, now, now))
+                "VALUES (?,?,?,?, 'photo', 'jpg', ?, 1, ?, ?, ?)",
+                (i, f"/v/{i}.jpg", "/v", name or f"{i}.jpg", size or 1000 + i, now, now, now))
         semantic._write(db, spec, [(i, vector.astype(np.float32), "ok", 1, 1, "thumb")])
         semantic._allowed_cache.clear()      # (the media index did not see this insert)
         return i
@@ -207,19 +207,20 @@ def test_the_idle_unload_cannot_pull_the_text_model_away_mid_query(tmp_path):
 def test_copies_of_one_picture_are_one_result_with_their_paths(lib):
     db, cfg, add, mix, query = lib
     photo = mix(query, 0.15)
-    original = add(photo)
-    copy = add(photo)                                        # the same file in another folder
-    resaved = add(photo + 0.01 * mix(query, 0.0))            # saved again: almost the same vector
-    burst = add(mix(photo, 0.95) * 1.0)                      # a burst shot: alike, not a copy
+    original = add(photo, name="IMG_1645.JPG", size=5000)
+    copy = add(photo, name="kopie.jpg", size=5000)                       # the same file under another name
+    resaved = add(photo + 0.01 * mix(query, 0.0), name="img_1645.jpg")  # saved again: almost the same vector
+    twin = add(photo + 0.012 * mix(query, 0.0), name="IMG_1646.JPG")     # the next shot: as alike, not a copy
+    burst = add(mix(photo, 0.95) * 1.0)                                  # a burst shot: alike, not a copy
     for _ in range(40):
         add(mix(query, 0.0))
     result = semantic.search_text(db, cfg, "x")
     ids = [it["id"] for it in result["items"]]
     assert ids.count(original) + ids.count(copy) + ids.count(resaved) == 1
-    first = result["items"][0]
-    assert first["copies"] == 2 and len(first["copy_paths"]) == 2
-    assert {first["id"], *(int(p.split("/")[-1].split(".")[0]) for p in first["copy_paths"])} == {original, copy, resaved}
-    assert burst in ids and "copies" not in result["items"][ids.index(burst)]
+    tile = next(it for it in result["items"] if it["id"] in (original, copy, resaved))
+    assert tile["copies"] == 2 and len(tile["copy_paths"]) == 2
+    assert {tile["id"], *(int(p.split("/")[-1].split(".")[0]) for p in tile["copy_paths"])} == {original, copy, resaved}
+    assert burst in ids and twin in ids and "copies" not in result["items"][ids.index(burst)]
     assert result["total"] == len(ids)
     # 'Vergelijkbaar' still shows every copy
     similar = [it["id"] for it in semantic.search_similar(db, cfg, burst)["items"]]
