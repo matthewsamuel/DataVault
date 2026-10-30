@@ -168,3 +168,35 @@ def test_dutch_and_english_find_about_as_much():
         found[lang] = sum(int((photos @ v >= semantic.relevance_cut(photos @ v, photos @ v)).sum()) for v in vectors)
     assert abs(found["nl"] - found["en"]) <= 0.1 * found["en"], found
 
+
+
+# ---------- the text model that is let go when idle ----------
+
+def test_the_idle_unload_cannot_pull_the_text_model_away_mid_query(tmp_path):
+    class Session:
+        def run(self, names, feed):
+            return [np.ones((1, 4), dtype=np.float32)]
+
+    class Tokenizer:
+        def encode(self, text):
+            return type("T", (), {"ids": [1, 2, 3]})()
+
+    class Racy(semantic.Encoder):
+        loads = 0
+
+        def load_text(self):
+            with self._lock:
+                if self._text is None:
+                    self._text, self._tokenizer = Session(), Tokenizer()
+                    self.loads += 1
+            if self.loads == 1:
+                self.unload_text(0)           # the 30-second idle tick lands right here
+
+    encoder = Racy(semantic.current_model(), tmp_path)
+    assert encoder.encode_text("hond").shape == (4,)
+    assert encoder.loads == 2 and encoder.text_ready()
+    # A query (and a warm-up of a loaded model) counts as use: the idle unload leaves it
+    assert not encoder.unload_text(60)
+    encoder.text_used -= 120
+    semantic.Encoder.load_text(encoder)
+    assert not encoder.unload_text(60)

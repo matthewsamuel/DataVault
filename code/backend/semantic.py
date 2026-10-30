@@ -468,6 +468,7 @@ class Encoder:
     def load_text(self) -> None:
         with self._lock:
             if self._text is not None:
+                self.text_used = time.monotonic()      # (warm-up counts as use: not let go right after)
                 return
             import onnxruntime as ort
             from tokenizers import Tokenizer
@@ -495,10 +496,17 @@ class Encoder:
             self.image_device = None
 
     def encode_text(self, text: str) -> np.ndarray:
-        self.load_text()
-        self.text_used = time.monotonic()
-        ids = np.array([self._tokenizer.encode(clean_query(text)).ids], dtype=np.int64)
-        vector = self._text.run(["pooler_output"], {"input_ids": ids})[0][0]
+        # The session and tokenizer are taken (and the use recorded) under the lock, so the
+        # idle unload cannot let them go between loading and running
+        while True:
+            self.load_text()
+            with self._lock:
+                tokenizer, session = self._tokenizer, self._text
+                if session is not None:
+                    self.text_used = time.monotonic()
+                    break
+        ids = np.array([tokenizer.encode(clean_query(text)).ids], dtype=np.int64)
+        vector = session.run(["pooler_output"], {"input_ids": ids})[0][0]
         return _normalised(vector)
 
     def reference_vector(self) -> np.ndarray:
