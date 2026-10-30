@@ -468,9 +468,12 @@ async function dgDoAction(src, action, button) {
     }
 }
 
+const DG_PICK_ACCEPT = '.zip,.json,.tgz,.gz,.txt,.csv,.sqlite,.db';
+
 // Een exportbestand kiezen (de browser leest het, de server kopieert het naar het archief)
 function dgPickFile(src) {
-    const input = createEl('input', { type: 'file', accept: '.zip,.json,.tgz,.txt,.sqlite', class: 'sr-only', 'aria-hidden': 'true' });
+    // Alle extensies die de server aanneemt (daemon.EXPORT_SUFFIXES); Safari grijst de rest uit
+    const input = createEl('input', { type: 'file', accept: DG_PICK_ACCEPT, class: 'sr-only', 'aria-hidden': 'true' });
     input.addEventListener('change', async () => {
         const file = input.files && input.files[0];
         input.remove();

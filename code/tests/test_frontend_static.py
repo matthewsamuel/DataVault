@@ -163,3 +163,15 @@ def test_screen_bound_toasts_and_audio_tiles():
     app = (FRONTEND / "app.js").read_text()
     assert "toast.dataset.view = activeMainView" in app and "t.dataset.view !== view" in app
     assert "audioThumbUrl(file.name)" not in app and "fa-music" in app
+
+
+def test_the_export_picker_accepts_every_suffix_the_server_takes():
+    """Safari greys out files that do not match accept: every server suffix must be in it
+    (History.db for Safari, NetflixViewingHistory.csv, ...)."""
+    from backend.datagatherer.daemon import EXPORT_SUFFIXES
+    source = (FRONTEND / "datagatherer.js").read_text(encoding="utf-8")
+    m = re.search(r"const DG_PICK_ACCEPT = '([^']+)'", source)
+    assert m and "accept: DG_PICK_ACCEPT" in source
+    accept = set(m.group(1).split(","))
+    for suffix in EXPORT_SUFFIXES:
+        assert "." + suffix.rsplit(".", 1)[-1] in accept, suffix
