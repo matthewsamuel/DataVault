@@ -174,7 +174,7 @@
 
     function writeHash() {
         const hash = hashFor();
-        if (location.hash !== hash) history.replaceState(null, '', location.pathname + location.search + hash);
+        if (location.hash !== hash) history.replaceState(history.state, '', location.pathname + location.search + hash);
     }
 
     // Het adres lezen: true als het over Albums ging
@@ -214,6 +214,8 @@
 
     window.addEventListener('hashchange', () => {
         if (!location.hash.startsWith('#albums')) return;
+        // Terug of Vooruit: app.js (popstate) heeft deze stap al getoond
+        if (typeof navIsRestoring === 'function' && navIsRestoring()) return;
         if (currentMainView() !== 'albums') {
             switchMainView('albums');
             return;
@@ -223,8 +225,23 @@
 
     // Albums verlaten: het adres weer leeg (het hoort niet bij de andere schermen)
     window.albumsLeave = function () {
-        if (location.hash.startsWith('#albums')) history.replaceState(null, '', location.pathname + location.search);
+        if (location.hash.startsWith('#albums')) history.replaceState(history.state, '', location.pathname + location.search);
     };
+
+    // Terug of Vooruit naar een andere stap binnen Albums (een ander album, Op deze dag)
+    window.albumsRestore = function () {
+        if (readHash()) showMode();
+    };
+
+    // Naar een ander album of Op deze dag is een eigen stap in de geschiedenis
+    function pushHash() {
+        const hash = hashFor();
+        if (location.hash === hash && history.state && history.state.view === 'albums') return;
+        const state = { view: 'albums' };
+        const url = location.pathname + location.search + hash;
+        if (history.state && history.state.view) history.pushState(state, '', url);
+        else history.replaceState(state, '', url);
+    }
 
     // ── Openen ───────────────────────────────────────────
 
@@ -284,8 +301,9 @@
         state.mode = 'otd';
         state.otdMonth = month || now.getMonth() + 1;
         state.otdDay = day || now.getDate();
-        history.replaceState(null, '', location.pathname + location.search + hashFor());
-        switchMainView('albums');
+        pushHash();
+        if (currentMainView() !== 'albums') switchMainView('albums');
+        else showMode();
     };
 
     window.albumsShow = function (albumId, spec, sort) {
@@ -296,12 +314,9 @@
         const album = currentAlbum();
         state.spec = spec ? { ...spec } : album ? JSON.parse(JSON.stringify(album.filters || {})) : {};
         state.sort = sort || (album ? album.sort : DEFAULT_SORT);
-        if (currentMainView() !== 'albums') {
-            history.replaceState(null, '', location.pathname + location.search + hashFor());
-            switchMainView('albums');
-        } else {
-            showMode();
-        }
+        pushHash();
+        if (currentMainView() !== 'albums') switchMainView('albums');
+        else showMode();
     };
 
     // Nieuw slim album: vanaf alles, met een uitleg onder de filters (geen melding over de knoppen
@@ -611,6 +626,20 @@
         return state.customRange ? 'range' : '';
     }
 
+    // De aantallen in de keuzelijsten tellen het hele archief. Staat er nog een ander filter aan,
+    // dan kloppen ze niet meer voor deze selectie: dan alleen de namen, geen (misleidend) getal
+    const FACET_KEYS = {
+        when: ['year', 'month', 'period', 'date_from', 'date_to'],
+        camera: ['camera', 'camera_contains'],
+        ext: ['ext'],
+    };
+    function facetCount(facet, n) {
+        const own = FACET_KEYS[facet];
+        const other = Object.keys(state.spec).some(k => !own.includes(k) && state.spec[k] !== undefined
+            && state.spec[k] !== null && !(Array.isArray(state.spec[k]) && !state.spec[k].length));
+        return other ? '' : ` (${formatNumberNl(n)})`;
+    }
+
     function renderFilters() {
         const spec = state.spec;
         document.querySelectorAll('#albums-kinds .pill').forEach(pill => {
@@ -618,7 +647,7 @@
         });
         const years = (state.facets && state.facets.years) || [];
         const when = $('albums-when');
-        const yearOptions = years.map(([y, n]) => option(`y:${y}`, `${y} (${formatNumberNl(n)})`));
+        const yearOptions = years.map(([y, n]) => option(`y:${y}`, `${y}${facetCount('when', n)}`));
         if (spec.year && !years.some(([y]) => y === spec.year)) yearOptions.unshift(option(`y:${spec.year}`, String(spec.year)));
         when.replaceChildren(option('', 'Altijd'),
             ...Object.entries(PERIODS).map(([v, l]) => option(v, l)),
@@ -650,14 +679,14 @@
         // Meer filters
         const cameras = (state.facets && state.facets.cameras) || [];
         const camera = $('albums-camera');
-        const camOptions = cameras.map(c => option(c.value, `${c.label} (${formatNumberNl(c.count)})`));
+        const camOptions = cameras.map(c => option(c.value, `${c.label}${facetCount('camera', c.count)}`));
         if (spec.camera && !cameras.some(c => c.value === spec.camera)) camOptions.unshift(option(spec.camera, spec.camera));
         if (spec.camera_contains) camOptions.unshift(option(CAMERA_CONTAINS, `Bevat '${spec.camera_contains}'`));
         camera.replaceChildren(option('', 'Camera'), ...camOptions);
         camera.value = spec.camera || (spec.camera_contains ? CAMERA_CONTAINS : '');
         const exts = (state.facets && state.facets.exts) || [];
         const ext = $('albums-ext');
-        const extOptions = exts.map(x => option(x.ext, `${x.ext} (${formatNumberNl(x.count)})`));
+        const extOptions = exts.map(x => option(x.ext, `${x.ext}${facetCount('ext', x.count)}`));
         (spec.ext || []).forEach(x => { if (!exts.some(e => e.ext === x)) extOptions.unshift(option(x, x)); });
         ext.replaceChildren(option('', 'Bestandstype'), ...extOptions);
         ext.value = spec.ext && spec.ext.length === 1 ? spec.ext[0] : '';
@@ -1626,7 +1655,7 @@
     const bootHash = location.hash;
     document.addEventListener('DOMContentLoaded', () => {
         if (!bootHash.startsWith('#albums')) return;
-        history.replaceState(null, '', location.pathname + location.search + bootHash);
+        history.replaceState(history.state, '', location.pathname + location.search + bootHash);
         switchMainView('albums');
     });
 

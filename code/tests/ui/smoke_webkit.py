@@ -433,21 +433,33 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("recovery: 8 opens the Herstelcentrum", lambda: page.keyboard.press("8"), 1.0)
             expect(page.locator(".recovery-entry").count() == 2, "recovery: no entry for each move")
             focused = "(document.activeElement.closest('.recovery-entry') || {dataset: {}}).dataset.key || document.activeElement.id"
-            accept = lambda d: d.accept()
-            page.on("dialog", accept)
+            native = []
+            page.on("dialog", lambda d: (native.append(d.message), d.dismiss()))
             first_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
-            step("recovery: Enter on Terugzetten", lambda: (
-                page.focus(".recovery-entry .recovery-undo"), page.keyboard.press("Enter")), 1.2)
+            step("recovery: Enter on Terugzetten asks in the app's own window", lambda: (
+                page.focus(".recovery-entry .recovery-undo"), page.keyboard.press("Enter"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000)), 0.3)
+            expect(page.evaluate("document.activeElement.textContent") == "Annuleren"
+                   and "terugzetten" in page.text_content("#dv-confirm-title"),
+                   f"recovery: the question does not start on Annuleren ({page.evaluate('document.activeElement.textContent')!r})")
+            step("recovery: Escape cancels the question", lambda: page.keyboard.press("Escape"), 0.5)
+            expect(not Path(second_src).exists() and page.evaluate(focused) == first_key,
+                   f"recovery: Escape still undid the move, or the focus did not come back ({page.evaluate(focused)})")
+            step("recovery: Terugzetten, then confirm", lambda: (
+                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.2)
             expect(Path(second_src).exists(), "recovery: the newest move did not go back")
             left_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
             expect(left_key != first_key and page.evaluate(focused) == left_key,
                    f"recovery: focus not on the next entry after the undo ({page.evaluate(focused)})")
-            step("recovery: Enter on the last Terugzetten", lambda: page.keyboard.press("Enter"), 1.2)
+            step("recovery: Enter on the last Terugzetten", lambda: (
+                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.2)
             expect(Path(moved_src).exists(), "recovery: the file did not go back")
             expect(page.is_visible("#recovery-list .empty-state"), "recovery: the list did not show its empty state")
             expect(page.evaluate("document.activeElement.id") == "recovery-title",
                    f"recovery: focus not on the title once the list is empty ({page.evaluate(active_id)})")
-            page.remove_listener("dialog", accept)
+            expect(not native, f"recovery: a native browser dialog appeared ({native})")
 
             # Instellingen: every built-in part is there and the theme can be chosen there
             step("settings: 9 opens Instellingen", lambda: page.keyboard.press("9"), 1.0)
@@ -532,8 +544,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             undone = page.evaluate(keurer_state)
             expect(undone[1] == before[1] and Path(keurer_file).exists(),
                    f"keurer: ArrowDown did not undo the decision ({undone} vs {before})")
+            # The undone photo is the next card again and counts as still to judge
+            expect(undone[0] == before[0] and page.evaluate("keurerFileQueue[keurerIndex].path") == keurer_file,
+                   f"keurer: the undone photo did not come back as the next card ({undone} vs {before})")
             # Only the Keurer tab passes arrows on: on another tab an arrow decides nothing.
-            # (Undoing a keep leaves keurerIndex where it is, so compare with the state just before.)
             base = page.evaluate(keurer_state)
             current = page.evaluate("keurerFileQueue[keurerIndex].path")
             step("keurer: arrow on the Tijdlijn tab", lambda: (
@@ -634,10 +648,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"settings: install button says {install_text!r}")
             # The install button asks first, with where it downloads from; 'Annuleren' downloads nothing
             asked = []
-            dismiss = lambda d: (asked.append(d.message), d.dismiss())  # noqa: E731
-            page.on("dialog", dismiss)
-            step("settings: install asks first", lambda: page.click("#settings-search-install"), 0.6)
-            page.remove_listener("dialog", dismiss)
+            step("settings: install asks first", lambda: (
+                page.click("#settings-search-install"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                asked.append(page.text_content("#modal-dv-confirm")),
+                page.click("#modal-dv-confirm .btn-secondary")), 0.6)
             jobs_now = page.evaluate("fetch('/api/jobs?type=model_download').then(r => r.json()).then(d => d.jobs.length)")
             expect(asked and "huggingface.co" in asked[0] and jobs_now == 0,
                    f"settings: install did not ask, or started anyway ({asked}, {jobs_now} jobs)")
@@ -917,6 +931,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                      document.getElementById('global-search').placeholder]""")
             expect(len(head[0]) == 3 and len(set(head[0])) == 1 and head[1] == "Zoeken…",
                    f"albums: at 1024 the header buttons sit at {head[0]}, search says {head[1]!r}")
+            # With another filter on, the camera list shows no archive-wide counts that would not match
+            labels = page.evaluate("[...document.querySelectorAll('#albums-camera option')].slice(1).map(o => o.textContent)")
+            expect(all("(" not in label for label in labels),
+                   f"albums: camera counts for the whole archive while Foto's is on ({labels[:3]})")
             page.set_viewport_size({"width": 1400, "height": 900})
             page.evaluate("albumsShow(null, {}, '-taken')")
 
@@ -963,6 +981,25 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("mapView().markers") <= geo[0], "map: the oldest year shows more than everything")
             step("map: clear the filters", lambda: page.click("#map-reset"), 1.0)
             expect(page.evaluate("mapView().markers") == geo[0], "map: clearing the filters did not bring every point back")
+            # A begin date after the end date: said next to the dates, the map and counts stay
+            count_before = page.text_content("#map-count")
+            step("map: dates the wrong way round", lambda: (
+                page.fill("#map-date-from", "2020-01-01"), page.dispatch_event("#map-date-from", "change"),
+                page.wait_for_timeout(800),
+                page.fill("#map-date-to", "2019-01-01"), page.dispatch_event("#map-date-to", "change")), 0.8)
+            # (the valid begin date alone may leave an empty map: that empty state is fine, a failure is not)
+            expect(page.is_visible("#map-range-error") and "mislukte" not in (page.text_content("#map-overlay") or ""),
+                   "map: reversed dates did not give the inline message, or showed the load-failed state")
+            step("map: clear the filters again", lambda: page.click("#map-reset"), 1.0)
+            expect(page.is_hidden("#map-range-error") and page.text_content("#map-count") == count_before,
+                   f"map: clearing left the date message or other counts ({page.text_content('#map-count')!r})")
+            # Back and Forward of the browser go between the screens, not out of the app
+            step("history: Back from Kaart", lambda: page.go_back(), 1.0)
+            expect(page.evaluate("currentMainView()") == "albums" and page.evaluate("location.hash").startswith("#albums"),
+                   f"history: Back went to {page.evaluate('[currentMainView(), location.hash]')}, not Albums")
+            step("history: Forward to Kaart", lambda: page.go_forward(), 1.0)
+            expect(page.evaluate("[currentMainView(), location.hash]") == ["map", ""],
+                   f"history: Forward went to {page.evaluate('[currentMainView(), location.hash]')}, not Kaart")
             expect(not outside, f"map: requests left this machine while the tiles were off: {outside}")
             # The opt-in: only after the switch does the browser ask OpenStreetMap for tiles (answered here by
             # a blank tile, so nothing really goes out), and the choice is kept by the server
@@ -1403,6 +1440,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                    " document.activeElement.id]")
             expect(dialog[0] and "RAW_DUPLICATES/near-duplicates" in dialog[1] and "null" not in dialog[1]
                    and dialog[2] == "btn-series-cancel", f"series: the confirmation is missing or unclear, or does not start on Annuleren ({dialog})")
+            # The card's button and the dialog name the same number (exact copies that move along included)
+            numbers = page.evaluate("[document.getElementById(`series-title-${seriesState.confirm.series.key}`)"
+                                    ".closest('.series-card').querySelector('.series-confirm-btn').textContent,"
+                                    " document.getElementById('btn-series-go').textContent]")
+            expect(re.sub(r"\D", "", numbers[0]) == re.sub(r"\D", "", numbers[1]),
+                   f"series: the card button and the dialog count differently ({numbers})")
             expect_focus_trapped("modal-series-confirm", "series: confirmation")
             page.focus("#btn-series-cancel")
             step("series: Escape moves nothing", lambda: page.keyboard.press("Escape"), 0.4)
@@ -1427,13 +1470,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                   " (document.querySelector('#series-list .empty-state-action') || {}).textContent]")
             expect(empty == ["Alle reeksen overgeslagen", "Overgeslagen tonen"],
                    f"series: after the last decision the list did not say the rest was skipped ({empty})")
-            accept = lambda d: d.accept()
-            page.on("dialog", accept)
             step("series: undo in the Herstelcentrum", lambda: (
                 page.click(".top-nav [data-view='recovery']"),
                 page.wait_for_selector(".recovery-entry"),
-                page.click(".recovery-entry:has-text('Beste uit reeks') .recovery-undo")), 1.5)
-            page.remove_listener("dialog", accept)
+                page.click(".recovery-entry:has-text('Beste uit reeks') .recovery-undo"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.5)
             expect(klein.exists() and not (holding / "2022" / "bursts" / "strand klein.jpg").exists(),
                    "series: the Herstelcentrum did not put the resized photo back")
             step("series: back on the tab", lambda: page.click(".top-nav [data-view='duplicates']"), 1.0)

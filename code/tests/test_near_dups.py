@@ -457,6 +457,11 @@ def test_a_stopped_run_keeps_what_it_did_and_the_next_one_finishes(client, confi
     assert job["status"] == ("paused" if how == "pause" else "cancelled"), job
     stored = _phash_rows(config)
     assert 0 < stored < 20
+    # The status adds up: compared + still to analyse + unreadable = all photos; the photos
+    # analysed but not yet paired are not counted again as 'nog te doen'
+    mid = client.get("/api/series/status").json()
+    assert mid["analysed"] + mid["to_analyse"] + mid["undecodable"] == mid["photos"], mid
+    assert mid["pending"] >= mid["to_analyse"] > 0
     before = len(calls)
     if how == "pause":
         _manager().resume(job_id["id"])

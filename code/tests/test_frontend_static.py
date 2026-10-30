@@ -183,3 +183,25 @@ def test_date_only_activity_has_no_made_up_time_and_the_tijdlijn_row_is_in_the_c
     css = (FRONTEND / "style.css").read_text(encoding="utf-8")
     assert re.search(r"\.map-header,\s*\.map-filters,\s*\.map-layers\s*\{[^}]*max-width", css)
     assert re.search(r"\.map-layers\[hidden\],\s*\.map-layers \[hidden\]\s*\{\s*display: none", css)
+
+
+def test_the_idle_job_dock_is_a_small_icon_not_a_wide_pill():
+    css = _sources()["style.css"]
+    # the 200 px minimum of a collapsed dock must not apply to the tiny 'n klaar' icon
+    assert ".job-dock.collapsed:not(.compact):not(.tiny)" in css
+    assert not re.search(r"\.job-dock\.collapsed:not\(\.compact\)\s*\{", css)
+    # on a small screen the dock starts collapsed and stays low when opened
+    assert "JOB_DOCK_SMALL" in _sources()["jobs.js"]
+
+
+def test_no_native_browser_dialogs():
+    """Questions use the app's own window (dvConfirm in ui.js), never confirm()/alert()/prompt()."""
+    found = []
+    for name, text in _sources().items():
+        if not name.endswith(".js"):
+            continue
+        for m in re.finditer(r"(?<![\w.$])(?:window\.)?(confirm|alert|prompt)\s*\(", text):
+            line = text.count("\n", 0, m.start()) + 1
+            found.append(f"{name}:{line} {m.group(1)}()")
+    assert found == [], found
+    assert "function dvConfirm(" in _sources()["ui.js"]

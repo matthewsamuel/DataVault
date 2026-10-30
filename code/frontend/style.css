@@ -1358,6 +1358,42 @@ textarea.input {
     gap: var(--space-sm);
 }
 
+/* Een vraag vóór een actie (dvConfirm in ui.js): smal, rustig, boven een ander venster */
+.modal.dv-confirm {
+    z-index: 10050;
+}
+
+.dv-confirm-container {
+    max-width: 480px;
+}
+
+.dv-confirm-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: var(--space-sm);
+    padding: var(--space-lg) var(--space-xl) var(--space-xl);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.dv-confirm-body p {
+    margin: 0;
+}
+
+.dv-confirm-list {
+    margin: 0;
+    padding-left: var(--space-xl);
+}
+
+.dv-confirm-body .mono {
+    font-size: var(--fs-xs);
+    color: var(--text-primary);
+}
+
 /* Vensters zoals het sneltoetsenoverzicht (ui.js) */
 .dv-overlay {
     position: fixed;
@@ -9231,8 +9267,14 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
-/* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar") */
-.job-dock.collapsed:not(.compact) {
+/* Klein icoon: precies zo breed als icoon en aantal, met gelijke ruimte links en rechts */
+.job-dock.tiny .job-dock-header {
+    height: 36px;
+    padding: 0 var(--space-md);
+}
+
+/* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar"); het kleine icoon nog smaller */
+.job-dock.collapsed:not(.compact):not(.tiny) {
     width: max-content;
     min-width: 200px;
 }
@@ -9240,6 +9282,13 @@ button.otd-settings-icon:hover {
 /* Ingeklapt paneel: de bibliotheekregel klapt mee in */
 .job-dock.collapsed:not(.compact) .job-library {
     display: none;
+}
+
+/* Klein of laag venster: het open paneel blijft laag (de lijst scrolt erin) */
+@media (max-width: 1279px), (max-height: 820px) {
+    .job-dock {
+        max-height: min(30vh, 240px);
+    }
 }
 
 @media (max-width: 600px) {
@@ -12134,6 +12183,18 @@ button.otd-settings-icon:hover {
     min-width: 120px;
 }
 
+/* Een lange albumnaam (tot 80 tekens) mag de rij niet oprekken: afgekapt met … */
+.map-filters .select-sm {
+    max-width: 200px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.map-date-field .input[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
 .map-date-field {
     display: inline-flex;
     align-items: center;
@@ -12146,8 +12207,13 @@ button.otd-settings-icon:hover {
     display: none;
 }
 
-.map-filter-spacer {
-    flex: 1;
+/* Aantal en 'Zonder locatie' blijven samen, rechts; past het niet, dan samen op de volgende regel */
+.map-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-left: auto;
+    white-space: nowrap;
 }
 
 .map-count {

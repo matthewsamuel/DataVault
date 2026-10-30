@@ -687,9 +687,12 @@ registerSettingsSection({
 });
 
 async function searchInstallModel(model) {
-    const sources = model.sources.join('\n');
-    const ok = confirm(`Het zoekmodel (ongeveer ${formatBytes(model.size)}) wordt nu eenmalig gedownload van:\n\n`
-        + `${sources}\n\nnaar ${model.folder}.\n\nDaarna werkt Slim zoeken helemaal op deze Mac. Doorgaan?`);
+    const ok = await dvConfirm({
+        title: 'Zoekmodel downloaden?', icon: 'fa-cloud-arrow-down', confirmLabel: 'Downloaden',
+        body: [`Het zoekmodel (ongeveer ${formatBytes(model.size)}) wordt eenmalig gedownload van:`,
+               createEl('ul', { class: 'dv-confirm-list' }, ...model.sources.map(url => createEl('li', { class: 'mono', text: url }))),
+               createEl('p', {}, 'naar ', createEl('span', { class: 'mono', text: model.folder }), '.'), 'Daarna werkt Slim zoeken helemaal op deze Mac.'],
+    });
     if (!ok) return;
     try {
         await jobsStart('model_download', {});

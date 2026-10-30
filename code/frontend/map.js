@@ -329,15 +329,39 @@
         $('map-reset').hidden = !filtersActive();
     }
 
+    // Van… tot…: een begindatum na de einddatum zegt de regel naast de datums meteen (zoals in
+    // Albums); de kaart en de aantallen blijven bij het laatste geldige filter staan
+    function showRangeError(key) {
+        const error = $('map-range-error');
+        if (!key) {
+            error.hidden = true;
+            error.textContent = '';
+            $('map-date-from').removeAttribute('aria-invalid');
+            $('map-date-to').removeAttribute('aria-invalid');
+            return;
+        }
+        error.textContent = key === 'date_from' ? 'De begindatum ligt na de einddatum.' : 'De einddatum ligt voor de begindatum.';
+        error.hidden = false;
+        $(key === 'date_from' ? 'map-date-from' : 'map-date-to').setAttribute('aria-invalid', 'true');
+    }
+
     function onFilter(key, value) {
         const f = state.filters;
-        f[key] = value;
-        if (key === 'year' && value) { f.date_from = ''; f.date_to = ''; }
-        if ((key === 'date_from' || key === 'date_to') && value) f.year = '';
-        if (key === 'album' && value) Object.assign(f, { year: '', date_from: '', date_to: '', camera: '' });
-        if (f.date_from && f.date_to && f.date_from > f.date_to) {
-            showToast('Datums omgedraaid', 'De begindatum lag na de einddatum; de kaart toont niets.', 'warning');
+        if (key === 'date_from' || key === 'date_to') {
+            const from = $('map-date-from').value;
+            const to = $('map-date-to').value;
+            if (from && to && from > to) {
+                showRangeError(key);
+                return;
+            }
+            Object.assign(f, { date_from: from, date_to: to });
+            if (from || to) f.year = '';
+        } else {
+            f[key] = value;
+            if (key === 'year' && value) { f.date_from = ''; f.date_to = ''; }
+            if (key === 'album' && value) Object.assign(f, { year: '', date_from: '', date_to: '', camera: '' });
         }
+        showRangeError(null);
         syncFilterControls();
         loadPoints({ fit: true });
     }
@@ -350,6 +374,7 @@
         $('map-album').addEventListener('change', e => onFilter('album', e.target.value));
         $('map-reset').addEventListener('click', () => {
             state.filters = { year: '', date_from: '', date_to: '', camera: '', album: '' };
+            showRangeError(null);
             syncFilterControls();
             loadPoints({ fit: true });
         });
@@ -359,7 +384,7 @@
             const q = params();
             q.delete('album');
             q.set('has_gps', 'false');
-            location.hash = `#albums?${q.toString()}`;
+            history.pushState({ view: 'albums' }, '', `${location.pathname}${location.search}#albums?${q.toString()}`);
             switchMainView('albums');
         });
     }
@@ -388,10 +413,11 @@
         const none = $('map-nogps');
         none.hidden = !(state.withoutGps > 0 || total > 0);
         none.replaceChildren(createEl('i', { class: 'fas fa-location-crosshairs', 'aria-hidden': 'true' }),
-            ` Foto’s zonder locatie: ${fmt(state.withoutGps)}`);
-        none.setAttribute('aria-label', `Foto\u2019s zonder locatie: ${fmt(state.withoutGps)}`);
+            ` Zonder locatie: ${fmt(state.withoutGps)}`);
+        // Het aantal telt alle bestanden zonder locatie (ook video's en audio), net als Albums
+        none.setAttribute('aria-label', `Bestanden zonder locatie: ${fmt(state.withoutGps)}`);
         none.disabled = !!state.filters.album || !state.withoutGps;
-        none.title = state.filters.album ? 'Kies “Hele archief” om ze in Albums te tonen' : 'Toon deze foto’s in Albums';
+        none.title = state.filters.album ? 'Kies “Hele archief” om ze in Albums te tonen' : 'Toon deze bestanden in Albums';
     }
 
     function makeMarker(p) {
@@ -751,6 +777,7 @@
         if (!state.markers.has(id) && filtersActive()) {
             // De foto valt buiten de filters: eerst die weg
             state.filters = { year: '', date_from: '', date_to: '', camera: '', album: '' };
+            showRangeError(null);
             syncFilterControls();
             await loadPoints({ fit: false });
         }

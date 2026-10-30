@@ -674,3 +674,17 @@ def test_home_widget_leaves_out_file_dated_files_like_the_screen(client, config,
 def test_creating_an_album_refuses_unknown_fields_like_updating(client):
     r = client.post("/api/library/albums", json={"name": "Diep", "filters": {"folder": "RAW"}, "extra": 1})
     assert r.status_code == 400 and "Onbekend veld: extra" in r.json()["detail"]["error"] if isinstance(r.json().get("detail"), dict) else r.status_code == 400
+
+
+def test_camera_text_matches_the_full_name_the_screens_show(indexed):
+    """'Sony A7 IV' is make 'Sony' + model 'A7 IV': typing the name from the camera facet finds it."""
+    from backend.routes import albums
+    with albums.db._connect() as conn:
+        ids = [r[0] for r in conn.execute("SELECT id FROM media WHERE kind = 'photo' ORDER BY id LIMIT 2")]
+        conn.execute("UPDATE media SET camera_make = 'Sony', camera_model = 'A7 IV' WHERE id = ?", (ids[0],))
+        conn.execute("UPDATE media SET camera_make = 'Canon', camera_model = 'Canon EOS 600D' WHERE id = ?", (ids[1],))
+    assert _browse(indexed, camera_contains="Sony A7 IV")["total"] == 1
+    assert _browse(indexed, camera_contains="sony a7")["total"] == 1
+    assert _browse(indexed, camera_contains="A7 IV")["total"] == 1
+    assert _browse(indexed, camera_contains="Canon EOS 600D")["total"] == 1
+    assert _browse(indexed, camera_contains="Sony EOS")["total"] == 0

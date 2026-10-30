@@ -196,6 +196,35 @@ const VIEW_TITLES = {
 // Het scherm waar een melding bij hoort: info en succes blijven niet hangen op een ander scherm
 let activeMainView = 'home';
 
+// ---------- Terug en Vooruit van de browser ----------
+// Elk ander scherm is een stap in de geschiedenis ({view}), zodat ⌘[ of terugvegen in Safari naar
+// het vorige scherm gaat in plaats van de app uit. Albums houdt zijn eigen adres (#albums?...).
+let navRestoring = false;
+
+function navRecord(view) {
+    if (navRestoring) return;
+    const keepHash = view === 'albums' && location.hash.startsWith('#albums');
+    const url = location.pathname + location.search + (keepHash ? location.hash : '');
+    const state = { view };
+    // Een nieuwe pagina (nog zonder stap) of hetzelfde scherm: deze stap bijwerken, niet stapelen
+    if (history.state && history.state.view && history.state.view !== view) history.pushState(state, '', url);
+    else history.replaceState(state, '', url);
+}
+
+window.addEventListener('popstate', (e) => {
+    const albumsHash = location.hash.startsWith('#albums');
+    const view = e.state && MAIN_VIEWS.includes(e.state.view) ? e.state.view : (albumsHash ? 'albums' : 'home');
+    // Tot na de hashchange die bij deze stap hoort: Albums leest het adres hier, niet nog eens daar
+    navRestoring = true;
+    setTimeout(() => { navRestoring = false; }, 0);
+    if (view === 'albums' && currentMainView() === 'albums' && typeof albumsRestore === 'function') albumsRestore();
+    else switchMainView(view);
+});
+
+function navIsRestoring() {
+    return navRestoring;
+}
+
 function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
     if (view !== activeMainView) {
@@ -204,6 +233,7 @@ function switchMainView(view) {
         });
     }
     activeMainView = view;
+    navRecord(view);
     document.title = view === 'home' ? 'DataVault' : `${VIEW_TITLES[view]} · DataVault`;
     // Update tabs (ook de tandwielknop van Instellingen)
     document.querySelectorAll('.top-nav [data-view]').forEach(tab => {
@@ -2487,7 +2517,11 @@ async function restartServer() {
 
     // Dubbele klik beveiliging
     if (brand && brand.dataset.restarting) return;
-    if (!confirm('DataVault-server herstarten?\n\nDe app is dan een paar seconden niet bereikbaar.')) return;
+    if (!await dvConfirm({
+        title: 'DataVault-server herstarten?', icon: 'fa-rotate-right', confirmLabel: 'Herstarten',
+        body: 'De app is dan een paar seconden niet bereikbaar.',
+    })) return;
+    if (brand && brand.dataset.restarting) return;
 
     setBrandRestarting(true);
 
@@ -4157,6 +4191,7 @@ async function sendChat({ inputEl, btn }) {
     };
 
     let fullText = '';
+    let rawText = '';      // het antwoord van het model zoals het kwam, met de ACTION-tag
     const toolEvents = [];
 
     try {
@@ -4198,10 +4233,11 @@ async function sendChat({ inputEl, btn }) {
                     return;
                 }
 
-                if (typeof event.replace === 'string') { fullText = event.replace; showText(fullText); continue; }
+                if (typeof event.replace === 'string') { fullText = event.replace; showText(fullText.replace(/<<ACTION[\s\S]*$/, '').trimEnd()); continue; }
 
                 if (typeof event.token === 'string' && event.token) {
                     fullText += event.token;
+                    rawText += event.token;
                     // Een half binnengekomen ACTION-tag niet laten zien
                     showText(fullText.replace(/(?:<<|<\|)ACTION[\s\S]*$|\{\s*"action"[^}]*$/, '').trimEnd());
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -4213,10 +4249,17 @@ async function sendChat({ inputEl, btn }) {
                     fullText = reply.text;
                     showText(fullText);
                     // Alleen een actie en geen tekst: de lege ballon weglaten, de resultaten komen eronder
-                    if (!fullText && toolEvents.length) { aiMsg.remove(); fullText = 'Ik heb het opgezocht.'; }
+                    if (!fullText && toolEvents.length) {
+                        aiMsg.remove();
+                        const allFailed = toolEvents.every(t => t.error);
+                        fullText = allFailed ? toolEvents[0].error : 'Ik heb het opgezocht.';
+                    }
                     toolEvents.forEach(chatRenderToolEvent);
                     if (reply.action) setTimeout(() => executeAIAction(reply.action), 1000);
-                    window.chatHistory.push({ role: 'assistant', content: fullText });
+                    // Lukte een actie, dan onthoudt de geschiedenis het antwoord mét de tag: zo blijft het
+                    // model ook bij de volgende vraag een actie schrijven in plaats van alleen 'Dit vond ik.'
+                    const acted = reply.action || toolEvents.some(t => !t.error);
+                    window.chatHistory.push({ role: 'assistant', content: acted && rawText.trim() ? rawText.trim() : fullText });
                 }
             }
         }

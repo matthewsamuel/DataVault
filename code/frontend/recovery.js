@@ -195,9 +195,10 @@ async function recoveryUndo(entry, button) {
     const unchecked = typeof entry.checked === 'number' && entry.checked < entry.file_count;
     const what = unchecked ? `De ${entry.file_count} bestanden van deze actie (voor zover ze nog terug kunnen)`
         : (n === 1 ? 'Dit bestand' : `${n} bestanden`);
-    const question = `${what} terugzetten naar de oorspronkelijke plek?\n\n`
-        + (entry.note || 'Er wordt nooit iets overschreven.');
-    if (!confirm(question)) return;
+    if (!await dvConfirm({
+        title: `${what} terugzetten?`, icon: 'fa-rotate-left', confirmLabel: 'Terugzetten',
+        body: ['Terug naar de oorspronkelijke plek.', entry.note || 'Er wordt nooit iets overschreven.'],
+    })) return;
     // De lijst wordt zo opnieuw opgebouwd; onthoud waar de focus stond om hem terug te zetten
     const list = document.getElementById('recovery-list');
     const hadFocus = list.contains(document.activeElement);

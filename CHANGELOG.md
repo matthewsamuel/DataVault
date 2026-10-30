@@ -35,6 +35,19 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - iMessage: reacties met een emoji of sticker (iOS 18) staan bij het bericht, en een ingetrokken bericht toont 'Bericht ingetrokken'.
 - Activiteit toont 'Hele dag' bij items zonder tijdstip (Netflix, agendapunten voor de hele dag, stappen) in plaats van een verzonnen uur.
 - Kaart: de rij 'Uit je Tijdlijn' staat in dezelfde kolom als de kop en de filters, en is weg als er geen locatiegeschiedenis is.
+- Kan Pasha een gevraagde actie niet uitvoeren, dan zegt ze dat nu duidelijk in plaats van 'Hier zijn ze.' zonder foto's eronder. Bijna-goede verzoeken (foto's van een datum, een jaar of een maand) worden omgezet naar de juiste zoekopdracht. Ook een kaal 'Dit vond ik.' zonder actie krijgt die melding, en Pasha onthoudt in het gesprek hoe ze een actie schreef, zodat ze het bij de volgende vraag niet vergeet.
+- Pasha noemt een plaats zoals jij hem schrijft: 'Parijs', niet 'Paris'.
+- Zoeken op camera vindt ook de volledige naam die het scherm toont, zoals 'Sony A7 IV' of 'Apple iPhone 14' (merk en model samen); ook bij Pasha.
+- Keurer: na Ongedaan maken (↓) komt de foto meteen terug als volgende kaart en telt hij weer mee bij 'nog te beoordelen'. De meldingen heten 'Ongedaan maken' in plaats van 'Undo'.
+- Het takenpaneel is in rust echt een klein rondje met een vinkje en het aantal, zonder lege balk ernaast.
+- Op een klein scherm (zoals 1024 × 768) begint het takenpaneel ingeklapt en blijft het laag als je het opent, zodat het geen knoppen meer bedekt.
+- Kaart: een begindatum na de einddatum geeft een korte melding naast de datums (zoals in Albums); de kaart en de aantallen blijven bij het laatste geldige filter in plaats van een rode foutmelding.
+- Kaart: een lange albumnaam rekt de filterbalk niet meer op, en het aantal en 'Zonder locatie' blijven samen rechts staan. Die knop telt alle bestanden zonder locatie en heet daarom 'Zonder locatie'.
+- Terugzetten in het Herstelcentrum en bij Duplicaten, miniaturen maken voor het hele archief, het zoekmodel downloaden, de server herstarten en sleutels vergeten vragen het nu in hetzelfde nette venster als de rest van de app, met de focus eerst op Annuleren, in plaats van een kaal venster van de browser.
+- Terug en Vooruit van de browser (⌘[ en ⌘], of vegen in Safari) gaan nu naar het vorige of volgende scherm in DataVault, ook tussen albums en Op deze dag, in plaats van de app te verlaten. Albums houdt daarbij zijn filters.
+- Albums: de aantallen achter jaren, camera's en bestandstypes staan er alleen als ze kloppen; staat er een ander filter aan, dan zie je alleen de namen, zodat een keuze niet onverwacht 0 bestanden geeft.
+- Beste uit reeks: 'nog te doen' telt alleen de foto's die nog vergeleken moeten worden, zodat de getallen optellen; daarna staat er 'reeksen zoeken volgt'. De knop op een reekskaart noemt hetzelfde aantal als het bevestigvenster, inclusief de exacte kopieën die meegaan.
+- Welke is mooier?: Vergelijken telt wat je 'vergeleken' hebt en de Ranglijst telt de foto's 'met een score'; het woord 'beoordeeld' betekende eerst twee dingen.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
