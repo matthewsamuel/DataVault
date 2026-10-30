@@ -13,7 +13,8 @@ Herstelcentrum, compares photos on the Beste uit reeks tab and keeps the best of
 with the keyboard (and undoes that), checks Instellingen and the storage window, walks through
 DataGatherer (help, the menu, the connect window, reading the existing Spotify export, the network log,
 the Dutch Takeout and Chrome history, the Activiteit view, the Tijdlijn route on the Kaart),
-makes a backup from Instellingen, compares photos in 'Welke is mooier?' (keys, undo, leaderboard), and runs
+makes a backup from Instellingen, compares photos in 'Welke is mooier?' (keys, undo, leaderboard), checks that
+nothing on a main view sticks out of a 1024 px window, the tab title per view and the favicon, and runs
 a11y_checks.js on every screen in the light and the dark theme:
 all visible text must reach WCAG AA contrast and every control must have a name. On the way
 it saves a screenshot of every screen in both themes (for a look at the design), in a temp
@@ -1484,6 +1485,31 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.set_viewport_size({"width": 1400, "height": 900})
             page.wait_for_timeout(400)
 
+            # Design pass (3.10): at 1024 px nothing on any main view sticks out of the window
+            # (Spotify's cards once did), every view names itself in the tab title, and the
+            # favicon is served
+            page.set_viewport_size({"width": 1024, "height": 768})
+            for view in ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery",
+                         "settings", "albums", "datagatherer", "map", "berichten", "activity"]:
+                page.evaluate(f"switchMainView('{view}')")
+                page.wait_for_timeout(900)
+                outside = page.evaluate("""(() => { const W = document.documentElement.clientWidth; const out = [];
+                    const clipped = e => { for (let a = e.parentElement; a && a !== document.body; a = a.parentElement) {
+                        const o = getComputedStyle(a); if (/(auto|scroll|hidden)/.test(o.overflowX) && !a.classList.contains('section')
+                            && a.getBoundingClientRect().right <= W + 1) return true; } return false; };
+                    document.querySelectorAll('.section.active *').forEach(e => { if (e.closest('svg')) return;
+                        const r = e.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 0 && (r.right > W + 1 || r.left < -1) && !clipped(e)) out.push(e.className || e.tagName); });
+                    return out.slice(0, 3); })()""")
+                expect(not outside, f"{view} at 1024 px: {outside} stick out of the window")
+                title = page.title()
+                expect(title.endswith("DataVault") and (view == "home" or " · " in title), f"{view}: tab title {title!r}")
+            page.set_viewport_size({"width": 1400, "height": 900})
+            page.evaluate("switchMainView('home')")
+            icons = page.evaluate("""Promise.all([...document.querySelectorAll("link[rel~='icon'], link[rel='apple-touch-icon']")]
+                .map(l => fetch(l.href).then(r => r.ok)))""")
+            expect(len(icons) >= 2 and all(icons), f"favicon links: {icons}")
+
             # Paging across a switch of source: a first page from the walk (made up here from
             # the real one, 500 rows) and the rest from the index is the same selection, so the
             # timeline goes on; a first page whose total differs makes it start over (once)
@@ -1746,6 +1772,9 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(only and all("Chrome-geschiedenis" in m for m in only), f"activity: the source filter shows {only[:3]}")
             step("activity: search", lambda: page.fill("#act-search", "Pagina 3"), 1.0)
             expect(page.evaluate("document.querySelectorAll('.act-event').length") == 1, "activity: search did not narrow to one")
+            # (an empty optional note once showed up as the text 'null' under the events)
+            expect("null" not in page.evaluate("[...document.getElementById('act-events').childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('')"),
+                   "activity: stray text under the events of a day")
             step("activity: Filters wissen", lambda: page.click("#act-reset"), 0.8)
             expect(page.evaluate("document.getElementById('act-reset').offsetParent === null"),
                    "activity: 'Filters wissen' stays visible without filters")
