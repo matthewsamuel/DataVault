@@ -7,6 +7,7 @@ copy is written to <cache>/db_backups/, so ratings, streaks and undo data can
 always be recovered. Migrations only add; they never drop user data.
 """
 import logging
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -1028,6 +1029,18 @@ def _has_user_tables(conn: sqlite3.Connection) -> bool:
     return row[0] > 0
 
 
+def _backup_sort_key(path: Path):
+    """(stamp, mtime) for '<stem>-v<version>-<YYYYmmdd-HHMMSS-ffffff>.db'; a name that does
+    not match that pattern falls back to its mtime with an empty stamp, so it counts as
+    oldest."""
+    m = re.match(r".*-v\d+-(\d{8}-\d{6}-\d{6})\.db$", path.name)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (m.group(1) if m else "", mtime)
+
+
 def backup_database(conn: sqlite3.Connection, db_path: Path, from_version: int) -> Path:
     """Consistent copy via the SQLite backup API; keeps the newest BACKUPS_TO_KEEP."""
     backup_dir = db_path.parent / BACKUP_DIR_NAME
@@ -1040,7 +1053,9 @@ def backup_database(conn: sqlite3.Connection, db_path: Path, from_version: int) 
     finally:
         target.close()
 
-    backups = sorted(backup_dir.glob(f"{db_path.stem}-v*.db"))
+    # Oldest first by the fixed-width stamp, not by the whole name: by name 'v110-' sorts
+    # before 'v12-' and 'v10-' before 'v9-', which would delete the copy just made.
+    backups = sorted(backup_dir.glob(f"{db_path.stem}-v*.db"), key=_backup_sort_key)
     for old in backups[:-BACKUPS_TO_KEEP]:
         old.unlink()  # only our own backup copies, never archive files
     return backup_path

@@ -212,3 +212,28 @@ def test_a_db_with_a_gap_gets_a_backup_before_the_gap_is_filled(tmp_path, monkey
     assert migrations.migrate(db_path) == [40, 50]
     assert len(list((tmp_path / migrations.BACKUP_DIR_NAME).glob("datavault-v*.db"))) == 1
 
+
+def test_pre_migration_backup_rotation_keeps_the_newest_copy(tmp_path, monkeypatch):
+    db_path = tmp_path / "datavault.db"
+    Database(db_path)
+    folder = tmp_path / migrations.BACKUP_DIR_NAME
+    folder.mkdir(exist_ok=True)
+    # Ten older copies whose names sort after 'v110-' and 'v10-' (and v2..v9 after v10)
+    old = ["v12", "v2", "v9", "v20", "v31", "v40", "v50", "v60", "v61", "v91"]
+    for i, version in enumerate(old):
+        (folder / f"datavault-{version}-20261029-1200{i:02d}-000000.db").write_bytes(b"old")
+    oldest = folder / "datavault-v10-20201231-235959-000000.db"
+    oldest.write_bytes(b"oldest")
+
+    def dummy(conn):
+        conn.execute("CREATE TABLE IF NOT EXISTS rotation_probe (x INTEGER)")
+
+    monkeypatch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS + [(999, "probe", dummy)])
+    assert migrations.migrate(db_path) == [999]
+    left = sorted(p.name for p in folder.glob("datavault-v*.db"))
+    assert len(left) == migrations.BACKUPS_TO_KEEP
+    newest = [n for n in left if n.startswith(f"datavault-v{migrations.LATEST_VERSION}-")]
+    assert len(newest) == 1, left  # the copy made just now survives its own rotation
+    assert not oldest.exists()  # the oldest copy by date goes, not the one that sorts first
+    assert "datavault-v12-20261029-120000-000000.db" not in left
+    assert "datavault-v91-20261029-120009-000000.db" in left
