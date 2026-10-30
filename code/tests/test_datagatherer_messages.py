@@ -428,6 +428,34 @@ def test_whatsapp_chat_export_merges_into_the_database_chat(client, app, tmp_pat
     assert client.get(f"/api/messages/conversations/{anna[0]['id']}").json()["conversation"]["count"] == 4
 
 
+def test_a_newer_chat_export_with_the_same_name_on_the_same_day_is_one_chat(client, app, tmp_path):
+    from backend.datagatherer import raw_store
+    lines = "".join(f"[01-06-2024 10:{i:02d}:00] Anna Jansen: Bericht {i}\n" for i in range(10))
+    newer = lines + "[02-06-2024 09:00:00] Anna Jansen: Nieuw\n"
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    _upload(client, app, "whatsapp", whatsapp_zip(tmp_path / "a" / "WhatsApp Chat - Anna.zip", lines))
+    result = _upload(client, app, "whatsapp", whatsapp_zip(tmp_path / "b" / "WhatsApp Chat - Anna.zip", newer))
+    assert result["import_result"]["added"] == 1
+    paths = [r[0] for r in _rows(app, "SELECT path FROM dg_raw_imports WHERE source_id = 'whatsapp' ORDER BY id")]
+    assert Path(paths[1]).name == "WhatsApp Chat - Anna 2.zip"         # the copy got a free name
+    assert _rows(app, "SELECT title, message_count FROM msg_conversations") == [("Anna", 11)]
+    # A bare _chat.txt twice on one day: the copy's ' 2' is no part of the chat's name either
+    (tmp_path / "c").mkdir()
+    (tmp_path / "d").mkdir()
+    bob = "[03-06-2024 10:00:00] Bob: Hoi\n"
+    (tmp_path / "c" / "_chat.txt").write_text(bob, encoding="utf-8")
+    (tmp_path / "d" / "_chat.txt").write_text(bob + "[03-06-2024 10:05:00] Bob: Nog iets\n", encoding="utf-8")
+    _upload(client, app, "whatsapp", tmp_path / "c" / "_chat.txt")
+    _upload(client, app, "whatsapp", tmp_path / "d" / "_chat.txt")
+    assert ("_chat", 2) in _rows(app, "SELECT title, message_count FROM msg_conversations")
+    assert len(_rows(app, "SELECT id FROM msg_messages")) == 13
+    # Without a manifest the copy's suffix is only dropped when the plain name is there too
+    raw = {"path": paths[1], "original_path": None}
+    assert raw_store.original_name(raw) == "WhatsApp Chat - Anna.zip"
+    assert raw_store.original_name({"path": str(tmp_path / "Team 2.zip"), "original_path": None}) == "Team 2.zip"
+
+
 def test_iphone_chatstorage_adds_only_what_the_mac_misses(client, app, tmp_path):
     _mac_whatsapp()
     _sync(client, app, "whatsapp")

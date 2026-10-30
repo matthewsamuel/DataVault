@@ -21,6 +21,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -144,6 +145,35 @@ def archive_file(config, db, connector, kind: str, src: Path, origin: str,
             "parser_version": connector.parser_version,
         })
     return state.get_raw(db, raw_id), True
+
+
+def original_name(raw: dict) -> str:
+    """
+    The file name an export had before DataVault copied it: a second export with the same name
+    on the same day is stored as 'name 2.zip'. From the original path (the Downloads watcher),
+    else from the manifest next to the copy (a browser upload), else the copy's own name
+    without a ' 2' that only the copy has.
+    """
+    path = Path(raw["path"])
+    if raw.get("original_path"):
+        return Path(raw["original_path"]).name
+    try:
+        manifests = sorted(path.parent.glob("datavault-import*.json"))
+    except OSError:
+        manifests = []
+    for manifest in manifests:
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("file") == path.name and isinstance(data.get("original_name"), str):
+            name = data["original_name"].replace("\\", "/").rsplit("/", 1)[-1].strip()
+            if name:
+                return name
+    m = re.match(r"^(.+) \d+(\.[^.]+)$", path.name)
+    if m and (path.parent / (m.group(1) + m.group(2))).exists():
+        return m.group(1) + m.group(2)
+    return path.name
 
 
 def register_folder(config, db, connector, kind: str, folder: Path, patterns: Tuple[str, ...] = ("*",)) -> Tuple[dict, bool]:
