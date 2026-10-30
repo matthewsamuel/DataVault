@@ -457,3 +457,48 @@ def test_migration_135_rekeys_my_activity_per_second_and_keeps_every_other_row(t
     assert after[("google_takeout", "calendar")][2] == "cal-1" and after[("netflix", "video_watch")][2] == "nf-1"
     assert db.get_setting("chat_model") == "qwen2.5:3b"
     db.close_all()
+
+
+def _big_records(n):
+    locations = [{"latitudeE7": 510500000 + i, "longitudeE7": 37200000 + i, "accuracy": 10 + i % 7,
+                  "timestamp": f"2019-07-14T{(i // 3600) % 24:02d}:{(i // 60) % 60:02d}:{i % 60:02d}Z",
+                  "activity": [{"timestamp": "2019-07-14T00:00:00Z", "activity": [{"type": "STILL", "confidence": 90}]}]}
+                 for i in range(n)]
+    locations.insert(3, {"latitudeE7": "x"})          # junk in between is skipped, as in parse()
+    return {"locations": locations}
+
+
+def test_a_large_records_json_is_streamed_with_the_same_points(tmp_path):
+    import io as _io
+    data = _big_records(500)
+    for text in (json.dumps(data, indent=2), "﻿" + json.dumps(data)):   # pretty (Google's shape) and compact
+        blob = text.encode("utf-8")
+        _, whole, _ = location_store.parse_bytes(blob)
+        for chunk in (7, 64, 4096):                       # objects cut at every possible place
+            streamed = list(location_store.iter_records(lambda: _io.BytesIO(blob), chunk=chunk))
+            assert streamed == whole and len(streamed) == 500
+    with pytest.raises(location_store.NotLocationHistory):
+        list(location_store.iter_records(lambda: _io.BytesIO(json.dumps(data)[:-500].encode()), chunk=64))
+    with pytest.raises(location_store.NotLocationHistory):
+        list(location_store.iter_records(lambda: _io.BytesIO(b'{"timelineObjects": []}')))
+
+
+def test_a_records_json_over_the_read_limit_is_still_read_and_a_skipped_file_is_on_the_card(client, app, tmp_path,
+                                                                                             monkeypatch):
+    from backend.datagatherer import raw_store
+    monkeypatch.setattr(raw_store, "MAX_MEMBER_BYTES", 20_000)     # stand-in for 1 GB
+    monkeypatch.setattr(location_store, "STREAM_FROM", 10_000)
+    zip_path = fx.write_zip(tmp_path / "takeout-20240101T000000Z-001.zip", {
+        "Takeout/Location History/Records.json": json.dumps(_big_records(300), indent=2),
+        "Takeout/Mijn activiteit/Zoeken/MyActivity.json": "[" + ",".join(
+            json.dumps({"header": "Zoeken", "title": f"Gezocht naar iets {i} " + "x" * 200,
+                        "time": "2019-07-14T09:00:00.000Z", "products": ["Zoeken"]}) for i in range(200)) + "]",
+    })
+    r = client.post(f"/api/datagatherer/sources/google_takeout/upload?name={zip_path.name}", content=zip_path.read_bytes())
+    assert r.status_code in (200, 201), r.text
+    result = app.state.jobs.result(_wait(app, r.json()["job"]["id"])["id"])
+    assert _wait(app, result["import_job"])["status"] == "done"
+    assert _rows(app, "SELECT COUNT(*) FROM location_points")[0][0] == 300
+    card = next(c for c in client.get("/api/datagatherer/sources").json()["sources"] if c["id"] == "google_takeout")
+    warning = [n for n in card["notes"] if n["tone"] == "warning"]
+    assert warning and "MyActivity.json" in warning[0]["text"] and "Niet alles" in warning[0]["text"]

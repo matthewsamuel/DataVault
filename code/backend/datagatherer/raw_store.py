@@ -28,7 +28,7 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Iterator, List, Optional, Tuple
 
 from backend import file_ops
 from backend.datagatherer import state
@@ -39,6 +39,7 @@ HASH_CHUNK = 4 * 1024 * 1024
 FREE_SPACE_MARGIN = 200 * 1024 * 1024
 MAX_MEMBER_BYTES = 1024 * 1024 * 1024     # one JSON file in an export; more is not an export
 MAX_RATIO = 200                            # uncompressed / compressed: more looks like a zip bomb
+MAX_STREAM_BYTES = 32 * 1024 * 1024 * 1024  # a file a parser reads as it goes (ExportFile.open)
 
 
 # One export at a time from 'is it new?' to its row: two uploads of the same bytes (or an upload
@@ -248,19 +249,62 @@ def iter_export_files(path: Path, wanted: Callable[[str], bool]) -> Iterator[Tup
                 if name.startswith(".") or full.is_symlink() or not wanted(name):
                     continue
                 rel = str(full.relative_to(path))
-                yield rel, (lambda f=full: _read_file(f))
+                yield rel, ExportFile.of_file(full)
         return
     names = read_zip_names(path)
     if names is None:
         if wanted(path.name):
-            yield path.name, (lambda: _read_file(path))
+            yield path.name, ExportFile.of_file(path)
         return
     with zipfile.ZipFile(path) as zf:
         for info in sorted(zf.infolist(), key=lambda i: i.filename):
             base = info.filename.rsplit("/", 1)[-1]
             if info.is_dir() or base.startswith(".") or "__MACOSX/" in info.filename or not wanted(base):
                 continue
-            yield info.filename, (lambda i=info: _read_member(zf, i))
+            yield info.filename, ExportFile.of_member(zf, info)
+
+
+class ExportFile:
+    """
+    One file of an export, as iter_export_files hands it out. Calling it returns the bytes
+    (refused above MAX_MEMBER_BYTES). open() gives a binary stream instead, for a parser
+    that reads as it goes (a multi-GB Records.json): up to MAX_STREAM_BYTES, and a zip member
+    that is compressed suspiciously well is refused here too. size is the uncompressed size.
+    """
+
+    def __init__(self, read: Callable[[], bytes], opener: Callable[[], Any], size: int):
+        self._read, self._open, self.size = read, opener, size
+
+    def __call__(self) -> bytes:
+        return self._read()
+
+    def open(self):
+        return self._open()
+
+    @classmethod
+    def of_file(cls, path: Path) -> "ExportFile":
+        def opener():
+            if path.stat().st_size > MAX_STREAM_BYTES:
+                raise RawStoreError(f"{path.name} is te groot om in te lezen")
+            return open(path, "rb")
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        return cls(lambda: _read_file(path), opener, size)
+
+    @classmethod
+    def of_member(cls, zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> "ExportFile":
+        def opener():
+            if info.file_size > MAX_STREAM_BYTES or _bomb(info):
+                raise RawStoreError(f"{info.filename} in de zip is verdacht groot; niet ingelezen")
+            return zf.open(info)
+        return cls(lambda: _read_member(zf, info), opener, info.file_size)
+
+
+def _bomb(info: zipfile.ZipInfo) -> bool:
+    return bool(info.compress_size and info.file_size / info.compress_size > MAX_RATIO
+                and info.file_size > 50 * 1024 * 1024)
 
 
 def _read_file(path: Path) -> bytes:
@@ -270,8 +314,7 @@ def _read_file(path: Path) -> bytes:
 
 
 def _read_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
-    if info.file_size > MAX_MEMBER_BYTES or (info.compress_size and info.file_size / info.compress_size > MAX_RATIO
-                                             and info.file_size > 50 * 1024 * 1024):
+    if info.file_size > MAX_MEMBER_BYTES or _bomb(info):
         raise RawStoreError(f"{info.filename} in de zip is verdacht groot; niet ingelezen")
     with zf.open(info) as member:
         data = member.read(MAX_MEMBER_BYTES + 1)

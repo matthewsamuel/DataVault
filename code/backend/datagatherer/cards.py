@@ -271,6 +271,9 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     if watched is not None:
         notes.append({"tone": "info", "text": f"DataVault kijkt altijd in je gesynchroniseerde map {watched.name} en "
                                               "leest een nieuwe export daar vanzelf in.", "path": str(watched)})
+    skipped = skipped_note(raws)
+    if skipped:
+        notes.append(skipped)
     notice = downloads_notice(raws, now)
     if notice:
         notes.append({"tone": "info", "text": f"{notice['name']} staat in het archief. Het origineel in Downloads mag je "
@@ -339,6 +342,19 @@ def _request_view(connector: Connector, request: Dict[str, Any]) -> Dict[str, An
     return {"id": request["id"], "kind": request["kind"], "label": kind.label if kind else request["kind"],
             "requested_at": request["requested_at"], "since": request["since"],
             "expected_days": list(kind.expected_days) if kind else None}
+
+
+def skipped_note(raws: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    """A warning when the newest read export had files that could not be read (stats 'skipped',
+    for example a location history that was too large): otherwise only the job stats say so."""
+    latest = next((r for r in raws if r["status"] == "imported"), None)
+    skipped = (latest.get("stats") or {}).get("skipped") if latest else None
+    if not skipped or not isinstance(skipped, list):
+        return None
+    shown = "; ".join(str(s) for s in skipped[:3])
+    more = f" en nog {len(skipped) - 3}" if len(skipped) > 3 else ""
+    return {"tone": "warning", "text": f"Niet alles uit je laatste export is ingelezen. Overgeslagen: {shown}{more}.",
+            "path": latest["path"]}
 
 
 def downloads_notice(raws: List[Dict[str, Any]], now: float) -> Optional[Dict[str, str]]:
