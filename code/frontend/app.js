@@ -186,8 +186,16 @@ function currentMainView() {
     }) || 'home';
 }
 
+// De titel van het tabblad per onderdeel ('Kaart · DataVault')
+const VIEW_TITLES = {
+    home: 'Home', viewer: 'Bestanden', duplicates: 'Duplicaten', spotify: 'Spotify', shows: 'Shows', keurer: 'Keurer',
+    timeline: 'Tijdlijn', recovery: 'Herstelcentrum', settings: 'Instellingen', albums: 'Albums', datagatherer: 'DataGatherer',
+    map: 'Kaart', berichten: 'Berichten', activity: 'Activiteit',
+};
+
 function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
+    document.title = view === 'home' ? 'DataVault' : `${VIEW_TITLES[view]} · DataVault`;
     // Update tabs (ook de tandwielknop van Instellingen)
     document.querySelectorAll('.top-nav [data-view]').forEach(tab => {
         // data-also: een onderdeel zonder eigen knop in het menu (Berichten hoort bij DataGatherer)

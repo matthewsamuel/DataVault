@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- DataVault: a safe with a dial, on the green accent (the same green as --accent in light mode) -->
+  <rect width="64" height="64" rx="14" fill="#15803d"/>
+  <rect x="13" y="14" width="38" height="34" rx="6" fill="none" stroke="#ffffff" stroke-width="4.5"/>
+  <circle cx="32" cy="31" r="7.5" fill="none" stroke="#ffffff" stroke-width="4"/>
+  <circle cx="32" cy="31" r="2" fill="#ffffff"/>
+  <path d="M20 48v4M44 48v4" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round"/>
+</svg>

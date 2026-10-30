@@ -637,6 +637,9 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - **Overal dezelfde bediening**: in het Herstelcentrum klap je de bestanden open met hetzelfde draaiende
   pijltje als elders, en bij Duplicaten > Herstellen staat de map vanaf het archief ('RAW/...') in
   plaats van het volledige pad op de schijf.
+- **Tabblad en beweging**: DataVault heeft een eigen icoon in het tabblad, en de titel van het tabblad
+  zegt in welk onderdeel je bent ('Kaart · DataVault'). Een ander onderdeel komt rustig in beeld
+  (niet als je in macOS minder beweging hebt gevraagd).
 
 ## Fase 2 – Stabiliseren
 

@@ -2314,6 +2314,9 @@ button.nav-brand {
     flex-direction: column;
     min-height: 0;
     flex: 1;
+    /* Een ander onderdeel komt rustig in beeld (alleen dekking: geen transform, die zou vaste
+       vensters en de kaart in de sectie verschuiven) */
+    animation: dv-fade-in var(--duration-base) var(--ease-out);
 }
 
 /* ==================== ZIJBALK: MAPPEN ==================== */
