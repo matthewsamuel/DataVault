@@ -13882,3 +13882,404 @@ html[data-motion="uit"]::view-transition-new(*) {
     font-size: var(--fs-2xs);
     box-shadow: var(--shadow-sm);
 }
+
+/* ==================== BEWEGING: MEDIA (foto's: media-motion.js, docs/MOTION.md) ====================
+   Eigen sectie van de fotoschermen (Bestanden, Tijdlijn, Albums, Reeksen, Duplicaten, viewer,
+   Keurer, Shows, Slim zoeken, Exporteren). Alleen tokens; Rustig en Uit volgen vanzelf. */
+
+/* ---------- Fototegel: optillen, licht en selectie ---------- */
+
+/* Optillen op de snappy-veer; de schaduw (één tegel tegelijk) in --dur-2 */
+.thumb-tile {
+    transition:
+        transform var(--spring-snappy-dur) var(--spring-snappy),
+        box-shadow var(--dur-2) var(--ease-out);
+}
+
+.thumb-tile:hover {
+    transform: translate3d(0, var(--motion-lift), 0);
+}
+
+.thumb-tile:active:not(.is-placeholder) {
+    transform: translate3d(0, var(--motion-lift), 0) scale(var(--motion-scale-press));
+    transition-duration: var(--dur-1), var(--dur-2);
+}
+
+/* De foto zelf vaagt bij het laden in en zet zich (heel licht) neer; hover zoomt niet */
+.thumb-tile img,
+.thumb-tile video {
+    transition:
+        opacity var(--dur-4) var(--ease-out),
+        transform var(--dur-5) var(--ease-emphasized);
+}
+
+.thumb-tile img.loading {
+    transform: scale(1.03);
+}
+
+.thumb-tile:hover img {
+    transform: none;
+}
+
+/* Het licht onder de muis (één element, media-motion.js): een zachte glans boven de foto */
+.mm-light {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 1;
+    width: 200%;
+    height: 200%;
+    border-radius: var(--radius-full);
+    /* Wit licht (--on-media) dat zacht wegloopt; soft-light hoogt de foto op zonder hem te verkleuren */
+    --mm-light-core: color-mix(in srgb, var(--on-media) 90%, transparent);
+    --mm-light-mid: color-mix(in srgb, var(--on-media) 32%, transparent);
+    background: radial-gradient(closest-side, var(--mm-light-core), var(--mm-light-mid) 40%, transparent 75%);
+    mix-blend-mode: soft-light;
+    opacity: 0;
+    pointer-events: none;
+    will-change: transform;
+    transition: opacity var(--dur-3) var(--ease-out);
+}
+
+.mm-light.is-on {
+    opacity: 1;
+}
+
+html:not([data-motion="volledig"]) .mm-light {
+    display: none;
+}
+
+/* Selectie: de ring groeit in (--dur-2), het vinkje springt erin (bouncy) en gaat snel weg.
+   De rondjes bestaan altijd (onzichtbaar), zodat ze een overgang hebben in plaats van een
+   animatie: een tegel die opnieuw getekend wordt (virtuele lijst) springt dus niet opnieuw. */
+.thumb-tile::after {
+    content: '';
+    position: absolute;
+    z-index: 2;
+    top: var(--space-sm);
+    right: var(--space-sm);
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-full);
+    background-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--on-media);
+    opacity: 0;
+    transform: scale(0.4);
+    pointer-events: none;
+    transition:
+        opacity var(--dur-1) var(--ease-exit),
+        transform var(--dur-2) var(--ease-exit);
+}
+
+.thumb-tile::before {
+    content: '';
+    position: absolute;
+    z-index: 3;
+    top: calc(var(--space-sm) + 6px);
+    right: calc(var(--space-sm) + 6px);
+    width: 10px;
+    height: 6px;
+    border: 2px solid var(--text-on-accent);
+    border-top: none;
+    border-right: none;
+    opacity: 0;
+    transform: rotate(-45deg) scale(0.3);
+    pointer-events: none;
+    transition:
+        opacity var(--dur-1) var(--ease-exit),
+        transform var(--dur-2) var(--ease-exit);
+}
+
+.thumb-tile.selected::after {
+    opacity: 1;
+    transform: none;
+    transition:
+        opacity var(--dur-2) var(--ease-out),
+        transform var(--spring-bouncy-dur) var(--spring-bouncy);
+}
+
+.thumb-tile.selected::before {
+    opacity: 1;
+    transform: rotate(-45deg);
+    transition:
+        opacity var(--dur-2) var(--ease-out) var(--dur-1),
+        transform var(--spring-bouncy-dur) var(--spring-bouncy) var(--dur-1);
+}
+
+.thumb-tile.selected {
+    box-shadow: 0 0 0 3px var(--accent);
+}
+
+.thumb-tile.selected:hover {
+    box-shadow: 0 0 0 3px var(--accent), var(--shadow-md);
+}
+
+/* ---------- Spoken: wat weggaat terwijl de lijst al verder is ---------- */
+
+.mm-ghost-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 95;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.mm-ghost-holder {
+    position: fixed;
+    display: flex;
+    pointer-events: none;
+    will-change: transform, opacity;
+}
+
+.mm-ghost-holder > .mm-ghost {
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+}
+
+/* ---------- Viewer: de vorige foto als spook bij volgende en vorige ---------- */
+
+.mm-viewer-ghost {
+    position: absolute;
+    z-index: 0;
+    margin: 0;
+    max-width: none;
+    max-height: none;
+    object-fit: contain;
+    pointer-events: none;
+}
+
+/* ---------- Keurer: de kaart in de lucht ---------- */
+
+.mm-keurer-flying {
+    box-shadow: var(--shadow-xl);
+}
+
+.mm-keurer-flying .keurer-card-overlay {
+    transition: none;
+}
+
+/* De knop die bij een toets hoort geeft even mee (MediaMotion.press) */
+.keurer-btn {
+    transition:
+        transform var(--spring-snappy-dur) var(--spring-snappy),
+        background-color var(--dur-2) var(--ease-out),
+        border-color var(--dur-2) var(--ease-out),
+        color var(--dur-2) var(--ease-out);
+}
+
+/* ---------- Reeksen: de winnaar zet zich neer ---------- */
+
+.series-photo.mm-winner {
+    z-index: 2;
+}
+
+.series-photo.is-leaving img {
+    transition: opacity var(--dur-3) var(--ease-out), filter var(--dur-3) var(--ease-out), transform var(--dur-5) var(--ease-emphasized);
+}
+
+/* ---------- Tijdlijn en Albums: rijen die zich neerzetten tijdens het scrollen ----------
+   Aan de scrollpositie gekoppeld (animation-timeline: view()): de browser doet het zelf, buiten
+   de hoofdthread. Een rij is helemaal klaar zodra hij helemaal in beeld is. */
+@supports (animation-timeline: view()) {
+    html[data-motion="volledig"] .tl-photo-row,
+    html[data-motion="volledig"] .albums-row {
+        animation: mm-row-settle linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 100%;
+    }
+
+    html[data-motion="volledig"] .tl-group-header {
+        animation: mm-header-settle linear both;
+        animation-timeline: view();
+        animation-range: entry 0% cover 30%;
+    }
+}
+
+@keyframes mm-row-settle {
+    from { opacity: 0.2; transform: translate3d(0, var(--motion-distance-lg), 0) scale(0.97); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes mm-header-settle {
+    from { opacity: 0; transform: translate3d(calc(var(--motion-distance-md) * -1), var(--motion-distance-md), 0); }
+    to { opacity: 1; transform: none; }
+}
+
+/* Het label met de maand rolt (MediaMotion.rollText) */
+.tl-current-date {
+    display: inline-block;
+}
+
+/* ---------- Shows: de diavoorstelling ---------- */
+
+/* Ken Burns (alleen hier, docs/MOTION.md): langzaam in- of uitzoomen vanuit een willekeurig punt */
+.cinematic-media.ken-burns-in,
+.cinematic-media.ken-burns-out {
+    transform-origin: var(--kb-x, 50%) var(--kb-y, 50%);
+    animation-duration: var(--kb-dur, 10s);
+    animation-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+html:not([data-motion="volledig"]) .cinematic-media.ken-burns-in,
+html:not([data-motion="volledig"]) .cinematic-media.ken-burns-out {
+    animation: none;
+}
+
+/* Voortgang met transform (geen breedte die elke frame de layout raakt) */
+.player-progress-fill.mm-progress {
+    width: 100%;
+    transform: scaleX(0);
+    transform-origin: left center;
+}
+
+/* Shows: een collectie is een stapel foto's. De omslag ligt voorop (.show-card-face, die
+   knipt en rondt af); twee foto's uit de map steken er een randje onder uit en waaieren bij
+   hover of focus uit op de smooth-veer. */
+.show-card-face {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    overflow: hidden;
+    border-radius: inherit;
+    background: var(--thumb-bg);
+}
+
+.show-card.has-stack {
+    overflow: visible;
+    background: transparent;
+    box-shadow: none;
+}
+
+.show-card.has-stack .show-card-face {
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow var(--dur-2) var(--ease-out);
+}
+
+.show-card.has-stack:hover {
+    box-shadow: none;
+}
+
+.show-card.has-stack:hover .show-card-face,
+.show-card.has-stack:focus-visible .show-card-face {
+    box-shadow: var(--shadow-lg);
+}
+
+.show-card-stack {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+.show-card-stack img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+    border: 1px solid var(--border-hairline);
+    background: var(--thumb-bg);
+    box-shadow: var(--shadow-sm);
+    filter: brightness(0.82);
+    transform-origin: 50% 85%;
+    transition:
+        transform var(--spring-smooth-dur) var(--spring-smooth),
+        filter var(--dur-3) var(--ease-out);
+}
+
+/* In rust: twee dunne randjes boven de omslag, als een nette stapel afdrukken */
+.show-card-stack img:nth-child(1) {
+    /* Geschaald rond 85% van de hoogte: -12,5% omhoog laat 4% van de hoogte boven de omslag uitsteken */
+    transform: translate3d(0, -12.5%, 0) scale(0.9);
+    filter: brightness(0.62);
+}
+
+.show-card-stack img:nth-child(2) {
+    transform: translate3d(0, -6.25%, 0) scale(0.95);
+}
+
+.show-card.has-stack:hover,
+.show-card.has-stack:focus-visible {
+    z-index: 2;
+}
+
+.show-card.has-stack:hover .show-card-stack img,
+.show-card.has-stack:focus-visible .show-card-stack img {
+    filter: none;
+}
+
+.show-card.has-stack:hover .show-card-stack img:nth-child(1),
+.show-card.has-stack:focus-visible .show-card-stack img:nth-child(1) {
+    transform: rotate(-8deg) translate3d(calc(var(--motion-distance-lg) * -0.75), calc(var(--motion-distance-md) * -0.5), 0);
+}
+
+.show-card.has-stack:hover .show-card-stack img:nth-child(2),
+.show-card.has-stack:focus-visible .show-card-stack img:nth-child(2) {
+    transform: rotate(7deg) translate3d(calc(var(--motion-distance-lg) * 0.75), calc(var(--motion-distance-md) * -0.4), 0);
+}
+
+/* De kaart zelf tilt op de snappy-veer */
+.show-card {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy), box-shadow var(--dur-2) var(--ease-out);
+}
+
+.show-card:hover {
+    transform: translate3d(0, calc(var(--motion-lift) * 1.5), 0);
+}
+
+/* Rustig en Uit: de stapel ligt stil achter de omslag (niets draait of verschuift) */
+html:not([data-motion="volledig"]) .show-card.has-stack .show-card-stack img:nth-child(n) {
+    transform: none;
+}
+
+/* ---------- Exporteren: de selectiebalk ---------- */
+
+.export-bar:not([hidden]) {
+    animation: mm-bar-in var(--spring-smooth-dur) var(--spring-smooth) both;
+}
+
+@keyframes mm-bar-in {
+    0% { opacity: 0; transform: translate3d(-50%, var(--motion-distance-lg), 0) scale(var(--motion-scale-in)); }
+    35% { opacity: 1; }
+    100% { opacity: 1; transform: translate3d(-50%, 0, 0); }
+}
+
+/* Een spook binnen een venster of overlay ligt boven de inhoud daarvan */
+.modal > .mm-ghost-holder,
+.dv-overlay > .mm-ghost-holder {
+    z-index: 50;
+}
+
+/* Keurer: de dagbalk groeit vanaf links (MediaMotion via keurerStatsMotion) */
+.keurer-daily-fill {
+    transform-origin: left center;
+}
+
+/* Shows: pauze zet ook de Ken Burns stil; de dia's vervagen in elkaar (MediaMotion-sectie) */
+.cinematic-overlay {
+    --mm-slide-fade: calc(var(--dur-6) * 1.5);
+}
+
+.cinematic-overlay.is-paused .cinematic-media {
+    animation-play-state: paused;
+}
+
+/* De nieuwe dia zet zich neer terwijl hij invaagt (de foto zelf doet Ken Burns) */
+.cinematic-slide {
+    transform: scale(1.015);
+    transition:
+        opacity var(--mm-slide-fade) var(--ease-in-out),
+        transform var(--mm-slide-fade) var(--ease-emphasized);
+}
+
+.cinematic-slide.active {
+    transform: none;
+}
+
+html:not([data-motion="volledig"]) .cinematic-slide {
+    transform: none;
+}
