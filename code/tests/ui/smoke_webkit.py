@@ -160,7 +160,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
     try:
         with sync_playwright() as p:
             browser = launch(p, engine, headed)
-            page = browser.new_page(viewport={"width": 1400, "height": 900})
+            # Beweging staat Uit (en macOS vraagt om minder beweging): elke klik geeft meteen de
+            # eindtoestand, zodat de smoke snel en voorspelbaar blijft. De beweging zelf meet
+            # tests/ui/motion_perf.py.
+            page = browser.new_page(viewport={"width": 1400, "height": 900}, reduced_motion="reduce")
+            page.add_init_script("try { localStorage.setItem('motion', 'uit'); } catch (e) {}")
             # WebKit reports a background poll (jobs, library status) that a navigation or the
             # teardown cut off as an 'access control checks' error: that is not a bug in the app
             def aborted_poll(text):
