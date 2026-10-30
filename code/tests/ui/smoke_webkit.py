@@ -987,7 +987,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 page.fill("#map-date-from", "2020-01-01"), page.dispatch_event("#map-date-from", "change"),
                 page.wait_for_timeout(800),
                 page.fill("#map-date-to", "2019-01-01"), page.dispatch_event("#map-date-to", "change")), 0.8)
-            expect(page.is_visible("#map-range-error") and page.is_hidden("#map-overlay"),
+            # (the valid begin date alone may leave an empty map: that empty state is fine, a failure is not)
+            expect(page.is_visible("#map-range-error") and "mislukte" not in (page.text_content("#map-overlay") or ""),
                    "map: reversed dates did not give the inline message, or showed the load-failed state")
             step("map: clear the filters again", lambda: page.click("#map-reset"), 1.0)
             expect(page.is_hidden("#map-range-error") and page.text_content("#map-count") == count_before,
