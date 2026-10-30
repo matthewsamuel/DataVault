@@ -384,7 +384,7 @@
             const q = params();
             q.delete('album');
             q.set('has_gps', 'false');
-            location.hash = `#albums?${q.toString()}`;
+            history.pushState({ view: 'albums' }, '', `${location.pathname}${location.search}#albums?${q.toString()}`);
             switchMainView('albums');
         });
     }

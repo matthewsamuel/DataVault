@@ -26,6 +26,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Kaart: een begindatum na de einddatum geeft een korte melding naast de datums (zoals in Albums); de kaart en de aantallen blijven bij het laatste geldige filter in plaats van een rode foutmelding.
 - Kaart: een lange albumnaam rekt de filterbalk niet meer op, en het aantal en 'Zonder locatie' blijven samen rechts staan. Die knop telt alle bestanden zonder locatie en heet daarom 'Zonder locatie'.
 - Terugzetten in het Herstelcentrum en bij Duplicaten, miniaturen maken voor het hele archief, het zoekmodel downloaden, de server herstarten en sleutels vergeten vragen het nu in hetzelfde nette venster als de rest van de app, met de focus eerst op Annuleren, in plaats van een kaal venster van de browser.
+- Terug en Vooruit van de browser (⌘[ en ⌘], of vegen in Safari) gaan nu naar het vorige of volgende scherm in DataVault, ook tussen albums en Op deze dag, in plaats van de app te verlaten. Albums houdt daarbij zijn filters.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.

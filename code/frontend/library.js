@@ -174,7 +174,7 @@
 
     function writeHash() {
         const hash = hashFor();
-        if (location.hash !== hash) history.replaceState(null, '', location.pathname + location.search + hash);
+        if (location.hash !== hash) history.replaceState(history.state, '', location.pathname + location.search + hash);
     }
 
     // Het adres lezen: true als het over Albums ging
@@ -214,6 +214,8 @@
 
     window.addEventListener('hashchange', () => {
         if (!location.hash.startsWith('#albums')) return;
+        // Terug of Vooruit: app.js (popstate) heeft deze stap al getoond
+        if (typeof navIsRestoring === 'function' && navIsRestoring()) return;
         if (currentMainView() !== 'albums') {
             switchMainView('albums');
             return;
@@ -223,8 +225,23 @@
 
     // Albums verlaten: het adres weer leeg (het hoort niet bij de andere schermen)
     window.albumsLeave = function () {
-        if (location.hash.startsWith('#albums')) history.replaceState(null, '', location.pathname + location.search);
+        if (location.hash.startsWith('#albums')) history.replaceState(history.state, '', location.pathname + location.search);
     };
+
+    // Terug of Vooruit naar een andere stap binnen Albums (een ander album, Op deze dag)
+    window.albumsRestore = function () {
+        if (readHash()) showMode();
+    };
+
+    // Naar een ander album of Op deze dag is een eigen stap in de geschiedenis
+    function pushHash() {
+        const hash = hashFor();
+        if (location.hash === hash && history.state && history.state.view === 'albums') return;
+        const state = { view: 'albums' };
+        const url = location.pathname + location.search + hash;
+        if (history.state && history.state.view) history.pushState(state, '', url);
+        else history.replaceState(state, '', url);
+    }
 
     // ── Openen ───────────────────────────────────────────
 
@@ -284,8 +301,9 @@
         state.mode = 'otd';
         state.otdMonth = month || now.getMonth() + 1;
         state.otdDay = day || now.getDate();
-        history.replaceState(null, '', location.pathname + location.search + hashFor());
-        switchMainView('albums');
+        pushHash();
+        if (currentMainView() !== 'albums') switchMainView('albums');
+        else showMode();
     };
 
     window.albumsShow = function (albumId, spec, sort) {
@@ -296,12 +314,9 @@
         const album = currentAlbum();
         state.spec = spec ? { ...spec } : album ? JSON.parse(JSON.stringify(album.filters || {})) : {};
         state.sort = sort || (album ? album.sort : DEFAULT_SORT);
-        if (currentMainView() !== 'albums') {
-            history.replaceState(null, '', location.pathname + location.search + hashFor());
-            switchMainView('albums');
-        } else {
-            showMode();
-        }
+        pushHash();
+        if (currentMainView() !== 'albums') switchMainView('albums');
+        else showMode();
     };
 
     // Nieuw slim album: vanaf alles, met een uitleg onder de filters (geen melding over de knoppen
@@ -1626,7 +1641,7 @@
     const bootHash = location.hash;
     document.addEventListener('DOMContentLoaded', () => {
         if (!bootHash.startsWith('#albums')) return;
-        history.replaceState(null, '', location.pathname + location.search + bootHash);
+        history.replaceState(history.state, '', location.pathname + location.search + bootHash);
         switchMainView('albums');
     });
 

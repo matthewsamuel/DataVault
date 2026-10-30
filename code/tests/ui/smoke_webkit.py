@@ -988,6 +988,13 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("map: clear the filters again", lambda: page.click("#map-reset"), 1.0)
             expect(page.is_hidden("#map-range-error") and page.text_content("#map-count") == count_before,
                    f"map: clearing left the date message or other counts ({page.text_content('#map-count')!r})")
+            # Back and Forward of the browser go between the screens, not out of the app
+            step("history: Back from Kaart", lambda: page.go_back(), 1.0)
+            expect(page.evaluate("currentMainView()") == "albums" and page.evaluate("location.hash").startswith("#albums"),
+                   f"history: Back went to {page.evaluate('[currentMainView(), location.hash]')}, not Albums")
+            step("history: Forward to Kaart", lambda: page.go_forward(), 1.0)
+            expect(page.evaluate("[currentMainView(), location.hash]") == ["map", ""],
+                   f"history: Forward went to {page.evaluate('[currentMainView(), location.hash]')}, not Kaart")
             expect(not outside, f"map: requests left this machine while the tiles were off: {outside}")
             # The opt-in: only after the switch does the browser ask OpenStreetMap for tiles (answered here by
             # a blank tile, so nothing really goes out), and the choice is kept by the server

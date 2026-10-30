@@ -196,6 +196,35 @@ const VIEW_TITLES = {
 // Het scherm waar een melding bij hoort: info en succes blijven niet hangen op een ander scherm
 let activeMainView = 'home';
 
+// ---------- Terug en Vooruit van de browser ----------
+// Elk ander scherm is een stap in de geschiedenis ({view}), zodat ⌘[ of terugvegen in Safari naar
+// het vorige scherm gaat in plaats van de app uit. Albums houdt zijn eigen adres (#albums?...).
+let navRestoring = false;
+
+function navRecord(view) {
+    if (navRestoring) return;
+    const keepHash = view === 'albums' && location.hash.startsWith('#albums');
+    const url = location.pathname + location.search + (keepHash ? location.hash : '');
+    const state = { view };
+    // Een nieuwe pagina (nog zonder stap) of hetzelfde scherm: deze stap bijwerken, niet stapelen
+    if (history.state && history.state.view && history.state.view !== view) history.pushState(state, '', url);
+    else history.replaceState(state, '', url);
+}
+
+window.addEventListener('popstate', (e) => {
+    const albumsHash = location.hash.startsWith('#albums');
+    const view = e.state && MAIN_VIEWS.includes(e.state.view) ? e.state.view : (albumsHash ? 'albums' : 'home');
+    // Tot na de hashchange die bij deze stap hoort: Albums leest het adres hier, niet nog eens daar
+    navRestoring = true;
+    setTimeout(() => { navRestoring = false; }, 0);
+    if (view === 'albums' && currentMainView() === 'albums' && typeof albumsRestore === 'function') albumsRestore();
+    else switchMainView(view);
+});
+
+function navIsRestoring() {
+    return navRestoring;
+}
+
 function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
     if (view !== activeMainView) {
@@ -204,6 +233,7 @@ function switchMainView(view) {
         });
     }
     activeMainView = view;
+    navRecord(view);
     document.title = view === 'home' ? 'DataVault' : `${VIEW_TITLES[view]} · DataVault`;
     // Update tabs (ook de tandwielknop van Instellingen)
     document.querySelectorAll('.top-nav [data-view]').forEach(tab => {
