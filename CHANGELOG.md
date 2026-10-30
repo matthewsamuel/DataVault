@@ -9,6 +9,13 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Beweging: vloeiend en met aandacht
+- De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
+- Een foto groeit vanuit zijn miniatuur in de viewer en krimpt bij het sluiten terug naar zijn plek in het raster.
+- Vensters komen op een zachte veer omhoog en gaan sneller weer weg. Meldingen schuiven van rechts binnen, tonen met een dunne lijn hoe lang ze nog blijven (stil zolang de muis erop staat) en de andere meldingen schuiven netjes op als er één verdwijnt. Dezelfde melding nog eens geeft een kort knikje in plaats van een tweede melding.
+- Wisselen tussen licht en donker loopt als een cirkel uit vanaf de knop die je gebruikte. Knoppen geven even mee als je ze indrukt.
+- Nieuw in Instellingen: **Beweging** met Volledig (standaard), Rustig (alleen korte vervagingen) en Uit, met een klein voorbeeld. Vraagt macOS om minder beweging, dan beweegt de app vanzelf rustig. Snelle toetsen in de Keurer en bij Welke is mooier? blijven meteen reageren.
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.
