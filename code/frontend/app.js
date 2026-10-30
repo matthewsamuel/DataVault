@@ -420,6 +420,12 @@ function renderShows(data) {
         `;
         container.appendChild(hero);
         upgradeHeroImage(hero.querySelector('.shows-hero-img'), cover);
+        if (!showsFlip) {
+            // Eén heldenmoment: de foto zet zich langzaam neer, de tekst rijst er in ritme op
+            Motion.animate(hero.querySelector('.shows-hero-img'), [{ transform: 'scale(1.06)' }, { transform: 'none' }],
+                { duration: '--dur-6', easing: '--ease-emphasized', key: 'hero' });
+            Motion.stagger(hero.querySelector('.shows-hero-content').children, 'rise', { delay: Motion.ms('--dur-2', 140) });
+        }
     }
 
     // 2. Folder Shows Grid
@@ -443,21 +449,31 @@ function renderShows(data) {
                 thumbUrl = vaultFileUrl('thumb', show.preview.path);
             }
 
-            // Full thumbnail with transparent overlay + text shadow for readability
-            card.innerHTML = html`
-                ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" alt="" loading="lazy">` : html`<div class="show-card-empty"><i class="fas fa-images" aria-hidden="true"></i></div>`}
-                <div class="show-card-caption">
-                    <h4 class="show-card-title">${show.title}</h4>
-                    <span class="show-card-meta">Map</span>
+            // Een stapel foto's: de omslag voorop, nog twee uit de map erachter die bij hover
+            // uitwaaieren (alleen als de map ze heeft); tekst met schaduw op de omslag
+            const stack = thumbUrl ? (show.stack || []).slice(0, 2) : [];
+            card.classList.toggle('has-stack', stack.length > 0);
+            setHTML(card, html`
+                ${stack.length ? html`<div class="show-card-stack" aria-hidden="true">${stack.map(item => html`<img src="${vaultFileUrl('thumb', item.path)}" alt="" loading="lazy">`)}</div>` : ''}
+                <div class="show-card-face">
+                    ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" alt="" loading="lazy">` : html`<div class="show-card-empty"><i class="fas fa-images" aria-hidden="true"></i></div>`}
+                    <div class="show-card-caption">
+                        <h4 class="show-card-title">${show.title}</h4>
+                        <span class="show-card-meta">Map</span>
+                    </div>
                 </div>
-            `;
+            `);
 
             grid.appendChild(card);
         });
 
         container.appendChild(grid);
+        // De collecties komen als een golf binnen; na husselen glijden ze naar hun nieuwe plek
+        if (!showsFlip) MediaMotion.cascade(grid.children, { revealRest: true });
     }
 }
+
+let showsFlip = false;
 
 function shuffleShows() {
     if (!_lastShowsData || !_lastShowsData.shows || _lastShowsData.shows.length < 2) return;
@@ -478,7 +494,16 @@ function shuffleShows() {
         }, 800);
     }
 
-    renderShows(_lastShowsData);
+    // Elke collectie glijdt naar zijn nieuwe plek (FLIP op de titel)
+    const grid = document.querySelector('#shows-container .shows-grid-folders');
+    const key = el => (el.querySelector('.show-card-title') || {}).textContent;
+    showsFlip = true;
+    try {
+        MediaMotion.flipByKey(grid ? grid.children : [], key, () => renderShows(_lastShowsData),
+            { after: () => document.querySelectorAll('#shows-container .shows-grid-folders > .show-card'), spring: 'smooth' });
+    } finally {
+        showsFlip = false;
+    }
 }
 
 async function playFolderShow(showObj) {
@@ -630,6 +655,7 @@ function showArchiveRoot() {
     currentMedia = (folderTree || []).map(f => ({ type: 'folder', name: f.name, path: f.path }));
     filteredMedia = [...currentMedia];
     gridFocusIndex = 0;
+    gridMotion = 'enter';
     const query = document.getElementById('global-search');
     if (query && query.value.trim()) handleGlobalSearch(query.value);
     else applySortAndRender();
@@ -760,6 +786,7 @@ async function loadMedia(folder) {
         currentMedia = data.files;
         filteredMedia = [...currentMedia];
         gridFocusIndex = 0;
+        gridMotion = 'enter';   // een andere map: de tegels komen als een golf binnen
 
         applySortAndRender();
         return true;
@@ -800,6 +827,7 @@ function sortMedia(criteria) {
 
 function handleSort(value) {
     currentSort = value;
+    gridMotion = 'flip';    // dezelfde tegels, een andere volgorde: ze glijden naar hun plek
     applySortAndRender();
 }
 
@@ -811,11 +839,13 @@ function toggleView(view) {
         btn.setAttribute('aria-pressed', String(btn.dataset.view === view));
     });
 
-    const grid = document.getElementById('media-grid');
-    grid.classList.toggle('list-view', view === 'list');
-    grid.classList.toggle('grid-view', view === 'grid');
-
-    renderMediaGrid();
+    // Raster en lijst vloeien in elkaar over (View Transition; zonder beweging meteen)
+    Motion.viewTransition(() => {
+        const grid = document.getElementById('media-grid');
+        grid.classList.toggle('list-view', view === 'list');
+        grid.classList.toggle('grid-view', view === 'grid');
+        renderMediaGrid();
+    }, { kind: 'swap' });
 }
 
 // ==================== MEDIA GRID RENDERING ====================
@@ -828,10 +858,30 @@ const GRID_CHUNK = 60;
 let gridItems = [];        // mappen eerst, dan bestanden: de volgorde van het raster
 let gridRendered = 0;      // zoveel kaarten van gridItems staan er nu
 let gridObserver = null;
+// Hoe de volgende keer tekenen beweegt (media-motion.js): 'enter' (een andere map: een golf),
+// 'flip' (sorteren, filteren, een bestand weg: de tegels glijden naar hun nieuwe plek) of
+// niets. Eén keer: renderMediaGrid zet hem terug.
+let gridMotion = null;
 
 // keepCount: na verplaatsen of verversen evenveel kaarten tonen als ervoor, zodat de
 // scrollpositie niet verspringt
 function renderMediaGrid(keepCount = false) {
+    const motion = gridMotion;
+    gridMotion = null;
+    if (motion === 'flip' && gridItems.length) {
+        const grid = document.getElementById('media-grid');
+        MediaMotion.flipByKey(grid.querySelectorAll('[data-grid-index]'), el => el.dataset.motionKey || el.dataset.filename,
+            () => drawMediaGrid(keepCount), { after: () => grid.querySelectorAll('[data-grid-index]') });
+        return;
+    }
+    drawMediaGrid(keepCount);
+    if (motion === 'enter') {
+        const grid = document.getElementById('media-grid');
+        MediaMotion.cascade(grid.querySelectorAll('[data-grid-index]'), { revealRest: true });
+    }
+}
+
+function drawMediaGrid(keepCount) {
     const grid = document.getElementById('media-grid');
     const previous = keepCount ? gridRendered : 0;
     if (gridObserver) {
@@ -882,6 +932,7 @@ function renderMoreGridCards(count = GRID_CHUNK) {
     const grid = document.getElementById('media-grid');
     const end = Math.min(gridItems.length, gridRendered + count);
     const fragment = document.createDocumentFragment();
+    const cards = [];
     for (let i = gridRendered; i < end; i++) {
         const item = gridItems[i];
         const card = item.type === 'folder' ? createFolderCard(item) : createMediaCard(item);
@@ -889,9 +940,11 @@ function renderMoreGridCards(count = GRID_CHUNK) {
         card.dataset.gridIndex = String(i);
         card.tabIndex = i === gridFocusIndex ? 0 : -1;
         fragment.appendChild(card);
+        cards.push(card);
     }
     gridRendered = end;
     grid.appendChild(fragment);
+    return cards;
 }
 
 // ==================== RASTER MET HET TOETSENBORD ====================
@@ -990,7 +1043,8 @@ function observeGridEnd(grid) {
     }
     gridObserver = new IntersectionObserver(entries => {
         if (!entries.some(e => e.isIntersecting)) return;
-        renderMoreGridCards();
+        // Het volgende stuk komt rij voor rij binnen zodra het in beeld scrolt
+        MediaMotion.revealTiles(renderMoreGridCards());
         if (gridRendered >= gridItems.length) {
             gridObserver.disconnect();
             gridObserver = null;
@@ -1229,6 +1283,7 @@ function updateSearchFieldForView(view) {
 function handleGlobalSearch(query) {
     clearTimeout(searchTimer);
     query = searchKey(query);
+    if (gridMotion !== 'enter') gridMotion = 'flip';   // typen: wat blijft schuift aan, niets wacht
 
     if (!query) {
         filteredMedia = [...currentMedia];
@@ -1253,6 +1308,8 @@ const viewer = {
     index: -1,          // het bestand dat nu te zien is
     onRemoved: null,    // (file) => void: de opener haalt een verplaatst bestand uit zijn lijst
     more: null,         // async (richting -1|1) => [bestanden]: een lijst die per pagina laadt (Albums)
+    step: 0,            // de richting van het laatste bladeren (1, -1, 0): de foto schuift die kant op
+    carry: 0,           // zoveel px was de foto al weggeveegd (MediaMotion.viewerSwipe)
     moreDone: {},       // richting -> true als er aan die kant niets meer komt
 };
 
@@ -1370,6 +1427,7 @@ function removeFromFilesView(file) {
     if (!currentMedia.some(f => f.path === file.path)) return;
     currentMedia = currentMedia.filter(f => f.path !== file.path);
     filteredMedia = filteredMedia.filter(f => f.path !== file.path);
+    gridMotion = 'flip';    // de tegel gaat zichtbaar weg, de rest schuift aan
     renderMediaGrid(true);
 }
 
@@ -1402,6 +1460,13 @@ function renderViewerFile() {
     document.getElementById('modal-title').textContent = file.name;
 
     stopViewerMedia();
+    // Bij bladeren gaat de vorige foto als spook opzij (MediaMotion.viewerStep); meten vóór het vervangen
+    const step = viewer.step;
+    const carry = viewer.carry;
+    viewer.step = 0;
+    viewer.carry = 0;
+    const oldMedia = step ? modalBody.querySelector(':scope > #modal-image') : null;
+    const oldRect = oldMedia ? oldMedia.getBoundingClientRect() : null;
     // Alles behalve de navigatiezones vervangen
     const zones = [...modalBody.querySelectorAll(':scope > .modal-nav-zone')];
     modalBody.replaceChildren(...zones);
@@ -1445,6 +1510,8 @@ function renderViewerFile() {
         modalControls.style.display = 'flex';
     }
     if (media) modalBody.insertBefore(media, modalBody.firstChild);
+    if (step) MediaMotion.viewerStep(modalBody, oldMedia, oldRect, media, step, carry);
+    else MediaMotion.clearViewerGhost();
 
     modalMetadata.replaceChildren(viewerMetadata(file));
     if (typeof searchViewerChanged === 'function') searchViewerChanged(file);
@@ -1982,18 +2049,22 @@ function updateImageTransform() {
     }
 }
 
-function prevFile() {
+function prevFile(carry = 0) {
     if (viewer.index > 0) {
         viewer.index--;
+        viewer.step = -1;
+        viewer.carry = carry;
         renderViewerFile();
     } else if (viewer.index === 0) {
         viewerLoadMore(-1);
     }
 }
 
-function nextFile() {
+function nextFile(carry = 0) {
     if (viewer.index >= 0 && viewer.index < viewer.items.length - 1) {
         viewer.index++;
+        viewer.step = 1;
+        viewer.carry = carry;
         renderViewerFile();
     } else if (viewer.index >= 0) {
         viewerLoadMore(1);
@@ -2018,6 +2089,7 @@ async function viewerLoadMore(step) {
             viewer.items = files.concat(viewer.items);
             viewer.index += files.length - 1;
         }
+        viewer.step = files.length ? step : 0;
         renderViewerFile();
     } catch (e) {
         toastFetchError('Volgende bestanden laden mislukt', e);
@@ -2025,6 +2097,16 @@ async function viewerLoadMore(step) {
         viewerMoreBusy = false;
     }
 }
+
+// Vegen met de muis of twee vingers op het trackpad (alleen zonder zoom, niet bij video)
+document.addEventListener('DOMContentLoaded', () => {
+    MediaMotion.viewerSwipe(document.getElementById('modal-body'), {
+        canSwipe: () => isViewerOpen() && !isMoveModalOpen() && modalZoom <= 1,
+        hasNext: () => viewer.index < viewer.items.length - 1 || !!(viewer.more && !viewer.moreDone[1]),
+        hasPrev: () => viewer.index > 0 || !!(viewer.more && !viewer.moreDone[-1]),
+        go: (step, carry) => (step > 0 ? nextFile(carry) : prevFile(carry)),
+    });
+});
 
 // Keyboard navigation (niet terwijl de verplaats-modal erboven open is)
 document.addEventListener('keydown', (e) => {
@@ -3309,38 +3391,49 @@ class CinematicPlayer {
         if (!this.isPlaying) return;
         this.stopLoop();
 
-        // Progress animation
+        // De groene lijn loopt vol met een transform (geen breedte: die zou elk beeld de layout
+        // raken); zonder beweging staat hij gewoon vol
         const bar = document.getElementById('player-progress');
-        bar.style.transition = 'none';
-        bar.style.width = '0%';
-        setTimeout(() => {
-            bar.style.transition = `width ${this.duration}ms linear`;
-            bar.style.width = '100%';
-        }, 50);
+        bar.classList.add('mm-progress');
+        bar.style.opacity = '1';
+        if (this.progressAnim) this.progressAnim.cancel();
+        this.progressAnim = Motion.off() ? null
+            : bar.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: this.duration, easing: 'linear', fill: 'forwards' });
+        bar.style.transform = Motion.off() ? 'none' : '';
 
         this.timer = setTimeout(() => this.next(), this.duration);
     }
 
     stopLoop() {
         clearTimeout(this.timer);
+        if (this.progressAnim) { this.progressAnim.cancel(); this.progressAnim = null; }
         const bar = document.getElementById('player-progress');
-        if (bar) {
-            bar.style.transition = 'none';
-            bar.style.width = '0%';
-        }
+        if (bar) bar.style.transform = '';
     }
 
     resetProgress() {
         if (this.isPlaying) this.startLoop();
+        else this.stopLoop();   // gepauzeerd naar een andere dia: de lijn begint weer leeg
     }
 
     togglePlay() {
         this.isPlaying = !this.isPlaying;
         const icon = document.getElementById('btn-play-pause').querySelector('i');
         icon.className = this.isPlaying ? 'fas fa-pause' : 'fas fa-play';
-
-        if (this.isPlaying) this.startLoop();
-        else this.stopLoop();
+        // Pauze houdt alles stil waar het is (de lijn en de Ken Burns); afspelen gaat daar verder
+        this.playerEl.classList.toggle('is-paused', !this.isPlaying);
+        const anim = this.progressAnim;
+        if (this.isPlaying && anim && anim.playState === 'paused') {
+            const left = Math.max(0, this.duration - (Number(anim.currentTime) || 0));
+            anim.play();
+            clearTimeout(this.timer);
+            this.timer = setTimeout(() => this.next(), left);
+        } else if (this.isPlaying) {
+            this.startLoop();
+        } else {
+            clearTimeout(this.timer);
+            if (anim) anim.pause();
+        }
     }
 
     next() {
@@ -3464,6 +3557,10 @@ class CinematicPlayer {
                 class: `cinematic-media ${kbEffect}`,
                 src: vaultFileUrl(file.type === 'video' ? 'thumb' : 'file', file.path),
             });
+            // Ken Burns vanuit een willekeurig punt (nooit de rand), zo lang als de dia plus de overgang
+            img.style.setProperty('--kb-x', `${Math.round(20 + Math.random() * 60)}%`);
+            img.style.setProperty('--kb-y', `${Math.round(25 + Math.random() * 50)}%`);
+            img.style.setProperty('--kb-dur', `${this.duration + 2000}ms`);
             img.addEventListener('error', () => {
                 const thumb = vaultFileUrl('thumb', file.path);
                 if (!img.src.endsWith(thumb)) img.src = thumb;
@@ -3473,19 +3570,22 @@ class CinematicPlayer {
 
         container.appendChild(slide);
 
-        // Force reflow and activate
-        setTimeout(() => {
+        // Kruisvervagen: de nieuwe dia komt erover, de oude gaat pas weg als de nieuwe er staat.
+        // Snel bladeren: dia's die nog aan het vertrekken waren, gaan meteen weg.
+        container.querySelectorAll('.cinematic-slide.is-leaving').forEach(el => el.remove());
+        if (oldSlide) oldSlide.classList.add('is-leaving');
+        requestAnimationFrame(() => requestAnimationFrame(() => {
             slide.classList.add('active');
             if (oldSlide) {
                 oldSlide.classList.remove('active');
-                setTimeout(() => oldSlide.remove(), 1500);
+                setTimeout(() => oldSlide.remove(), Motion.ms('--dur-6', 640) * 1.5 + 100);
             }
-        }, 50);
+        }));
 
         // Show folder name (from API or extracted from path)
         const folderName = file.folder || file.path.split(/[/\\\\]/).slice(-2, -1)[0] || 'Onbekende map';
 
-        titleEl.textContent = folderName;
+        MediaMotion.rollText(titleEl, folderName, 1);
 
         metaEl.innerHTML = html`
 <span class="player-meta-item"><i class="fas fa-folder" aria-hidden="true"></i> ${folderName}</span>
@@ -3503,13 +3603,11 @@ ${file.size ? html`<span class="player-meta-item"><i class="fas fa-hard-drive" a
             // Show indeterminate progress for video
             const bar = document.getElementById('player-progress');
             if (bar) {
-                bar.style.transition = 'none';
-                bar.style.width = '100%';
+                bar.classList.add('mm-progress');
+                bar.style.transform = 'none';
                 bar.style.opacity = '0.3';
             }
         } else {
-            const bar = document.getElementById('player-progress');
-            if (bar) bar.style.opacity = '1';
             this.resetProgress();
         }
     }
