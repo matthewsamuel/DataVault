@@ -453,10 +453,20 @@ function searchRenderResults(data, fresh) {
     const results = overlay.querySelector('#search-results');
     const start = fresh ? 0 : results.children.length;
     const cards = data.items.map((item, i) => searchResultCard(item, start + i));
-    if (fresh) results.replaceChildren(...cards); else results.append(...cards);
-    // De resultaten stromen binnen: een golf over wat in beeld staat, de rest bij het scrollen
-    if (fresh) MediaMotion.cascade(cards, { revealRest: true, root: results.closest('.search-scroll') || null });
-    else MediaMotion.revealTiles(cards, { root: results.closest('.search-scroll') || null });
+    // De resultaten stromen binnen: de eerste keer een golf over wat in beeld staat (de rest bij
+    // het scrollen); verfijn je de zoekopdracht, dan schuift wat blijft naar zijn nieuwe plek
+    const root = results.closest('.search-scroll') || null;
+    const refine = fresh && results.querySelector('.search-result');
+    if (refine) {
+        MediaMotion.flipByKey(results.querySelectorAll('.search-result'), el => el.dataset.motionKey,
+            () => results.replaceChildren(...cards), { after: () => cards });
+    } else if (fresh) {
+        results.replaceChildren(...cards);
+        MediaMotion.cascade(cards, { revealRest: true, root });
+    } else {
+        results.append(...cards);
+        MediaMotion.revealTiles(cards, { root });
+    }
     const more = overlay.querySelector('#search-more');
     more.replaceChildren();
     const count = data.total;
