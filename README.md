@@ -1,18 +1,64 @@
-# DataVault Dashboard
+# DataVault
 
-## A Comprehensive Personal Media Management System
+**A fully local dashboard for a large personal photo and video archive: find, browse, curate and clean it up, without ever risking a file.**
 
-DataVault Dashboard is a full-featured web application for organizing, analyzing, and curating large personal media archives. It combines intelligent file deduplication, chronological browsing, AI-powered assistance, and gamified curation into a unified platform that handles thousands of photos and videos across multiple formats and storage locations.
+*Nederlandse samenvatting: DataVault is een lokale webapp (FastAPI, SQLite, vanilla JavaScript) om een groot persoonlijk foto- en videoarchief te doorzoeken, te sorteren en op te ruimen. Alles draait op de eigen Mac, zonder cloud of tracking. Bestanden worden nooit verwijderd of overschreven, alleen verplaatst met een opgeslagen "ongedaan maken". De interface is in het Nederlands.*
 
-**Built with:** FastAPI (Python), Vanilla JavaScript, SQLite, Pillow, ffmpeg, Ollama  
-**Status:** Production-ready  
-**Repository:** https://github.com/matthewsamuel/DataVault
+![Home, light](docs/screenshots/home-light.webp)
 
----
+## The problem
+
+A decade of photos ends up spread over disks, phone backups and exports: exact copies, bursts of
+near-identical shots, scans without a date, folders nobody remembers. Cloud services solve this by
+uploading everything. For an irreplaceable archive that is the wrong trade: you want search and
+clean-up without handing the files to anyone, and without a tool that can lose them.
+
+DataVault is built for one person with one big archive on an external disk (the design target is
+100,000+ files). Every design decision follows from two rules: **nothing leaves the machine** and
+**nothing is ever deleted**.
+
+## What makes it interesting technically
+
+- **Fully local.** No cloud, no telemetry, no CDN. Fonts, icons, map data and the map library are vendored. A test scans the frontend and fails on any external URL (one opt-in exception, see [Safety](#safety-design)).
+- **Safe, reversible file operations.** One function moves archive files (`move_no_overwrite`). It never overwrites, keeps all metadata and records an undo. There is no delete in the app.
+- **Background jobs** with progress, pause, cancel and resume. They survive a restart and wait when the disk is unplugged.
+- **Incremental library index** (SQLite): 100,000 files are read once in about 14 seconds. A re-check of an unchanged archive takes 0.03 s, because only changed folders are listed.
+- **Semantic photo search on-device.** A SigLIP 2 model runs through `onnxruntime` (Core ML on Apple Silicon). Search for "a dog on the beach" in Dutch or English. No PyTorch, no GPU server.
+- **Perceptual-hash series.** dHash and pHash group bursts and near-duplicates, then "best of series" picks a keeper using a sharpness and exposure quality score.
+- **Offline map.** Photos with GPS on a Natural Earth basemap, marker clusters and Dutch city labels. Place names are looked up offline. Online map tiles are an off-by-default opt-in.
+- **Local LLM assistant ("Pasha")** through Ollama. It can search, filter and show photos. Anything that changes files is only a *proposal*: nothing happens until you click *Uitvoeren*.
+- **Schema migrations** (numbered, appended, tested against a legacy database) and automatic compact backups of the database.
+
+## Features
+
+**Browse and find**
+- Home with a photo and a Spotify play from this day in earlier years, and quick entries to the rest
+- Bestanden: folder tree, grid and list, a viewer with zoom, capture date, camera, size and place
+- Tijdlijn: virtual-scrolled timeline of the whole archive with a year slider
+- Albums: combined filters (period, folder, camera, type, location, rating), smart albums that update themselves, "Op deze dag"
+- Slim zoeken: search by what is in the photo, "similar photos", file name search
+- Kaart: photos on a map, clusters, year filter, "show on map" from the viewer
+
+**Clean up (always undoable)**
+- Duplicaten: exact copies by content hash, with a byte-for-byte check before anything moves
+- Reeksen ("Beste uit reeks"): bursts and near-identical photos, keep the best, move the rest
+- Herstelcentrum: one place to see every move the app made and put it back
+
+**Curate**
+- Keurer: swipe-style keep/move decisions with keyboard shortcuts, streaks and undo
+- Shows: slideshows and "Welke is mooier?" duels that feed an Elo rating per photo, with a leaderboard
+- Exporteren: copy a selection or the best photos of a period to a folder outside the archive (originals or resized JPEG, CSV/JSON overview)
+
+**Your own data (DataGatherer, all opt-in)**
+- Spotify (export or API), Last.fm, Google Takeout (location history, activity), Chrome and Safari history, iMessage and WhatsApp, with an activity timeline and photo geotagging from your location history. Nothing goes online unless you click it.
+
+**Platform**
+- Light and dark theme, full keyboard control, a shortcut overview, a design system with tokens, a style guide page
+- Database back-ups with rotation and a restore script
 
 ## Screenshots
 
-Light and dark theme at 1440 x 900, taken in WebKit from a generated showcase archive
+Light and dark theme at 1440 x 900, taken in WebKit from a **generated** showcase archive
 (`code/tests/fixtures/showcase_vault.py`): no real photos or personal data.
 
 | Screen | Light | Dark |
@@ -26,874 +72,195 @@ Light and dark theme at 1440 x 900, taken in WebKit from a generated showcase ar
 | Timeline | ![Timeline, light](docs/screenshots/tijdlijn-light.webp) | ![Timeline, dark](docs/screenshots/tijdlijn-dark.webp) |
 | Spotify | ![Spotify, light](docs/screenshots/spotify-light.webp) | ![Spotify, dark](docs/screenshots/spotify-dark.webp) |
 
----
+Screens that do not have a committed screenshot yet (placeholders, not invented images):
 
-## 🎯 Quick Overview
+| Screen | Light | Dark |
+|---|---|---|
+| Pasha, the assistant | _screenshot pending_ | _screenshot pending_ |
+| Slim zoeken (results) | _screenshot pending_ | _screenshot pending_ |
+| Herstelcentrum | _screenshot pending_ | _screenshot pending_ |
+| Duplicaten | _screenshot pending_ | _screenshot pending_ |
+| DataGatherer | _screenshot pending_ | _screenshot pending_ |
 
-### Core Functionalities
+<!--
+TODO(screenshots): capture these from the showcase vault (see "Running the tests" for how to start it:
+`code/tests/fixtures/showcase_vault.py DIR --populate URL`), WebKit, nl-NL, 1440x900, light and dark,
+and save as .webp next to the others. Then replace the "screenshot pending" cells with the image links.
 
-#### Media Organization & Discovery
-- **Chronological Timeline Browser** — Browse entire archive by creation date with virtual scrolling, year-based indexing, and efficient multi-folder temporal views
-- **Smart Folder Navigation** — Hierarchical folder tree with media counts, folder enable/disable settings, and recursive depth traversal
-- **Multi-View Display** — Grid view (thumbnail-based), list view (sortable by name/date/size), and fullscreen modal viewer with zoom and pan controls
+| docs/screenshots/pasha-light.webp / pasha-dark.webp            | Chat (Pasha) open with an answer that shows a strip of thumbnails and a proposal card with an "Uitvoeren" button |
+| docs/screenshots/slim-zoeken-light.webp / slim-zoeken-dark.webp | Search window after typing a query such as "strand", with the results grid and relevance badges |
+| docs/screenshots/herstelcentrum-light.webp / -dark.webp         | Herstelcentrum, tab "Herstel" with several entries (a move, a duplicate run) and one expanded |
+| docs/screenshots/duplicaten-light.webp / -dark.webp             | Duplicaten after a scan of a folder: groups, the keeper rule picker and the kept copy highlighted |
+| docs/screenshots/datagatherer-light.webp / -dark.webp           | DataGatherer overview with source cards (Spotify, Google Takeout, Chrome, Berichten) and one imported |
+-->
 
-#### Duplicate Detection & Management
-- **Content-Addressed Deduplication** — Find exact duplicates using xxHash3-128 hashing (size pre-filter first) with a cache that is only trusted while the file is provably unchanged
-- **You Choose What Stays** — A fixed, deterministic rule per group (oldest by default; newest, shortest path or a preferred folder), switchable instantly in the UI, plus a per-group pick of the copy to keep
-- **Safe Removal** — Move duplicates to RAW_DUPLICATES preserving directory structure, only after a byte-for-byte compare with the kept copy; one undo run per cleanup action, no metadata loss
-- **Folder-Level Scanning** — Scan any folder for duplicates within that folder (and its subfolders); read errors are reported, never silently skipped
+## Architecture
 
-#### Gamified Photo Curation (Foto Keurer)
-- **Swipe-Based Interface** — Four-directional gesture controls (left/right/up/down) + keyboard shortcuts for intuitive rapid rating
-- **Streak Motivation System** — Daily 20-photo goal with consecutive day tracking and persistent progress storage
-- **Smart Undo History** — Reverse up to 20 actions with automatic file restoration from trash or relocation
-- **Keyboard-First Design** — Support for WASD, arrow keys, spacebar preview, and mouse gestures
-
-#### Media Analytics & Insights
-- **Spotify Integration** — Parse streaming history (both Extended and Standard formats) with artist/track aggregation, hourly/monthly activity patterns, binge tracking, and skip detection
-- **Per-Year Statistics** — Filter and analyze listening habits by year with available year detection
-- **Listening Trends** — Total play time, skip ratios, top artists, platform usage distribution
-
-#### Intelligent Slideshows ("Shows")
-- **Weighted Random Sampling** — ELO-style rating system (baseline 1000) for intelligent photo presentation
-- **Probability-Based Selection** — Higher-rated photos appear more frequently, lower-rated less often
-- **Multi-Folder Slideshow** — Create slideshows from any combination of folders with folder visibility controls
-
-#### AI-Powered Chat Assistant
-- **Local LLM Integration** — Privacy-first design using Ollama (no cloud data transmission)
-- **Rich Context Injection** — Assistant has access to live vault data (folder structure, disk usage, top Spotify artists, listening time)
-- **Multi-Modal Interaction** — Text chat + action tags (open folders, show photos by date, switch tabs, scan duplicates)
-- **Streaming Responses** — Real-time response streaming for perceived low latency
-
-#### Advanced Media Handling
-- **Format Support** — Photos: JPG, PNG, HEIF, TIFF, WebP, GIF, BMP, RAW, CR2, NEF, ARW, DNG | Videos: MP4, MOV, M4V, AVI, MKV, WMV, FLV, WebM, 3GP, MPG, MPEG, MTS, M2TS | Audio: MP3, WAV, FLAC, M4A, AAC, OGG, WMA
-- **Thumbnail Generation** — JPEG thumbnails (300x300, quality 85), decoded small and then turned upright by EXIF orientation; cached under a key of path, size, mtime and inode; HEIC via pillow-heif, RAW via macOS `sips`; video frame extraction via ffmpeg
-- **Metadata Preservation** — Atomic file operations (os.replace) preserve timestamps, EXIF, IPTC, extended attributes
-
-#### Performance & Reliability
-- **Background Prefetch** — Smart multi-stage prefetching (Spotify all-time → shows → per-year data) with promise-based caching
-- **Background Jobs** — Duplicate scans, hashing and thumbnail pre-generation run as jobs in a worker thread (`backend/jobs.py`, `/api/jobs`): progress with ETA, cancel, pause and resume, persisted in SQLite so they survive a reload; a job left running by a stopped server comes back as `interrupted`, and one whose vault is unplugged waits for it and continues
-- **Never Blocking the Server** — Every route that touches the disk, a subprocess or SQLite is a plain `def` (threadpool); only the chat routes are `async` (they await Ollama). SQLite runs in WAL mode with one connection per thread and a busy timeout
-- **Graceful Error Handling** — Corrupt files skipped silently, cross-device moves detected, partial failures reported with details. Every error answer has one shape, `{"error": {"code", "message"}, "detail"}` (`backend/errors.py`; `detail` keeps the old field), and the frontend reads it through `fetchJSON` (api.js) and shows it with one toast helper (`toastFetchError`); identical toasts are not stacked. Every answer `vault_unavailable` (also from a plain `fetch`) raises the "Archief niet bereikbaar" banner at once, and `toastFetchError` then shows no toast. Starting a background job (`POST /api/jobs`) needs the vault too; the other job routes keep working, so the dock can still pause or cancel a job that waits for the disk
-- **Unplugged Disk** — Every route that reads the archive depends on `errors.require_vault` and answers 503 `vault_unavailable` while the vault is gone; an `OSError` or database error halfway through a request becomes the same 503 when the vault turned out to be gone. The page shows a banner ("Archief niet bereikbaar"), polls `/api/health` every 3 s until the disk is back and then reloads what it shows, without a server restart. The app also starts without the disk: routers are always initialised and the database opens (and migrates) lazily on the first request after the vault appears (`Database(prepare=...)`, `db.when_ready`), without ever creating folders under `/Volumes`
-- **Capabilities** — `/api/health` reports `capabilities` (ffmpeg, ffprobe, pillow_heif, sips, and the chat: Ollama reachable, installed models, chosen model) and Dutch `notices` for what is missing; the page shows them in a small notice bottom left that can be dismissed
-- **Security Hardening** — No CORS, trusted hosts only (127.0.0.1/localhost), a per-process session token on every state-changing request, one central path check (`resolve_in_vault`) and one exclusion rule for every walk over the archive
-
----
-
-## 🏗️ System Architecture
-
-### Backend Structure (FastAPI + Python)
-
-```
-backend/
-├── main.py                    # FastAPI initialization, middleware, route registration, health/restart
-├── security.py                # Trusted hosts, session token (GET /api/session) and its middleware
-├── paths.py                   # resolve_in_vault() for request paths; ArchiveFilter/walk_archive() exclusions
-├── restart.py                 # Restart of this server process only (helper waits for the PID to exit)
-├── config.py                  # Configuration loader, media type definitions
-├── database.py                # SQLite abstraction (caching, ratings, decisions, undo tracking)
-├── scanner.py                 # File discovery, xxHash3 hashing, per-folder duplicate detection
-├── file_ops.py                # Safe atomic file operations with metadata preservation
-├── thumbnail.py               # Thumbnail generation (PIL) with cache validation, atomic writes
-├── jobs.py                    # JobManager: background jobs with progress, cancel, pause, resume, vault wait
-├── job_types.py               # The job types: dup_scan, hashing, thumbnails, index
-├── recovery.py                # Recovery center registry: providers, ActionRecorder, undo of shared records
-│
-└── routes/
-    ├── folders.py             # Folder tree enumeration, recursive traversal
-    ├── media.py               # Individual file operations, thumbnail serving, file downloads
-    ├── duplicates.py          # Duplicate scan (as a job), verified batch moves, undo per run
-    ├── jobs.py                # /api/jobs: start, list, get, result, cancel, pause, resume
-    ├── spotify.py             # Spotify JSON parsing, stats aggregation, year filtering
-    ├── shows.py               # Slideshow generation, weighted sampling, ELO ratings
-    ├── chat.py                # LLM chat with Ollama, context injection, action tags, streaming
-    ├── keurer.py              # Photo curation endpoints, streak calculation, undo support
-    ├── recovery.py            # GET /api/recovery (every undoable move), POST /api/recovery/undo
-    ├── stats.py               # Statistics aggregation, general analytics
-    └── timeline.py            # Chronological media browsing, date indexing, virtual scrolling
+```mermaid
+flowchart LR
+  subgraph Browser["Browser (Safari), vanilla JS, no build step"]
+    UI["index.html + feature modules<br/>app.js, library.js, map.js, keurer.js, ..."]
+    API["api.js: fetch wrapper with session token"]
+    UI --> API
+  end
+  subgraph Server["FastAPI app (backend.main:create_app), 127.0.0.1 only"]
+    SEC["security.py: trusted hosts, token, no CORS"]
+    R["routes/ (one router per feature)"]
+    J["jobs.py + job_types.py<br/>background jobs: progress, cancel, resume"]
+    FO["file_ops.py: move_no_overwrite + undo records"]
+    PA["paths.py: resolve in vault, exclusions"]
+    ML["semantic.py, near_dups.py, places.py<br/>onnxruntime, Pillow, pHash"]
+    AS["assistant.py: tools + confirmed proposals"]
+  end
+  DB[("SQLite, WAL<br/>numbered migrations")]
+  FS[("Archive on disk<br/>never deleted")]
+  OL["Ollama on 127.0.0.1:11434<br/>(optional)"]
+  MD["models/ SigLIP 2 ONNX<br/>(one-time download)"]
+  API -->|HTTP + token| SEC --> R
+  R --> J
+  R --> FO
+  R --> AS
+  J --> ML
+  J --> DB
+  R --> DB
+  FO --> PA --> FS
+  ML --> FS
+  ML --> MD
+  AS --> OL
 ```
 
-**Key Architectural Patterns:**
-- **Modular Route-Based Organization:** Each feature is a self-contained router with init/endpoint separation
-- **Dependency Injection via init_router():** Routes receive shared config and database instances
-- **Stateless API Design:** Routes don't maintain state; all data persists in SQLite or filesystem
-- **Streaming Responses:** Chat endpoint uses SSE (Server-Sent Events) for real-time streaming
-- **Static Mount Last:** Frontend served via StaticFiles mounted after all API routes to prevent interception
-
-### Frontend Structure (Vanilla JavaScript)
-
-```
-frontend/
-├── index.html                 # 9 main sections: home, viewer, duplicates, spotify, shows, keurer, timeline, recovery, settings
-├── api.js                     # Adds the session token to every write (loaded first)
-├── dom.js                     # Safe DOM helpers: createEl, html`...`, setHTML (loaded second)
-├── ui.js                      # Empty/error/skeleton states; focus trap, Escape and focus return for every overlay
-├── app.js                     # Core state management, view switching, prefetch caching
-├── style.css                  # Responsive design (Flexbox/Grid), theme system, animations
-├── keurer.js                  # Photo curator UI, swipe detection, undo history
-├── duplicates.js              # Duplicate groups, keep rules, cleanup dialog, Herstellen (undo)
-├── timeline.js                # Timeline UI, virtual scrolling, slider navigation
-├── wave-background.js         # Animated background (only while visible; still with reduced motion)
-├── resizable-sidebar.js       # Interactive folder tree sidebar
-├── recovery.js                # Herstelcentrum: one chronological list of reversible actions with undo
-├── settings.js                # Instellingen: sections register with registerSettingsSection()
-├── shortcuts.js               # Keyboard scheme (1-9, g + letter, /, t, ?) and the shortcut overview
-└── vendor/                    # Font Awesome 6.4.0 and JetBrains Mono, with licenses (no CDN)
-```
-
-**Frontend Techniques:**
-- **No External Frameworks:** Vanilla JS reduces bundle size (<50KB vs. 500KB+ with framework)
-- **Virtual Scrolling:** Efficient rendering of large datasets (10,000+ items)
-- **Intersection Observer:** Lazy thumbnail loading on scroll
-- **Promise-Based Prefetching:** Background data loading with smart prioritization
-- **CSS Variables & Media Queries:** Responsive design with automatic dark mode
-- **State-Driven Rendering:** Global state → API fetch → DOM update pattern
-
-### Data Flow Architecture
-
-```
-User Action (UI)
-    ↓
-JavaScript Handler (DOM, event listeners)
-    ↓
-Fetch API Call (HTTP POST/GET)
-    ↓
-FastAPI Route (validation, authorization)
-    ↓
-Business Logic (scanner, file_ops, database queries)
-    ↓
-SQLite or Filesystem Operation
-    ↓
-Response (JSON or streaming data)
-    ↓
-UI Update (render, toast notification)
-```
-
----
-
-## 💾 Core Features & Technical Deep Dive
-
-### 1. DUPLICATE DETECTION
-
-**Problem:** Large vaults accumulate identical files across folders. Manual identification is impossible; naive approaches are too slow.
-
-**Solution:**
-- **Per-Folder Scan as a background job** (`POST /api/jobs {type: "dup_scan", params: {folder, rule, prefer_folder}}`,
-  `scanner.find_duplicates_in_folder`); `POST /api/duplicates/scan_folder?folder_path=&rule=&prefer_folder=` runs
-  the same job and waits for it (for scripts):
-  1. Walk the chosen folder in sorted order with the archive's one exclusion rule (no cache, TRASH,
-     RAW_DUPLICATES, hidden or `._` files, symlinks) and group the non-empty media files by size; per file only
-     the path string and a small fingerprint tuple are kept
-  2. Hash only the files that share a size with xxHash3-128 on 4 threads, submitted in a bounded window
-     (`jobs.bounded_map`: never tens of thousands of futures at once); new hashes go to the cache in batches
-     of 2000 (or every 10 s), so a stopped or interrupted scan resumes from the cache
-  3. Group by hash and pick the copy that stays with `scanner.choose_keeper(rule)`
-  4. Answer with groups: `{id, hash, size, type, copies: [...], keep}`; each copy carries `capture_ts`
-     (EXIF DateTimeOriginal, else birthtime, else mtime), `file_ts`, `hidden`, `path_len` and `name_rank`
-- **Which copy stays:** every rule first prefers a copy that is not hidden (dot name or the Finder
-  'hidden' flag) and ends with the path in alphabetical order, so the result is fully deterministic.
-  `oldest` (default): oldest capture date, then oldest file date, then shortest path. `newest`: the reverse
-  dates. `shortest`: shortest path, then oldest. `folder`: a copy anywhere below `prefer_folder`, then oldest
-  (the UI offers every folder holding a copy plus its parent folders up to the scanned folder).
-  Identical bytes mean identical EXIF, so within a group the file date tells the copies apart.
-  The UI (`keepSortKey` in duplicates.js) uses the same keys, so switching rules is instant, and the user can
-  pick another copy per group.
-- **Honest results:** unreadable folders and files are counted (`errors`, `error_samples`, `complete: false`);
-  a folder that disappears mid-scan fails the job, and an unplugged vault makes it wait and run again, so a
-  scan that missed files because of the disk is never `done`. The result is stored (`job_results`) and served
-  again after a reload, leaving out copies that were moved since. One scan runs at a time; a second one waits
-  in the queue (`scan_folder` answers 409 instead).
-- **Smart Caching:** `file_hashes` rows carry their algorithm (`algo`) and are only used while the file's
-  inode, size, mtime_ns and ctime_ns are unchanged (ctime cannot be set back, so an in-place edit that
-  restores the mtime is still noticed). Rows from before migration 6 are simply rehashed. The cache is read in
-  one query and written in one transaction per scan, and rows of files that are gone are pruned.
-- **Verified Removal** (`POST /api/duplicates/move`, body `{groups: [{keep, move: [...]}], run_id?, folder?}`):
-  for every file, right before moving and under `ARCHIVE_LOCK`, the server checks that it is a regular file
-  outside RAW_DUPLICATES/TRASH/cache, that `keep` still exists inside the vault, and that both are
-  **byte-for-byte identical** (`file_ops.files_identical`, no cached hash), and that `keep` is not hidden
-  (dot name below the vault root or UF_HIDDEN) while the file to move is visible. Only then is the file moved to
-  RAW_DUPLICATES with its folder structure, via `move_no_overwrite`. Refusals are listed per file in `failed`.
-  So the last copy of a photo can never be moved away, even if the folder changed since the scan.
-  `POST /api/duplicates/delete_single` does the same for one file.
-- **Undo per action:** a run is created in the same transaction as its first moved file (so there are no empty
-  runs); the UI sends one action in chunks of about 100 files with the returned `run_id`. Runs are ordered by an
-  AUTOINCREMENT `seq`, never by clock time. `GET /api/duplicates/runs` lists recent runs (with how many files are
-  still in RAW_DUPLICATES), `POST /api/duplicates/undo {run_id}` restores one run, and
-  `POST /api/raw_duplicates/undo_last` restores the newest run that still has a file in RAW_DUPLICATES.
-  A file that took the original place is never overwritten: the restored file then gets
-  `name_RESTORED_001.ext`. Only restored files are forgotten; the rest stays recorded for a later attempt.
-  The database lives on the vault disk: while it is unplugged, every database error answers 503
-  "Archief niet bereikbaar (schijf losgekoppeld?)" (app-wide handler in `backend/errors.py`) instead of a 500.
-
-**Code Example:**
-```python
-# duplicates._move_verified, shortened (the caller holds ARCHIVE_LOCK and records the move)
-if not files_identical(src_path, keeper):
-    raise HTTPException(409, "File is no longer identical to the kept copy; scan again")
-dst_path, was_conflict = safe_move_with_structure(real_src, base_folder, config.DUPLICATES_FOLDER.resolve())
-```
-
-**Algorithm:** xxHash3-128 to find candidates quickly; a full byte compare decides before anything moves.
-
----
-
-### 2. CHRONOLOGICAL TIMELINE
-
-**Problem:** Thousands of photos spanning decades; users need intuitive temporal exploration without loading everything.
-
-**Solution:**
-- **Date Extraction (`backend/media_dates.py`):** EXIF DateTimeOriginal (then DateTimeDigitized, DateTime) for photos, the QuickTime `mvhd` creation time for mp4/mov/m4v/3gp, else macOS st_birthtime, else mtime. The same rule serves the timeline, "on this day" and photos-by-date. Dates are cached in SQLite (`media_dates`, migration 9) with the size and mtime_ns they were read at, and read with 4 threads when missing
-- **Recursive Folder Scanning:** Efficient traversal excluding system folders; one `folders` query parameter per folder (names may contain commas), nested selections are reduced to the outer folder (no photo twice), and folders that were not found come back in `skipped`
-- **Compact, cached answer:** one row per file `[timestamp, path relative to root, size, 'p'|'v', date source]` instead of a dict with the full path (about a third of the size), cached per folder selection until the mtime of any folder below it changes
-- **On this day / photos by date:** first the date cache (each row checked against the disk), then a walk in random order that stops at enough hits, 300 folders (photos-by-date: 2000) or a time budget (2 s / 4 s); `complete: false` says the budget ran out. Only photos and videos, never audio
-- **Date-Based Indexing:** Year → Month → Count structure for O(1) year jumping
-- **Year Boundaries:** Precomputed indices of first photo per year
-- **Virtual Scrolling:** Render only visible items (20-50 thumbnails at a time)
-- **Multi-Folder Support:** Users select 1+ folders; results merged chronologically
-- **Slider Navigation:** Year labels + real-time tooltip showing date range
-
-**Performance:** 10,000+ photo timelines scroll smoothly
-
-**Code Example:**
-```python
-# Build date index for quick navigation
-date_index = defaultdict(lambda: defaultdict(int))
-for f in all_files:
-    dt = datetime.fromtimestamp(f["timestamp"])
-    date_index[dt.year][dt.month] += 1
-
-# Compute year boundaries for slider jumping
-year_boundaries = {}
-for i, f in enumerate(all_files):
-    year = datetime.fromtimestamp(f["timestamp"]).year
-    if year not in year_boundaries:
-        year_boundaries[year] = i  # Index of first photo in year
-```
-
----
-
-### 3. GAMIFIED CURATION (Foto Keurer)
-
-**Problem:** Manually rating large photo libraries is tedious; users need motivation.
-
-**Solution:**
-- **Four-Directional Gestures:** 
-  - LEFT (A-key) = Keep
-  - RIGHT (D-key) = Delete
-  - UP (W-key) = Move to folder
-  - DOWN (S-key) = Undo
-- **Daily Streak System:** Requires 20+ ratings per day; tracks consecutive days
-- **Progress Tracking:** Real-time counter (today's count / 20) + lifetime total
-- **Undo History Stack:** Stores last 20 actions with trash_path and moved_to locations
-- **Database Recording:** Timestamps decisions for streak recalculation
-
-**Streak Algorithm:**
-```python
-streak = 0
-check_date = today
-
-# If today's goal not met, start counting from yesterday
-if daily_count[today] < 20:
-    check_date = today - 1
-
-# Count consecutive days with 20+ decisions
-while daily_count[check_date] >= 20:
-    streak += 1
-    check_date -= 1
-```
-
-**Gesture Detection:**
-```javascript
-// Calculate swipe distance and angle
-const deltaX = endX - startX;
-const deltaY = endY - startY;
-const distance = Math.sqrt(deltaX*deltaX + deltaY*deltaY);
-const angle = Math.atan2(deltaY, deltaX);
-
-// Threshold: minimum 50px swipe distance
-if (distance > 50) {
-    if (angle > -0.75 && angle < 0.75) {
-        decide('delete');      // →
-    } else if (angle > 0.75 && angle < 2.4) {
-        decide('move');        // ↑
-    } // ... more angles
-}
-```
-
----
-
-### 4. SPOTIFY ANALYTICS
-
-**Problem:** Spotify provides raw history but limited insights. Understanding personal habits requires custom aggregation.
-
-**Solution:**
-- **Multi-Format Parser:** Handles both Extended (Streaming_History_Audio_*.json) and Standard (StreamingHistory*.json) formats
-- **Robust Error Handling:** Graceful fallback for missing fields; skips glitches (<1s plays)
-- **Rich Aggregation:**
-  - Artists: cumulative time, play count, tracked first occurrence
-  - Tracks: ms_played, artist, name
-  - Hourly distribution (0-23)
-  - Monthly distribution (1-12)
-  - Platform usage
-  - Binge tracking (max consecutive plays)
-  - Skip/completion detection (< or > 30s as threshold)
-  - "On This Day" feature (same month/day in previous years)
-- **Year Filtering:** Detect available years; filter stats by year
-
-**Performance:** Millions of play records aggregated in <1 second
-
----
-
-### 5. SLIDESHOW SYSTEM (Shows)
-
-**Problem:** Static browsing is passive. Randomized presentation with weighted recommendations improves engagement.
-
-**Solution:**
-- **ELO-Style Ratings:** Each file has rating (baseline 1000); updated via user votes
-- **Weighted Random Order Without Repeats:** every photo and video below a show's folder is a
-  candidate; each gets the key `random() ** (1 / rating^1.5)` and the largest keys come first
-  (Efraimidis-Spirakis), so a liked photo tends to come early, and no photo is repeated or left
-  out. A folder show plays at most 2000 files, Feeling Lucky draws 50 from the whole library.
-  ```python
-  keyed = ((random.random() ** (1.0 / show_weight(ratings.get(p, 1000))), p) for p in paths)
-  order = [p for _, p in heapq.nlargest(k, keyed)]
-  ```
-- **What a show plays:** photos and videos only (no audio). Videos the browser can play
-  (mp4, m4v, mov, webm) play as video; other formats show their thumbnail as a still.
-- **Show list:** every folder below `library` with photos or videos somewhere inside (not
-  `library` itself); the preview comes from its own files, or from its subfolders. An
-  unreadable folder is skipped on its own.
-- **Slideshow Controls:** Auto-advance (configurable interval), manual prev/next, pause/resume
-- **Folder Filtering:** Exclude folders via enable/disable settings stored in database
-
----
-
-### 6. LLM-POWERED CHAT
-
-**Problem:** Users want conversational help, but cloud AI raises privacy concerns.
-
-**Solution:**
-- **Local Ollama Integration:** Privacy-first; no cloud data transmission
-- **Model choice:** a dropdown in the chat header lists the models Ollama has installed (`GET /api/chat/models`, from Ollama's `/api/tags`); the choice is stored server-side in `app_settings` (migration 10, `POST /api/chat/model`). The default is `qwen2.5:3b` (~1.9 GB, fast on a Mac); install another light model with e.g. `ollama pull llama3.2:3b`
-- **Clear failures:** Ollama not running, the model not installed, no answer in time (connect 3 s, read 120 s), an error or a disconnect halfway: the stream always ends with `done` or an `error` event with a code (`ollama_down`, `model_missing`, `timeout`, `ollama_error`, `incomplete`) and a Dutch message, shown in the chat bubble; the status next to the dropdown says Online / Model ontbreekt / Ollama offline
-- **Duplicates from the chat:** `scan_duplicates` only offers a button ("Scan starten") for the chosen folder; the scan runs as a background job after the click
-- **Dynamic Context Injection:**
-  ```
-  Current date/time
-  Available folders (top 25)
-  Disk usage (used, free, total)
-  Top Spotify artists + total listening time
-  ```
-- **Multi-Modal Interaction:** Chat text + action tags
-  - `open_folder`, `show_photos`, `search_photos`, `open_file`, `open_tab`, `scan_duplicates`
-  - Model output is untrusted: it is shown with `textContent`, and an action runs only if it is
-    on an allowlist with typed arguments (`open_tab` only for a known view, `show_photos` only
-    for a real `YYYY-MM-DD` date). `open_file` opens a file only if the server lists it in its
-    folder (`/api/media`, so inside the vault); `open_folder` only opens a folder from the
-    server's folder tree.
-  - Folder names and Spotify artists go into the system prompt as a JSON list without `<`, `>`
-    or control characters (`chat.as_prompt_data`), and the prompt says they are data, not
-    instructions.
-- **Streaming Responses:** SSE (Server-Sent Events) for real-time chat
-- **Think Block Filtering:** Removes `<think>` tags from reasoning models
-
-**System Prompt Example:**
-```
-You are Pasha, DataVault's personal AI assistant.
-Answer briefly in Dutch. Be helpful.
-
-=== LIVE VAULT DATA ===
-Today: April 1, 2026
-Folders: RAW, Archive, 2020, 2021, ...
-Disk: 850GB used, 150GB free (1TB total)
-Spotify: Top artists: Taylor Swift, The Weeknd, ...
-Listening time: 45,000 minutes
-```
-
----
-
-### 7. MEDIA VIEWER & THUMBNAIL SYSTEM
-
-**Problem:** Browsing 1000s of images requires fast, efficient thumbnail loading and rendering.
-
-**Solution:**
-- **Lazy Thumbnail Generation:** JPEG thumbnails (300x300, quality 85) generated on first access
-- **Small first, then upright:** a JPEG is decoded at 1/2 to 1/8 of its size (`img.draft`), `thumbnail()` reduces it, and only the small image is turned by its EXIF orientation (a 48 MP photo needs ~25 MB instead of ~400 MB). At most 4 thumbnails are made at once, and two requests for the same one make it once. Photos up to 2 x 300 MP are accepted (Pillow's default bomb limit is ~179 MP); non-JPEG images above 50 MP are decoded one at a time. A RAW or HEIC photo Pillow cannot decode goes through macOS `sips`
-- **Cache key:** `v2_<md5(path|size|mtime_ns|inode)>.jpg`. A different file at the same path (a restore, an undo, another `IMG_0001.jpg` moved in) never shows the old picture, and bumping `THUMB_VERSION` makes every thumbnail again (version 2: EXIF rotation). At startup old-style entries, stored placeholders and stale temporary files are removed from the thumbnail folder, and when the current thumbnails take more than `THUMB_CACHE_MAX_BYTES` (4 GB, about 200,000 thumbnails) the least recently shown ones (by atime) are removed until 80 % of that is left; thumbnails of edited or deleted files are never shown again, so they go first. A move through the app renames the cached thumbnail to the new path's key (`file_ops.on_moved` + `thumbnail.carry_over`)
-- **Placeholders are never stored:** audio, documents, a video without ffmpeg and a file that cannot be read or decoded get a placeholder served with `Cache-Control: no-store` and `X-DataVault-Placeholder`, never one cached under the file's name. A read error is tried again on the next request, an undecodable file after 5 minutes (`RETRY_SECONDS`), a video as soon as ffmpeg is installed. The thumbnail job (`/api/jobs` type `thumbnails`) never writes placeholders: a photo or video that cannot be read counts as an error (`errors`, the run is not `complete`), one that reads fine but cannot be decoded (corrupt, empty, unknown format, no video frame) is counted apart as `undecodable` and does not make the run incomplete, a cached placeholder for a photo is made again (`thumbnail.is_placeholder` compares the exact placeholder bytes), and videos without ffmpeg are skipped as `no_ffmpeg`
-- **Format Conversion:** Pillow handles HEIF (with pillow-heif), RAW, JPEG, PNG, etc.; converts to RGB as needed
-- **Video Frame Extraction:** ffmpeg (`-nostdin`, `-ss 1` before `-i` so it seeks in the input) extracts the frame at the 1s mark; a clip shorter than that gets a second try for its first frame
-- **Never above the cache:** a thumbnail write only ever makes the thumbnail folder itself, and `Config.ensure_cache_dirs` makes folders below the vault root one at a time, so a vault renamed or unplugged mid-job is never recreated as an empty folder at the old path
-- **Concurrent Processing:** ThreadPoolExecutor for multi-core hash/thumbnail operations
-- **One viewer, its own list:** the Files grid, the timeline and the chat each open the shared
-  viewer with their own list of files (`openViewer(items, index, {onRemoved})`). Previous/next
-  (keys and the side zones), Move and Open in Finder always act on the file that is shown, and
-  the Files grid's own lists are never replaced. The metadata shows only real values: the file
-  date (or the timeline's capture date) and a Shows rating only for files that were voted on
-  (`/api/media` adds `rating` and `votes` for those)
-
-**Performance:**
-- Thumbnail generation: 50-100ms per image
-- Cache hit: <10ms per thumbnail
-- Video frame extraction: 100-300ms per video
-
----
-
-## 🛠️ Technical Achievements & Design Patterns
-
-### 1. Safe File Operations (Metadata Preservation)
-
-**Key Insight:** Standard approaches (copy → delete) lose metadata, and a plain `os.rename()` silently overwrites an existing file. Solution: every move goes through one helper, `file_ops.move_no_overwrite()`.
-
-**Benefits:**
-- Single atomic, *exclusive* rename (`renamex_np(RENAME_EXCL)` on macOS, `os.link` + unlink elsewhere): an existing file is never replaced, a clash becomes `name_DUP_001.ext`
-- Same inode, so mtime, birthtime, EXIF, extended attributes and Finder locks are preserved
-- Refuses cross-volume moves, directories and symlinks instead of falling back to copy + delete
-
-```python
-final_path = move_no_overwrite(src, dst)                  # picks name_DUP_001.ext on a clash
-move_no_overwrite(trash_file, original, rename_on_conflict=False)  # undo: 409 if taken
-```
-
-### 2. Smart Caching with Validity Tracking
-
-**Problem:** Re-hashing on every scan is slow; naive caching ignores changes.
-
-**Solution:** Cache with stat-based invalidation (size + mtime).
-
-**Impact:** 90-95% cache hit rate on typical vaults
-
-### 3. Virtual Scrolling for Large Datasets
-
-**Pattern:** Render only visible items; update range on scroll.
-
-**Enables:** Smooth browsing of 10,000+ photo timelines without DOM bloat
-
-### 4. Background Prefetch with Promise Coordination
-
-**Pattern:** Start expensive API calls in background; `await` when needed.
-
-**Benefits:**
-- Reduces perceived latency
-- Prioritizes based on usage patterns (Spotify all-time → shows → per-year)
-- Progressive enhancement: app responds immediately; data loads later
-
-### 5. Transactional Undo System
-
-**Pattern:** Record all operations in database; rollback by reversing each operation.
-
-**Enables:** Undo for duplicates, keurer decisions, file moves
-
-### 6. HTTP Security, Path Validation & Exclusions
-
-**HTTP layer** (`backend/security.py`): the frontend is served same-origin, so there is no CORS
-middleware at all; no other website can read an API response. `TrustedHostMiddleware` only
-answers `Host: 127.0.0.1` or `localhost` (DNS rebinding gets 400). Every request with a method
-other than GET/HEAD/OPTIONS must carry `X-DataVault-Token`, a secret generated per server
-process and served by `GET /api/session` (cross-site `Sec-Fetch-Site` is refused).
-`frontend/api.js`, loaded before every other script, wraps `fetch`: it adds the token to
-same-origin writes and, after a server restart (403 with `X-DataVault-Auth: token`), fetches the
-new token and retries once. GET endpoints have no side effects except `/api/thumb`, which fills
-the app's own thumbnail cache.
-`GET /api/file` serves only photos, videos and audio inline (with their real content type);
-anything else, and HTML, XHTML, SVG or XML in any case, is sent as `application/octet-stream`
-with `Content-Disposition: attachment`, so a saved web page in the archive can never run on the
-app's origin (where `/api/session` hands out the token). Every `/api/file` answer also carries
-`X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`.
-
-**Paths** (`backend/paths.py`): every route that takes a path or folder calls
-`resolve_in_vault(user_path, config)`. Relative input is taken from the vault root; the on-disk
-spelling wins, else the NFC/NFD form; after resolving `..` and symlinks both the entry and its
-target must lie inside `VAULT_ROOT`; the cache, the database and (if it lives in the vault) the
-app folder are refused. Outside paths always get the same 403, checked before any existence
-test, so the answer reveals nothing about the disk outside the vault. A file keeps its last
-component unresolved (so a route can still refuse a symlink); a folder (`folder=True`) is fully
-resolved, so stored paths use one spelling.
-
-```python
-folder_path = resolve_in_vault(folder, config, folder=True)   # 400 non-string, 403 outside/internal
-if not folder_path.is_dir():
-    raise HTTPException(status_code=404, detail="Folder not found")
-```
-
-**Rendering** (`frontend/dom.js`): file and folder names, paths, EXIF values, Spotify titles and
-chat output are data, never HTML (`xss <img src=x onerror=...>.jpg` is a valid file name). The
-frontend builds HTML only with `createEl` (text nodes, `addEventListener`), the ``html`...` ``
-template tag (escapes every interpolated value) or `setHTML` (accepts only that markup), and no inline
-handler carries data. `tests/test_frontend_safety.py` fails on any other `innerHTML` use.
-
-**Offline**: Font Awesome and the JetBrains Mono font are served from `frontend/vendor/`; the
-frontend contacts no other host. `tests/test_frontend_offline.py` fails on any external URL in
-the frontend (the allowlist is at the top of that file; only click-to-open Spotify search links
-are listed separately).
-
-**Exclusions**: every walk over the archive (folder tree, viewer, timeline, stats, Shows,
-duplicates scan, Keurer, chat context, Spotify files) uses `ArchiveFilter` / `walk_archive()`,
-a drop-in for `os.walk`. It skips the cache, TRASH, RAW_DUPLICATES and the app folder by device +
-inode (not by name, so a user folder called `dashboard` stays visible), hidden files, `._`
-AppleDouble files and symlinks.
-
-**Restart** (`backend/restart.py`): `POST /api/restart` restarts only the process that received
-it. A helper in its own session waits for this PID to exit, then execs the same interpreter with
-the same arguments, working directory and environment. Nothing is killed by port. A second
-restart request while one is pending gets 409 (`Herstart is al bezig`), so only one new server
-ever starts. The restarted server outlives the Terminal window that started it, so it never
-writes to that Terminal: output that went to a regular file (the DataVault app's
-`/tmp/datavault_server.log`) stays there, anything else (a tty, a pipe) goes to
-`~/Library/Logs/DataVault/server.log` (override with `DATAVAULT_LOG_FILE`; above 10 MB the old
-log moves to `server.log.1`).
-The old process stops with SIGTERM (uvicorn finishes open requests). If a request keeps it
-alive, a SIGINT after 10 s makes uvicorn stop waiting (uvicorn ignores a second SIGTERM), and
-after 15 s the process ends itself with `os._exit`, because a synchronous request (timeline scan,
-largest-files walk, `du`) runs in a non-daemon worker thread the interpreter would wait for. That
-last step first takes `ARCHIVE_LOCK`, so it never interrupts an archive move. The helper waits
-up to 5 minutes for the old PID.
-
-## 📊 Database Design
-
-### SQLite Schema
-
-```sql
--- Keurer decisions: track rated files per folder
-CREATE TABLE keurer_decisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    path TEXT NOT NULL,
-    folder TEXT NOT NULL,
-    decision TEXT NOT NULL,  -- 'keep', 'delete', 'move'
-    decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    dest_path TEXT,          -- where delete/move put the file (for server-side undo)
-    dest_ino INTEGER,        -- inode + size of that file, checked before undo
-    dest_size INTEGER
-);
--- Only 'keep' is unique per path: delete/move rows always stay, so their undo is never lost
-CREATE UNIQUE INDEX idx_keurer_keep_path_folder ON keurer_decisions(path, folder) WHERE decision = 'keep';
-CREATE INDEX idx_keurer_folder ON keurer_decisions(folder);
-CREATE INDEX idx_keurer_date ON keurer_decisions(decided_at);
-
--- Hash cache: avoid re-hashing unchanged files (migration 6)
-CREATE TABLE file_hashes (
-    path TEXT PRIMARY KEY,
-    size INTEGER NOT NULL,
-    mtime REAL NOT NULL,
-    hash TEXT NOT NULL,      -- was 'sha256'; holds the algo's hex digest
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    algo TEXT,               -- 'xxh3_128'; NULL = unknown, never used
-    ino INTEGER,             -- the hash is only trusted while ino, size,
-    mtime_ns INTEGER,        -- mtime_ns and ctime_ns are unchanged
-    ctime_ns INTEGER
-);
-
--- File ratings: ELO scores for weighted sampling
-CREATE TABLE file_ratings (
-    path TEXT PRIMARY KEY,
-    rating INTEGER DEFAULT 1000,
-    votes INTEGER DEFAULT 0,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Undo tracking: one run per duplicates cleanup action (migration 7)
-CREATE TABLE delete_runs (
-    seq INTEGER PRIMARY KEY AUTOINCREMENT,  -- order of runs; never clock time
-    run_id TEXT NOT NULL UNIQUE,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    total_files INTEGER DEFAULT 0,
-    created_at REAL,                        -- UTC epoch seconds, for display
-    folder TEXT                             -- the folder that was cleaned up
-);
-
-CREATE TABLE delete_operations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id TEXT NOT NULL,
-    src_path TEXT NOT NULL,
-    dst_path TEXT NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (run_id) REFERENCES delete_runs(run_id)
-);
-CREATE INDEX idx_delops_run ON delete_operations(run_id);
-
--- Folder visibility settings
-CREATE TABLE show_settings (
-    path TEXT PRIMARY KEY,
-    enabled BOOLEAN DEFAULT 1
-);
-
--- Background jobs (migration 8): progress, checkpoint and a small summary per job
-CREATE TABLE jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT NOT NULL,                 -- 'dup_scan', 'hashing', 'thumbnails'
-    params TEXT NOT NULL DEFAULT '{}',  -- JSON
-    status TEXT NOT NULL,               -- queued, running, paused, waiting_for_vault,
-                                        -- cancelled, failed, done, interrupted
-    processed INTEGER NOT NULL DEFAULT 0,
-    total INTEGER,                      -- NULL while still counting
-    message TEXT, error TEXT,
-    checkpoint TEXT, summary TEXT,      -- JSON
-    created_at REAL NOT NULL, updated_at REAL NOT NULL, started_at REAL, finished_at REAL
-);
-CREATE INDEX idx_jobs_status ON jobs(status);
-CREATE INDEX idx_jobs_type ON jobs(type, id);
--- The full result of a finished job, zlib-compressed JSON (kept for the newest few per type)
-CREATE TABLE job_results (
-    job_id INTEGER PRIMARY KEY REFERENCES jobs(id),
-    encoding TEXT NOT NULL,             -- 'json+zlib'
-    data BLOB NOT NULL
-);
--- Capture dates (migration 9, backend/media_dates.py): trusted while size and mtime_ns match
-CREATE TABLE media_dates (
-    path TEXT PRIMARY KEY,
-    size INTEGER NOT NULL,
-    mtime_ns INTEGER NOT NULL,
-    taken REAL NOT NULL,                -- EXIF/video date, else birthtime, else mtime
-    source TEXT NOT NULL,               -- 'exif', 'video', 'birthtime', 'mtime'
-    updated_at REAL NOT NULL
-);
-CREATE INDEX idx_media_dates_taken ON media_dates(taken);
--- Settings chosen in the UI (migration 10), JSON values; for now 'chat_model'
-CREATE TABLE app_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at REAL NOT NULL
-);
-```
-
-The database opens lazily when the vault is not there at startup (`Database(prepare=...)`): the first
-request after the disk appears makes the cache folder, migrates and opens it, and `when_ready` callbacks
-(job recovery, thumbnail cache cleanup) run then.
-
-The database runs in WAL mode (readers never wait for the writer) with `busy_timeout` 10 s and one
-connection per thread; every method runs inside `with self._connect()`, which commits or rolls back, so a
-failed call never leaves a transaction open. Before each use the database file is stat'ed: gone means
-`OperationalError` (503 "Archief niet bereikbaar"), and a different file (the disk was mounted again) gets
-a fresh connection.
-
----
-
-## 🚀 Performance Optimizations
-
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Duplicate scan, ~94k files (synthetic, SSD) | 6.2 s cold, 1.4 s warm | Phase 1: 73.6 s / 13.8 s. Background job; `/api/health` stays under 30 ms meanwhile; peak RSS ~175-225 MB (was ~960 MB) |
-| Thumbnail generation | 50-100ms | Per image with PIL |
-| Thumbnail cache hit | <10ms | Key holds size, mtime and inode |
-| Video frame extraction | 100-300ms | Via ffmpeg |
-| Timeline rendering (10k photos) | <100ms | Virtual scrolling |
-| Spotify aggregation (millions) | <1s | defaultdict aggregation |
-| Initial page load | <1s | Lazy loading, deferred data |
-
-**Optimization Strategies:**
-1. **Hash Caching:** Trusted only while inode, size, mtime_ns and ctime_ns are unchanged; read in one query, written in batches
-2. **Background Prefetch:** Multi-stage prioritization, requestIdleCallback
-3. **Concurrent Processing:** Bounded ThreadPoolExecutor windows inside background jobs; blocking routes run in the threadpool
-4. **Lazy Rendering:** IntersectionObserver for thumbnail loading
-5. **Virtual Scrolling:** Only render visible items
-6. **Streaming Responses:** SSE for real-time chat
-7. **Static Asset Caching:** Browser cache validation via mtime
-
----
-
-## 🔧 Technologies & Skills Demonstrated
-
-### Languages & Frameworks
-- **Python 3.12** — FastAPI, pathlib, asyncio, concurrent.futures
-- **JavaScript (ES6)** — Vanilla JS (no frameworks), async/await, Fetch API
-- **SQL** — SQLite3, schema design, indexing, transactions
-- **HTML/CSS3** — Semantic markup, Flexbox/Grid, responsive design, CSS variables
-
-### Libraries & Tools
-- **FastAPI** — Modern async web framework with type hints
-- **Pillow (PIL)** — Image processing, format conversion, thumbnail generation
-- **ffmpeg** — Video processing, frame extraction
-- **SQLite3** — Local database, schema management
-- **xxHash3** — Fast hashing (10x vs. SHA-256)
-- **Ollama** — Local LLM integration
-- **TrustedHostMiddleware + session token** — Local-only HTTP layer (no CORS)
-- **StaticFiles** — Frontend serving via FastAPI
-
-### Design Patterns & Concepts
-- **RESTful API Design** — Stateless routes, proper HTTP methods, streaming responses
-- **Dependency Injection** — Modular route initialization without heavy frameworks
-- **Transactional Operations** — ACID guarantees for file operations and undo
-- **Caching Strategies** — Stat-based cache invalidation, prefetch prioritization
-- **Virtual Scrolling** — Efficient rendering of large datasets
-- **Gesture Detection** — Touch/mouse event handling with angle/distance thresholds
-- **State Machine Pattern** — View switching, phase-based progress tracking
-- **Content-Addressed Hashing** — Deduplication via xxHash3-128, confirmed by a byte compare
-- **ELO Rating System** — Probability-weighted random sampling
-- **Security Hardening** — Path validation, vault boundary enforcement
-- **Error Handling** — Graceful degradation, cross-device detection, comprehensive logging
-
-### System Design Aspects
-- **Single-Page Application (SPA)** — Client-side routing, state management
-- **Asynchronous Architecture** — Async FastAPI routes, streaming responses
-- **Database Optimization** — Strategic indexing, denormalized aggregations
-- **File System Operations** — Atomic moves, metadata preservation, safe deletion
-- **Multi-Format Support** — Handling 40+ media file types
-- **Privacy-First Design** — Local LLM (no cloud transmission)
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Python 3.12 (the pinned requirements, e.g. Pillow 13 and Starlette 1.10, need it; the
-  Python 3.9 that ships with macOS is too old): `brew install python@3.12`
-- SQLite3 (included with Python)
-- Modern web browser
-- ffmpeg (for video thumbnails)
-- Ollama (optional, for chat feature; `ollama pull qwen2.5:3b` for the default model)
-
-### Installation
+- **Frontend:** vanilla JavaScript, one module per screen, `dom.js` builds elements with `textContent` (never `innerHTML` with data), all colours and spacing come from CSS tokens in `style.css`. FontAwesome, JetBrains Mono, Leaflet and the Natural Earth map data are vendored.
+- **Backend:** FastAPI, built by a factory so tests get a fresh app per vault. One router per feature. A thread-local SQLite connection per thread (WAL). Long work runs as a job, never on the event loop.
+- **Jobs:** `JobManager` persists jobs in SQLite. They report progress, can be paused, cancelled and resumed, are marked "interrupted" after a crash and enter `waiting_for_vault` when the disk disappears.
+- **Library index:** `media` table with capture date, size, camera, GPS and duration, read from file headers without decoding pixels. Folder mtimes decide what to re-read. Albums, timeline, map, export and the assistant all query it.
+- **Migrations:** `migrations.py` holds numbered migrations, numbered in blocks per feature (the latest is 110). Existing ones are never edited. A backup of the database is made before a migration, and tests run each against a legacy database to prove that ratings, decisions, undo data and jobs survive.
+
+## Safety design
+
+The archive is irreplaceable, so the app is built to be unable to lose it.
+
+- **Never delete.** There is no code path that removes an archive file. The Keurer's "weg" moves a file to a trash folder, duplicates move to `RAW_DUPLICATES`, series moves go to a visible folder. Nothing is emptied automatically.
+- **One way to move.** `file_ops.move_no_overwrite` is the only function that moves archive files. It refuses to overwrite (a name clash gets `_DUP_001`), keeps timestamps, EXIF and extended attributes, refuses cross-device moves instead of copy-then-delete, and works under one lock so concurrent moves cannot collide.
+- **Undo for every move.** Each move is recorded (run id, source, destination, inode and size) so the Herstelcentrum can put it back. Restoring never overwrites either, and the Keurer checks that the file is still the same one.
+- **Byte-for-byte before duplicates move.** A hash match alone is not enough.
+- **Path validation.** Every path from the browser is resolved inside the vault (symlinks, `..` and differently-cased protected folders included). The cache, database and trash folders are excluded centrally in `paths.py`.
+- **Local only.** The server listens on `127.0.0.1`, accepts only trusted `Host` headers (DNS rebinding), sends no CORS headers, and every POST needs a per-session token in `X-DataVault-Token`.
+- **Offline by default.** Nothing calls out on its own. The only opt-ins are online map tiles (one URL template, off by default), Spotify and Last.fm in DataGatherer (on click), the one-time model download, and a local Ollama.
+- **The assistant cannot act on its own.** Pasha has no "delete" tool and no access outside the vault. Moves and exports are proposals that expire after ten minutes and run once, after your click, through the same safe function.
+- **Reading your own data is gated.** Messages and browser history are read only from sources you switch on, and the server needs no Full Disk Access (a small helper you start yourself does).
+
+## Install
+
+Requirements: macOS, Python 3.12 (`brew install python@3.12`), optional `ffmpeg` for video thumbnails (`brew install ffmpeg`).
 
 ```bash
-# Clone repository
 git clone https://github.com/matthewsamuel/DataVault.git
-cd DataVault
-
-# Everything runs from code/ (requirements.txt and config.json live there)
-cd code
-
-# Create the virtual environment and install the pinned dependencies
+cd DataVault/code
 python3.12 -m venv venv
 venv/bin/pip install -r requirements.txt
+cp config.example.json config.json     # then edit the paths to your archive (config.json is gitignored)
+./start.sh                              # starts on http://127.0.0.1:8000 and opens the browser
+```
 
-# Create config.json with your vault paths (see Configuration below)
-cp config.example.json config.json
+Stop with `Ctrl+C` or `./stop_datavault.sh`. On macOS you can also double-click `DataVault.app`
+(see `code/APP_BUNDLE_README.md`). Starting by hand:
 
-# Start the server (the app is built by a factory; there is no module-level `app`)
+```bash
 venv/bin/python -m uvicorn --factory backend.main:create_app --host 127.0.0.1 --port 8000
-# or: ./start.sh  (creates the venv on first run, stops an earlier DataVault server on
-#                  port 8000 and opens the browser); stop it with ./stop_datavault.sh
-
-# Open browser
-# http://127.0.0.1:8000
 ```
 
-### Configuration
+**Optional: semantic search model** (about 970 MB, one explicit download; the app never downloads on its own):
 
-Create `code/config.json` (copy `code/config.example.json`; it is not in git):
-```json
-{
-  "vault_root": "/Volumes/T7",
-  "raw_folder": "/Volumes/T7/RAW",
-  "cache_folder": "/Volumes/T7/.datavault_cache",
-  "duplicates_folder": "/Volumes/T7/RAW_DUPLICATES",
-  "trash_folder": "/Volumes/T7/TRASH"
-}
+```bash
+venv/bin/python scripts/download_models.py --list   # shows files, sizes and sources first
+venv/bin/python scripts/download_models.py          # downloads and checks SHA-256 per file
 ```
 
----
+The same step is the *Zoekmodel installeren* button in Instellingen. Then run the *Slim zoeken* indexing job from the app.
 
-## 📁 Project Structure
+**Optional: assistant.** Install [Ollama](https://ollama.com), then `ollama pull qwen2.5:3b` (the default model, also selectable in the chat).
 
-```
-DataVault/
-├── code/
-│   ├── backend/
-│   │   ├── main.py                    # FastAPI app, route registration
-│   │   ├── config.py                  # Configuration, path validation
-│   │   ├── database.py                # SQLite abstraction
-│   │   ├── scanner.py                 # File discovery, hashing
-│   │   ├── file_ops.py                # Safe file operations
-│   │   ├── thumbnail.py               # Thumbnail generation
-│   │   ├── jobs.py                    # Background jobs (JobManager)
-│   │   ├── job_types.py               # dup_scan, hashing, thumbnails
-│   │   └── routes/                    # API endpoints
-│   │       ├── folders.py
-│   │       ├── media.py
-│   │       ├── duplicates.py
-│   │       ├── spotify.py
-│   │       ├── shows.py
-│   │       ├── chat.py
-│   │       ├── keurer.py
-│   │       ├── stats.py
-│   │       └── timeline.py
-│   │
-│   ├── requirements.txt               # Python dependencies (pinned, Python 3.12)
-│   ├── config.example.json            # Copy to config.json and edit the paths
-│   ├── config.json                    # Configuration (user-created, not in git)
-│   ├── start.sh / stop_datavault.sh   # Start and stop the server on port 8000
-│   │
-│   └── frontend/
-│       ├── index.html                 # Main template
-│       ├── api.js                     # Session token for writes
-│       ├── dom.js                     # Safe DOM helpers
-│       ├── app.js                     # Core logic
-│       ├── style.css                  # Styling
-│       ├── keurer.js                  # Photo curator UI
-│       ├── duplicates.js              # Duplicate browser
-│       ├── timeline.js                # Timeline UI
-│       ├── wave-background.js         # Background animation
-│       ├── resizable-sidebar.js       # Sidebar interaction
-│       └── vendor/                    # Font Awesome, JetBrains Mono (local copies)
-│
-├── README.md                          # This file
-├── PORTFOLIO.md                       # Detailed technical documentation
-├── CHANGELOG.md                       # What changed, per phase (Dutch)
-└── .gitignore                         # Git configuration
+Try it without your own archive: build a generated demo vault and point the app at it.
+
+```bash
+cd code
+V=$(mktemp -d)/vault
+venv/bin/python tests/fixtures/showcase_vault.py $V        # writes ${V}_config.json
+DATAVAULT_TESTING=1 DATAVAULT_CONFIG=${V}_config.json \
+  venv/bin/python -m uvicorn --factory backend.main:create_app --host 127.0.0.1 --port 8765
 ```
 
----
+## Running the tests
 
-## 📈 What This Project Demonstrates
+```bash
+cd code
+venv/bin/pip install -r requirements-dev.txt
+venv/bin/python -m pytest                    # backend and static frontend tests, on a generated test vault
+python3 tests/ui/smoke_webkit.py             # browser smoke test in WebKit (needs: pip install playwright && playwright install webkit)
+```
 
-### Software Engineering
-- **Full-Stack Development:** Backend (Python, async), frontend (vanilla JS), database (SQLite)
-- **API Design:** RESTful endpoints with proper HTTP semantics, streaming responses
-- **Database Design:** Schema normalization, strategic indexing, transactional integrity
-- **File System Operations:** Atomic moves, metadata preservation, cross-device detection
-- **Security:** Path validation, vault boundary enforcement, graceful error handling
+pytest never touches your archive: every test builds a throwaway vault, and the chat tests use a fake Ollama.
+The smoke test starts its own server, clicks through every screen in both themes and fails on any JavaScript
+error, failed request, WCAG AA contrast problem or control without a name. More in `code/README.md`.
 
-### Data Processing & Algorithms
-- **Content-Addressed Hashing:** xxHash3-128 deduplication with smart caching and a byte compare before any move
-- **Date Extraction & Indexing:** Temporal organization with year-based jumping
-- **Probability-Based Sampling:** ELO rating system for weighted randomness
-- **Recursive Traversal:** Efficient folder scanning with exclusion filters
-- **Background Jobs:** Multi-phase scanning as resumable jobs with progress, ETA, cancel and pause
+## Performance
 
-### Performance & Optimization
-- **Cache Strategy:** Stat-based invalidation achieving 90%+ hit rates
-- **Virtual Scrolling:** Smooth rendering of 10,000+ item lists
-- **Background Prefetch:** Smart prioritization reducing perceived latency
-- **Concurrent Processing:** Multi-core utilization via ThreadPoolExecutor
-- **Format Support:** Handling 40+ media types with intelligent conversions
+Measured on an Apple M3 Pro, internal SSD, on synthetic vaults (not the real archive). Numbers are from the step reports in `CHANGELOG.md`.
 
-### UI/UX & Frontend Engineering
-- **Gesture Detection:** Multi-directional swipe recognition with angle/distance thresholds
-- **Responsive Design:** CSS Flexbox/Grid adapting to all screen sizes
-- **State Management:** Unidirectional data flow without external frameworks
-- **Lazy Loading:** IntersectionObserver for efficient image rendering
-- **Accessibility:** Keyboard shortcuts, ARIA labels, semantic HTML
+| What | Result |
+|---|---|
+| Cold index of 100,000 files in 2,082 folders | 13.9 s (about 7,200 files/s); `/api/health` stayed at p50 5.8 ms, p95 9.0 ms; server RSS 64 to 81 MB |
+| Re-check of the unchanged archive | 0.03 s incremental, 0.77 s for a full pass over all folders |
+| Timeline from the index, 96,878 rows | first page 186 ms over HTTP, all rows 420 ms (the old directory walk: 11.7 s cold) |
+| Browse a filtered album page, 100,000 rows | first pages 6 to 98 ms, deep page at offset 50,000 66 to 141 ms |
+| "On this day" from the index | 43 ms |
+| Semantic search, 100,000 vectors | a new query 66 ms, similar photos 31 ms, repeated query 0.3 ms |
+| Semantic search, first query after start | 1.4 s with the model files in the OS cache (10 to 20 s when read cold from the external disk) |
+| Image embedding (SigLIP 2) | 71 img/s with Core ML and thumbnails, about 10 img/s on the CPU |
+| Burst and near-duplicate analysis | 391 photos/s end to end (4,026 photos in 10.3 s); 12 MP JPEG 130/s on 4 threads |
+| Recovery list in a worst case (10,000 Keurer moves, 100 runs of 2,000 files) | 223 ms for 50 entries (was 47.9 s) |
+| Database backup, 109 MB database | 6.7 MB gzipped, made in about 1 s |
 
-### AI/ML Integration
-- **Local LLM:** Privacy-preserving Ollama integration
-- **Context Injection:** Dynamic system prompts with live vault data
-- **Multi-Modal Interaction:** Text + structured action tags
-- **Streaming:** Real-time response handling via SSE
+## Project structure
 
-### Reliability & Maintenance
-- **Error Handling:** Graceful degradation for missing external drives
-- **Logging:** Comprehensive operation tracking
-- **Testing:** Type hints throughout; error validation
-- **Documentation:** Code comments, READMEs, portfolio documentation
+```
+.
+├── README.md  CHANGELOG.md  docs/            documentation, screenshots, "Bewust niet gedaan"
+├── DataVault.app/                            double-click launcher (compiled AppleScript)
+└── code/
+    ├── backend/
+    │   ├── main.py, config.py, security.py, errors.py     app factory, config, token and host checks, uniform errors
+    │   ├── database.py, migrations.py                     SQLite (WAL) and numbered migrations
+    │   ├── file_ops.py, paths.py                          the only file mover, vault path rules
+    │   ├── jobs.py, job_types.py                          background jobs and their types
+    │   ├── media_index.py, media_meta.py, media_dates.py  library index and metadata readers
+    │   ├── library_filters.py, smart_albums.py            filters and smart albums
+    │   ├── semantic.py, near_dups.py, places.py           CLIP search, series, offline place names
+    │   ├── assistant.py, elo.py, export.py, backup.py, recovery.py
+    │   ├── datagatherer/                                  Spotify, Takeout, browsers, messages
+    │   └── routes/                                        one API router per feature
+    ├── frontend/                                          index.html, one JS file per screen, style.css, vendor/
+    ├── scripts/                                           download_models.py, eval_semantic_search.py
+    ├── tests/                                             pytest suite, fixtures (test and showcase vault), ui/smoke_webkit.py
+    ├── requirements.txt  config.example.json  start.sh  stop_datavault.sh  restore_backup.py
+    └── README.md  RESTART.md  APP_BUNDLE_README.md       Dutch user documentation
+```
 
----
+## Limitations
 
-## 📝 License
+- macOS only (launcher, Finder integration, Core ML). The backend itself is portable Python, but this is untested elsewhere.
+- Built for one user on one machine: no accounts, no sharing, no sync. Two servers on one archive are not supported.
+- The UI is in Dutch. There is no language switch.
+- Video has no near-duplicate detection, and capture dates for avi, mkv and mts fall back to the file date.
+- RAW thumbnails go through macOS `sips` and are not tested with real camera RAW files.
+- The semantic model needs about 1.7 GB of RAM while loaded and a 970 MB download; the first query after a reboot reads it from disk (10 to 20 s from an external disk).
+- The small local chat model (`qwen2.5:3b`) follows the strict action format in 85 to 90 percent of tests, so Pasha sometimes asks you to rephrase.
+- The map labels cities, not countries (countries appear as tooltips).
+- The test suite and the measurements ran on generated archives, never on the real one.
+- There is no LICENSE file yet.
 
-This project is available under the MIT License. See LICENSE file for details.
+The full, honest list with reasons and good next steps is in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
----
+## Author
 
-## 👤 Author
-
-**Matthew Samuel**  
-Full-stack developer passionate about building elegant, efficient tools for personal productivity.
-
-- GitHub: https://github.com/matthewsamuel
-- Portfolio: https://github.com/matthewsamuel/DataVault
-
----
-
-**Last Updated:** April 2026  
-**Status:** Production-Ready
+Matthew Samuel. Built with FastAPI, SQLite, vanilla JavaScript, Pillow, onnxruntime and Ollama.
