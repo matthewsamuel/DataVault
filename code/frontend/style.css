@@ -7717,6 +7717,33 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
+/* Plaatshouders terwijl de cijfers laden (zelfde maat als een echt cijfer) */
+.keurer-stat-skeleton {
+    row-gap: var(--space-xs);
+}
+
+.keurer-stat-skeleton .skeleton-line {
+    width: 64px;
+}
+
+.keurer-stat-skeleton .skeleton-line-short {
+    width: 40px;
+    height: 8px;
+}
+
+.keurer-stats-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    margin: 0;
+    padding: 0 var(--space-md);
+    color: var(--danger-text);
+    font-size: var(--fs-sm);
+    text-align: center;
+}
+
 .keurer-stat-divider {
     width: 1px;
     height: 32px;
@@ -7810,6 +7837,12 @@ button.otd-settings-icon:hover {
     flex: 1 1 0;
     min-height: 220px;
     position: relative;
+}
+
+/* Een melding (kies een map, klaar, mislukt) krimpt niet onder zijn eigen hoogte: met een open
+   takenpaneel op een laag venster schoof hij anders over de cijfers en de toetsen heen */
+.keurer-card-area:has(> .keurer-state-card) {
+    min-height: auto;
 }
 
 /* Lege, klare of mislukte stand */
