@@ -11,10 +11,14 @@ plus 30 macOS wallpaper thumbnails, in .model-build/eval/images/.
     cd code
     venv/bin/python scripts/eval_semantic_search.py --images ../.model-build/eval/images
     venv/bin/python scripts/eval_semantic_search.py --images ... --thumbnails   # as the job sees them
+    venv/bin/python scripts/eval_semantic_search.py --images ... --thumbnails --save-fixture
+        # also stores the vectors for tests/test_semantic_ranking.py (after a model or cut change)
 
 A query counts as found at rank k when a photo with all its tags is at place k. Printed
 per language: recall@1, recall@5 (share of queries with a right photo at 1 / in the top
-5), MRR, precision@5 and mAP, plus the speed of the image and text encoders.
+5), MRR, precision@5 and mAP (ranked with the app's query vector: hub correction included),
+the recall and precision of the 'strong' set (semantic.relevance_cut), plus the speed of
+the image and text encoders.
 --thumbnails first makes the 300 px thumbnails the embedding job uses (into a temp dir).
 """
 import argparse
@@ -32,6 +36,7 @@ from backend import semantic  # noqa: E402
 from backend.config import DEFAULT_MODELS_FOLDER  # noqa: E402
 
 HERE = Path(__file__).resolve().parent / "semantic_eval"
+FIXTURE = CODE_DIR / "tests" / "fixtures" / "semantic_eval_vectors.npz"
 
 
 def load_set():
@@ -54,7 +59,7 @@ def metrics(emb, names, labels, queries, encoder, lang_index):
     for query in queries:
         need, text = query[0], query[lang_index]
         start = time.perf_counter()
-        vector = encoder.encode_text(text)
+        vector = semantic.corrected(encoder.encode_text(text), encoder.reference_vector())
         times.append(time.perf_counter() - start)
         order = np.argsort(-(emb @ vector))
         relevant = [need <= labels[names[i]] for i in order]
@@ -76,22 +81,25 @@ def metrics(emb, names, labels, queries, encoder, lang_index):
             "text_ms": float(np.median(times)) * 1000}, misses
 
 
-def strong_report(emb, names, labels, queries, encoder, index) -> None:
-    """Precision and recall of the 'strong' set (the relevance cut of semantic.py, background = this set)."""
+def strong_set(emb, names, labels, queries, vectors):
+    """(recall, precision, queries empty although right photos exist) of the 'strong' sets (background = this set)."""
     tp = fp = fn = empty = 0
-    for q in queries:
-        need, text = q[0], q[index]
-        scores = emb @ encoder.encode_text(text)
-        median = float(np.median(scores))
-        mad = float(np.median(np.abs(scores - median))) * 1.4826
-        cut = max(semantic.MIN_SCORE, float(scores.max()) - semantic.SCORE_SPREAD, median + semantic.SCORE_Z * mad)
-        if float(scores.max()) >= semantic.CLEAR_SCORE and cut > float(scores.max()):
-            cut = max(semantic.MIN_SCORE, float(scores.max()) - semantic.SCORE_SPREAD)
+    for q, vector in zip(queries, vectors):
+        scores = emb @ vector
+        cut = semantic.relevance_cut(scores, scores)
         strong = {names[i] for i in np.flatnonzero(scores >= cut)}
-        rel = {n for n in names if need <= labels[n]}
+        rel = {n for n in names if q[0] <= labels[n]}
         tp += len(strong & rel); fp += len(strong - rel); fn += len(rel - strong)
         empty += (not strong) and bool(rel)
-    print(f"    strong set: recall {tp / (tp + fn):.3f} precision {tp / max(1, tp + fp):.3f}; "
+    return tp / (tp + fn), tp / max(1, tp + fp), empty
+
+
+def strong_report(emb, names, labels, queries, encoder, index) -> None:
+    """Precision and recall of the 'strong' set (the relevance cut of semantic.py)."""
+    reference = encoder.reference_vector()
+    vectors = [semantic.corrected(encoder.encode_text(q[index]), reference) for q in queries]
+    recall, precision, empty = strong_set(emb, names, labels, queries, vectors)
+    print(f"    strong set: recall {recall:.3f} precision {precision:.3f}; "
           f"queries empty although right photos exist: {empty}")
 
 
@@ -101,6 +109,8 @@ def main() -> int:
     parser.add_argument("--models-folder", default=str(DEFAULT_MODELS_FOLDER))
     parser.add_argument("--device", default="cpu", choices=("cpu", "auto"))
     parser.add_argument("--thumbnails", action="store_true", help="embed the 300 px thumbnails, as the job does")
+    parser.add_argument("--save-fixture", action="store_true",
+                        help=f"store the photo and query vectors in {FIXTURE.relative_to(CODE_DIR)}")
     args = parser.parse_args()
     from PIL import Image
     spec = semantic.current_model()
@@ -138,6 +148,14 @@ def main() -> int:
         for miss in misses:
             print(f"    {miss}")
         strong_report(emb, names, labels, queries, encoder, index)
+    if args.save_fixture:
+        np.savez_compressed(
+            FIXTURE, model=spec.id, names=np.array(names), photos=emb.astype(np.float16),
+            nl=np.stack([encoder.encode_text(q[1]) for q in queries]).astype(np.float16),
+            en=np.stack([encoder.encode_text(q[2]) for q in queries]).astype(np.float16),
+            reference_texts=np.array(semantic.REFERENCE_TEXTS),
+            reference=encoder.reference_vector().astype(np.float32))
+        print(f"vectors stored in {FIXTURE}")
     return 0
 
 
