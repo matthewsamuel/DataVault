@@ -24,12 +24,33 @@ FB_MARKERS = ("profile_information/", "your_posts", "comments_and_reactions/", "
               "jouw_facebook_activiteit/", "je_facebook_activiteit/")
 
 
+def _activity_folders(names: List[str]) -> tuple:
+    """(facebook, instagram): whether the export has Meta's top-level activity folder of that app
+    (your_facebook_activity/, jouw_instagram_activiteit/, ...). A whole folder name, never a
+    substring: a chat folder such as inbox/instagramlover_99 says nothing about the app."""
+    fb = ig = False
+    for n in names[:5000]:
+        parts = meta_dyi.folder_parts(n)
+        fb = fb or any(p in meta_dyi.FOLDER_NAMES["facebook"] for p in parts)
+        ig = ig or any(p in meta_dyi.FOLDER_NAMES["instagram"] for p in parts)
+        if fb and ig:
+            break
+    return fb, ig
+
+
 def is_instagram(path: Path, names: List[str]) -> bool:
+    fb, ig = _activity_folders(names)
+    if fb or ig:
+        return ig and not fb
+    # Older exports without an activity folder: the zip's name, or Instagram's own layout
     if path.name.lower().startswith("instagram"):
         return True
     for n in names[:5000]:
         low = n.lower()
-        if "instagram" in low or low.startswith(("content/posts_", "media/posts/")) or "/content/posts_" in low:
+        if low.startswith(("content/posts_", "media/posts/")) or "/content/posts_" in low:
+            return True
+        # 'instagram' in a file or folder name, but not in a chat's folder (that is a person's name)
+        if "instagram" in low and not meta_dyi.has_folder(n, "messages"):
             return True
     return False
 

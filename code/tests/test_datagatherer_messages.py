@@ -208,6 +208,22 @@ def test_facebook_export_is_recognised_imported_once_and_repaired(client, app, t
     assert detail["records"] == 6 and detail["since"] and detail["export_kinds"][0]["date_range"] is True
 
 
+def test_a_facebook_export_with_instagram_in_a_chat_name_stays_facebook(tmp_path):
+    from backend.datagatherer import raw_store
+    threads = {"instagramlover_99": fb_thread([ME, "Insta Gramlover"], [
+        {"sender_name": "Insta Gramlover", "timestamp_ms": T0 * 1000, "content": "Hoi"}])}
+    fb_zip = meta_export(tmp_path / "facebook-x.zip", "en", threads)
+    nl_zip = meta_export(tmp_path / "export.zip", "nl", threads)
+    ig_zip = instagram_export(tmp_path / "meta-2024.zip", threads={"anna_1": fb_thread([ME, "Anna"], [
+        {"sender_name": "Anna", "timestamp_ms": T0 * 1000, "content": "Hoi"}])})
+    fb, ig = registry.get("facebook"), registry.get("instagram")
+    for path in (fb_zip, nl_zip):
+        names = raw_store.read_zip_names(path)
+        assert fb.detect(path, names) == "dyi" and ig.detect(path, names) is None, path.name
+    names = raw_store.read_zip_names(ig_zip)
+    assert ig.detect(ig_zip, names) == "dyi" and fb.detect(ig_zip, names) is None
+
+
 def test_an_overlapping_newer_export_adds_only_what_is_new(client, app, tmp_path):
     first = meta_export(tmp_path / "facebook-1.zip", "en", _fb_threads())
     _upload(client, app, "facebook", first)
