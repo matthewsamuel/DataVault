@@ -877,12 +877,13 @@ function renderMediaGrid(keepCount = false) {
     drawMediaGrid(keepCount);
     if (motion === 'enter') {
         const grid = document.getElementById('media-grid');
-        MediaMotion.cascade(grid.querySelectorAll('[data-grid-index]'), { revealRest: true });
+        MediaMotion.cascade(grid.querySelectorAll('[data-grid-index]'), { revealRest: true, owner: grid });
     }
 }
 
 function drawMediaGrid(keepCount) {
     const grid = document.getElementById('media-grid');
+    MediaMotion.release(grid);   // wachtende 'in beeld scrollen' van de vorige tegels
     const previous = keepCount ? gridRendered : 0;
     if (gridObserver) {
         gridObserver.disconnect();
@@ -1044,7 +1045,7 @@ function observeGridEnd(grid) {
     gridObserver = new IntersectionObserver(entries => {
         if (!entries.some(e => e.isIntersecting)) return;
         // Het volgende stuk komt rij voor rij binnen zodra het in beeld scrolt
-        MediaMotion.revealTiles(renderMoreGridCards());
+        MediaMotion.revealTiles(renderMoreGridCards(), { owner: document.getElementById('media-grid') });
         if (gridRendered >= gridItems.length) {
             gridObserver.disconnect();
             gridObserver = null;

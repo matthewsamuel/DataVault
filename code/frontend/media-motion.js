@@ -50,6 +50,39 @@
         ];
     }
 
+    // De elementen (in documentvolgorde, van boven naar onder) die rond het scherm staan: zoekt
+    // binair naar de eerste, zodat een raster van duizenden tegels maar een paar keer gemeten wordt
+    function nearView(els, margin = 0) {
+        const all = list(els);
+        const vh = window.innerHeight;
+        let lo = 0, hi = all.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (all[mid].getBoundingClientRect().bottom < -margin) lo = mid + 1; else hi = mid;
+        }
+        const out = [];
+        for (let i = lo; i < all.length; i++) {
+            const r = all[i].getBoundingClientRect();
+            if (r.top > vh + margin) break;
+            out.push(all[i]);
+        }
+        return out;
+    }
+
+    // Waarnemers van revealTiles per eigenaar (een raster): weg zodra het raster opnieuw tekent
+    const owned = new WeakMap();
+    function own(owner, observer) {
+        if (!owner || !observer) return;
+        if (!owned.has(owner)) owned.set(owner, []);
+        owned.get(owner).push(observer);
+    }
+    function release(owner) {
+        const observers = owner && owned.get(owner);
+        if (!observers) return;
+        observers.forEach(o => o.disconnect());
+        owned.delete(owner);
+    }
+
     // ---------- 1. Een raster komt binnen: een golf vanaf linksboven ----------
 
     // Alleen wat in beeld staat beweegt; de vertraging volgt rij + kolom (een diagonale golf),
@@ -68,7 +101,7 @@
             seen.push([els[i], r]);
         }
         // Wat onder de rand staat, komt pas binnen als het in beeld scrolt
-        if (opts.revealRest && rest < els.length) revealTiles(els.slice(rest), { root: opts.root });
+        if (opts.revealRest && rest < els.length) revealTiles(els.slice(rest), { root: opts.root, owner: opts.owner });
         if (!seen.length) return settled();
         if (!full()) {
             return Motion.stagger(seen.map(([el]) => el), 'fade', { key: 'enter' });
@@ -102,12 +135,14 @@
     function revealTiles(tiles, opts = {}) {
         const els = list(tiles);
         if (!els.length || !full()) return { disconnect() {} };
-        return Motion.reveal(els, {
+        const observer = Motion.reveal(els, {
             preset: () => tileFrames(Motion.px('--motion-distance-md', 12), 0.97),
             root: opts.root || null,
-            margin: opts.margin || '0px 0px -4% 0px',
+            margin: opts.margin || '0px 0px 6% 0px',   // net vóór de rand: bij snel scrollen geen leeg vlak
             step: opts.step !== undefined ? opts.step : Motion.ms('--stagger-step', 28) * 0.75,
         });
+        own(opts.owner, observer);
+        return observer;
     }
 
     // ---------- 3. Een lijst die opnieuw getekend wordt (sorteren, filteren, weghalen) ----------
@@ -124,7 +159,7 @@
         const vh = window.innerHeight;
         const old = new Map();
         const ghosts = [];
-        list(before).forEach(el => {
+        nearView(before, vh).forEach(el => {
             const r = el.getBoundingClientRect();
             if (r.bottom < -vh || r.top > vh * 2 || !r.width) return;
             const key = keyFn(el);
@@ -132,7 +167,7 @@
             old.set(String(key), { el, r });
         });
         mutate();
-        const now = list(typeof opts.after === 'function' ? opts.after() : opts.after);
+        const now = nearView(typeof opts.after === 'function' ? opts.after() : opts.after, vh * 0.5);
         const anims = [];
         const kept = new Set();
         const moves = [];
@@ -607,6 +642,8 @@
 
     window.MediaMotion = {
         tileFrames,
+        nearView,
+        release,
         cascade,
         revealTiles,
         flipByKey,

@@ -13999,6 +13999,7 @@ html:not([data-motion="volledig"]) .mm-light {
 }
 
 .thumb-tile.selected::before {
+    z-index: 3;
     opacity: 1;
     transform: rotate(-45deg);
     transition:
@@ -14282,4 +14283,15 @@ html:not([data-motion="volledig"]) .show-card.has-stack .show-card-stack img:nth
 
 html:not([data-motion="volledig"]) .cinematic-slide {
     transform: none;
+}
+
+/* Albums: ruimte boven de eerste rij, zodat de groene selectiering niet tegen de scrollrand
+   wordt afgesneden (de rijen rekenen met offsetTop, dus dit verschuift niets) */
+.albums-content {
+    margin-top: var(--space-xs);
+}
+
+/* Shows: ruimte voor de randjes van de stapels onder de kop 'Collecties' */
+.shows-grid-folders {
+    padding-top: var(--space-sm);
 }
