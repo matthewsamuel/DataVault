@@ -387,7 +387,7 @@
 
     if (typeof addShortcutGroup === 'function') {
         addShortcutGroup('Selecteren en exporteren', [
-            [['Spatie'], 'Foto selecteren of deselecteren (Albums en Tijdlijn)'],
+            [['spatie'], 'Foto selecteren of deselecteren (Albums en Tijdlijn)'],
             [['⇧ klik'], 'Alles tussen twee foto\'s selecteren'],
             [['⌘ klik'], 'Eén foto toevoegen aan de selectie'],
             [['Esc'], 'Selectie wissen'],

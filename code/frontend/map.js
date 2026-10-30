@@ -28,6 +28,21 @@
     const MAX_LABELS = 120;
     const HINT_ZOOM = 9;                // vanaf hier is de basiskaart zonder internet te grof
     const KIND_ICON = ['fa-image', 'fa-film', 'fa-music'];
+    // Plaatsnamen op de kaart in het Nederlands waar dat de gewone naam is (Natural Earth is Engels)
+    const PLACE_NL = {
+        'Moscow': 'Moskou', 'Vienna': 'Wenen', 'Prague': 'Praag', 'Brussels': 'Brussel', 'Cologne': 'Keulen',
+        'Athens': 'Athene', 'Lisbon': 'Lissabon', 'Copenhagen': 'Kopenhagen', 'Warsaw': 'Warschau',
+        'Budapest': 'Boedapest', 'Milan': 'Milaan', 'Naples': 'Napels', 'Venice': 'Venetië', 'Berlin': 'Berlijn',
+        'Munich': 'München', 'Geneva': 'Genève', 'Cape Town': 'Kaapstad', 'Tokyo': 'Tokio', 'Beijing': 'Peking',
+        'The Hague': 'Den Haag', 'Liege': 'Luik', 'Ghent': 'Gent', 'Antwerp': 'Antwerpen', 'Seville': 'Sevilla',
+        'London': 'Londen', 'Paris': 'Parijs', 'Bucharest': 'Boekarest', 'Kiev': 'Kyiv', 'Cairo': 'Caïro',
+        'Baghdad': 'Bagdad', 'Tehran': 'Teheran', 'Belgrade': 'Belgrado', 'Saint Petersburg': 'Sint-Petersburg',
+        'Makkah': 'Mekka', 'Mecca': 'Mekka', 'Mexico City': 'Mexico-Stad', 'Washington, D.C.': 'Washington',
+        'Kuwait City': 'Koeweit', 'Archangel': 'Archangelsk', 'Florence': 'Florence', 'Algiers': 'Algiers',
+        'Singapore': 'Singapore', 'Rome': 'Rome', 'Turin': 'Turijn', 'Strasbourg': 'Straatsburg', 'Aachen': 'Aken',
+        'Frankfurt': 'Frankfurt', 'Zurich': 'Zürich', 'Hanoi': 'Hanoi', 'Seoul': 'Seoel', 'Damascus': 'Damascus',
+        'Jerusalem': 'Jeruzalem', 'Tripoli': 'Tripoli', 'Havana': 'Havana', 'Bern': 'Bern', 'Vatican City': 'Vaticaanstad',
+    };
 
     const $ = id => document.getElementById(id);
     const fmt = n => Number(n).toLocaleString('nl-NL');
@@ -178,7 +193,7 @@
     async function loadPlaces() {
         if (state.placeData) return state.placeData;
         try {
-            state.placeData = await (await fetch(PLACES_URL)).json();
+            state.placeData = (await (await fetch(PLACES_URL)).json()).map(([name, ...rest]) => [PLACE_NL[name] || name, ...rest]);
         } catch (err) {
             state.placeData = [];
         }

@@ -642,6 +642,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   (niet als je in macOS minder beweging hebt gevraagd).
 - **Activiteit** heeft een eigen icoon (een golflijn) in plaats van dat van het Herstelcentrum, en onder
   de gebeurtenissen van een dag staat niet langer het woord 'null'.
+- **Kaart in het Nederlands**: bekende steden heten op de kaart zoals in het Nederlands (Moskou,
+  Wenen, Parijs, Lissabon, Tokio, ...). In het sneltoetsenoverzicht heet de spatiebalk overal 'spatie'.
 
 ## Fase 2 – Stabiliseren
 

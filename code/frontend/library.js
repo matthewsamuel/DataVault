@@ -1636,7 +1636,7 @@
         addShortcutGroup('Albums', [
             [['←', '→', '↑', '↓'], 'Door de foto\'s'],
             [['Enter'], 'Foto openen in de viewer'],
-            [['Spatie'], 'Foto selecteren voor export'],
+            [['spatie'], 'Foto selecteren voor export'],
             [['Home', 'End'], 'Naar de eerste of laatste foto'],
             [['PageUp', 'PageDown'], 'Een scherm terug of verder (ook in Op deze dag)'],
         ]);
