@@ -1358,6 +1358,42 @@ textarea.input {
     gap: var(--space-sm);
 }
 
+/* Een vraag vóór een actie (dvConfirm in ui.js): smal, rustig, boven een ander venster */
+.modal.dv-confirm {
+    z-index: 10050;
+}
+
+.dv-confirm-container {
+    max-width: 480px;
+}
+
+.dv-confirm-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: var(--space-sm);
+    padding: var(--space-lg) var(--space-xl) var(--space-xl);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.dv-confirm-body p {
+    margin: 0;
+}
+
+.dv-confirm-list {
+    margin: 0;
+    padding-left: var(--space-xl);
+}
+
+.dv-confirm-body .mono {
+    font-size: var(--fs-xs);
+    color: var(--text-primary);
+}
+
 /* Vensters zoals het sneltoetsenoverzicht (ui.js) */
 .dv-overlay {
     position: fixed;

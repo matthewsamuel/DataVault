@@ -2487,7 +2487,11 @@ async function restartServer() {
 
     // Dubbele klik beveiliging
     if (brand && brand.dataset.restarting) return;
-    if (!confirm('DataVault-server herstarten?\n\nDe app is dan een paar seconden niet bereikbaar.')) return;
+    if (!await dvConfirm({
+        title: 'DataVault-server herstarten?', icon: 'fa-rotate-right', confirmLabel: 'Herstarten',
+        body: 'De app is dan een paar seconden niet bereikbaar.',
+    })) return;
+    if (brand && brand.dataset.restarting) return;
 
     setBrandRestarting(true);
 

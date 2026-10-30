@@ -475,8 +475,11 @@ function jobsInit() {
 
 async function startThumbnailJob() {
     const folder = typeof currentFolder === 'string' && currentFolder ? currentFolder : null;
-    if (!folder && !confirm('Miniaturen maken voor het hele archief?\n\nDit kan bij een groot archief uren duren. ' +
-                            'Het loopt op de achtergrond; je kunt het pauzeren en later hervatten.')) {
+    if (!folder && !await dvConfirm({
+        title: 'Miniaturen maken voor het hele archief?', icon: 'fa-images', confirmLabel: 'Miniaturen maken',
+        body: ['Dit kan bij een groot archief uren duren.',
+               'Het loopt op de achtergrond; je kunt het pauzeren en later hervatten.'],
+    })) {
         return;
     }
     try {

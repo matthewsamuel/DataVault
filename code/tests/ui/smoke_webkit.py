@@ -433,21 +433,33 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("recovery: 8 opens the Herstelcentrum", lambda: page.keyboard.press("8"), 1.0)
             expect(page.locator(".recovery-entry").count() == 2, "recovery: no entry for each move")
             focused = "(document.activeElement.closest('.recovery-entry') || {dataset: {}}).dataset.key || document.activeElement.id"
-            accept = lambda d: d.accept()
-            page.on("dialog", accept)
+            native = []
+            page.on("dialog", lambda d: (native.append(d.message), d.dismiss()))
             first_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
-            step("recovery: Enter on Terugzetten", lambda: (
-                page.focus(".recovery-entry .recovery-undo"), page.keyboard.press("Enter")), 1.2)
+            step("recovery: Enter on Terugzetten asks in the app's own window", lambda: (
+                page.focus(".recovery-entry .recovery-undo"), page.keyboard.press("Enter"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000)), 0.3)
+            expect(page.evaluate("document.activeElement.textContent") == "Annuleren"
+                   and "terugzetten" in page.text_content("#dv-confirm-title"),
+                   f"recovery: the question does not start on Annuleren ({page.evaluate('document.activeElement.textContent')!r})")
+            step("recovery: Escape cancels the question", lambda: page.keyboard.press("Escape"), 0.5)
+            expect(not Path(second_src).exists() and page.evaluate(focused) == first_key,
+                   f"recovery: Escape still undid the move, or the focus did not come back ({page.evaluate(focused)})")
+            step("recovery: Terugzetten, then confirm", lambda: (
+                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.2)
             expect(Path(second_src).exists(), "recovery: the newest move did not go back")
             left_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
             expect(left_key != first_key and page.evaluate(focused) == left_key,
                    f"recovery: focus not on the next entry after the undo ({page.evaluate(focused)})")
-            step("recovery: Enter on the last Terugzetten", lambda: page.keyboard.press("Enter"), 1.2)
+            step("recovery: Enter on the last Terugzetten", lambda: (
+                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.2)
             expect(Path(moved_src).exists(), "recovery: the file did not go back")
             expect(page.is_visible("#recovery-list .empty-state"), "recovery: the list did not show its empty state")
             expect(page.evaluate("document.activeElement.id") == "recovery-title",
                    f"recovery: focus not on the title once the list is empty ({page.evaluate(active_id)})")
-            page.remove_listener("dialog", accept)
+            expect(not native, f"recovery: a native browser dialog appeared ({native})")
 
             # Instellingen: every built-in part is there and the theme can be chosen there
             step("settings: 9 opens Instellingen", lambda: page.keyboard.press("9"), 1.0)
@@ -636,10 +648,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"settings: install button says {install_text!r}")
             # The install button asks first, with where it downloads from; 'Annuleren' downloads nothing
             asked = []
-            dismiss = lambda d: (asked.append(d.message), d.dismiss())  # noqa: E731
-            page.on("dialog", dismiss)
-            step("settings: install asks first", lambda: page.click("#settings-search-install"), 0.6)
-            page.remove_listener("dialog", dismiss)
+            step("settings: install asks first", lambda: (
+                page.click("#settings-search-install"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                asked.append(page.text_content("#modal-dv-confirm")),
+                page.click("#modal-dv-confirm .btn-secondary")), 0.6)
             jobs_now = page.evaluate("fetch('/api/jobs?type=model_download').then(r => r.json()).then(d => d.jobs.length)")
             expect(asked and "huggingface.co" in asked[0] and jobs_now == 0,
                    f"settings: install did not ask, or started anyway ({asked}, {jobs_now} jobs)")
@@ -1440,13 +1452,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                   " (document.querySelector('#series-list .empty-state-action') || {}).textContent]")
             expect(empty == ["Alle reeksen overgeslagen", "Overgeslagen tonen"],
                    f"series: after the last decision the list did not say the rest was skipped ({empty})")
-            accept = lambda d: d.accept()
-            page.on("dialog", accept)
             step("series: undo in the Herstelcentrum", lambda: (
                 page.click(".top-nav [data-view='recovery']"),
                 page.wait_for_selector(".recovery-entry"),
-                page.click(".recovery-entry:has-text('Beste uit reeks') .recovery-undo")), 1.5)
-            page.remove_listener("dialog", accept)
+                page.click(".recovery-entry:has-text('Beste uit reeks') .recovery-undo"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.5)
             expect(klein.exists() and not (holding / "2022" / "bursts" / "strand klein.jpg").exists(),
                    "series: the Herstelcentrum did not put the resized photo back")
             step("series: back on the tab", lambda: page.click(".top-nav [data-view='duplicates']"), 1.0)

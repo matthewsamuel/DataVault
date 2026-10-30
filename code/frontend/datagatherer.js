@@ -983,7 +983,10 @@ async function dgOpenSettings(id) {
     if (secrets.some(f => f.stored) || detail.configured) {
         footer.push(createEl('button', { type: 'button', class: 'btn btn-danger dg-forget',
             onClick: async () => {
-                if (!confirm(`Alle sleutels van ${detail.name} uit de Sleutelhanger halen? Je gegevens en exports blijven in het archief.`)) return;
+                if (!await dvConfirm({
+                    title: `Sleutels van ${detail.name} vergeten?`, icon: 'fa-key', confirmLabel: 'Vergeten', danger: true,
+                    body: 'Alle sleutels van deze bron gaan uit de Sleutelhanger. Je gegevens en exports blijven in het archief.',
+                })) return;
                 try {
                     await dgPost(`/api/datagatherer/sources/${encodeURIComponent(id)}/forget`);
                     dgCloseModal('dg-settings');

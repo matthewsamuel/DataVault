@@ -172,3 +172,16 @@ def test_the_idle_job_dock_is_a_small_icon_not_a_wide_pill():
     assert not re.search(r"\.job-dock\.collapsed:not\(\.compact\)\s*\{", css)
     # on a small screen the dock starts collapsed and stays low when opened
     assert "JOB_DOCK_SMALL" in _sources()["jobs.js"]
+
+
+def test_no_native_browser_dialogs():
+    """Questions use the app's own window (dvConfirm in ui.js), never confirm()/alert()/prompt()."""
+    found = []
+    for name, text in _sources().items():
+        if not name.endswith(".js"):
+            continue
+        for m in re.finditer(r"(?<![\w.$])(?:window\.)?(confirm|alert|prompt)\s*\(", text):
+            line = text.count("\n", 0, m.start()) + 1
+            found.append(f"{name}:{line} {m.group(1)}()")
+    assert found == [], found
+    assert "function dvConfirm(" in _sources()["ui.js"]
