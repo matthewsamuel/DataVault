@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -398,10 +399,18 @@ def test_the_automatic_runner_starts_after_the_index_and_holds_after_a_pause(cli
     _photo(config.RAW_FOLDER / "nieuw/a.jpg", (1, 2, 3), "a")
     _photo(config.RAW_FOLDER / "nieuw/b.jpg", (3, 2, 1), "b")
     _index(client)
-    fake.on_image = lambda n: manager.pause(job2["id"]) if n >= 1 else None
-    job2 = {}
+    # The worker can reach its first image before the POST below has returned, so the
+    # pause waits until the test knows the job's id.
+    job2, known = {}, threading.Event()
+
+    def pause_after_the_first(n):
+        if n >= 1 and known.wait(30):
+            manager.pause(job2["id"])
+
+    fake.on_image = pause_after_the_first
     r = client.post("/api/jobs", json={"type": "semantic", "params": {}})
     job2["id"] = r.json()["job"]["id"]
+    known.set()
     assert manager.wait(job2["id"], timeout=60)["status"] == "paused"
     fake.on_image = None
     assert auto.tick() is False

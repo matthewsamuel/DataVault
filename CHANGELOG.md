@@ -9,6 +9,11 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Verificatieronde
+- Database-updates die later zijn toegevoegd maar een lager nummer hebben (Slim zoeken en 'Welke is mooier?') worden nu altijd uitgevoerd, ook op een database die al verder was bijgewerkt. Ontbrak er zo een, dan vult de app hem bij de volgende start alsnog aan en blijven alle gegevens staan.
+- De veiligheidskopie die vlak voor een database-update wordt gemaakt, blijft nu bewaard; bij het opruimen gaan de oudste kopieën (op datum) weg in plaats van de kopie die net gemaakt is.
+- Drie tests die op een drukke computer soms faalden, zijn betrouwbaar gemaakt.
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.
