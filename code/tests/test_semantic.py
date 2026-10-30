@@ -185,7 +185,7 @@ def test_without_the_model_search_explains_how_to_install_it_and_nothing_else_br
     found = client.get("/api/search/filename", params={"q": "taart"}).json()
     assert _names(found) == ["🎂 taart.png"]
     assert client.get("/api/library/media").status_code == 200
-    assert client.post("/api/search/warm").json() == {"ready": False}
+    assert client.post("/api/search/warm").json() == {"ready": False, "loaded": False}
 
 
 def test_the_app_never_downloads_by_itself(client, config, monkeypatch):
@@ -303,6 +303,34 @@ def test_a_moved_photo_keeps_its_embedding_and_one_in_trash_is_not_found(client,
     assert str(moved) in paths() and str(src) not in paths()
     trashed = move_no_overwrite(vault / STRAND, config.TRASH_FOLDER / STRAND)
     assert str(vault / STRAND) not in paths() and str(trashed) not in paths()
+
+
+def test_files_changed_in_finder_are_not_shown_and_the_index_catches_up(client, config, vault, fake, monkeypatch):
+    """Removed or moved outside the app: the stale row is left out and an index pass is asked for."""
+    from backend import media_index
+    _index(client)
+    _embed(client)
+    asked = []
+    monkeypatch.setattr(media_index, "_updater", lambda: asked.append(1))
+    # Opening the search window asks for a pass (cheap when nothing changed)
+    assert client.post("/api/search/warm").json() == {"ready": True, "loaded": True}
+    assert asked == [1]
+    target = vault / "RAW/2019/zomer vakantie/IMG_0002.JPG"
+    before = client.get("/api/search/semantic", params={"q": "oranje"}).json()
+    assert str(target) in [i["path"] for i in before["items"]]
+    shutil.move(target, config.CACHE_FOLDER.parent.parent / "weg.jpg")       # as in Finder
+    after = client.get("/api/search/semantic", params={"q": "oranje", "include_weak": True}).json()
+    assert str(target) not in [i["path"] for i in after["items"]] and len(asked) == 2
+    by_name = client.get("/api/search/filename", params={"q": "IMG_0002"}).json()
+    assert by_name["items"] == [] and len(asked) == 3
+    # A pass that finds the file in its new place tells Slim zoeken at once
+    told = []
+    monkeypatch.setattr(media_index, "_on_new_files", lambda: told.append(1))
+    shutil.move(config.CACHE_FOLDER.parent.parent / "weg.jpg", vault / "RAW/2019/terug.jpg")
+    _index(client)
+    assert told == [1]
+    _index(client)                    # nothing new: nobody is told
+    assert told == [1]
 
 
 def test_embeddings_of_removed_files_are_purged(client, config, vault, fake):

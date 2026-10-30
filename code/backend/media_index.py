@@ -162,6 +162,24 @@ def request_update() -> None:
             pass
 
 
+# Set by main.create_app: told after a pass that found new or changed photos and videos
+# (Slim zoeken recognises them right away instead of at its next poll)
+_on_new_files: Optional[Callable[[], None]] = None
+
+
+def set_new_files_listener(fn: Optional[Callable[[], None]]) -> None:
+    global _on_new_files
+    _on_new_files = fn
+
+
+def _tell_new_files() -> None:
+    if _on_new_files is not None:
+        try:
+            _on_new_files()
+        except Exception:
+            pass
+
+
 # ---------- which files belong in the index ----------
 
 def indexable(path: Path, config) -> bool:
@@ -514,6 +532,8 @@ def run_pass(ctx, config, db, full: bool, errors, read_errors, vault_unavailable
         info["last_full_at"] = now
     db.set_setting(STATE_KEY, info)
     counts = run.counts
+    if counts["new"] or counts["changed"]:
+        _tell_new_files()
     return {
         "full": full,
         "files": files,

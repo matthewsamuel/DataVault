@@ -173,6 +173,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             media_index.set_updater(app.state.auto_index.request)
             # Slim zoeken: photos are recognised after the index, once the model is installed
             app.state.auto_semantic = semantic.SemanticAuto(job_manager, config, db)
+            media_index.set_new_files_listener(app.state.auto_semantic.request)
             # ... and the text model is read from disk now (10-20 s the first time after a boot),
             # so the first query does not wait for it
             def _warm():
@@ -183,6 +184,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             threading.Thread(target=_warm, daemon=True, name="semantic-warm").start()
         else:
             media_index.set_updater(None)
+            media_index.set_new_files_listener(None)
         # DATAVAULT_GATHER_DAEMON=0 turns the DataGatherer thread off (tests tick it themselves)
         if os.environ.get("DATAVAULT_GATHER_DAEMON", "1") != "0":
             app.state.gather_daemon = gather_daemon.Daemon(config, db, lambda: app.state.jobs)
