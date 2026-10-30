@@ -4179,6 +4179,7 @@ async function sendChat({ inputEl, btn }) {
     };
 
     let fullText = '';
+    let rawText = '';      // het antwoord van het model zoals het kwam, met de ACTION-tag
     const toolEvents = [];
 
     try {
@@ -4224,6 +4225,7 @@ async function sendChat({ inputEl, btn }) {
 
                 if (typeof event.token === 'string' && event.token) {
                     fullText += event.token;
+                    rawText += event.token;
                     // Een half binnengekomen ACTION-tag niet laten zien
                     showText(fullText.replace(/(?:<<|<\|)ACTION[\s\S]*$|\{\s*"action"[^}]*$/, '').trimEnd());
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -4242,7 +4244,10 @@ async function sendChat({ inputEl, btn }) {
                     }
                     toolEvents.forEach(chatRenderToolEvent);
                     if (reply.action) setTimeout(() => executeAIAction(reply.action), 1000);
-                    window.chatHistory.push({ role: 'assistant', content: fullText });
+                    // Lukte een actie, dan onthoudt de geschiedenis het antwoord mét de tag: zo blijft het
+                    // model ook bij de volgende vraag een actie schrijven in plaats van alleen 'Dit vond ik.'
+                    const acted = reply.action || toolEvents.some(t => !t.error);
+                    window.chatHistory.push({ role: 'assistant', content: acted && rawText.trim() ? rawText.trim() : fullText });
                 }
             }
         }

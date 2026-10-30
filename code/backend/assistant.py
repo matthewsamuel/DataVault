@@ -249,8 +249,20 @@ def resolve_actions(text: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any
             server.append(action)
         elif page:
             client.append(page)
-    tried = bool(raws) or bool(UNFINISHED.search(text))
+    tried = bool(raws) or bool(UNFINISHED.search(text)) or is_bare_claim(text)
     return server[:2], client[:1], tried
+
+
+# The short lead-ins of the prompt's examples. An answer that is only one of these ('Dit vond ik.')
+# promised a result but carries no action (the small model sometimes forgets the tag).
+CLAIMS = {"hier zijn ze", "hier zijn ze dan", "hier is het", "dit vond ik", "alsjeblieft", "ik kijk het na",
+          "even kijken", "dit zijn je reeksen", "ik stel het voor", "ik bereid het voor", "zoeken",
+          "ik zoek het op", "ik heb het opgezocht"}
+
+
+def is_bare_claim(text: str) -> bool:
+    words = re.sub(r"[^\w\s']", " ", (text or "").lower())
+    return " ".join(words.split()) in CLAIMS
 
 
 def parse_actions(text: str) -> List[Dict[str, Any]]:

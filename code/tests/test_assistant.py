@@ -272,6 +272,8 @@ def _raw(client, fake_ollama, content):
     'Hier zijn ze. <<ACTION: {"action": "show_photos", "date": "gisteren"}>>',
     'Ik kijk het na. <<ACTION: not json>>',
     'Even kijken. <<ACTION: {"action": "library_filter", "ye',                    # cut off
+    'Dit vond ik.',                                                               # a promise without any action
+    'Hier zijn ze...',
 ])
 def test_an_action_that_cannot_run_is_reported_not_swallowed(indexed, fake_ollama, content):
     events = _raw(indexed, fake_ollama, content)
@@ -303,6 +305,7 @@ def test_a_page_action_stays_for_the_page_in_its_own_spelling(indexed, fake_olla
     assert not [e for e in events if "tool" in e]
     assert [e["replace"] for e in events if "replace" in e] == \
         ['Ik open hem.\n<<ACTION: {"action": "open_tab", "target": "keurer"}>>']
-    # a normal answer without any action is left alone
-    events = _raw(indexed, fake_ollama, "Hallo! Hoe gaat het?")
-    assert not [e for e in events if "tool" in e or "replace" in e]
+    # a normal answer without any action is left alone, also when it starts like a promise
+    for text in ("Hallo! Hoe gaat het?", "Dit vond ik een mooie reis.", "Alsjeblieft, graag gedaan!"):
+        events = _raw(indexed, fake_ollama, text)
+        assert not [e for e in events if "tool" in e or "replace" in e], text
