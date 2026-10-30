@@ -394,3 +394,66 @@ def test_migration_110_adds_tables_and_keeps_every_user_row(tmp_path, monkeypatc
     assert db.get_setting("chat_model") == "qwen2.5:3b"
     assert state.schedule_enabled(db, "spotify")
     db.close_all()
+
+
+def test_my_activity_as_html_and_as_json_is_one_record(app):
+    """Takeout HTML has whole seconds, its JSON milliseconds: the same video is one row."""
+    html = [e for e in gf.parse_activity_html(fx.MY_ACTIVITY_HTML.encode(), None) if e["title"] == "Fietsen in Gent"]
+    entry = {"header": "YouTube", "title": "Watched Fietsen in Gent", "titleUrl": "https://www.youtube.com/watch?v=def",
+             "time": "2019-07-14T13:00:00.417Z", "products": ["YouTube"]}
+    json_events = list(gf.parse_activity_json(json.dumps([entry]).encode(), "YouTube", "youtube_watch"))
+    assert len(html) == 1 and html[0]["ts_ms"] == 1563109200000 and json_events[0]["ts_ms"] == 1563109200417
+    assert html[0]["key"] == json_events[0]["key"]
+    activity_store.insert(app.state.db, "google_takeout", None, html)
+    assert activity_store.insert(app.state.db, "google_takeout", None, json_events)["added"] == 0
+
+
+def test_migration_135_rekeys_my_activity_per_second_and_keeps_every_other_row(tmp_path, monkeypatch):
+    import hashlib
+    from backend import migrations
+    from backend.database import Database
+    from test_duplicates_runs import _migrate_to
+    from test_foundation import _make_legacy_db
+
+    def old_key(*parts):
+        return hashlib.sha1("\x1f".join("" if p is None else str(p) for p in parts).encode()).hexdigest()[:24]
+
+    db_path = tmp_path / "datavault.db"
+    _make_legacy_db(db_path)
+    _migrate_to(db_path, 110, monkeypatch)
+    url = "https://www.youtube.com/watch?v=def"
+    rows = [  # (source, kind, ts_ms, title, url, details, key)
+        ("google_takeout", "youtube_watch", 1563109200000, "Fietsen in Gent", url, None,                       # HTML
+         old_key("youtube_watch", 1563109200000, url)),
+        ("google_takeout", "youtube_watch", 1563109200417, "Fietsen in Gent", url, '{"kanaal": "Kanaal Y"}',  # JSON
+         old_key("youtube_watch", 1563109200417, url)),
+        ("google_takeout", "search", 1563094800000, "weer Gent", None, None, old_key("search", 1563094800000, "weer Gent")),
+        ("google_takeout", "web_visit", 1563091200123, "Voorbeeld", "https://voorbeeld.be/",
+         '{"browser": "Chrome", "bron": "Takeout"}', old_key("web_visit", 1563091200123, "https://voorbeeld.be/")),
+        ("google_takeout", "calendar", 1563091200000, "Etentje", None, None, "cal-1"),
+        ("netflix", "video_watch", 1563091200000, "Documentaire", None, None, "nf-1"),
+    ]
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executemany("INSERT INTO activity_events (source, kind, ts_ms, title, url, details, event_key, first_seen_at) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, 1.0)", rows)
+        conn.execute("INSERT INTO location_points (ts_ms, lat, lon, source, origin) VALUES (1, 51.0, 3.7, 'records', 'x')")
+        conn.execute("INSERT INTO app_settings VALUES ('chat_model', '\"qwen2.5:3b\"', 5.0)")
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('schema_version', 'activity_events')")]
+        before = {t: conn.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in tables}
+    db = Database(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 135
+        for table, kept in before.items():
+            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == kept, table
+        after = {(r[0], r[1]): r[2:] for r in conn.execute(
+            "SELECT source, kind, ts_ms, details, event_key FROM activity_events ORDER BY id")}
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert len(after) == 5                                     # the HTML copy of the video is gone, nothing else
+    assert after[("google_takeout", "youtube_watch")][:2] == (1563109200417, '{"kanaal": "Kanaal Y"}')
+    assert after[("google_takeout", "youtube_watch")][2] == activity_store.key("youtube_watch", 1563109200, url)
+    assert after[("google_takeout", "search")][2] == activity_store.key("search", 1563094800, "weer Gent")
+    assert after[("google_takeout", "web_visit")][2] == rows[3][6]            # Chrome's own history keeps its key
+    assert after[("google_takeout", "calendar")][2] == "cal-1" and after[("netflix", "video_watch")][2] == "nf-1"
+    assert db.get_setting("chat_model") == "qwen2.5:3b"
+    db.close_all()

@@ -414,7 +414,9 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
 - Stap 3.9c: Google Takeout (nl/en) en de Tijdlijn van de telefoon, Chrome- en Safari-geschiedenis
   (`local_import`, uit een kopie), Netflix, Snapchat, TikTok, Apple (privacy.apple.com) en Apple
   Gezondheid. Migratie 110: `activity_events`, `location_points`, `location_visits` en
-  `media_location_inferred` (geschatte plek van foto's zonder GPS, alleen in de database). API's:
+  `media_location_inferred` (geschatte plek van foto's zonder GPS, alleen in de database). Migratie
+  135 geeft elk item uit Mijn activiteit een sleutel op de seconde, zodat HTML en JSON van dezelfde
+  Takeout één rij geven. API's:
   `/api/activity/{facets,days,events}`, `/api/location/{summary,days,track,settings,geotag}` en
   `/api/map/inferred`; de taak `datagatherer.geotag` schat opnieuw. Tijdzones offline via de Natural
   Earth-landen en `backend/data/country_zones.json` (uit de tz-database). Het scherm Activiteit

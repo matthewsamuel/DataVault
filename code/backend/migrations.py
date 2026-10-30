@@ -960,6 +960,50 @@ def _m110_activity_and_location(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_location_inferred_latlon ON media_location_inferred(lat, lon)")
 
 
+
+# The kinds google_formats.activity_item makes (My Activity and YouTube's own history)
+_ACTIVITY_ITEM_KINDS = ("youtube_watch", "youtube_search", "search", "maps", "web_visit", "activity")
+
+
+def _m135_activity_keys_per_second(conn: sqlite3.Connection):
+    """
+    DataGatherer verification round: a My Activity entry is keyed on its time in whole
+    seconds. Takeout's HTML (the default) has seconds, its JSON has milliseconds, so the same
+    video read from both was stored twice. Every My Activity row of google_takeout gets the
+    new key (kind, second, url or title); where two rows now share it, the copy with the
+    less precise time is removed: it is the same entry, and the raw exports stay in the archive.
+    Chrome's own BrowserHistory rows ('bron': 'Takeout') keep their key.
+    """
+    import hashlib
+    import json
+
+    def key(*parts):
+        text = "\x1f".join("" if p is None else str(p) for p in parts)
+        return hashlib.sha1(text.encode("utf-8", "surrogatepass")).hexdigest()[:24]
+
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'activity_events'").fetchone():
+        return
+    rows = conn.execute(
+        f"SELECT id, kind, ts_ms, url, title, details, event_key FROM activity_events WHERE source = 'google_takeout' "
+        f"AND kind IN ({', '.join('?' * len(_ACTIVITY_ITEM_KINDS))}) ORDER BY id", _ACTIVITY_ITEM_KINDS).fetchall()
+    groups = {}
+    for row_id, kind, ts_ms, url, title, details, old_key in rows:
+        try:
+            info = json.loads(details) if details else {}
+        except ValueError:
+            info = {}
+        if kind == "web_visit" and isinstance(info, dict) and info.get("bron") == "Takeout":
+            continue
+        groups.setdefault(key(kind, ts_ms // 1000, url or title), []).append((row_id, ts_ms, old_key))
+    for new_key, members in groups.items():
+        # keep the millisecond time when there is one (JSON), else the oldest row
+        members.sort(key=lambda m: (m[1] % 1000 == 0, m[0]))
+        keep = members[0]
+        for row_id, _, _ in members[1:]:
+            conn.execute("DELETE FROM activity_events WHERE id = ?", (row_id,))
+        if keep[2] != new_key:
+            conn.execute("UPDATE activity_events SET event_key = ? WHERE id = ?", (new_key, keep[0]))
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -990,6 +1034,8 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (91, "social_items", _m091_social_items),
     # 110-119: DataGatherer Google, location, browser and extras (step 3.9c)
     (110, "activity_and_location", _m110_activity_and_location),
+    # 135-139: DataGatherer verification round
+    (135, "activity_keys_per_second", _m135_activity_keys_per_second),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
