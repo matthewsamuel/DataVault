@@ -256,7 +256,9 @@ def build_showcase_vault(root: Path) -> Path:
             if i == 3 and t in (5, 8, 13):
                 for k in range(1, 5):
                     number += 1
-                    frame = img.transform(img.size, Image.AFFINE, (1, 0, k * 3, 0, 1, k * 2), resample=Image.BILINEAR)
+                    # (a crop that moves a few pixels, scaled back: no black edge like a plain shift)
+                    w, h = img.size
+                    frame = img.crop((k * 3, k * 2, w - 12 + k * 3, h - 8 + k * 2)).resize(img.size, Image.BILINEAR)
                     frame = frame.point(lambda v, k=k: min(255, int(v * (1 + k * 0.01))))
                     _save(frame, raw / folder / f"IMG_{number:04d}.JPG", when + timedelta(seconds=k), camera, gps)
 
