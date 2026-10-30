@@ -60,7 +60,7 @@ async function actLoad() {
             document.getElementById('act-layout').classList.add('act-empty');
             days.replaceChildren();
             events.replaceChildren(emptyState({
-                icon: 'fa-clock-rotate-left', title: 'Nog geen activiteit',
+                icon: 'fa-wave-square', title: 'Nog geen activiteit',
                 text: 'Lees in DataGatherer een export of je browsergeschiedenis in; '
                     + 'wat je deed verschijnt hier per dag.',
                 action: { label: 'Naar DataGatherer', primary: true, onClick: () => switchMainView('datagatherer') },
@@ -173,7 +173,7 @@ function actRenderDays() {
             },
                 createEl('span', { class: 'act-day-label', text: actDayLabel(d.day) }),
                 createEl('span', { class: 'act-day-icons', 'aria-hidden': 'true' },
-                    ...top.map(([k]) => createEl('i', { class: `fas ${(kinds.get(k) || {}).icon || 'fa-clock-rotate-left'}` }))),
+                    ...top.map(([k]) => createEl('i', { class: `fas ${(kinds.get(k) || {}).icon || 'fa-wave-square'}` }))),
                 createEl('span', { class: 'act-day-count mono', text: d.count.toLocaleString('nl-BE') }))));
     });
     box.replaceChildren(...children);
@@ -217,7 +217,7 @@ function actEvent(ev) {
     Object.entries(ev.details || {}).forEach(([k, v]) => {
         if (ACT_DETAIL_LABELS[k] && v !== null && v !== '' && meta.length < 5) meta.push(`${ACT_DETAIL_LABELS[k]}: ${actDetailText(k, v)}`);
     });
-    const kind = (actState.facets.kinds.find(k => k.id === ev.kind) || {}).icon || 'fa-clock-rotate-left';
+    const kind = (actState.facets.kinds.find(k => k.id === ev.kind) || {}).icon || 'fa-wave-square';
     const title = ev.url && /^https?:\/\//.test(ev.url)
         ? createEl('a', { class: 'act-title', href: ev.url, rel: 'noopener noreferrer', title: ev.url, text: ev.title || ev.url,
             onClick: (e) => { e.preventDefault(); openExternal(ev.url); } })
@@ -244,9 +244,11 @@ async function actLoadEvents() {
             createEl('h2', { class: 'section-title', id: 'act-day-title', text: new Date(`${day}T12:00:00`).toLocaleDateString('nl-BE',
                 { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) }),
             createEl('span', { class: 'act-events-count', text: `${data.events.length}${data.truncated ? '+' : ''} ${data.events.length === 1 ? 'gebeurtenis' : 'gebeurtenissen'}` }));
-        box.replaceChildren(head,
+        // (replaceChildren zou null als de tekst 'null' tonen)
+        box.replaceChildren(...[head,
             createEl('ol', { class: 'act-list', 'aria-labelledby': 'act-day-title' }, ...data.events.map(actEvent)),
-            data.truncated ? createEl('p', { class: 'act-more', text: 'Alleen de eerste 500 van deze dag: verfijn met de filters.' }) : null);
+            data.truncated ? createEl('p', { class: 'act-more', text: 'Alleen de eerste 500 van deze dag: verfijn met de filters.' }) : null]
+            .filter(Boolean));
     } catch (err) {
         if (seq !== actState.eventsSeq) return;
         box.replaceChildren(errorState('Deze dag kon niet geladen worden', err, actLoadEvents));

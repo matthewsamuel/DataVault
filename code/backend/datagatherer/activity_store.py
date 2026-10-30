@@ -34,7 +34,7 @@ KINDS: Dict[str, Tuple[str, str]] = {
     "web_visit": ("Website bezocht", "fa-globe"),
     "calendar": ("Agenda", "fa-calendar-day"),
     "note": ("Notitie", "fa-note-sticky"),
-    "activity": ("Activiteit", "fa-clock-rotate-left"),
+    "activity": ("Activiteit", "fa-wave-square"),
     "video_watch": ("Gekeken", "fa-tv"),
     "like": ("Leuk gevonden", "fa-heart"),
     "memory": ("Herinnering", "fa-camera"),

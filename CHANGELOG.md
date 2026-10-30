@@ -640,6 +640,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - **Tabblad en beweging**: DataVault heeft een eigen icoon in het tabblad, en de titel van het tabblad
   zegt in welk onderdeel je bent ('Kaart · DataVault'). Een ander onderdeel komt rustig in beeld
   (niet als je in macOS minder beweging hebt gevraagd).
+- **Activiteit** heeft een eigen icoon (een golflijn) in plaats van dat van het Herstelcentrum, en onder
+  de gebeurtenissen van een dag staat niet langer het woord 'null'.
 
 ## Fase 2 – Stabiliseren
 
