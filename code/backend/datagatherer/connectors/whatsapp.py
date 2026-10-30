@@ -24,6 +24,7 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from backend.datagatherer import local_db, messages_store, raw_store, state
 from backend.datagatherer.base import Connector, ConnectorError, Coverage, ExportKind, GatherContext, HelpOption, SettingField
@@ -64,7 +65,9 @@ def _txt_member(names: List[str]) -> Optional[str]:
 
 def _open_ro(path: Path) -> sqlite3.Connection:
     """An archived database, read-only and immutable: nothing is ever written next to it."""
-    return sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+    # Percent-encode the path: a raw '#' or '?' would cut it short, drop mode=ro and make
+    # SQLite create an empty file at the shortened path (inside the export folder).
+    return sqlite3.connect(f"file:{quote(str(path))}?mode=ro&immutable=1", uri=True)
 
 
 class WhatsApp(Connector):

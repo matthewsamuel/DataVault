@@ -288,6 +288,59 @@ def test_a_new_export_with_a_taken_name_never_overwrites(app, config, tmp_path):
     assert not list(Path(raw1["path"]).parent.glob(".*partial*"))
 
 
+def test_a_partial_copy_left_by_a_crash_is_cleaned_up_and_nothing_else(app, config, tmp_path):
+    """A crash (kill, power loss, unplug) mid-copy leaves '.<name>.datavault-partial-<hex>' in the
+    archive; the next copy of that source, and the daemon once per start, remove it."""
+    import subprocess
+    import sys
+    from backend.datagatherer import daemon
+    db = app.state.db
+    connector = registry.get("spotify")
+    src = tmp_path / "Downloads" / "groot.zip"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(os.urandom(9 * 1024 * 1024))
+    folder = raw_store.target_folder(config, connector, "Extended streaming history", time.time() - 86400)
+    folder.mkdir(parents=True)
+    crash = ("import os, sys; from pathlib import Path; from backend import file_ops\n"
+             "def check(done):\n    if done >= 4 * 1024 * 1024: os._exit(9)\n"
+             "file_ops.copy_no_overwrite(Path(sys.argv[1]), Path(sys.argv[2]), check=check)\n")
+    code = Path(__file__).resolve().parents[1]
+    assert subprocess.run([sys.executable, "-c", crash, str(src), str(folder / src.name)], cwd=code).returncode == 9
+    [left] = [p for p in folder.iterdir() if ".datavault-partial-" in p.name]
+    assert left.name.startswith(".groot.zip.datavault-partial-") and left.stat().st_size >= 4 * 1024 * 1024
+    old = time.time() - 3600
+    os.utime(left, (old, old))
+    # What must stay: a partial still being written, look-alikes, a symlink, an export itself
+    fresh = folder / ".ander.zip.datavault-partial-0123abcd"
+    fresh.write_bytes(b"bezig")
+    lookalikes = [folder / "geen.datavault-partial-0123abcd", folder / ".x.datavault-partial-nothex1",
+                  folder / ".x.datavault-partial-0123abcd.zip"]
+    outside = tmp_path / "buiten.txt"
+    outside.write_text("blijft")
+    link = folder / ".link.datavault-partial-0123abcd"
+    os.symlink(outside, link)
+    for p in lookalikes:
+        p.write_bytes(b"x")
+        os.utime(p, (old, old))
+    os.utime(link, (old, old), follow_symlinks=False)
+    raw, created = raw_store.archive_file(config, db, connector, "extended", _zip(tmp_path), "downloads")
+    assert created and not left.exists()
+    assert fresh.exists() and all(p.exists() for p in lookalikes) and link.is_symlink() and outside.read_text() == "blijft"
+    # The daemon sweeps once per start, for every source, without a new copy
+    other = raw_store.owner_folder(config) / registry.get("whatsapp").raw_folder / "2024-01-01 Backup"
+    other.mkdir(parents=True)
+    stale = other / ".ChatStorage.sqlite.datavault-partial-deadbeef"
+    stale.write_bytes(b"half")
+    os.utime(stale, (old, old))
+    d = daemon.Daemon(config, db, lambda: app.state.jobs)
+    d.tick()
+    assert not stale.exists()
+    stale.write_bytes(b"half")
+    os.utime(stale, (old, old))
+    d.tick()
+    assert stale.exists()                   # only once per start
+
+
 def test_existing_folders_are_registered_in_place(app, config, vault):
     db = app.state.db
     connector = registry.get("spotify")

@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import threading
 import time
 import zipfile
@@ -103,6 +104,53 @@ def folder_fingerprint(folder: Path, patterns: Tuple[str, ...] = ("*",)) -> Tupl
     return hashlib.sha256("\n".join(lines).encode()).hexdigest(), len(lines), total
 
 
+STALE_PARTIAL_SECONDS = 10 * 60     # a copy in progress writes its partial file every few MB
+
+
+def sweep_partials(config, connectors, now: Optional[float] = None) -> List[str]:
+    """
+    Remove the hidden partial copies (file_ops.copy_no_overwrite's temporary
+    '.<name>.datavault-partial-<hex>') that a crash, power loss or unplug left in
+    data/<owner>/<raw_folder>/<date folder>/. They are always DataVault's own unfinished
+    copies, never an export: only that function makes them (exclusive create) and it never
+    keeps that name. Taken under the archive lock, so no copy of this process is busy, and
+    only when untouched for STALE_PARTIAL_SECONDS (another process writing would update it).
+    Regular files only, never a symlink or a folder. Returns the removed paths.
+    """
+    owner = owner_folder(config)
+    if owner is None:
+        return []
+    now = time.time() if now is None else now
+    removed: List[str] = []
+    with _archive_lock:
+        for connector in connectors:
+            raw = getattr(connector, "raw_folder", "")
+            if not raw:
+                continue
+            try:
+                days = [e.path for e in os.scandir(owner / raw) if e.is_dir(follow_symlinks=False)]
+            except OSError:
+                continue
+            for day in days:
+                try:
+                    entries = [e for e in os.scandir(day) if file_ops.PARTIAL_MARK in e.name
+                               and file_ops.PARTIAL_NAME.match(e.name)]
+                except OSError:
+                    continue
+                for e in entries:
+                    try:
+                        st = e.stat(follow_symlinks=False)
+                        if not stat.S_ISREG(st.st_mode) or now - st.st_mtime < STALE_PARTIAL_SECONDS:
+                            continue
+                        os.unlink(e.path)
+                        removed.append(e.path)
+                    except OSError:
+                        continue
+    for path in removed:
+        print(f"DataGatherer: removed an unfinished copy: {path}")
+    return removed
+
+
 def target_folder(config, connector, kind_label: str, when: Optional[float] = None) -> Path:
     owner = owner_folder(config)
     if owner is None:
@@ -120,6 +168,7 @@ def archive_file(config, db, connector, kind: str, src: Path, origin: str,
     """
     export = connector.export_kind(kind)
     label = export.folder_label if export else kind
+    sweep_partials(config, [connector])        # what an earlier, interrupted copy left behind
     sha, size = sha256_file(src, check)
     with _archive_lock:
         existing = state.raw_by_sha(db, sha)

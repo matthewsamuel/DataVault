@@ -84,6 +84,32 @@ def _existing_ancestor(path: Path) -> Path:
     return Path("/")
 
 
+def refuse_protected(real: Path, config: Config) -> None:
+    """ExportError when real lies in the archive or in one of DataVault's own folders."""
+    protected = {"de bibliotheek (het archief)": config.VAULT_ROOT, "de RAW-map": config.RAW_FOLDER,
+                 "RAW_DUPLICATES": config.DUPLICATES_FOLDER, "TRASH": config.TRASH_FOLDER,
+                 "de cache van DataVault": config.CACHE_FOLDER}
+    for label, folder in protected.items():
+        if is_inside(real, folder):
+            raise ExportError(f"Exporteren naar {label} kan niet: kies een map buiten het archief")
+    if internal_folder_for(real, config) is not None:
+        raise ExportError("Exporteren naar een map van DataVault zelf kan niet")
+
+
+def _output_folder(dest: Path, parts: List[str], config: Config) -> Path:
+    """
+    The folder for one exported file, created, or ExportError. check_destination only sees
+    the root: a subfolder named like the archive (dest is the vault's parent and structure is
+    'folders') or a month folder that is a symlink into the vault would land inside it. So
+    the real path is checked before mkdir (nothing is created there) and again after.
+    """
+    folder = dest.joinpath(*parts)
+    refuse_protected(Path(os.path.realpath(folder)), config)
+    folder.mkdir(parents=True, exist_ok=True)
+    refuse_protected(Path(os.path.realpath(folder)), config)
+    return folder
+
+
 def check_destination(raw: Any, config: Config) -> Path:
     """The destination as an absolute real path, or ExportError. The folder need not exist yet."""
     if not isinstance(raw, str) or not raw.strip():
@@ -102,14 +128,7 @@ def check_destination(raw: Any, config: Config) -> Path:
     if real in folders or any(real == Path(t) or real.is_relative_to(t) for t in SYSTEM_TREES) \
             or real.is_relative_to(home / "Library"):
         raise ExportError("Dit is een systeemmap; kies een eigen map, bijvoorbeeld in Afbeeldingen")
-    protected = {"de bibliotheek (het archief)": config.VAULT_ROOT, "de RAW-map": config.RAW_FOLDER,
-                 "RAW_DUPLICATES": config.DUPLICATES_FOLDER, "TRASH": config.TRASH_FOLDER,
-                 "de cache van DataVault": config.CACHE_FOLDER}
-    for label, folder in protected.items():
-        if is_inside(real, folder):
-            raise ExportError(f"Exporteren naar {label} kan niet: kies een map buiten het archief")
-    if internal_folder_for(real, config) is not None:
-        raise ExportError("Exporteren naar een map van DataVault zelf kan niet")
+    refuse_protected(real, config)
     if real.exists() and not real.is_dir():
         raise ExportError("Op die plek staat een bestand, geen map")
     anchor = _existing_ancestor(real)
@@ -428,8 +447,7 @@ def run_export(ctx: JobContext, config: Config, db) -> Dict[str, Any]:
             try:
                 src = Path(item.path)
                 st = src.stat()
-                folder = dest.joinpath(*_safe_parts(_subfolder(item, structure)))
-                folder.mkdir(parents=True, exist_ok=True)
+                folder = _output_folder(dest, _safe_parts(_subfolder(item, structure)), config)
                 tmp = folder / f"{LOG_PREFIX}{ctx.job_id}-{index}.part"
                 if os.path.lexists(tmp):
                     os.unlink(tmp)          # a leftover of this job's own interrupted run
@@ -464,6 +482,8 @@ def run_export(ctx: JobContext, config: Config, db) -> Dict[str, Any]:
                 copied += 1
                 bytes_out += size
                 converted += 1 if was_converted else 0
+            except ExportError as e:
+                errors.add(item.name, e)        # a subfolder that would end up in the archive
             except OSError as e:
                 if e.errno == errno.ENOSPC:
                     raise HTTPException(status_code=507, detail="De schijf is vol; er is niets overschreven. "

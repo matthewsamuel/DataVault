@@ -472,19 +472,27 @@ def propose_keep_best(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
     if not near_dups.counts(ctx.db).get("analysed"):
         raise ToolError("De reeksen zijn nog niet berekend. Open Duplicaten, kies Beste uit reeks en start de vergelijking.")
     data = near_dups.page(ctx.db, near_dups.DEFAULT_STRICTNESS, "size", 0, a.get("count", 1))
-    groups, preview, loose = [], [], 0
+    groups, preview, loose, copies = [], [], 0, 0
+    to = "RAW_DUPLICATES/near-duplicates"
     for s in data["items"]:
         keep = [s["best"]]
         losers = [m for m in s["members"] if m["id"] != s["best"]]
         groups.append({"members": [m["id"] for m in s["members"]], "keep": keep})
-        loose += len(losers)
+        # near_dups.keep_best moves each loser's byte-identical copies along: the card shows them too
         for m in losers:
-            preview.append({"path": m["path"], "name": m["name"], "to": "RAW_DUPLICATES/near-duplicates"})
+            preview.append({"path": m["path"], "name": m["name"], "to": to})
+            for c in m.get("copies") or []:
+                preview.append({"path": c["path"], "name": c["path"].rsplit("/", 1)[-1], "to": f"{to} (exacte kopie)"})
+                copies += 1
+        loose += len(losers)
     if not groups:
         raise ToolError("Ik vond geen reeksen om op te ruimen.")
+    total = loose + copies
     title = (f"In {len(groups)} {'reeks' if len(groups) == 1 else 'reeksen'} de beste foto houden en "
-             f"{loose} andere naar RAW_DUPLICATES/near-duplicates verplaatsen")
-    return _pending(ctx, "keep_best", title, {"groups": groups}, preview, loose)
+             f"{total} andere naar {to} verplaatsen")
+    if copies:
+        title += f" (waarvan {copies} {'exacte kopie' if copies == 1 else 'exacte kopieën'})"
+    return _pending(ctx, "keep_best", title, {"groups": groups}, preview, total)
 
 
 def propose_export(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:

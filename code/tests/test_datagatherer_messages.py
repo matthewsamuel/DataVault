@@ -361,6 +361,37 @@ def test_iphone_chatstorage_adds_only_what_the_mac_misses(client, app, tmp_path)
     assert not Path(str(archived) + "-wal").exists() and not Path(str(archived) + "-shm").exists()
 
 
+@pytest.mark.parametrize("folder,name", [("WhatsApp #2", "ChatStorage #2.sqlite"),
+                                         ("export? 2", "ChatStorage?x.sqlite"),
+                                         ("map %41", "ChatStorage %41.sqlite")])
+def test_whatsapp_paths_with_hash_question_mark_or_percent_are_read_and_nothing_is_created(
+        client, app, tmp_path, folder, name):
+    from urllib.parse import quote
+    where = tmp_path / folder
+    where.mkdir()
+    phone = where / name
+    make_chatstorage(phone, [{"pk": 7, "jid": "32470000001@s.whatsapp.net", "name": "Anna Jansen"}], [
+        {"pk": 70, "chat": 7, "text": "Hoi met een raar pad", "ts": T0 + 36060, "stanza": "R1"},
+    ])
+    before = sorted(p.name for p in tmp_path.iterdir()), sorted(p.name for p in where.iterdir())
+    # What the Downloads watcher does: detect it in place
+    assert registry.get("whatsapp").detect(phone, None) == "backup"
+    assert (sorted(p.name for p in tmp_path.iterdir()), sorted(p.name for p in where.iterdir())) == before
+    # Uploaded under its odd name it is archived and its message read
+    result = _upload(client, app, "whatsapp", phone, name=quote(name))
+    assert result["import_result"]["added"] == 1
+    assert _rows(app, "SELECT body FROM msg_messages WHERE body = 'Hoi met een raar pad'")
+    archived = Path(_rows(app, "SELECT path FROM dg_raw_imports WHERE kind = 'backup'")[0][0])
+    siblings = sorted(p.name for p in archived.parent.iterdir())
+    assert archived.name == name                          # the odd name itself is opened
+    assert siblings == sorted([archived.name, "datavault-import.json"]), siblings   # no stray empty file
+    # Imported again straight from the export folder: still nothing new written there
+    r = client.post("/api/datagatherer/sources/whatsapp/import")
+    assert r.status_code in (200, 201), r.text
+    assert _wait(app, r.json()["job"]["id"])["status"] == "done"
+    assert sorted(p.name for p in archived.parent.iterdir()) == siblings
+
+
 def test_whatsapp_card_asks_for_full_disk_access_and_the_helper_route_works(client, app, tmp_path):
     live, container = _mac_whatsapp()
     db_file = container / "ChatStorage.sqlite"

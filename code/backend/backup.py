@@ -71,6 +71,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set
+from urllib.parse import quote
 
 from backend import migrations
 from backend.config import DEFAULT_CONFIG_PATH
@@ -295,8 +296,15 @@ def _rebuildable(conn: sqlite3.Connection) -> List[str]:
     return sorted(names)
 
 
+def _ro_uri(path: Path) -> str:
+    """A read-only SQLite URI. The path is percent-encoded: unquoted, a '#' or '?' in a
+    folder name cuts the path short and drops mode=ro, so SQLite would create an empty
+    database at the shortened path and check that one instead."""
+    return f"file:{quote(str(path))}?mode=ro"
+
+
 def _integrity(path: Path) -> str:
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn = sqlite3.connect(_ro_uri(path), uri=True)
     try:
         rows = conn.execute("PRAGMA integrity_check").fetchall()
     finally:
@@ -305,7 +313,7 @@ def _integrity(path: Path) -> str:
 
 
 def _schema_version(path: Path) -> Optional[int]:
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn = sqlite3.connect(_ro_uri(path), uri=True)
     try:
         row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         return row[0] if row else None
@@ -776,7 +784,7 @@ def _restore_plain(config, db_path: Path, backup: Path, plain: Path, version: in
         elif not db_path.parent.is_dir():
             raise BackupError(f"De map van de database bestaat niet: {db_path.parent}. Is de schijf aangesloten?", 503)
         say(f"Back-up terugzetten: {backup}")
-        source = sqlite3.connect(f"file:{plain}?mode=ro", uri=True)
+        source = sqlite3.connect(_ro_uri(plain), uri=True)
         try:
             dest = sqlite3.connect(str(db_path), timeout=30)
             try:

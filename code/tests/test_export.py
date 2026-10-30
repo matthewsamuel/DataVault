@@ -367,3 +367,33 @@ def test_defaults_choose_folder_and_reveal(indexed, vault, tmp_path, monkeypatch
     assert calls[-1] == ["open", str(tmp_path)]
     assert indexed.post("/api/export/reveal", json={"path": str(vault / "RAW")}).status_code == 403
     assert indexed.post("/api/export/reveal", json={"path": str(tmp_path / "nergens")}).status_code == 404
+
+
+def _dirs(vault: Path):
+    return sorted(str(Path(root)) for root, dirs, _ in os.walk(vault) if ".datavault_cache" not in root)
+
+
+def test_original_folders_never_land_inside_the_archive(client, vault):
+    """The vault's parent is an allowed destination; an archive folder named like the vault
+    would put its copy (and with it a new folder) inside the archive itself."""
+    nested = vault / vault.name / "dieper" / "nested.jpg"
+    nested.parent.mkdir(parents=True)
+    shutil.copy2(vault / STRAND, nested)
+    _index(client, full=True)
+    before, dirs = _snapshot(vault), _dirs(vault)
+    result = _run(client, vault, [f"{vault.name}/dieper/nested.jpg", STRAND], vault.parent, structure="folders")
+    assert result["copied"] == 1 and result["errors"] == 1 and not result["complete"]
+    assert "buiten het archief" in result["error_samples"][0]
+    assert (vault.parent / "RAW/2019/zomer vakantie/strand 001.jpg").is_file()    # the other one is fine
+    assert _snapshot(vault) == before and _dirs(vault) == dirs                    # nothing new in the archive
+
+
+def test_a_month_folder_that_is_a_symlink_into_the_archive_is_refused(indexed, vault, tmp_path):
+    dest = tmp_path / "export"
+    dest.mkdir()
+    os.symlink(vault / "RAW", dest / "2019-07")
+    before, dirs = _snapshot(vault), _dirs(vault)
+    result = _run(indexed, vault, [STRAND, "RAW/2020/Café Ümlaut/koffie é à ü.jpg"], dest, structure="month")
+    assert result["copied"] == 1 and result["errors"] == 1
+    assert (dest / "2020-10/koffie é à ü.jpg").is_file()
+    assert _snapshot(vault) == before and _dirs(vault) == dirs
