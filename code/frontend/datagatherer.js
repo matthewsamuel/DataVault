@@ -247,6 +247,11 @@ function dgDataBlock(src) {
                 text: src.gap_days === 0 ? ' · vandaag' : ` · ${dgDays(src.gap_days)} geleden`,
             }));
         }
+    } else if (src.unread_until) {
+        // Elders in de app al te zien (het Spotify-scherm leest de export zelf), maar nog niet ingelezen
+        line.append(createEl('span', { class: 'dg-until-label', text: 'Gegevens t/m ' }),
+            createEl('span', { class: 'mono dg-until-date', text: dgDate(src.unread_until) }),
+            createEl('span', { class: 'dg-gap', text: ' · nog niet ingelezen' }));
     } else {
         line.append(createEl('span', { class: 'dg-until-label', text: src.raw.count
             ? `${formatNumberNl(src.raw.count)} ${src.raw.count === 1 ? 'export' : 'exports'} in het archief`
@@ -263,11 +268,8 @@ function dgCoverageBar(src) {
     const cov = src.coverage || {};
     const track = createEl('div', { class: 'dg-coverage', role: 'img' });
     const segments = cov.segments || [];
-    if (!cov.first || !segments.length) {
-        track.classList.add('is-empty');
-        track.setAttribute('aria-label', 'Nog geen gegevens');
-        return createEl('div', { class: 'dg-coverage-wrap' }, track);
-    }
+    // Zonder periode geen lege grijze balk (die leek op een vastgelopen lader): de regel erboven zegt het al
+    if (!cov.first || !segments.length) return null;
     const start = cov.first;
     const end = Math.max(Date.now() / 1000, cov.last || 0);
     const span = Math.max(1, end - start);

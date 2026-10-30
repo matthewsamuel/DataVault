@@ -342,6 +342,18 @@ class Spotify(Connector):
                         segments=[(s["from"], s["until"], s["estimated"]) for s in c["segments"]],
                         holes=[(h["from"], h["until"]) for h in c["holes"]])
 
+    def unread_until(self, ctx: GatherContext) -> Optional[float]:
+        # The Spotify tab falls back to the export files until they are read in: the card names
+        # how far those go, so it never says 'Nog geen gegevens' next to two years of plays
+        from backend.routes import spotify as spotify_route
+        try:
+            if spotify_route._from_database():
+                return None
+            _, plays = spotify_route.load_plays()
+        except Exception:
+            return None
+        return plays[-1].utc.timestamp() if plays else None
+
     def consent_expires(self, ctx: GatherContext) -> Optional[float]:
         """When the 6-month consent ends; None when unknown (also when the Keychain cannot be read)."""
         try:
