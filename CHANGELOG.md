@@ -644,6 +644,8 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   de gebeurtenissen van een dag staat niet langer het woord 'null'.
 - **Kaart in het Nederlands**: bekende steden heten op de kaart zoals in het Nederlands (Moskou,
   Wenen, Parijs, Lissabon, Tokio, ...). In het sneltoetsenoverzicht heet de spatiebalk overal 'spatie'.
+- **Schermafbeeldingen**: de README toont acht schermen in licht en donker (docs/screenshots), gemaakt
+  van een gegenereerd voorbeeldarchief zonder echte foto's of persoonlijke gegevens.
 
 ## Fase 2 – Stabiliseren
 

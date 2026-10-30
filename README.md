@@ -10,6 +10,24 @@ DataVault Dashboard is a full-featured web application for organizing, analyzing
 
 ---
 
+## Screenshots
+
+Light and dark theme at 1440 x 900, taken in WebKit from a generated showcase archive
+(`code/tests/fixtures/showcase_vault.py`): no real photos or personal data.
+
+| Screen | Light | Dark |
+|---|---|---|
+| Home | ![Home, light](docs/screenshots/home-light.webp) | ![Home, dark](docs/screenshots/home-dark.webp) |
+| Albums and filters | ![Albums and filters, light](docs/screenshots/albums-light.webp) | ![Albums and filters, dark](docs/screenshots/albums-dark.webp) |
+| Viewer with details | ![Viewer with details, light](docs/screenshots/viewer-light.webp) | ![Viewer with details, dark](docs/screenshots/viewer-dark.webp) |
+| Map (offline) | ![Map (offline), light](docs/screenshots/kaart-light.webp) | ![Map (offline), dark](docs/screenshots/kaart-dark.webp) |
+| Best of a burst | ![Best of a burst, light](docs/screenshots/beste-uit-reeks-light.webp) | ![Best of a burst, dark](docs/screenshots/beste-uit-reeks-dark.webp) |
+| Keurer | ![Keurer, light](docs/screenshots/keurer-light.webp) | ![Keurer, dark](docs/screenshots/keurer-dark.webp) |
+| Timeline | ![Timeline, light](docs/screenshots/tijdlijn-light.webp) | ![Timeline, dark](docs/screenshots/tijdlijn-dark.webp) |
+| Spotify | ![Spotify, light](docs/screenshots/spotify-light.webp) | ![Spotify, dark](docs/screenshots/spotify-dark.webp) |
+
+---
+
 ## 🎯 Quick Overview
 
 ### Core Functionalities
