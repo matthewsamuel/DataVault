@@ -865,7 +865,7 @@ function renderDuplicateRuns(runs) {
         return createEl('div', { class: 'dup-run' },
             createEl('span', { class: 'dup-run-time', text: when }),
             createEl('span', { class: 'dup-run-count', text: count }),
-            createEl('span', { class: 'dup-run-folder', text: run.folder || '', title: run.folder || '' }),
+            createEl('span', { class: 'dup-run-folder', text: run.folder ? displayPath(run.folder, 60) : '', title: run.folder || '' }),
             createEl('span', { class: 'dup-run-note', text: note }),
             createEl('button', {
                 class: 'btn btn-secondary btn-small',

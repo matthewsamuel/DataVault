@@ -119,7 +119,8 @@ function recoveryEntryCard(entry) {
     if (count > 1) {
         const more = count > shown.length ? ` (de eerste ${shown.length} getoond)` : '';
         fileBlock = createEl('details', { class: 'recovery-details' },
-            createEl('summary', { text: `${count} bestanden${more}` }), files);
+            createEl('summary', null, createEl('i', { class: 'fas fa-chevron-right recovery-chevron', 'aria-hidden': 'true' }),
+                `${count} bestanden${more}`), files);
     }
 
     const button = createEl('button', {

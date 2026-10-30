@@ -630,6 +630,13 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
   van internet), met het tijdstip en het jaar eronder. De grote foto's op Home en in Shows worden
   scherp: eerst de miniatuur, dan het originele bestand zodra dat geladen is (alleen JPEG, PNG en
   WebP tot 20 MB). De naam op een lichte foto blijft leesbaar.
+- **Netjes op elk scherm**: Spotify past nu ook in een venster van 1024 pixels breed (de cijferkaarten
+  en de datum liepen buiten beeld), de knoppen bovenaan DataGatherer staan op één rij, lange paden in
+  een DataGatherer-melding breken netjes af, en de foto in de viewer houdt ruimte tot de kop. De strook
+  'op deze dag' bij Spotify loopt zacht uit aan de randen, en de laadvlakken glanzen zonder harde streep.
+- **Overal dezelfde bediening**: in het Herstelcentrum klap je de bestanden open met hetzelfde draaiende
+  pijltje als elders, en bij Duplicaten > Herstellen staat de map vanaf het archief ('RAW/...') in
+  plaats van het volledige pad op de schijf.
 
 ## Fase 2 – Stabiliseren
 

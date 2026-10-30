@@ -1658,8 +1658,11 @@ textarea.input {
     100% { background-position: -100% 0; }
 }
 
+/* (tussenstappen in het verloop: geen scherpe lichte streep midden in de glans) */
 .skeleton {
-    background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-highlight) 50%, var(--skeleton-base) 75%);
+    --skeleton-mid: color-mix(in srgb, var(--skeleton-base) 55%, var(--skeleton-highlight));
+    background: linear-gradient(90deg, var(--skeleton-base) 20%, var(--skeleton-mid) 38%, var(--skeleton-highlight) 50%,
+        var(--skeleton-mid) 62%, var(--skeleton-base) 80%);
     background-size: 200% 100%;
     animation: skeleton-shimmer 1.4s ease-in-out infinite;
     border-radius: var(--radius-xs);
@@ -2978,8 +2981,10 @@ a.breadcrumb-item:hover {
     object-fit: cover;
 }
 
+/* De foto past binnen de ruimte van de body (met zijn marge rondom), niet tegen de kop aan */
 #modal-viewer .modal-body img,
 #modal-viewer .modal-body video {
+    max-height: 100%;
     border-radius: var(--radius-xs);
     box-shadow: var(--shadow-xl);
 }
@@ -4995,9 +5000,12 @@ a.breadcrumb-item:hover {
     min-width: 140px;
 }
 
+/* width: 100%: in de flexkolom van de sectie zou de breedte anders meegroeien met de inhoud
+   (de strook 'op deze dag') tot voorbij het venster */
 .spotify-content {
     position: relative;
     z-index: 10;
+    width: 100%;
     max-width: var(--page-max);
     margin: 0 auto;
     padding: var(--space-sm) var(--page-gutter) var(--space-4xl);
@@ -5357,11 +5365,15 @@ a.breadcrumb-item:hover {
 }
 
 .spotify-list.horizontal-scroll,
+/* Een strook die zijwaarts schuift: zachte randen in plaats van harde afgesneden kaarten */
 .on-this-day-list {
     display: flex;
     overflow-x: auto;
     gap: var(--space-md);
     padding: var(--space-md);
+    scroll-padding-inline: var(--space-md);
+    -webkit-mask-image: linear-gradient(to right, transparent, var(--text-primary) var(--space-2xl), var(--text-primary) calc(100% - var(--space-2xl)), transparent);
+    mask-image: linear-gradient(to right, transparent, var(--text-primary) var(--space-2xl), var(--text-primary) calc(100% - var(--space-2xl)), transparent);
 }
 
 .on-this-day-item {
@@ -9426,11 +9438,38 @@ button.otd-settings-icon:hover {
     margin: var(--space-md) 0 0 48px;
 }
 
+/* Uitklappen met hetzelfde draaiende pijltje als elders (geen driehoekje van de browser) */
 .recovery-details summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 2px var(--space-xs);
+    margin-left: calc(-1 * var(--space-xs));
+    border-radius: var(--radius-xs);
     cursor: pointer;
+    list-style: none;
     color: var(--text-secondary);
     font-size: var(--fs-xs);
     font-weight: var(--fw-medium);
+    transition: color var(--duration-fast) var(--ease-out);
+}
+
+.recovery-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.recovery-details summary:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.recovery-chevron {
+    font-size: var(--icon-xs);
+    transition: transform var(--duration-base) var(--ease-out);
+}
+
+.recovery-details[open] .recovery-chevron {
+    transform: rotate(90deg);
 }
 
 .recovery-details summary:hover {
@@ -10351,9 +10390,11 @@ button.otd-settings-icon:hover {
  * .card, .badge, .btn, .pill, .menu, .progress, .switch. Groen alleen voor de hoofdknop,
  * de dekkingsbalk en 'actueel'. */
 
+/* Eén rij knoppen naast de titel (de ondertitel breekt eerder af dan de knoppen) */
 .dg-header-actions {
     display: flex;
-    flex-wrap: wrap;
+    flex-shrink: 0;
+    align-items: center;
     gap: var(--space-sm);
 }
 
@@ -10424,11 +10465,13 @@ button.otd-settings-icon:hover {
 
 /* ---------- De kaart ---------- */
 
+/* (lange paden in een melding breken af binnen de kaart) */
 .dg-card {
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
     min-width: 0;
+    overflow-wrap: anywhere;
     padding: var(--space-xl);
     transition: border-color var(--duration-fast) var(--ease-out);
 }
@@ -13089,10 +13132,6 @@ button.otd-settings-icon:hover {
 /* ==================== DataGatherer 3.9c: Activiteit, Tijdlijn op de kaart ==================== */
 
 /* Bronnen | Activiteit: dezelfde hoogte als de knoppen ernaast */
-.dg-header-actions {
-    align-items: center;
-}
-
 .dg-switch > button {
     height: calc(var(--control-h) - 6px);
 }
