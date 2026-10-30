@@ -540,6 +540,13 @@ def _messages_db():
          "text": "Vond 'Ja, kom maar' leuk", "ts": T0 + 30},
         {"rowid": 4, "guid": "G-4", "chat": 2, "handle": 2, "text": "Foto van zaterdag", "ts": T0 + 40},
         {"rowid": 5, "guid": "G-5", "chat": 2, "handle": 1, "text": "Oud bericht", "ts": T0 - 86400 * 2000, "seconds": True},
+        # iOS 18: any emoji as a tapback, and a tapback with an emoji taken back
+        {"rowid": 6, "guid": "G-6", "chat": 1, "handle": 1, "assoc": "p:0/G-1", "assoc_type": 2006, "emoji": "🎉",
+         "text": "Reageerde met 🎉 op “Ben je thuis?”", "ts": T0 + 50},
+        {"rowid": 7, "guid": "G-7", "chat": 1, "handle": 1, "assoc": "p:0/G-1", "assoc_type": 3006, "emoji": "🎉",
+         "text": "Verwijderde 🎉", "ts": T0 + 55},
+        # 'Undo send': no text left
+        {"rowid": 8, "guid": "G-8", "chat": 1, "me": True, "ts": T0 + 60, "retracted": True},
     ], [{"rowid": 1, "message": 4, "filename": "~/Library/Messages/Attachments/ab/01/X/IMG_0001.HEIC",
          "mime": "image/heic", "transfer": "IMG_0001.HEIC"}])
 
@@ -548,19 +555,21 @@ def test_imessage_reads_attributed_body_dates_tapbacks_and_attachments(client, a
     _messages_db()
     job, result = _sync(client, app, "imessage")
     assert job["status"] == "done", job
-    assert result["added"] == 4
-    rows = {r[0]: r[1:] for r in _rows(app, "SELECT msg_key, body, is_me, sent_at_ms, reactions, attachments, sender "
-                                            "FROM msg_messages")}
+    assert result["added"] == 5
+    rows = {r[0]: r[1:] for r in _rows(app, "SELECT msg_key, body, is_me, sent_at_ms, reactions, attachments, sender, "
+                                            "kind FROM msg_messages")}
+    assert json.loads(rows["G-1"][3]) == [{"actor": "+32470000001", "reaction": "🎉"}]
+    assert "G-6" not in rows and "G-7" not in rows and rows["G-8"][0] is None and rows["G-8"][6] == "unsent"
     assert rows["G-2"][0] == "Ja, kom maar 🙂" and rows["G-2"][1] == 1
     assert rows["G-1"][2] == (T0 + 10) * 1000 and rows["G-5"][2] == (T0 - 86400 * 2000) * 1000
     assert json.loads(rows["G-2"][3]) == [{"actor": "+32470000001", "reaction": "❤️"}]
     assert "G-3" not in rows                               # a tapback is no message of its own
     assert json.loads(rows["G-4"][4])[0]["name"] == "IMG_0001.HEIC" and rows["G-4"][5] == "bob@example.com"
     convs = {c["title"]: c for c in client.get("/api/messages/conversations?source=imessage").json()["conversations"]}
-    assert convs["Weekend"]["is_group"] is True and convs["+32470000001"]["count"] == 2
+    assert convs["Weekend"]["is_group"] is True and convs["+32470000001"]["count"] == 3
     job, result = _sync(client, app, "imessage")
     assert result["added"] == 0
-    assert len(_rows(app, "SELECT id FROM msg_messages")) == 4
+    assert len(_rows(app, "SELECT id FROM msg_messages")) == 5
 
 
 # ---------- search, Berichten API, Pasha ----------
@@ -587,7 +596,7 @@ def test_search_across_sources_with_a_filter_and_marked_snippets(client, app, tm
     thread = client.get(f"/api/messages/conversations/{hit['conversation']}", params={"around": hit["id"]}).json()
     assert any(m["id"] == hit["id"] for m in thread["messages"])
     sources = {s["id"]: s for s in client.get("/api/messages/sources").json()["sources"]}
-    assert sources["imessage"]["messages"] == 4 and sources["messenger"]["conversations"] == 2
+    assert sources["imessage"]["messages"] == 5 and sources["messenger"]["conversations"] == 2
     assert sources["whatsapp"]["messages"] == 0 and all(s["pasha"] is False for s in sources.values())
 
 
