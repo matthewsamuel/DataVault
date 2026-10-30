@@ -1059,7 +1059,7 @@ function dgLogList(entries, withSource, compact) {
 async function dgOpenNetworkLog() {
     const box = createEl('div', { class: 'dg-log-box' }, skeletonRows(3));
     dgModal('dg-network', 'Netwerklog', 'fa-globe', [
-        createEl('p', { class: 'dg-modal-text', text: 'Elke verbinding die DataGatherer maakte of weigerde, nieuwste eerst. '
+        createEl('p', { class: 'dg-modal-text', text: 'Elke verbinding die DataVault maakte of weigerde (DataGatherer en het zoekmodel), nieuwste eerst. '
             + 'Zonder de rest van het adres: daar kan een sleutel in staan.' }), box],
     [createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Sluiten', 'data-autofocus': '', onClick: () => dgCloseModal('dg-network') })],
     true);

@@ -240,6 +240,10 @@ def last_request(db, source_id: str) -> Optional[Dict[str, Any]]:
 
 # ---------- network log ----------
 
+# Network log rows that do not come from a connector: the source id and its name in the Netwerklog
+SEARCH_MODEL_SOURCE = "slim_zoeken"
+OTHER_SOURCES = {SEARCH_MODEL_SOURCE: "Slim zoeken (zoekmodel)"}
+
 LOG_COLUMNS = ("id", "at", "source_id", "trigger", "method", "host", "path", "status", "outcome", "bytes", "ms",
                "job_id", "note")
 
