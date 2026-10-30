@@ -3793,7 +3793,8 @@ function renderChatModelSelects() {
     document.querySelectorAll('[data-chat-model]').forEach(select => {
         const options = (models || []).map(m => createEl('option', {
             value: m.name,
-            text: m.parameter_size ? `${m.name} (${m.parameter_size})` : m.name,
+            // Een cloudmodel van Ollama draait bij ollama.com: dat staat er altijd bij
+            text: m.cloud ? `${m.name} · cloud, niet lokaal` : (m.parameter_size ? `${m.name} (${m.parameter_size})` : m.name),
         }));
         if (current && !installed) options.unshift(createEl('option', { value: current, text: `${current} (niet geïnstalleerd)` }));
         select.replaceChildren(...options);
@@ -3802,7 +3803,9 @@ function renderChatModelSelects() {
     });
     if (!reachable) setChatStatus('Ollama offline', 'error', error || 'Start de Ollama-app');
     else if (!installed) setChatStatus('Model ontbreekt', 'warning', `Kies een ander model, of installeer het met: ollama pull ${current}`);
-    else setChatStatus('Online', 'ok', `Taalmodel: ${current}`);
+    else if ((models || []).some(m => m.name === current && m.cloud)) {
+        setChatStatus('In de cloud (ollama.com)', 'warning', `Taalmodel: ${current}. Het draait bij ollama.com: je vragen en wat Pasha uit je archief meestuurt gaan naar internet.`);
+    } else setChatStatus('Online', 'ok', `Taalmodel: ${current}`);
 }
 
 async function loadChatModels() {
@@ -3816,14 +3819,23 @@ async function loadChatModels() {
 
 async function chooseChatModel(model) {
     if (!model || model === chatModelState.current) return;
+    // Een cloudmodel (Ollama '-cloud') stuurt de vraag en de archiefcontext naar ollama.com: alleen na een ja
+    const cloud = (chatModelState.models || []).some(m => m.name === model && m.cloud);
+    if (cloud && !confirm(`${model} draait niet op deze Mac maar bij ollama.com.\n\n`
+        + 'Alles wat je Pasha vraagt gaat dan naar internet, met wat hij uit je archief meestuurt '
+        + '(mappen, plekken, Spotify en, als je dat aanzette, berichten).\n\nToch dit model gebruiken?')) {
+        renderChatModelSelects();
+        return;
+    }
     try {
         const data = await fetchJSON(`${API_BASE}/api/chat/model`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model }),
+            body: JSON.stringify(cloud ? { model, allow_cloud: true } : { model }),
         });
         chatModelState.current = data.current;
-        showToast('Pasha', `Gebruikt nu het model ${data.current}`, 'success');
+        showToast('Pasha', data.cloud ? `Gebruikt nu ${data.current}, in de cloud bij ollama.com` : `Gebruikt nu het model ${data.current}`,
+            data.cloud ? 'warning' : 'success');
     } catch (e) {
         showToast('Model niet gekozen', e.message, 'error');
     }

@@ -7042,6 +7042,11 @@ button.otd-settings-icon:hover {
     opacity: 0.6;
 }
 
+/* In Instellingen is er ruimte: de hele naam (en 'niet lokaal' bij een cloudmodel) blijft leesbaar */
+.settings-row .chat-model-select {
+    max-width: min(360px, 100%);
+}
+
 .chat-error-text {
     color: var(--danger-text);
     white-space: pre-wrap;
