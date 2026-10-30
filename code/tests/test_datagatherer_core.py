@@ -206,6 +206,49 @@ def test_a_scheduled_request_needs_the_schedule_switched_on(app, client):
     assert len(fake.requests) == 1
 
 
+def test_a_request_whose_log_row_cannot_be_written_never_goes_out(app, client, monkeypatch):
+    """PRIV-2: the log row is written before the request; no row (database locked) means no request."""
+    db = app.state.db
+    fake = FakeSpotify()
+    net.set_transport_factory(lambda: httpx.MockTransport(fake.handler))
+
+    def locked(db, **values):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(net.state, "log_request", locked)
+    with _guard_client(db) as http:
+        with pytest.raises(net.NetworkRefused, match="netwerklog"):
+            http.get("https://api.spotify.com/v1/me")
+    assert fake.requests == []
+
+
+def test_the_log_row_is_there_while_the_request_is_on_its_way(app, client):
+    """The 'pending' row exists before the transport is called and gets its outcome afterwards."""
+    from backend.datagatherer import state
+    db = app.state.db
+    seen = []
+
+    def handler(request):
+        seen.append([(e["host"], e["outcome"]) for e in state.network_log(db, "spotify")])
+        return httpx.Response(200, json={"id": "me"})
+
+    net.set_transport_factory(lambda: httpx.MockTransport(handler))
+    with _guard_client(db) as http:
+        assert http.get("https://api.spotify.com/v1/me").status_code == 200
+    assert seen == [[("api.spotify.com", "pending")]]
+    row = state.network_log(db, "spotify")[0]
+    assert row["outcome"] == "ok" and row["status"] == 200 and row["bytes"] > 0 and row["ms"] is not None
+    # A transport failure is recorded on the same row
+    def broken(request):
+        raise httpx.ConnectError("down", request=request)
+    net.set_transport_factory(lambda: httpx.MockTransport(broken))
+    with _guard_client(db) as http:
+        with pytest.raises(httpx.ConnectError):
+            http.get("https://api.spotify.com/v1/me")
+    rows = state.network_log(db, "spotify")
+    assert len(rows) == 2 and rows[0]["outcome"] == "error" and rows[0]["note"] == "ConnectError"
+
+
 def test_tests_never_reach_the_real_network(app):
     with _guard_client(app.state.db) as http:
         with pytest.raises(net.NetworkRefused, match="testmodus"):

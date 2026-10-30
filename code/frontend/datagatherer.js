@@ -1042,7 +1042,7 @@ function dgLogList(entries, withSource, compact) {
         if (compact) empty.classList.add('empty-state-compact');
         return empty;
     }
-    const outcome = { ok: ['Gelukt', 'badge-success'], refused: ['Geweigerd', 'badge-warning'],
+    const outcome = { ok: ['Gelukt', 'badge-success'], pending: ['Bezig', 'badge-info'], refused: ['Geweigerd', 'badge-warning'],
         http_error: ['Fout', 'badge-danger'], error: ['Geen verbinding', 'badge-danger'] };
     const trigger = { user: 'jouw klik', schedule: 'schema' };
     return createEl('ul', { class: 'dg-log' }, ...entries.map(e => createEl('li', { class: 'dg-log-row' },
