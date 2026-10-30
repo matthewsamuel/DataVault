@@ -49,6 +49,7 @@ near-duplicates (see near_duplicate).
 """
 import bisect
 import datetime
+import itertools
 import math
 import os
 import random
@@ -815,13 +816,19 @@ def choose_pairs(candidates: Sequence[Dict[str, Any]], count: int = 1, avoid: It
     by_mu = sorted(pool, key=lambda c: (c["mu"], c["path"]))
     mus = [c["mu"] for c in by_mu]
     recent = set(memory.recent)
+    cutoff = _top_cutoff(mus)
+    weights = [(c["rd"] / RD_START) ** FIRST_POWER * _relevance(c, cutoff)
+               * (RECENT_PENALTY if c["path"] in recent else 1.0) for c in pool]
     out = []
     for _ in range(count):
-        found = _one_pair(pool, by_mu, mus, taken, recent, blocked, memory, near_dup, rng)
+        found = _one_pair(pool, weights, by_mu, mus, taken, recent, blocked, memory, near_dup, rng)
         if not found:
             break
         out.append(found)
         taken.update(c["path"] for c in found)
+        for i, c in enumerate(pool):
+            if c["path"] in taken:
+                weights[i] = 0.0
     return out
 
 
@@ -837,19 +844,18 @@ def choose_pair(candidates: Sequence[Dict[str, Any]], avoid: Iterable[Iterable[s
 select_pair = choose_pair
 
 
-def _one_pair(pool, by_mu, mus, taken, recent, blocked, memory, near_dup, rng):
+def _one_pair(pool, weights, by_mu, mus, taken, recent, blocked, memory, near_dup, rng):
+    """One pair (see choose_pairs); weights: the first-photo weight of each pool photo (0 once taken)."""
     free = [c for c in pool if c["path"] not in taken] if taken else pool
-    if len(free) < 2:
+    if len(free) < 2 or not any(weights):
         return None
-    cutoff = _top_cutoff(mus)
-    weights = [(c["rd"] / RD_START) ** FIRST_POWER * _relevance(c, cutoff) * (RECENT_PENALTY if c["path"] in recent else 1.0)
-               for c in free]
+    cum = list(itertools.accumulate(weights))
     options: List[Tuple[float, Dict[str, Any], Dict[str, Any]]] = []
     tried = set()
     for _ in range(FIRST_DRAWS * 3):
         if len(tried) >= min(FIRST_DRAWS, len(free)):
             break
-        first = rng.choices(free, weights)[0]
+        first = rng.choices(pool, cum_weights=cum)[0]
         if first["path"] in tried:
             continue
         tried.add(first["path"])
