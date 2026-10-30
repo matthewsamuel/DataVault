@@ -73,6 +73,7 @@ def test_mojibake_is_repaired_and_correct_text_stays():
     ("ios_en", (2024, 6, 1, 10, 1, 0), "s"),
     ("android_nl", (2024, 6, 1, 10, 1, 0), "min"),
     ("android_us", (2024, 6, 1, 10, 1, 0), "min"),
+    ("android_fr", (2024, 6, 1, 10, 1, 0), "min"),
 ])
 def test_whatsapp_export_lines_in_every_phone_format(fmt, first, precision):
     from datetime import datetime
@@ -88,6 +89,9 @@ def test_whatsapp_export_lines_in_every_phone_format(fmt, first, precision):
         assert media["kind"] == "media" and media["attachments"][0]["name"].endswith(".jpg")
     if fmt == "android_us":    # month first: 6/13 is 13 June, in the evening
         assert datetime.fromtimestamp(parsed["messages"][1]["ts_ms"] / 1000, BRUSSELS).timetuple()[:5] == (2024, 6, 13, 18, 30)
+    if fmt == "android_fr":
+        assert whatsapp_txt.looks_like_chat(WHATSAPP_TXT[fmt]) and len(parsed["messages"]) == 2
+        assert datetime.fromtimestamp(parsed["messages"][1]["ts_ms"] / 1000, BRUSSELS).timetuple()[:5] == (2024, 6, 13, 21, 34)
 
 
 def test_whatsapp_chat_names_from_file_names():

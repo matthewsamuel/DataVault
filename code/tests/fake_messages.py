@@ -239,6 +239,9 @@ WHATSAPP_TXT = {
     # Android in US English: month first, AM/PM
     "android_us": ("6/1/24, 10:01 AM - Anna Jansen: Hoi! Zin in koffie?\n"
                    "6/13/24, 6:30 PM - Matthias: See you\n"),
+    # Android in French: ' à ' between date and time
+    "android_fr": ("01/06/2024 à 10:01 - Anna Jansen: Hoi! Zin in koffie?\n"
+                   "13/06/2024 à 21:34 - Matthias: Oui\n"),
 }
 
 
