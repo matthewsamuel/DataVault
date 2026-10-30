@@ -187,7 +187,10 @@ function recoveryRender() {
     summary.textContent = `${recoveryState.total} actie${recoveryState.total === 1 ? '' : 's'}`
         + (entries.length < recoveryState.total ? ` (${entries.length} getoond)` : '')
         + ` · ${open} terug te zetten`;
+    // Beweging (motion-shell.js): de acties glijden naar hun nieuwe plek, wat veranderde licht op
+    const play = window.ShellMotion ? ShellMotion.keyedFlip(list, '.recovery-entry') : null;
     list.replaceChildren(...entries.map(recoveryEntryCard));
+    if (play) play();
 }
 
 async function recoveryUndo(entry, button) {
