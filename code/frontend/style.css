@@ -9857,6 +9857,22 @@ button.otd-settings-icon:hover {
     color: var(--text-tertiary);
 }
 
+/* Zijbalk tijdens het laden: rijen van dezelfde hoogte als een album */
+.albums-side-skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    height: var(--control-h);
+    padding: 0 var(--space-sm);
+}
+
+.albums-side-skeleton-icon {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--radius-xs);
+}
+
 .albums-side-note {
     margin: 0;
     padding: var(--space-xs) var(--space-sm);
