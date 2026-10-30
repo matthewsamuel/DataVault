@@ -2,6 +2,8 @@
 
 Een lokale media viewer en RAW duplicaten opruimtool voor macOS. Draait op externe schijf T7, met absolute prioriteit voor data-veiligheid en metadata-behoud.
 
+Dit is de Nederlandse gebruikershandleiding. Voor een overzicht van het project (architectuur, veiligheidsontwerp, gemeten snelheid) zie de [README in de hoofdmap](../README.md); wat bewust niet gedaan is staat in [docs/NIET_GEDAAN.md](../docs/NIET_GEDAAN.md).
+
 ## Mapstructuur
 
 ```
@@ -19,10 +21,13 @@ Een lokale media viewer en RAW duplicaten opruimtool voor macOS. Draait op exter
     │   ├── jobs.py        # Achtergrondtaken (voortgang, pauzeren, hervatten)
     │   ├── job_types.py   # Duplicatenscan, indexeren, miniaturen, foto's vergelijken
     │   ├── near_dups.py   # Bijna-duplicaten en bursts (Beste uit reeks)
-
-    │   ├── job_types.py   # Duplicatenscan, indexeren, miniaturen
+    │   ├── media_index.py # Bibliotheek: index van het hele archief (datum, camera, GPS)
     │   ├── semantic.py    # Slim zoeken: zoekmodel, herkennen, zoeken
-    │   └── routes/        # API endpoints
+    │   ├── assistant.py   # Pasha: gereedschappen en voorstellen met bevestiging
+    │   ├── export.py, backup.py, recovery.py, elo.py, places.py
+    │   ├── datagatherer/  # Spotify, Takeout, browsers, berichten
+    │   ├── migrations.py  # Genummerde databasemigraties
+    │   └── routes/        # API endpoints, één router per onderdeel
     ├── frontend/          # HTML/CSS/JS interface
     ├── models/            # Gedownloade zoekmodellen (niet in git; alleen na "installeren")
     ├── scripts/           # download_models.py, eval_semantic_search.py
@@ -575,7 +580,7 @@ een echte HEIC-foto (als pillow_heif hem kan schrijven) en een gedraaide JPEG (E
 | | |
 |---|---|
 | Alle metadata bewaard (datum, EXIF, xattrs) | Bestanden kopiëren dan verwijderen: NOOIT |
-| Alles ongedaan te maken | Bestanden buiten vault benaderen: NOOIT |
+| Alles ongedaan te maken | Archiefbestanden buiten de kluis verplaatsen: NOOIT (exporteren kopieert alleen) |
 | Pad-validatie op alle operaties | Automatisch verwijderen zonder bevestiging: NOOIT |
 | Blokkering bij cross-device verplaatsingen | Media-inhoud aanpassen: NOOIT |
 

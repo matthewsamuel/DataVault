@@ -4,6 +4,11 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 
 ## Fase 3 – Nieuwe functies
 
+Fase 3 voegt de bibliotheek (één index van het hele archief), Albums, de Kaart, Slim zoeken, Beste uit
+reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welke is mooier? en
+database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
+staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.
@@ -1306,3 +1311,13 @@ Bekend, maar bewust nog niet in fase 2 opgelost:
   die bij het opstarten de lopende taken van de eerste als "onderbroken".
 - Twee oudere opdrachten (`/api/duplicates/delete_single` en `/api/duplicates/scan_folder`, niet
   meer door het scherm gebruikt) nemen hun pad nog als URL-parameter in plaats van in de body.
+
+## Fase 1 – Analyse
+
+Fase 1 was een analyse zonder codewijzigingen. Het rapport bevat ongeveer 180 bevindingen, bijna
+allemaal gecontroleerd door ze na te bootsen: 2 kritiek, 34 hoog, 81 middel en 61 laag. De grootste
+onderwerpen waren bugs (52), gegevensverlies en -integriteit (28), snelheid bij 100.000 bestanden
+(27) en veiligheid (23). De ernstigste zaken waren Keurer-undo die bestanden buiten het archief kon
+verplaatsen of overschrijven, een app die elke website liet aanspreken (open CORS, geen
+authenticatie), verplaatsen dat bestaande bestanden kon overschrijven, en taken die de hele server
+tientallen minuten blokkeerden. Fase 2 loste die op; fase 3 bouwde daarna de nieuwe functies.
