@@ -12042,7 +12042,8 @@ button.otd-settings-icon:hover {
 }
 
 .map-header,
-.map-filters {
+.map-filters,
+.map-layers {
     /* Kop en filters op dezelfde plek als op de andere pagina's; de kaart zelf blijft breed */
     width: 100%;
     max-width: calc(var(--page-max) - 2 * var(--page-gutter));
@@ -12488,7 +12489,7 @@ button.otd-settings-icon:hover {
 
 @media (max-width: 1100px) {
     .map-page {
-        padding: var(--space-lg) var(--space-xl);
+        padding: var(--space-lg) var(--page-gutter);
     }
 }
 
