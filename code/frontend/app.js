@@ -3855,9 +3855,14 @@ async function chooseChatModel(model) {
     if (!model || model === chatModelState.current) return;
     // Een cloudmodel (Ollama '-cloud') stuurt de vraag en de archiefcontext naar ollama.com: alleen na een ja
     const cloud = (chatModelState.models || []).some(m => m.name === model && m.cloud);
-    if (cloud && !confirm(`${model} draait niet op deze Mac maar bij ollama.com.\n\n`
-        + 'Alles wat je Pasha vraagt gaat dan naar internet, met wat hij uit je archief meestuurt '
-        + '(mappen, plekken, Spotify en, als je dat aanzette, berichten).\n\nToch dit model gebruiken?')) {
+    if (cloud && !await dvConfirm({
+        title: 'Cloudmodel gebruiken?',
+        icon: 'fa-cloud',
+        body: [`${model} draait niet op deze Mac maar bij ollama.com.`,
+            'Alles wat je Pasha vraagt gaat dan naar internet, met wat hij uit je archief meestuurt '
+            + '(mappen, plekken, Spotify en, als je dat aanzette, berichten).'],
+        confirmLabel: 'Toch gebruiken',
+    })) {
         renderChatModelSelects();
         return;
     }
