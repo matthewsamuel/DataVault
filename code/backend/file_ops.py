@@ -17,6 +17,7 @@ import ctypes
 import ctypes.util
 import errno
 import os
+import re
 import stat
 import sys
 import threading
@@ -298,6 +299,10 @@ def is_inside(path: Path, folder: Path) -> bool:
 
 
 COPY_CHUNK = 4 * 1024 * 1024
+# The temporary name of copy_no_overwrite: '.<name>.datavault-partial-<8 hex>'. Only this
+# function ever makes such a file (exclusive create) and it never keeps that name.
+PARTIAL_MARK = ".datavault-partial-"
+PARTIAL_NAME = re.compile(r"^\..+\.datavault-partial-[0-9a-f]{8}$", re.DOTALL)
 
 
 def copy_no_overwrite(src: Path, dst: Path, expected_sha256: Optional[str] = None,
@@ -326,7 +331,7 @@ def copy_no_overwrite(src: Path, dst: Path, expected_sha256: Optional[str] = Non
         protected = protected_path_for(path)
         if protected is not None:
             raise ProtectedPathError(f"Refusing to copy into {protected}: {dst}")
-    temp = dst.parent / f".{dst.name}.datavault-partial-{uuid.uuid4().hex[:8]}"
+    temp = dst.parent / f".{dst.name}{PARTIAL_MARK}{uuid.uuid4().hex[:8]}"
     digest = hashlib.sha256()
     size = 0
     fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)

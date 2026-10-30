@@ -192,6 +192,7 @@ class Daemon:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.last_tick: Optional[float] = None
+        self._swept = False
 
     def start(self) -> None:
         if self._thread is None:
@@ -219,6 +220,10 @@ class Daemon:
         started = {"watch": [], "sync": []}
         if not self.db.ready or not self.config.VAULT_ROOT.is_dir():
             return started
+        if not self._swept:
+            # Once per start: partial copies a crash or unplug left in the archive (raw_store)
+            self._swept = True
+            raw_store.sweep_partials(self.config, registry.connectors(), now)
         started["watch"] = self.watch_tick(now)
         started["sync"] = self.schedule_tick(now)
         return started
