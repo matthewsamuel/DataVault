@@ -6,10 +6,13 @@ transaction. Before any pending migration runs on an existing database, a full
 copy is written to <cache>/db_backups/, so ratings, streaks and undo data can
 always be recovered. Migrations only add; they never drop user data.
 """
+import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Tuple
+from typing import Callable, List, Set, Tuple
+
+log = logging.getLogger(__name__)
 
 BACKUP_DIR_NAME = "db_backups"
 BACKUPS_TO_KEEP = 10
@@ -1008,6 +1011,15 @@ def get_schema_version(conn: sqlite3.Connection) -> int:
     return row[0] or 0
 
 
+def get_applied_versions(conn: sqlite3.Connection) -> Set[int]:
+    """Every version recorded in schema_version. migrate() runs what is missing from this
+    set, not only what lies above the highest number: phase 3 merged migrations out of
+    order (40 and 50 landed after 60 and 61), so a database migrated in between has a
+    gap below its highest version that must still be filled."""
+    get_schema_version(conn)  # creates the table when it is missing
+    return {r[0] for r in conn.execute("SELECT version FROM schema_version")}
+
+
 def _has_user_tables(conn: sqlite3.Connection) -> bool:
     row = conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
@@ -1035,14 +1047,20 @@ def backup_database(conn: sqlite3.Connection, db_path: Path, from_version: int) 
 
 
 def migrate(db_path: Path) -> List[int]:
-    """Bring the database at db_path up to LATEST_VERSION. Returns applied versions."""
+    """Bring the database at db_path up to LATEST_VERSION: run, in list order, every
+    migration whose version is not yet in schema_version. Returns applied versions."""
     conn = sqlite3.connect(str(db_path), isolation_level=None)
     applied: List[int] = []
     try:
         current = get_schema_version(conn)
-        pending = [m for m in MIGRATIONS if m[0] > current]
+        done = get_applied_versions(conn)
+        pending = [m for m in MIGRATIONS if m[0] not in done]
         if not pending:
             return applied
+        gaps = [m[0] for m in pending if m[0] < current]
+        if gaps:
+            log.warning("Schema version %s is missing migrations %s (merged out of order); "
+                        "applying them now", current, gaps)
 
         if _has_user_tables(conn):
             backup_database(conn, db_path, current)

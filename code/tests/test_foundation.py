@@ -160,3 +160,55 @@ def test_app_starts_on_test_vault(client, vault):
     body = r.json()
     assert body["vault_available"] is True
     assert body["vault_path"] == str(vault)
+
+
+# The first-parent history of phase 3 merged migrations out of order: step 3.9a shipped
+# 1-12, 20, 21, 30, 31, 60, 61, and only later merges added 40 and 50 below 61.
+_OUT_OF_ORDER_SHIPPED = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 20, 21, 30, 31, 60, 61}
+
+
+def test_migrations_merged_below_the_highest_version_still_run(tmp_path, monkeypatch):
+    db_path = tmp_path / "datavault.db"
+    _make_legacy_db(db_path)
+    full = list(migrations.MIGRATIONS)
+    monkeypatch.setattr(migrations, "MIGRATIONS", [m for m in full if m[0] in _OUT_OF_ORDER_SHIPPED])
+    assert migrations.migrate(db_path) == [v for v in sorted(_OUT_OF_ORDER_SHIPPED) if v > 0]
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("INSERT INTO media (path, folder, name, kind, ext, size, mtime_ns, added_at, indexed_at, seen_at) "
+                 "VALUES ('/v/RAW/a.jpg', '/v/RAW', 'a.jpg', 'photo', '.jpg', 10, 1, 1.0, 1.0, 1.0)")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(migrations, "MIGRATIONS", full)
+    applied = migrations.migrate(db_path)
+    assert 40 in applied and 50 in applied
+    assert applied == [m[0] for m in full if m[0] not in _OUT_OF_ORDER_SHIPPED]
+
+    conn = sqlite3.connect(str(db_path))
+    versions = {r[0] for r in conn.execute("SELECT version FROM schema_version")}
+    assert versions == {m[0] for m in full}
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"elo_comparisons", "semantic_embeddings"} <= tables
+    # Every row from before survives the late migrations
+    assert conn.execute("SELECT rating, votes FROM file_ratings WHERE path='/v/RAW/a.jpg'").fetchone() == (1150, 3)
+    assert conn.execute("SELECT enabled FROM show_settings").fetchone() == (0,)
+    assert conn.execute("SELECT COUNT(*) FROM delete_operations").fetchone() == (1,)
+    assert conn.execute("SELECT COUNT(*) FROM keurer_decisions").fetchone() == (60,)
+    assert conn.execute("SELECT COUNT(*) FROM media").fetchone() == (1,)
+    conn.close()
+    # Nothing left to do afterwards, and the app's own start-up agrees
+    assert migrations.migrate(db_path) == []
+    db = Database(db_path)
+    assert db.get_rating("/v/RAW/a.jpg") == 1150
+
+
+def test_a_db_with_a_gap_gets_a_backup_before_the_gap_is_filled(tmp_path, monkeypatch):
+    db_path = tmp_path / "datavault.db"
+    Database(db_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("DELETE FROM schema_version WHERE version IN (40, 50)")
+    conn.commit()
+    conn.close()
+    assert migrations.migrate(db_path) == [40, 50]
+    assert len(list((tmp_path / migrations.BACKUP_DIR_NAME).glob("datavault-v*.db"))) == 1
+
