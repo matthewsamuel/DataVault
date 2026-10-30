@@ -157,3 +157,9 @@ def test_both_themes_define_the_same_colour_tokens():
     light = set(re.findall(r"(--[\w-]+)\s*:", block(":root[data-theme=\"light\"]")))
     auto = set(re.findall(r"(--[\w-]+)\s*:", block(":root:not([data-theme])")))
     assert dark and dark == light == auto, (dark ^ light, light ^ auto)
+
+
+def test_screen_bound_toasts_and_audio_tiles():
+    app = (FRONTEND / "app.js").read_text()
+    assert "toast.dataset.view = activeMainView" in app and "t.dataset.view !== view" in app
+    assert "audioThumbUrl(file.name)" not in app and "fa-music" in app

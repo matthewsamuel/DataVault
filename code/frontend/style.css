@@ -9211,6 +9211,21 @@ button.otd-settings-icon:hover {
     border-radius: var(--radius-full);
 }
 
+.job-dock.tiny {
+    width: max-content;
+    border-radius: var(--radius-full);
+    box-shadow: var(--shadow-md);
+}
+
+.job-dock.tiny .job-dock-toggle {
+    display: none;
+}
+
+.job-dock.tiny .job-dock-title {
+    gap: var(--space-xs);
+    color: var(--text-secondary);
+}
+
 /* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar") */
 .job-dock.collapsed:not(.compact) {
     width: max-content;
@@ -11851,6 +11866,11 @@ button.otd-settings-icon:hover {
 
 /* An empty date shows the browser's placeholder date: mute it so it does not read as a filter */
 .search-date .input.is-empty,
+.map-date-field .input.is-empty,
+.map-date-field .input.is-empty::-webkit-datetime-edit,
+.map-date-field .input.is-empty::-webkit-datetime-edit-year-field,
+.map-date-field .input.is-empty::-webkit-datetime-edit-month-field,
+.map-date-field .input.is-empty::-webkit-datetime-edit-day-field,
 .search-date .input.is-empty::-webkit-datetime-edit,
 .search-date .input.is-empty::-webkit-datetime-edit-year-field,
 .search-date .input.is-empty::-webkit-datetime-edit-month-field,
@@ -12019,6 +12039,14 @@ button.otd-settings-icon:hover {
     flex: 1;
     min-height: 0;
     overflow: hidden;
+}
+
+.map-header,
+.map-filters {
+    /* Kop en filters op dezelfde plek als op de andere pagina's; de kaart zelf blijft breed */
+    width: 100%;
+    max-width: calc(var(--page-max) - 2 * var(--page-gutter));
+    margin-inline: auto;
 }
 
 .map-page {

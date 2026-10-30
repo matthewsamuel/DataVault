@@ -319,6 +319,9 @@
         $('map-year').value = f.year;
         $('map-date-from').value = f.date_from;
         $('map-date-to').value = f.date_to;
+        // Een lege datum toont in WebKit de datum van vandaag: gedempt, zodat het geen filter lijkt
+        $('map-date-from').classList.toggle('is-empty', !f.date_from);
+        $('map-date-to').classList.toggle('is-empty', !f.date_to);
         $('map-camera').value = f.camera;
         $('map-album').value = f.album;
         const albumOn = !!f.album;

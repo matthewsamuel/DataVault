@@ -161,8 +161,15 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
         with sync_playwright() as p:
             browser = launch(p, engine, headed)
             page = browser.new_page(viewport={"width": 1400, "height": 900})
-            page.on("pageerror", lambda e: problems.append(f"page error: {e}"))
-            page.on("console", lambda m: problems.append(f"console {m.type}: {m.text}") if m.type == "error" else None)
+            # WebKit reports a background poll (jobs, library status) that a navigation or the
+            # teardown cut off as an 'access control checks' error: that is not a bug in the app
+            def aborted_poll(text):
+                return "access control checks" in text and any(
+                    f"/api/{name}" in text for name in ("jobs", "library/status"))
+
+            page.on("pageerror", lambda e: None if aborted_poll(str(e)) else problems.append(f"page error: {e}"))
+            page.on("console", lambda m: problems.append(f"console {m.type}: {m.text}")
+                    if m.type == "error" and not aborted_poll(m.text) else None)
             page.on("response", lambda r: problems.append(f"HTTP {r.status} {r.url}")
                     if "/api/" in r.url and r.status >= 500 else None)
 

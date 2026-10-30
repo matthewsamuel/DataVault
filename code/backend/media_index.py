@@ -549,6 +549,9 @@ def pass_message(result: Dict[str, Any]) -> str:
     if result["removed"]:
         changes.append(f"{n(result['removed'])} weg")
     parts.append(", ".join(changes) if changes else "niets veranderd")
+    listed, unchanged = result.get("folders_listed", 0), result.get("folders_unchanged", 0)
+    if listed or unchanged:
+        parts.append(f"{n(listed)} map(pen) bekeken, {n(unchanged)} ongewijzigd overgeslagen")
     if result["errors"]:
         parts.append(f"{n(result['errors'])} map(pen) of bestand(en) niet leesbaar")
     if result["read_errors"]:

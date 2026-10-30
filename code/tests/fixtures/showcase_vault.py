@@ -564,11 +564,26 @@ def populate(base: str, vault: Path) -> dict:
     return log
 
 
+def _arguments():
+    import argparse
+    parser = argparse.ArgumentParser(description="Build (or --populate) the generated showcase vault.")
+    parser.add_argument("directory", help="absolute path of the vault folder to create, inside the OS temp folder")
+    parser.add_argument("--populate", metavar="URL", help="fill a running test server through its public API")
+    args = parser.parse_args()
+    target = Path(args.directory)
+    if not target.is_absolute():
+        parser.error("directory must be an absolute path (the config and sibling folders are written next to it)")
+    target = target.resolve()
+    temp = Path(tempfile.gettempdir()).resolve()
+    if temp not in target.parents and Path("/private/var/folders") not in target.parents:
+        parser.error(f"directory must be inside the temp folder ({temp})")
+    return args, target
+
+
 if __name__ == "__main__":
-    target = Path(sys.argv[1]).resolve()
-    if "--populate" in sys.argv:
-        url = sys.argv[sys.argv.index("--populate") + 1]
-        print(json.dumps(populate(url, target), indent=2, ensure_ascii=False))
+    args, target = _arguments()
+    if args.populate:
+        print(json.dumps(populate(args.populate, target), indent=2, ensure_ascii=False))
     else:
         build_showcase_vault(target)
         write_config(target, target.parent / f"{target.name}_config.json")

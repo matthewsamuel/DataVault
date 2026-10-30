@@ -406,8 +406,13 @@ function renderJobDockContent(dock) {
     let title = active ? `Taken (${active} bezig)`
         : idle ? `${finished.length} ${finished.length === 1 ? 'taak' : 'taken'} klaar` : `Taken (${visible.length})`;
     if (incomplete) title += ` · ${incomplete} onvolledig`;
+    // Alleen afgeronde taken en dicht: een klein icoon met het aantal, geen balk over de pagina
+    const tiny = idle && collapsed;
+    dock.classList.toggle('tiny', tiny);
     const header = createEl('button', {
         class: 'job-dock-header',
+        'aria-label': tiny ? title : null,
+        title: tiny ? title : null,
         'aria-expanded': collapsed ? 'false' : 'true',
         onClick: () => {
             if (idle) jobDock.idleOpen = !jobDock.idleOpen;
@@ -416,8 +421,9 @@ function renderJobDockContent(dock) {
         },
     },
         createEl('span', { class: 'job-dock-title' },
-            incomplete ? createEl('i', { class: 'fas fa-triangle-exclamation job-dock-warning', 'aria-hidden': 'true' }) : null,
-            title),
+            tiny ? createEl('i', { class: 'fas fa-circle-check', 'aria-hidden': 'true' })
+                : (incomplete ? createEl('i', { class: 'fas fa-triangle-exclamation job-dock-warning', 'aria-hidden': 'true' }) : null),
+            tiny ? String(finished.length) : title),
         createEl('i', { class: `fas ${collapsed ? 'fa-chevron-up' : 'fa-chevron-down'} job-dock-toggle`, 'aria-hidden': 'true' }));
 
     // Van de afgeronde taken staat de nieuwste er helemaal; de rest samen op één regel

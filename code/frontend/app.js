@@ -193,8 +193,17 @@ const VIEW_TITLES = {
     map: 'Kaart', berichten: 'Berichten', activity: 'Activiteit',
 };
 
+// Het scherm waar een melding bij hoort: info en succes blijven niet hangen op een ander scherm
+let activeMainView = 'home';
+
 function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
+    if (view !== activeMainView) {
+        document.querySelectorAll('#toast-container .toast[data-view]').forEach(t => {
+            if (t.dataset.view !== view) { clearTimeout(t._hideTimer); t.remove(); }
+        });
+    }
+    activeMainView = view;
     document.title = view === 'home' ? 'DataVault' : `${VIEW_TITLES[view]} · DataVault`;
     // Update tabs (ook de tandwielknop van Instellingen)
     document.querySelectorAll('.top-nav [data-view]').forEach(tab => {
@@ -1025,15 +1034,14 @@ function createMediaCard(file) {
     // Thumbnail URL logic
     let thumbUrl = `${API_BASE}/api/thumb?path=${encodeURIComponent(file.path)}`;
 
-    if (file.type === 'other') {
-        // Geen foto, video of audio (pdf, zip, ...): een bestandsicoon, nooit een miniatuur
+    if (file.type === 'other' || file.type === 'audio') {
+        // Geen foto of video (pdf, zip, audio, ...): een bestandsicoon op een rustig vlak, nooit een miniatuur
         card.classList.add('other-card');
-        card.appendChild(createEl('div', { class: 'other-card-icon' }, createEl('i', { class: 'fas fa-file' })));
+        const icon = file.type === 'audio' ? 'fa-music' : 'fa-file';
+        card.appendChild(createEl('div', { class: 'other-card-icon' }, createEl('i', { class: `fas ${icon}` })));
         card.appendChild(createEl('div', { class: 'media-card-name', text: file.name }));
         card.appendChild(createListMeta(file));
         return card;
-    } else if (file.type === 'audio') {
-        thumbUrl = audioThumbUrl(file.name);
     } else if (file.name.toLowerCase().endsWith('.avi')) {
         thumbUrl = 'assets/audio_thumbs/avi_thumb.png';
     }
@@ -1978,6 +1986,7 @@ function showToast(title, message, type = 'info', action = null) {
     toast.className = `toast ${type} toast-${type}`;
     toast.dataset.title = String(title);
     toast.dataset.message = String(message);
+    if (type === 'info' || type === 'success') toast.dataset.view = activeMainView;
     // Een fout wordt meteen voorgelezen; de rest zegt de container (aria-live polite)
     if (type === 'error') toast.setAttribute('role', 'alert');
     // Titel en melding zijn tekst: ze bevatten vaak bestandsnamen of een foutmelding van de server

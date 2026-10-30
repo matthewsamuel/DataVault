@@ -4,6 +4,13 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 
 ## Fase 3 – Nieuwe functies
 
+### Laatste reparaties
+- Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
+- Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.
+- Kaart: kop en filters staan op dezelfde plek als op de andere pagina's; een lege datum ziet er gedempt uit.
+- Het takenpaneel is een klein icoon met het aantal zodra alles klaar is.
+- Het indexeren meldt hoeveel mappen zijn bekeken en hoeveel ongewijzigd zijn overgeslagen.
+
 ### Pasha: zoeken, tonen en voorstellen met bevestiging
 
 - Pasha kan nu ook zoeken op inhoud (Slim zoeken), je bibliotheek filteren op jaar, maand, camera of map, een slim album openen, foto's van deze dag tonen, foto's bij een stad of land vinden (volledig offline, met de kaartgegevens van de Kaart), je reeksen van bijna-dezelfde foto's laten zien en vertellen hoe het met de achtergrondtaken en het Herstelcentrum staat.

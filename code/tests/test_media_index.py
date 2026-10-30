@@ -1031,3 +1031,10 @@ def test_the_timeline_version_belongs_to_the_selection(client, config):
                                             "destination_folder": str(library / "Reis Italië")})
     assert r.status_code == 200, r.text
     assert media_index.selection_version(db, filters) != version
+
+
+def test_pass_message_says_how_many_folders_were_skipped():
+    from backend import media_index
+    result = {"files": 10, "new": 1, "changed": 0, "moved": 0, "removed": 0, "errors": 0, "read_errors": 0,
+              "folders_listed": 1, "folders_unchanged": 4}
+    assert "1 map(pen) bekeken, 4 ongewijzigd overgeslagen" in media_index.pass_message(result)
