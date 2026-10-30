@@ -427,10 +427,21 @@ function keurerDecideKeep()   { keurerAnimateAndDecide('keep'); }
 function keurerDecideDelete() { keurerAnimateAndDecide('delete'); }
 function keurerDecideMove()   { keurerAnimateUp(); }
 
+// Zet een teruggedraaide foto als eerstvolgende kaart in de wachtrij (en telt hem weer mee)
+function keurerRequeue(file) {
+    const at = keurerFileQueue.findIndex(f => f.path === file.path);
+    if (at >= keurerIndex) return;          // nog niet beoordeeld: staat al in de rij
+    if (at >= 0) {
+        keurerFileQueue.splice(at, 1);
+        keurerIndex--;
+    }
+    keurerFileQueue.splice(keurerIndex, 0, file);
+}
+
 async function keurerUndo() {
     if (keurerIsAnimating || keurerUndoBusy) return;
     if (keurerHistory.length === 0) {
-        showToast('Undo', 'Geen actie om ongedaan te maken', 'info');
+        showToast('Ongedaan maken', 'Er is geen actie om ongedaan te maken.', 'info');
         return;
     }
 
@@ -455,11 +466,10 @@ async function keurerUndo() {
         keurerDropHistory(entry.id);
         keurerApplyStats(data.stats);
 
-        // Alleen terug in de wachtrij als de beslissing bij de huidige map hoort
+        // Alleen terug in de wachtrij als de beslissing bij de huidige map hoort. De foto komt
+        // als volgende kaart terug: staat hij al beoordeeld achter ons, dan haalt hij daar weg.
         const file = data.file || entry.file;
-        if (data.folder === keurerFolder && !keurerFileQueue.some(f => f.path === file.path)) {
-            keurerFileQueue.splice(keurerIndex, 0, file);
-        }
+        if (data.folder === keurerFolder) keurerRequeue(file);
         keurerUpdateRemaining();
 
         const label = entry.decision === 'delete' ? 'Prullenmand' : entry.decision === 'move' ? 'Verplaatsing' : 'Bewaren';
@@ -469,7 +479,7 @@ async function keurerUndo() {
     } catch (e) {
         // 404/409/410: deze stap kan niet (meer) terug; haal hem van de stapel
         if ([404, 409, 410].includes(e.status)) keurerDropHistory(entry.id);
-        toastFetchError('Undo mislukt', e);
+        toastFetchError('Ongedaan maken mislukt', e);
     } finally {
         keurerUndoBusy = false;
     }

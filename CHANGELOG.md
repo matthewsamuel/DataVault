@@ -20,6 +20,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Kan Pasha een gevraagde actie niet uitvoeren, dan zegt ze dat nu duidelijk in plaats van 'Hier zijn ze.' zonder foto's eronder. Bijna-goede verzoeken (foto's van een datum, een jaar of een maand) worden omgezet naar de juiste zoekopdracht.
 - Pasha noemt een plaats zoals jij hem schrijft: 'Parijs', niet 'Paris'.
 - Zoeken op camera vindt ook de volledige naam die het scherm toont, zoals 'Sony A7 IV' of 'Apple iPhone 14' (merk en model samen); ook bij Pasha.
+- Keurer: na Ongedaan maken (↓) komt de foto meteen terug als volgende kaart en telt hij weer mee bij 'nog te beoordelen'. De meldingen heten 'Ongedaan maken' in plaats van 'Undo'.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.

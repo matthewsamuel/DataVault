@@ -532,8 +532,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             undone = page.evaluate(keurer_state)
             expect(undone[1] == before[1] and Path(keurer_file).exists(),
                    f"keurer: ArrowDown did not undo the decision ({undone} vs {before})")
+            # The undone photo is the next card again and counts as still to judge
+            expect(undone[0] == before[0] and page.evaluate("keurerFileQueue[keurerIndex].path") == keurer_file,
+                   f"keurer: the undone photo did not come back as the next card ({undone} vs {before})")
             # Only the Keurer tab passes arrows on: on another tab an arrow decides nothing.
-            # (Undoing a keep leaves keurerIndex where it is, so compare with the state just before.)
             base = page.evaluate(keurer_state)
             current = page.evaluate("keurerFileQueue[keurerIndex].path")
             step("keurer: arrow on the Tijdlijn tab", lambda: (
