@@ -43,8 +43,13 @@ const jobDock = {
     libraryLoading: false,
 };
 
+// Op een klein scherm (1024x768) bedekt het open paneel een derde van de pagina: daar begint
+// het ingeklapt, tot je het zelf openklikt (die keuze wordt bewaard)
+const JOB_DOCK_SMALL = '(max-width: 1279px), (max-height: 820px)';
+
 try {
-    jobDock.collapsed = localStorage.getItem('jobDockCollapsed') === '1';
+    const saved = localStorage.getItem('jobDockCollapsed');
+    jobDock.collapsed = saved === null ? window.matchMedia(JOB_DOCK_SMALL).matches : saved === '1';
     JSON.parse(localStorage.getItem('jobDockDismissed') || '[]').forEach(id => jobDock.dismissed.add(id));
 } catch (e) { /* geen opslag: alles zichtbaar */ }
 
