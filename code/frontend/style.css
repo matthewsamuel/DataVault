@@ -11979,6 +11979,82 @@ button.otd-settings-icon:hover {
     pointer-events: none;
 }
 
+/* The same picture in more places: one tile, the number of other copies top right */
+.search-result-copies {
+    position: absolute;
+    top: var(--space-sm);
+    right: var(--space-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    height: var(--icon-xl);
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background: var(--media-scrim);
+    color: var(--on-media);
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-semibold);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+}
+
+.search-result-copies .fas {
+    font-size: var(--icon-xs);
+}
+
+/* Nothing fits well: a quiet note above what looks most like it */
+.search-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
+    padding: var(--space-md) var(--space-lg);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-card);
+    background: var(--surface-raised);
+}
+
+.search-notice-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: var(--space-2xl);
+    height: var(--space-2xl);
+    border-radius: var(--radius-full);
+    background: var(--surface-sunken);
+    color: var(--text-tertiary);
+    font-size: var(--icon-sm);
+}
+
+.search-notice-title {
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    line-height: var(--lh-normal);
+}
+
+.search-notice-text {
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.search-hint {
+    max-width: 520px;
+    margin: var(--space-lg) 0 0;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal);
+    text-wrap: balance;
+}
+
+.search-hint .fas {
+    margin-right: var(--space-xs);
+}
+
 .search-more {
     display: flex;
     justify-content: center;
