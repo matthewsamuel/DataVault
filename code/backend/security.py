@@ -74,6 +74,19 @@ class SessionTokenMiddleware:
 
 # 'unsafe-inline' for scripts and styles: index.html uses onclick attributes and the views set
 # inline styles. What matters for privacy is where the page may load from and connect to: 'self'.
+def content_security_policy() -> str:
+    """
+    The policy for this process. A test server (DATAVAULT_TESTING=1) also allows 'unsafe-eval':
+    Playwright's wait_for_function evaluates its expression as a string inside the page. The
+    frontend itself never evaluates strings (tests/test_frontend_offline.py checks that), so this
+    hides nothing the real app does.
+    """
+    if os.environ.get("DATAVAULT_TESTING") == "1":
+        return CONTENT_SECURITY_POLICY.replace("script-src 'self' 'unsafe-inline'",
+                                               "script-src 'self' 'unsafe-inline' 'unsafe-eval'")
+    return CONTENT_SECURITY_POLICY
+
+
 CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'",
@@ -95,9 +108,9 @@ CSP_HEADER = b"content-security-policy"
 class ContentSecurityPolicyMiddleware:
     """Adds CONTENT_SECURITY_POLICY to every HTTP response (pure ASGI: streaming passes untouched)."""
 
-    def __init__(self, app, policy: str = CONTENT_SECURITY_POLICY):
+    def __init__(self, app, policy: str = None):
         self.app = app
-        self.policy = policy.encode()
+        self.policy = (policy or content_security_policy()).encode()
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":

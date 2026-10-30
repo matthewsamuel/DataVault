@@ -209,3 +209,10 @@ def test_the_frontend_has_no_password_fields():
     to save it as a website password (in iCloud Keychain, outside DataVault's own Keychain item)."""
     offending = _lines_matching(re.compile(r"""\btype\s*=\s*password\b|["'`]password["'`]""", re.IGNORECASE))
     assert not offending, "\n".join(offending)
+
+
+def test_the_frontend_never_evaluates_strings():
+    """The Content-Security-Policy of the real app has no 'unsafe-eval' (a test server does, for Playwright)."""
+    offending = _lines_matching(re.compile(
+        r"""\beval\(|\bnew\s+Function\(|\bset(?:Timeout|Interval)\(\s*["'`]"""))
+    assert not offending, "\n".join(offending)

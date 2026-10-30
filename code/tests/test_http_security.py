@@ -147,6 +147,16 @@ def test_every_response_carries_a_content_security_policy(client, url):
     assert policy["object-src"] == ["'none'"] and policy["frame-ancestors"] == ["'none'"]
 
 
+
+def test_the_real_app_allows_no_eval(monkeypatch):
+    """Only a test server allows 'unsafe-eval' (for Playwright's wait_for_function)."""
+    from backend import security
+    monkeypatch.delenv("DATAVAULT_TESTING", raising=False)
+    assert "unsafe-eval" not in security.content_security_policy()
+    monkeypatch.setenv("DATAVAULT_TESTING", "1")
+    assert "'unsafe-eval'" in security.content_security_policy()
+
+
 def test_query_strings_never_reach_the_access_log(app, caplog):
     """PRIV-5: an OAuth callback (?code=...&state=...) is logged as its path only."""
     import logging
