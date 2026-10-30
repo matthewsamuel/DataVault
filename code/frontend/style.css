@@ -13157,9 +13157,22 @@ button.otd-settings-icon:hover {
 }
 
 .chat-confirm-status {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
     font-size: var(--fs-sm);
     line-height: 1.5;
     color: var(--text-secondary);
+}
+
+.chat-confirm-status > i {
+    flex: none;
+    color: var(--accent-text);
+}
+
+.chat-confirm-status.is-error,
+.chat-confirm-status.is-error > i {
+    color: var(--danger-text);
 }
 
 .chat-confirm-status:empty {
