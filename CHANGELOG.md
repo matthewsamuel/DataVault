@@ -23,6 +23,8 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Keurer: na Ongedaan maken (↓) komt de foto meteen terug als volgende kaart en telt hij weer mee bij 'nog te beoordelen'. De meldingen heten 'Ongedaan maken' in plaats van 'Undo'.
 - Het takenpaneel is in rust echt een klein rondje met een vinkje en het aantal, zonder lege balk ernaast.
 - Op een klein scherm (zoals 1024 × 768) begint het takenpaneel ingeklapt en blijft het laag als je het opent, zodat het geen knoppen meer bedekt.
+- Kaart: een begindatum na de einddatum geeft een korte melding naast de datums (zoals in Albums); de kaart en de aantallen blijven bij het laatste geldige filter in plaats van een rode foutmelding.
+- Kaart: een lange albumnaam rekt de filterbalk niet meer op, en het aantal en 'Zonder locatie' blijven samen rechts staan. Die knop telt alle bestanden zonder locatie en heet daarom 'Zonder locatie'.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.

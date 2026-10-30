@@ -12108,6 +12108,18 @@ button.otd-settings-icon:hover {
     min-width: 120px;
 }
 
+/* Een lange albumnaam (tot 80 tekens) mag de rij niet oprekken: afgekapt met … */
+.map-filters .select-sm {
+    max-width: 200px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.map-date-field .input[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
 .map-date-field {
     display: inline-flex;
     align-items: center;
@@ -12120,8 +12132,13 @@ button.otd-settings-icon:hover {
     display: none;
 }
 
-.map-filter-spacer {
-    flex: 1;
+/* Aantal en 'Zonder locatie' blijven samen, rechts; past het niet, dan samen op de volgende regel */
+.map-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-left: auto;
+    white-space: nowrap;
 }
 
 .map-count {

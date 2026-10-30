@@ -965,6 +965,17 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("mapView().markers") <= geo[0], "map: the oldest year shows more than everything")
             step("map: clear the filters", lambda: page.click("#map-reset"), 1.0)
             expect(page.evaluate("mapView().markers") == geo[0], "map: clearing the filters did not bring every point back")
+            # A begin date after the end date: said next to the dates, the map and counts stay
+            count_before = page.text_content("#map-count")
+            step("map: dates the wrong way round", lambda: (
+                page.fill("#map-date-from", "2020-01-01"), page.dispatch_event("#map-date-from", "change"),
+                page.wait_for_timeout(800),
+                page.fill("#map-date-to", "2019-01-01"), page.dispatch_event("#map-date-to", "change")), 0.8)
+            expect(page.is_visible("#map-range-error") and page.is_hidden("#map-overlay"),
+                   "map: reversed dates did not give the inline message, or showed the load-failed state")
+            step("map: clear the filters again", lambda: page.click("#map-reset"), 1.0)
+            expect(page.is_hidden("#map-range-error") and page.text_content("#map-count") == count_before,
+                   f"map: clearing left the date message or other counts ({page.text_content('#map-count')!r})")
             expect(not outside, f"map: requests left this machine while the tiles were off: {outside}")
             # The opt-in: only after the switch does the browser ask OpenStreetMap for tiles (answered here by
             # a blank tile, so nothing really goes out), and the choice is kept by the server
