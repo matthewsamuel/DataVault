@@ -488,3 +488,30 @@ def test_the_restore_script_lists_the_backups(app, config, capsys):
     assert restore_backup.main(["--config", str(config.config_path)]) == 0
     out = capsys.readouterr().out
     assert str(config.BACKUP_FOLDER) in out and "datavault-" in out and "auto" in out
+
+
+@pytest.mark.parametrize("folder", ["back-ups #2", "back-ups? 2", "back-ups %41"])
+def test_checks_read_the_real_file_when_the_path_has_hash_question_mark_or_percent(tmp_path, folder):
+    """Unquoted, a '#' or '?' cuts the SQLite URI short: the check would open (and create)
+    an empty database at the shortened path and always say 'ok'."""
+    where = tmp_path / folder
+    where.mkdir()
+    good = where / "goed #1.db"
+    conn = sqlite3.connect(str(good))
+    conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("INSERT INTO schema_version VALUES (42, 'x')")
+    conn.commit()
+    conn.close()
+    bad = where / "kapot #1.db"
+    bad.write_bytes(good.read_bytes()[:100] + b"\xff" * (len(good.read_bytes()) - 100))
+    before = sorted(p.name for p in tmp_path.rglob("*"))
+    assert backup._integrity(good) == "ok"
+    assert backup._schema_version(good) == 42
+    try:
+        verdict = backup._integrity(bad)
+    except sqlite3.DatabaseError as e:
+        verdict = str(e)
+    assert verdict != "ok"
+    assert sorted(p.name for p in tmp_path.rglob("*")) == before        # nothing created
+    with pytest.raises(backup.BackupError):
+        backup.check_backup_file(bad)

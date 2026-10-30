@@ -9,6 +9,9 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Verificatieronde
+- WhatsApp-exports en back-ups met een #, ? of % in de map- of bestandsnaam worden gewoon gelezen; er verschijnt geen leeg bestand meer naast de export, en de controle van een back-up kijkt echt naar het bestand.
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.
