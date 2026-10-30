@@ -494,10 +494,18 @@ async def stream_with_tools(ollama_messages: list, model: str) -> AsyncGenerator
             text += event.get("token") or ""
             if event.get("done"):
                 ctx = assistant.Context(config, db, manager)
-                actions = assistant.parse_actions(text)
-                if actions:
-                    # The model wrote the action in its own spelling: the chat shows the answer without it
-                    yield _sse({"replace": assistant.strip_actions(text)})
+                actions, page_actions, tried = assistant.resolve_actions(text)
+                if actions or page_actions:
+                    # The model wrote the action in its own spelling: the chat shows the answer without it,
+                    # plus the one action the page runs itself, in the spelling the page reads
+                    shown = assistant.strip_actions(text)
+                    for page_action in page_actions:
+                        shown += f"\n<<ACTION: {json.dumps(page_action, ensure_ascii=False)}>>"
+                    yield _sse({"replace": shown})
+                elif tried:
+                    # An action Pasha cannot run: never leave 'Hier zijn ze.' with nothing under it
+                    yield _sse({"replace": ""})
+                    yield _sse({"tool": "unknown", "error": assistant.NOT_RUN})
                 for action in actions:
                     yield _sse(await run_in_threadpool(assistant.run_action, ctx, action))
         yield chunk

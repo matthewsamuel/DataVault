@@ -17,6 +17,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Exporteren met de originele mappen of per maand schrijft nooit meer in het archief, ook niet als je de map boven het archief kiest of als een maandmap een snelkoppeling naar het archief is; zo'n bestand telt als mislukt.
 - Pasha's kaart voor 'beste uit reeks houden' toont ook de exacte kopieën die mee verhuizen, en het aantal op de kaart is precies wat er na Uitvoeren verplaatst wordt.
 - Een half gekopieerde export die achterbleef na een crash, stroomuitval of een losgekoppelde schijf (een verborgen bestand '.…datavault-partial-…') wordt bij de volgende kopie van die bron en bij het starten van de app opgeruimd; echte exports blijven altijd staan.
+- Kan Pasha een gevraagde actie niet uitvoeren, dan zegt ze dat nu duidelijk in plaats van 'Hier zijn ze.' zonder foto's eronder. Bijna-goede verzoeken (foto's van een datum, een jaar of een maand) worden omgezet naar de juiste zoekopdracht.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.

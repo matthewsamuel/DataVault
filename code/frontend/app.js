@@ -4186,7 +4186,7 @@ async function sendChat({ inputEl, btn }) {
                     return;
                 }
 
-                if (typeof event.replace === 'string') { fullText = event.replace; showText(fullText); continue; }
+                if (typeof event.replace === 'string') { fullText = event.replace; showText(fullText.replace(/<<ACTION[\s\S]*$/, '').trimEnd()); continue; }
 
                 if (typeof event.token === 'string' && event.token) {
                     fullText += event.token;
@@ -4201,7 +4201,11 @@ async function sendChat({ inputEl, btn }) {
                     fullText = reply.text;
                     showText(fullText);
                     // Alleen een actie en geen tekst: de lege ballon weglaten, de resultaten komen eronder
-                    if (!fullText && toolEvents.length) { aiMsg.remove(); fullText = 'Ik heb het opgezocht.'; }
+                    if (!fullText && toolEvents.length) {
+                        aiMsg.remove();
+                        const allFailed = toolEvents.every(t => t.error);
+                        fullText = allFailed ? toolEvents[0].error : 'Ik heb het opgezocht.';
+                    }
                     toolEvents.forEach(chatRenderToolEvent);
                     if (reply.action) setTimeout(() => executeAIAction(reply.action), 1000);
                     window.chatHistory.push({ role: 'assistant', content: fullText });

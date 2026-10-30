@@ -116,6 +116,8 @@ def test_photos_at_a_place_use_the_gps_of_the_index(indexed, fake_ollama):
     assert all("strand 001" not in i["path"] for i in fr.get("result", {}).get("items", []))
     none = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Japan"}))
     assert "Geen foto" in none["error"]
+    paris = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "parijs"}))
+    assert paris["error"] == "Geen foto's met een locatie in Parijs."      # the user's word, not 'Paris'
     unknown = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Atlantis"}))
     assert "niet" in unknown["error"]
 
@@ -227,7 +229,8 @@ def test_export_is_a_proposal_that_opens_the_export_window(indexed, fake_ollama,
 def test_the_model_cannot_name_a_path_for_keep_best_or_a_delete(indexed, fake_ollama, vault):
     before = _tree(vault)
     events = _say(indexed, fake_ollama, {"action": "delete_file", "path": str(vault / STRAND)})
-    assert not [e for e in events if "tool" in e]
+    # nothing runs; the chat only says it could not do that
+    assert [e for e in events if "tool" in e] == [{"tool": "unknown", "error": assistant.NOT_RUN}]
     assert _tree(vault) == before
 
 
@@ -252,3 +255,54 @@ def test_keep_best_card_shows_the_exact_copies_that_move_along(indexed, fake_oll
     for action in done["actions"]:
         assert indexed.post("/api/recovery/undo", json={"action_id": action}).status_code == 200
     assert _tree(vault) == before
+
+
+# ---------- an action Pasha cannot run is never silent ----------
+
+def _raw(client, fake_ollama, content):
+    fake_ollama.chat_lines = [{"message": {"content": content}, "done": False}, {"done": True}]
+    r = client.post("/api/chat/stream", json={"messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 200
+    return [json.loads(l[6:]) for l in r.text.splitlines() if l.startswith("data: ")]
+
+
+@pytest.mark.parametrize("content", [
+    'Dit vond ik. <<ACTION: {"action": "find_photos", "mood": "blij"}>>',       # missing query, no date
+    'Hier zijn ze. <<ACTION: {"action": "delete_everything"}>>',
+    'Hier zijn ze. <<ACTION: {"action": "show_photos", "date": "gisteren"}>>',
+    'Ik kijk het na. <<ACTION: not json>>',
+    'Even kijken. <<ACTION: {"action": "library_filter", "ye',                    # cut off
+])
+def test_an_action_that_cannot_run_is_reported_not_swallowed(indexed, fake_ollama, content):
+    events = _raw(indexed, fake_ollama, content)
+    replaced = [e["replace"] for e in events if "replace" in e]
+    assert replaced == [""], events                 # the claim 'Hier zijn ze.' is gone
+    tool = _tool(events)
+    assert tool["error"] == assistant.NOT_RUN
+    assert events[-1].get("done")
+
+
+def test_near_miss_actions_are_mapped_onto_real_ones(indexed, fake_ollama):
+    cases = {
+        '{"action": "find_photos", "date": "2019-07-14"}': {"action": "library_filter", "date_from": "2019-07-14",
+                                                            "date_to": "2019-07-14"},
+        '{"action": "find_photos", "year": 2019}': {"action": "library_filter", "year": 2019},
+        '{"action": "search_photos", "query": "2019"}': {"action": "library_filter", "year": 2019},
+        '{"action": "show_photos", "date": "2019-07"}': {"action": "library_filter", "year": 2019, "month": 7},
+        '{"action": "photos_at_place", "place": "Nederland"}}': {"action": "photos_at_place", "place": "Nederland"},
+    }
+    for raw, want in cases.items():
+        assert assistant.parse_actions(f"Hier. <<ACTION: {raw}>>") == [want], raw
+    tool = _tool(_raw(indexed, fake_ollama, 'Hier zijn ze. <<ACTION: {"action": "search_photos", "query": "2019"}>>'))
+    assert tool["tool"] == "library_filter" and tool["result"]["total"] > 0
+
+
+def test_a_page_action_stays_for_the_page_in_its_own_spelling(indexed, fake_ollama):
+    # valid for the chat screen itself: no error, and the tag reaches the page as <<ACTION: ...>>
+    events = _raw(indexed, fake_ollama, 'Ik open hem. <|ACTION: {"action": "open_tab", "target": "keurer"}|>')
+    assert not [e for e in events if "tool" in e]
+    assert [e["replace"] for e in events if "replace" in e] == \
+        ['Ik open hem.\n<<ACTION: {"action": "open_tab", "target": "keurer"}>>']
+    # a normal answer without any action is left alone
+    events = _raw(indexed, fake_ollama, "Hallo! Hoe gaat het?")
+    assert not [e for e in events if "tool" in e or "replace" in e]
