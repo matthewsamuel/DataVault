@@ -140,8 +140,9 @@ def activity_item(item: Dict[str, Any], product: Optional[str], forced_kind: Opt
         details["product"] = header[:80]
     if any(isinstance(d, dict) and "Ads" in str(d.get("name", "")) for d in item.get("details") or []):
         details["advertentie"] = True
-    # The same entry is in My Activity and in YouTube's own history file: one key for both
-    return store.event(kind, ts, store.key(kind, ts, url or title), title=title, url=url, details=details)
+    # The same entry is in My Activity and in YouTube's own history file, as HTML (whole
+    # seconds) or JSON (milliseconds): one key for all of them, on the second (migration 135)
+    return store.event(kind, ts, store.key(kind, ts // 1000, url or title), title=title, url=url, details=details)
 
 
 def parse_activity_json(blob: bytes, product: Optional[str], forced_kind: Optional[str] = None) -> Iterator[Dict[str, Any]]:

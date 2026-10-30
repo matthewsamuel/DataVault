@@ -6,7 +6,7 @@ The tables and columns this reads (undocumented; they changed between macOS vers
     message                   ROWID, guid (stable id), text, attributedBody, handle_id, service,
                               date (since 2001-01-01: seconds before macOS 10.13, nanoseconds
                               since), is_from_me, associated_message_guid,
-                              associated_message_type (2000-2005: a tapback)
+                              associated_message_type (2000-2007: a tapback)
     handle                    ROWID, id (phone number or e-mail)
     chat                      ROWID, guid, chat_identifier, display_name, style (43 = group)
     chat_message_join         chat_id, message_id
@@ -24,6 +24,7 @@ from typing import Any, Dict, Iterator, List, Optional
 APPLE_EPOCH = 978307200
 TAPBACKS = {2000: "❤️", 2001: "\U0001F44D", 2002: "\U0001F44E", 2003: "\U0001F602", 2004: "‼️",
             2005: "❓"}
+EMOJI_TAPBACK, STICKER_TAPBACK = 2006, 2007    # iOS 18 / macOS 15: any emoji (associated_message_emoji), a sticker
 OBJECT_REPLACEMENT = "￼"
 
 
@@ -118,21 +119,29 @@ def messages(conn: sqlite3.Connection, since_unix: Optional[float] = None) -> It
     cols = _columns(conn, "message")
     pick = lambda c: c if c in cols else "NULL"   # noqa: E731
     sql = (f"SELECT ROWID, guid, text, {pick('attributedBody')}, handle_id, date, is_from_me, "
-           f"{pick('associated_message_guid')}, {pick('associated_message_type')}, {pick('item_type')} FROM message")
+           f"{pick('associated_message_guid')}, {pick('associated_message_type')}, {pick('item_type')}, "
+           f"{pick('associated_message_emoji')}, {pick('date_retracted')} FROM message")
     args = ()
     if since_unix is not None:
         threshold = (since_unix - APPLE_EPOCH)
         sql += " WHERE (date >= ? OR (date > 0 AND date < 100000000000 AND date >= ?))"
         args = (int(threshold * 1e9), int(threshold))
-    for rowid, guid, text, body, handle_id, date, from_me, assoc, assoc_type, item_type in conn.execute(sql + " ORDER BY date", args):
+    for (rowid, guid, text, body, handle_id, date, from_me, assoc, assoc_type, item_type, emoji,
+         retracted) in conn.execute(sql + " ORDER BY date", args):
         unix = to_unix(date)
         if unix is None or not guid or rowid not in chat_of:
             continue
         sender = None if from_me else handles.get(handle_id)
-        if assoc_type and 2000 <= assoc_type <= 2005 and assoc:
+        if assoc_type and 2000 <= assoc_type <= STICKER_TAPBACK and assoc:
             target = assoc.split("/", 1)[1] if "/" in assoc else assoc.split(":", 1)[-1]
+            if assoc_type == EMOJI_TAPBACK:
+                reaction = emoji.strip() if isinstance(emoji, str) and emoji.strip() else "\U0001F642"
+            elif assoc_type == STICKER_TAPBACK:
+                reaction = "sticker"
+            else:
+                reaction = TAPBACKS[assoc_type]
             yield {"tapback": True, "target": target, "actor": "ik" if from_me else (sender or ""),
-                   "reaction": TAPBACKS[assoc_type]}
+                   "reaction": reaction}
             continue
         if assoc_type and assoc_type >= 3000:
             continue        # a tapback taken back: the earlier one stays (nothing is deleted)
@@ -142,5 +151,7 @@ def messages(conn: sqlite3.Connection, since_unix: Optional[float] = None) -> It
             text = text.replace(OBJECT_REPLACEMENT, "").strip() or None
         attachments = files.get(rowid, [])
         kind = "system" if item_type else ("media" if attachments and not text else "text")
+        if retracted and not text and not attachments:
+            kind = "unsent"          # 'Undo send' (iOS 16+): the bubble says so instead of being empty
         yield {"chat": chat_of[rowid], "key": guid, "ts_ms": int(round(unix * 1000)), "is_me": bool(from_me),
                "sender": sender, "text": text, "kind": kind, "attachments": attachments}

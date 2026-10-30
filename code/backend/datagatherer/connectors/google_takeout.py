@@ -120,10 +120,9 @@ class GoogleTakeout(Connector):
             ctx.check()
             ctx.progress(message=f"Inlezen: {name.rsplit('/', 1)[-1]}")
             try:
-                blob = read()
                 if what == "location":
-                    try:
-                        fmt, points, visits = location_store.parse_bytes(blob)
+                    try:     # a large Records.json is read as it goes, never whole
+                        fmt, points, visits = location_store.parse_export_file(read)
                     except location_store.NotLocationHistory:
                         continue
                     stats = location_store.insert(ctx.db, self.id, raw["id"], fmt, points, visits, check=ctx.check)
@@ -132,7 +131,8 @@ class GoogleTakeout(Connector):
                     export_kit.merge_stats(totals, {"seen": stats["seen"], "covers_from": stats["covers_from"],
                                                     "covers_until": stats["covers_until"]})
                 else:
-                    stats = activity_store.insert(ctx.db, self.id, raw["id"], self._parse(what, name, blob), check=ctx.check)
+                    stats = activity_store.insert(ctx.db, self.id, raw["id"], self._parse(what, name, read()),
+                                                  check=ctx.check)
                     export_kit.merge_stats(totals, stats)
             except (ValueError, UnicodeDecodeError, raw_store.RawStoreError) as e:
                 if len(skipped) < 10:

@@ -195,13 +195,15 @@ class WhatsApp(Connector):
                 raise ConnectorError("Geen WhatsApp-chats gevonden in deze map")
             messages_store.reconcile_whatsapp(ctx.db)
             return totals
-        stats = self._import_file(ctx, path, raw["kind"], raw["id"])
+        # The chat's name from the export's own file name, not from the copy ('… Anna 2.zip')
+        stats = self._import_file(ctx, path, raw["kind"], raw["id"], name=raw_store.original_name(raw))
         return stats
 
     def after_import(self, ctx: GatherContext) -> None:
         messages_store.reconcile_whatsapp(ctx.db)
 
-    def _import_file(self, ctx: GatherContext, path: Path, kind: str, raw_id: int) -> Dict[str, Any]:
+    def _import_file(self, ctx: GatherContext, path: Path, kind: str, raw_id: int,
+                     name: Optional[str] = None) -> Dict[str, Any]:
         if kind == "backup" or path.name.lower().endswith(".sqlite"):
             try:
                 conn = _open_ro(path)
@@ -213,9 +215,9 @@ class WhatsApp(Connector):
                 return self._read_db(ctx, conn, "whatsapp_backup", raw_id)
             finally:
                 conn.close()
-        return self._import_txt(ctx, path, raw_id)
+        return self._import_txt(ctx, path, raw_id, name or path.name)
 
-    def _import_txt(self, ctx: GatherContext, path: Path, raw_id: int) -> Dict[str, Any]:
+    def _import_txt(self, ctx: GatherContext, path: Path, raw_id: int, file_name: str) -> Dict[str, Any]:
         names = raw_store.read_zip_names(path)
         if names is not None:
             member = _txt_member(names)
@@ -228,17 +230,17 @@ class WhatsApp(Connector):
                     break
             folder = member.rsplit("/", 1)[0] + "/" if "/" in member else ""
             media = {n.rsplit("/", 1)[-1]: n for n in names if n.startswith(folder) and n != member}
-            title = whatsapp_txt.chat_name(path.name) or whatsapp_txt.chat_name(member)
+            title = whatsapp_txt.chat_name(file_name) or whatsapp_txt.chat_name(member)
         else:
             text = raw_store._read_file(path)
             media = {}
-            title = whatsapp_txt.chat_name(path.name)
+            title = whatsapp_txt.chat_name(file_name)
         zone = local_zone()
         parsed = whatsapp_txt.parse(text.decode("utf-8-sig", errors="replace"), zone)
         if not parsed["messages"]:
             raise ConnectorError("Deze chat-export bevat geen berichten die DataVault herkent")
         senders = {m["sender"] for m in parsed["messages"] if m["sender"]}
-        title = title or path.stem
+        title = title or Path(file_name).stem
         owner = self._owner(ctx)
         me = owner.casefold() if owner else None
         if me is None and len(senders) == 2 and title.casefold() in {s.casefold() for s in senders}:

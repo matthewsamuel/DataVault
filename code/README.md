@@ -414,7 +414,9 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
 - Stap 3.9c: Google Takeout (nl/en) en de Tijdlijn van de telefoon, Chrome- en Safari-geschiedenis
   (`local_import`, uit een kopie), Netflix, Snapchat, TikTok, Apple (privacy.apple.com) en Apple
   Gezondheid. Migratie 110: `activity_events`, `location_points`, `location_visits` en
-  `media_location_inferred` (geschatte plek van foto's zonder GPS, alleen in de database). API's:
+  `media_location_inferred` (geschatte plek van foto's zonder GPS, alleen in de database). Migratie
+  135 geeft elk item uit Mijn activiteit een sleutel op de seconde, zodat HTML en JSON van dezelfde
+  Takeout één rij geven. API's:
   `/api/activity/{facets,days,events}`, `/api/location/{summary,days,track,settings,geotag}` en
   `/api/map/inferred`; de taak `datagatherer.geotag` schat opnieuw. Tijdzones offline via de Natural
   Earth-landen en `backend/data/country_zones.json` (uit de tz-database). Het scherm Activiteit
@@ -526,7 +528,9 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
   WhatsApp-stanza-id, of gesprek + tijd + afzender + tekst). Een chat-export van WhatsApp wordt
   samengevoegd met de chat uit de database; berichten die de database ook heeft krijgen
   `superseded_by` en worden nooit gewist. Facebook-export en Messenger-download komen samen in één
-  gesprek (op deelnemers). Meta's mojibake wordt hersteld; Nederlandse en Engelse mapnamen werken.
+  gesprek. Een Meta-chat heeft als sleutel het id van zijn map in de export, zodat een groep waaruit
+  iemand vertrok of die een nieuwe naam kreeg één gesprek blijft; de Messenger-download wordt op
+  deelnemers aan die chat gekoppeld. Meta's mojibake wordt hersteld; Nederlandse en Engelse mapnamen werken.
 - **Volledige schijftoegang**: de server heeft ze niet nodig. Hij leest de database als hij mag;
   anders kopieert de kleine hulp `backend/datagatherer/fda_helper.py` (alleen standaardbibliotheek,
   start je zelf in een Terminal met Volledige schijftoegang) de database met `-wal` en `-shm` naar

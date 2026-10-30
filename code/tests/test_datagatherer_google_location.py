@@ -394,3 +394,111 @@ def test_migration_110_adds_tables_and_keeps_every_user_row(tmp_path, monkeypatc
     assert db.get_setting("chat_model") == "qwen2.5:3b"
     assert state.schedule_enabled(db, "spotify")
     db.close_all()
+
+
+def test_my_activity_as_html_and_as_json_is_one_record(app):
+    """Takeout HTML has whole seconds, its JSON milliseconds: the same video is one row."""
+    html = [e for e in gf.parse_activity_html(fx.MY_ACTIVITY_HTML.encode(), None) if e["title"] == "Fietsen in Gent"]
+    entry = {"header": "YouTube", "title": "Watched Fietsen in Gent", "titleUrl": "https://www.youtube.com/watch?v=def",
+             "time": "2019-07-14T13:00:00.417Z", "products": ["YouTube"]}
+    json_events = list(gf.parse_activity_json(json.dumps([entry]).encode(), "YouTube", "youtube_watch"))
+    assert len(html) == 1 and html[0]["ts_ms"] == 1563109200000 and json_events[0]["ts_ms"] == 1563109200417
+    assert html[0]["key"] == json_events[0]["key"]
+    activity_store.insert(app.state.db, "google_takeout", None, html)
+    assert activity_store.insert(app.state.db, "google_takeout", None, json_events)["added"] == 0
+
+
+def test_migration_135_rekeys_my_activity_per_second_and_keeps_every_other_row(tmp_path, monkeypatch):
+    import hashlib
+    from backend import migrations
+    from backend.database import Database
+    from test_duplicates_runs import _migrate_to
+    from test_foundation import _make_legacy_db
+
+    def old_key(*parts):
+        return hashlib.sha1("\x1f".join("" if p is None else str(p) for p in parts).encode()).hexdigest()[:24]
+
+    db_path = tmp_path / "datavault.db"
+    _make_legacy_db(db_path)
+    _migrate_to(db_path, 110, monkeypatch)
+    url = "https://www.youtube.com/watch?v=def"
+    rows = [  # (source, kind, ts_ms, title, url, details, key)
+        ("google_takeout", "youtube_watch", 1563109200000, "Fietsen in Gent", url, None,                       # HTML
+         old_key("youtube_watch", 1563109200000, url)),
+        ("google_takeout", "youtube_watch", 1563109200417, "Fietsen in Gent", url, '{"kanaal": "Kanaal Y"}',  # JSON
+         old_key("youtube_watch", 1563109200417, url)),
+        ("google_takeout", "search", 1563094800000, "weer Gent", None, None, old_key("search", 1563094800000, "weer Gent")),
+        ("google_takeout", "web_visit", 1563091200123, "Voorbeeld", "https://voorbeeld.be/",
+         '{"browser": "Chrome", "bron": "Takeout"}', old_key("web_visit", 1563091200123, "https://voorbeeld.be/")),
+        ("google_takeout", "calendar", 1563091200000, "Etentje", None, None, "cal-1"),
+        ("netflix", "video_watch", 1563091200000, "Documentaire", None, None, "nf-1"),
+    ]
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executemany("INSERT INTO activity_events (source, kind, ts_ms, title, url, details, event_key, first_seen_at) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, 1.0)", rows)
+        conn.execute("INSERT INTO location_points (ts_ms, lat, lon, source, origin) VALUES (1, 51.0, 3.7, 'records', 'x')")
+        conn.execute("INSERT INTO app_settings VALUES ('chat_model', '\"qwen2.5:3b\"', 5.0)")
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('schema_version', 'activity_events')")]
+        before = {t: conn.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in tables}
+    db = Database(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 135
+        for table, kept in before.items():
+            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == kept, table
+        after = {(r[0], r[1]): r[2:] for r in conn.execute(
+            "SELECT source, kind, ts_ms, details, event_key FROM activity_events ORDER BY id")}
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert len(after) == 5                                     # the HTML copy of the video is gone, nothing else
+    assert after[("google_takeout", "youtube_watch")][:2] == (1563109200417, '{"kanaal": "Kanaal Y"}')
+    assert after[("google_takeout", "youtube_watch")][2] == activity_store.key("youtube_watch", 1563109200, url)
+    assert after[("google_takeout", "search")][2] == activity_store.key("search", 1563094800, "weer Gent")
+    assert after[("google_takeout", "web_visit")][2] == rows[3][6]            # Chrome's own history keeps its key
+    assert after[("google_takeout", "calendar")][2] == "cal-1" and after[("netflix", "video_watch")][2] == "nf-1"
+    assert db.get_setting("chat_model") == "qwen2.5:3b"
+    db.close_all()
+
+
+def _big_records(n):
+    locations = [{"latitudeE7": 510500000 + i, "longitudeE7": 37200000 + i, "accuracy": 10 + i % 7,
+                  "timestamp": f"2019-07-14T{(i // 3600) % 24:02d}:{(i // 60) % 60:02d}:{i % 60:02d}Z",
+                  "activity": [{"timestamp": "2019-07-14T00:00:00Z", "activity": [{"type": "STILL", "confidence": 90}]}]}
+                 for i in range(n)]
+    locations.insert(3, {"latitudeE7": "x"})          # junk in between is skipped, as in parse()
+    return {"locations": locations}
+
+
+def test_a_large_records_json_is_streamed_with_the_same_points(tmp_path):
+    import io as _io
+    data = _big_records(500)
+    for text in (json.dumps(data, indent=2), "﻿" + json.dumps(data)):   # pretty (Google's shape) and compact
+        blob = text.encode("utf-8")
+        _, whole, _ = location_store.parse_bytes(blob)
+        for chunk in (7, 64, 4096):                       # objects cut at every possible place
+            streamed = list(location_store.iter_records(lambda: _io.BytesIO(blob), chunk=chunk))
+            assert streamed == whole and len(streamed) == 500
+    with pytest.raises(location_store.NotLocationHistory):
+        list(location_store.iter_records(lambda: _io.BytesIO(json.dumps(data)[:-500].encode()), chunk=64))
+    with pytest.raises(location_store.NotLocationHistory):
+        list(location_store.iter_records(lambda: _io.BytesIO(b'{"timelineObjects": []}')))
+
+
+def test_a_records_json_over_the_read_limit_is_still_read_and_a_skipped_file_is_on_the_card(client, app, tmp_path,
+                                                                                             monkeypatch):
+    from backend.datagatherer import raw_store
+    monkeypatch.setattr(raw_store, "MAX_MEMBER_BYTES", 20_000)     # stand-in for 1 GB
+    monkeypatch.setattr(location_store, "STREAM_FROM", 10_000)
+    zip_path = fx.write_zip(tmp_path / "takeout-20240101T000000Z-001.zip", {
+        "Takeout/Location History/Records.json": json.dumps(_big_records(300), indent=2),
+        "Takeout/Mijn activiteit/Zoeken/MyActivity.json": "[" + ",".join(
+            json.dumps({"header": "Zoeken", "title": f"Gezocht naar iets {i} " + "x" * 200,
+                        "time": "2019-07-14T09:00:00.000Z", "products": ["Zoeken"]}) for i in range(200)) + "]",
+    })
+    r = client.post(f"/api/datagatherer/sources/google_takeout/upload?name={zip_path.name}", content=zip_path.read_bytes())
+    assert r.status_code in (200, 201), r.text
+    result = app.state.jobs.result(_wait(app, r.json()["job"]["id"])["id"])
+    assert _wait(app, result["import_job"])["status"] == "done"
+    assert _rows(app, "SELECT COUNT(*) FROM location_points")[0][0] == 300
+    card = next(c for c in client.get("/api/datagatherer/sources").json()["sources"] if c["id"] == "google_takeout")
+    warning = [n for n in card["notes"] if n["tone"] == "warning"]
+    assert warning and "MyActivity.json" in warning[0]["text"] and "Niet alles" in warning[0]["text"]

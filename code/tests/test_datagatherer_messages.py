@@ -73,6 +73,7 @@ def test_mojibake_is_repaired_and_correct_text_stays():
     ("ios_en", (2024, 6, 1, 10, 1, 0), "s"),
     ("android_nl", (2024, 6, 1, 10, 1, 0), "min"),
     ("android_us", (2024, 6, 1, 10, 1, 0), "min"),
+    ("android_fr", (2024, 6, 1, 10, 1, 0), "min"),
 ])
 def test_whatsapp_export_lines_in_every_phone_format(fmt, first, precision):
     from datetime import datetime
@@ -88,6 +89,9 @@ def test_whatsapp_export_lines_in_every_phone_format(fmt, first, precision):
         assert media["kind"] == "media" and media["attachments"][0]["name"].endswith(".jpg")
     if fmt == "android_us":    # month first: 6/13 is 13 June, in the evening
         assert datetime.fromtimestamp(parsed["messages"][1]["ts_ms"] / 1000, BRUSSELS).timetuple()[:5] == (2024, 6, 13, 18, 30)
+    if fmt == "android_fr":
+        assert whatsapp_txt.looks_like_chat(WHATSAPP_TXT[fmt]) and len(parsed["messages"]) == 2
+        assert datetime.fromtimestamp(parsed["messages"][1]["ts_ms"] / 1000, BRUSSELS).timetuple()[:5] == (2024, 6, 13, 21, 34)
 
 
 def test_whatsapp_chat_names_from_file_names():
@@ -208,6 +212,22 @@ def test_facebook_export_is_recognised_imported_once_and_repaired(client, app, t
     assert detail["records"] == 6 and detail["since"] and detail["export_kinds"][0]["date_range"] is True
 
 
+def test_a_facebook_export_with_instagram_in_a_chat_name_stays_facebook(tmp_path):
+    from backend.datagatherer import raw_store
+    threads = {"instagramlover_99": fb_thread([ME, "Insta Gramlover"], [
+        {"sender_name": "Insta Gramlover", "timestamp_ms": T0 * 1000, "content": "Hoi"}])}
+    fb_zip = meta_export(tmp_path / "facebook-x.zip", "en", threads)
+    nl_zip = meta_export(tmp_path / "export.zip", "nl", threads)
+    ig_zip = instagram_export(tmp_path / "meta-2024.zip", threads={"anna_1": fb_thread([ME, "Anna"], [
+        {"sender_name": "Anna", "timestamp_ms": T0 * 1000, "content": "Hoi"}])})
+    fb, ig = registry.get("facebook"), registry.get("instagram")
+    for path in (fb_zip, nl_zip):
+        names = raw_store.read_zip_names(path)
+        assert fb.detect(path, names) == "dyi" and ig.detect(path, names) is None, path.name
+    names = raw_store.read_zip_names(ig_zip)
+    assert ig.detect(ig_zip, names) == "dyi" and fb.detect(ig_zip, names) is None
+
+
 def test_an_overlapping_newer_export_adds_only_what_is_new(client, app, tmp_path):
     first = meta_export(tmp_path / "facebook-1.zip", "en", _fb_threads())
     _upload(client, app, "facebook", first)
@@ -246,13 +266,78 @@ def test_messenger_secure_storage_merges_with_the_facebook_export(client, app, t
     assert registry.get("facebook").detect(zip_path, names) is None
     result = _upload(client, app, "messenger", zip_path)
     assert result["import_result"]["added"] == 1           # the overlapping message was already there
-    convs = _rows(app, "SELECT id, message_count FROM msg_conversations WHERE title = 'Anna Jansen'")
+    convs = _rows(app, "SELECT id, message_count FROM msg_conversations WHERE title = 'Anna Jansen' "
+                       "AND merged_into IS NULL")
     assert len(convs) == 1 and convs[0][1] == 3            # one chat across both exports
     thread = client.get(f"/api/messages/conversations/{convs[0][0]}").json()
     newest = thread["messages"][-1]
     assert newest["is_me"] is True and newest["origin"] == "messenger_e2ee"
     assert newest["attachments"][0]["preview"] is True
     assert client.get(f"/api/messages/attachments/{newest['id']}/0").status_code == 200
+
+
+def _group(people, messages, title, folder):
+    thread = fb_thread([ME] + people, [{"sender_name": who, "timestamp_ms": T0 * 1000 + sec * 1000, "content": text}
+                                       for who, sec, text in messages], title=title)
+    return {folder: thread}
+
+
+def _open_convs(app):
+    return _rows(app, "SELECT title, message_count FROM msg_conversations WHERE merged_into IS NULL "
+                      "AND message_count > 0 ORDER BY id")
+
+
+def test_a_member_who_left_and_a_renamed_group_stay_one_chat(client, app, tmp_path):
+    msgs = [("Anna", 1, "Wie komt er zondag?"), ("Bob", 2, "Ik!"), ("Carl", 3, "Ik ook")]
+    _upload(client, app, "facebook", meta_export(tmp_path / "facebook-1.zip", "en",
+                                                 _group(["Anna", "Bob", "Carl"], msgs, "Familie", "familie_555")))
+    # Newer, overlapping: Carl left, the group was renamed (so was its folder), one new message
+    newer = _group(["Anna", "Bob"], msgs + [("Anna", 4, "Carl is uit de groep")], "Familie ❤", "familieliefde_555")
+    result = _upload(client, app, "facebook", meta_export(tmp_path / "facebook-2.zip", "en", newer))
+    assert result["import_result"]["added"] == 1
+    assert _open_convs(app) == [("Familie", 4)]
+    assert len(_rows(app, "SELECT id FROM msg_messages")) == 4
+
+
+def test_different_chats_with_the_same_people_stay_apart(client, app, tmp_path):
+    threads = {}
+    threads.update(_group(["Anna", "Bob"], [("Anna", 1, "Fijne verjaardag")], "Familie", "familie_1"))
+    threads.update(_group(["Anna", "Bob"], [("Bob", 2, "Agenda voor maandag")], "Werkgroep", "werkgroep_2"))
+    # Two deactivated accounts: Meta calls both 'Facebook user'
+    threads.update(_group(["Facebook user"], [("Facebook user", 3, "Hallo van de eerste")], None, "facebookuser_111"))
+    threads.update(_group(["Facebook user"], [("Facebook user", 4, "Hallo van de tweede")], None, "facebookuser_222"))
+    _upload(client, app, "facebook", meta_export(tmp_path / "facebook.zip", "en", threads))
+    convs = _open_convs(app)
+    assert len(convs) == 4 and ("Familie", 1) in convs and ("Werkgroep", 1) in convs
+    # A secure storage chat of those people is ambiguous: it stays its own chat, nothing is lost
+    chat = {"participants": [ME, "Anna", "Bob"], "threadName": "Familie", "messages": [
+        {"senderName": "Anna", "text": "Nieuw bericht", "timestamp": T0 * 1000 + 9000, "type": "text",
+         "isUnsent": False, "reactions": [], "media": []}]}
+    _upload(client, app, "messenger", secure_storage(tmp_path / "messages.zip", {"familie": chat}))
+    assert len(_open_convs(app)) == 5 and len(_rows(app, "SELECT id FROM msg_messages")) == 5
+
+
+def test_chats_stored_by_their_people_before_are_split_and_not_doubled(client, app, tmp_path):
+    """A database from before folder ids: two groups with the same members in one 'p:' chat."""
+    from backend.datagatherer import meta_import, messages_store
+    db = app.state.db
+    old = messages_store.conversation(db, "messenger", "p:anna|bob|" + ME.casefold(), "Familie", [ME, "Anna", "Bob"], True)
+    rows = [messages_store.message_row(old, f"legacy{i}", "facebook_dyi", T0 * 1000 + sec * 1000, source="messenger",
+                                       sender=who, body=text)
+            for i, (who, sec, text) in enumerate([("Anna", 1, "Fijne verjaardag"), ("Bob", 2, "Agenda voor maandag")])]
+    rows.append(messages_store.message_row(old, "secure0", "messenger_e2ee", T0 * 1000 + 9000, source="messenger",
+                                           sender="Anna", body="Versleuteld"))
+    messages_store.insert_messages(db, "messenger", rows)
+    threads = {}       # Werkgroep first (folder order): it must not take over the chat called Familie
+    threads.update(_group(["Anna", "Bob"], [("Bob", 2, "Agenda voor maandag"), ("Bob", 5, "Nieuw")],
+                          "Werkgroep", "a_werkgroep_2"))
+    threads.update(_group(["Anna", "Bob"], [("Anna", 1, "Fijne verjaardag")], "Familie", "familie_1"))
+    result = _upload(client, app, "facebook", meta_export(tmp_path / "facebook.zip", "en", threads))
+    assert result["import_result"]["added"] == 1
+    assert len(_rows(app, "SELECT id FROM msg_messages")) == 4
+    by_title = {t: n for t, n in _open_convs(app)}
+    assert by_title == {"Familie": 2, "Werkgroep": 2}    # Familie kept the encrypted message, Werkgroep got its own
+    assert meta_import.claim_messages(db, "messenger", 999, {"participants": [], "messages": []}, "x") == 0
 
 
 def test_instagram_export_reads_media_metadata_and_direct_messages(client, app, tmp_path):
@@ -341,6 +426,34 @@ def test_whatsapp_chat_export_merges_into_the_database_chat(client, app, tmp_pat
     # The export again: nothing new, nothing doubled
     _upload(client, app, "whatsapp", export, name="WhatsApp Chat - Anna Jansen (1).zip")
     assert client.get(f"/api/messages/conversations/{anna[0]['id']}").json()["conversation"]["count"] == 4
+
+
+def test_a_newer_chat_export_with_the_same_name_on_the_same_day_is_one_chat(client, app, tmp_path):
+    from backend.datagatherer import raw_store
+    lines = "".join(f"[01-06-2024 10:{i:02d}:00] Anna Jansen: Bericht {i}\n" for i in range(10))
+    newer = lines + "[02-06-2024 09:00:00] Anna Jansen: Nieuw\n"
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    _upload(client, app, "whatsapp", whatsapp_zip(tmp_path / "a" / "WhatsApp Chat - Anna.zip", lines))
+    result = _upload(client, app, "whatsapp", whatsapp_zip(tmp_path / "b" / "WhatsApp Chat - Anna.zip", newer))
+    assert result["import_result"]["added"] == 1
+    paths = [r[0] for r in _rows(app, "SELECT path FROM dg_raw_imports WHERE source_id = 'whatsapp' ORDER BY id")]
+    assert Path(paths[1]).name == "WhatsApp Chat - Anna 2.zip"         # the copy got a free name
+    assert _rows(app, "SELECT title, message_count FROM msg_conversations") == [("Anna", 11)]
+    # A bare _chat.txt twice on one day: the copy's ' 2' is no part of the chat's name either
+    (tmp_path / "c").mkdir()
+    (tmp_path / "d").mkdir()
+    bob = "[03-06-2024 10:00:00] Bob: Hoi\n"
+    (tmp_path / "c" / "_chat.txt").write_text(bob, encoding="utf-8")
+    (tmp_path / "d" / "_chat.txt").write_text(bob + "[03-06-2024 10:05:00] Bob: Nog iets\n", encoding="utf-8")
+    _upload(client, app, "whatsapp", tmp_path / "c" / "_chat.txt")
+    _upload(client, app, "whatsapp", tmp_path / "d" / "_chat.txt")
+    assert ("_chat", 2) in _rows(app, "SELECT title, message_count FROM msg_conversations")
+    assert len(_rows(app, "SELECT id FROM msg_messages")) == 13
+    # Without a manifest the copy's suffix is only dropped when the plain name is there too
+    raw = {"path": paths[1], "original_path": None}
+    assert raw_store.original_name(raw) == "WhatsApp Chat - Anna.zip"
+    assert raw_store.original_name({"path": str(tmp_path / "Team 2.zip"), "original_path": None}) == "Team 2.zip"
 
 
 def test_iphone_chatstorage_adds_only_what_the_mac_misses(client, app, tmp_path):
@@ -458,6 +571,13 @@ def _messages_db():
          "text": "Vond 'Ja, kom maar' leuk", "ts": T0 + 30},
         {"rowid": 4, "guid": "G-4", "chat": 2, "handle": 2, "text": "Foto van zaterdag", "ts": T0 + 40},
         {"rowid": 5, "guid": "G-5", "chat": 2, "handle": 1, "text": "Oud bericht", "ts": T0 - 86400 * 2000, "seconds": True},
+        # iOS 18: any emoji as a tapback, and a tapback with an emoji taken back
+        {"rowid": 6, "guid": "G-6", "chat": 1, "handle": 1, "assoc": "p:0/G-1", "assoc_type": 2006, "emoji": "🎉",
+         "text": "Reageerde met 🎉 op “Ben je thuis?”", "ts": T0 + 50},
+        {"rowid": 7, "guid": "G-7", "chat": 1, "handle": 1, "assoc": "p:0/G-1", "assoc_type": 3006, "emoji": "🎉",
+         "text": "Verwijderde 🎉", "ts": T0 + 55},
+        # 'Undo send': no text left
+        {"rowid": 8, "guid": "G-8", "chat": 1, "me": True, "ts": T0 + 60, "retracted": True},
     ], [{"rowid": 1, "message": 4, "filename": "~/Library/Messages/Attachments/ab/01/X/IMG_0001.HEIC",
          "mime": "image/heic", "transfer": "IMG_0001.HEIC"}])
 
@@ -466,19 +586,21 @@ def test_imessage_reads_attributed_body_dates_tapbacks_and_attachments(client, a
     _messages_db()
     job, result = _sync(client, app, "imessage")
     assert job["status"] == "done", job
-    assert result["added"] == 4
-    rows = {r[0]: r[1:] for r in _rows(app, "SELECT msg_key, body, is_me, sent_at_ms, reactions, attachments, sender "
-                                            "FROM msg_messages")}
+    assert result["added"] == 5
+    rows = {r[0]: r[1:] for r in _rows(app, "SELECT msg_key, body, is_me, sent_at_ms, reactions, attachments, sender, "
+                                            "kind FROM msg_messages")}
+    assert json.loads(rows["G-1"][3]) == [{"actor": "+32470000001", "reaction": "🎉"}]
+    assert "G-6" not in rows and "G-7" not in rows and rows["G-8"][0] is None and rows["G-8"][6] == "unsent"
     assert rows["G-2"][0] == "Ja, kom maar 🙂" and rows["G-2"][1] == 1
     assert rows["G-1"][2] == (T0 + 10) * 1000 and rows["G-5"][2] == (T0 - 86400 * 2000) * 1000
     assert json.loads(rows["G-2"][3]) == [{"actor": "+32470000001", "reaction": "❤️"}]
     assert "G-3" not in rows                               # a tapback is no message of its own
     assert json.loads(rows["G-4"][4])[0]["name"] == "IMG_0001.HEIC" and rows["G-4"][5] == "bob@example.com"
     convs = {c["title"]: c for c in client.get("/api/messages/conversations?source=imessage").json()["conversations"]}
-    assert convs["Weekend"]["is_group"] is True and convs["+32470000001"]["count"] == 2
+    assert convs["Weekend"]["is_group"] is True and convs["+32470000001"]["count"] == 3
     job, result = _sync(client, app, "imessage")
     assert result["added"] == 0
-    assert len(_rows(app, "SELECT id FROM msg_messages")) == 4
+    assert len(_rows(app, "SELECT id FROM msg_messages")) == 5
 
 
 # ---------- search, Berichten API, Pasha ----------
@@ -505,7 +627,7 @@ def test_search_across_sources_with_a_filter_and_marked_snippets(client, app, tm
     thread = client.get(f"/api/messages/conversations/{hit['conversation']}", params={"around": hit["id"]}).json()
     assert any(m["id"] == hit["id"] for m in thread["messages"])
     sources = {s["id"]: s for s in client.get("/api/messages/sources").json()["sources"]}
-    assert sources["imessage"]["messages"] == 4 and sources["messenger"]["conversations"] == 2
+    assert sources["imessage"]["messages"] == 5 and sources["messenger"]["conversations"] == 2
     assert sources["whatsapp"]["messages"] == 0 and all(s["pasha"] is False for s in sources.values())
 
 
