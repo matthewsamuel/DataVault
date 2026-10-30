@@ -839,8 +839,10 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
             args.append(filters[key])
     if filters.get("camera_contains"):
         pattern = "%" + "".join("\\" + c if c in "%_\\" else c for c in str(filters["camera_contains"])) + "%"
-        clauses.append("(m.camera_model LIKE ? ESCAPE '\\' OR m.camera_make LIKE ? ESCAPE '\\')")
-        args.extend([pattern, pattern])
+        # also the full name the screens show ('Sony A7 IV' = make 'Sony' + model 'A7 IV')
+        clauses.append("(m.camera_model LIKE ? ESCAPE '\\' OR m.camera_make LIKE ? ESCAPE '\\' OR "
+                       "(COALESCE(m.camera_make, '') || ' ' || COALESCE(m.camera_model, '')) LIKE ? ESCAPE '\\')")
+        args.extend([pattern, pattern, pattern])
     if filters.get("has_gps") is True:
         clauses.append("m.lat IS NOT NULL")
     elif filters.get("has_gps") is False:

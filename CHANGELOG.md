@@ -18,6 +18,8 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Pasha's kaart voor 'beste uit reeks houden' toont ook de exacte kopieën die mee verhuizen, en het aantal op de kaart is precies wat er na Uitvoeren verplaatst wordt.
 - Een half gekopieerde export die achterbleef na een crash, stroomuitval of een losgekoppelde schijf (een verborgen bestand '.…datavault-partial-…') wordt bij de volgende kopie van die bron en bij het starten van de app opgeruimd; echte exports blijven altijd staan.
 - Kan Pasha een gevraagde actie niet uitvoeren, dan zegt ze dat nu duidelijk in plaats van 'Hier zijn ze.' zonder foto's eronder. Bijna-goede verzoeken (foto's van een datum, een jaar of een maand) worden omgezet naar de juiste zoekopdracht.
+- Pasha noemt een plaats zoals jij hem schrijft: 'Parijs', niet 'Paris'.
+- Zoeken op camera vindt ook de volledige naam die het scherm toont, zoals 'Sony A7 IV' of 'Apple iPhone 14' (merk en model samen); ook bij Pasha.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
