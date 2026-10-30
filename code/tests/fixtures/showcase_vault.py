@@ -499,11 +499,18 @@ def populate(base: str, vault: Path) -> dict:
     # Ratings (Shows) and Elo duels
     for p in rnd.sample(photos, min(60, len(photos))):
         api.post("/api/shows/vote", {"path": p["path"], "vote": "up" if rnd.random() < 0.7 else "down"})
-    for _ in range(40):
-        a, b = rnd.sample(photos, 2)
+    # 'Welke is mooier?' in the library: the pairs the app itself picks, judged by a hidden taste
+    # (mostly consistent, sometimes a draw), so the Ranglijst has bands, movement and a leader
+    taste: dict = {}
+    for _ in range(70):
         try:
-            api.post("/api/shows/compare", {"a": a["path"], "b": b["path"], "winner": rnd.choice("ab"),
-                                            "scope": "all"})
+            pair = api.get("/api/shows/compare/pair").get("pair")
+            if not pair:
+                break
+            a, b = (taste.setdefault(p["path"], rnd.gauss(0, 200)) for p in pair)
+            p_a = 1 / (1 + 10 ** ((b - a) / 400))
+            winner = "draw" if abs(a - b) < 40 and rnd.random() < 0.4 else ("a" if rnd.random() < p_a else "b")
+            api.post("/api/shows/compare", {"a": pair[0]["path"], "b": pair[1]["path"], "winner": winner})
         except RuntimeError:
             break
 
