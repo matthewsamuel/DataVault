@@ -99,6 +99,31 @@ TRANSITIONS = [
     ("thema: cirkel naar donker", "document.getElementById('theme-button').focus()", "setTheme('dark')", 1000),
 ]
 
+# ---------- Schil (motion-shell.js) ----------
+# Een lege staat in een eigen vak boven de pagina, zodat het meten niets van de app verandert
+SHELL_EMPTY = ("(() => { let box = document.getElementById('perf-empty'); if (box) box.remove();"
+               " box = document.createElement('div'); box.id = 'perf-empty';"
+               " box.style.cssText = 'position:fixed;left:40px;bottom:40px;width:420px;z-index:5;background:var(--surface-card)';"
+               " document.body.append(box); box.append(emptyState({ icon: 'fa-inbox', title: 'Nog niets ' + Math.random(),"
+               " text: 'Een lege staat komt binnen', action: { label: 'Iets doen', onClick() {} } })); })()")
+SHELL_BURST = ("(() => { const item = document.createElement('div'); item.className = 'job-item job-done';"
+               " item.style.cssText = 'position:fixed;right:40px;bottom:120px;'; item.innerHTML = '<span class=\"job-status\">Klaar</span>';"
+               " document.body.append(item); ShellMotion.jobCelebrate(item); setTimeout(() => item.remove(), 900); })()")
+TRANSITIONS += [
+    ("schil: eerste indruk van Home", "switchMainView('home')", "ShellMotion.homeIntro()", 1200),
+    ("schil: Home -> Herstelcentrum (streep)", "switchMainView('home')", "switchMainView('recovery')", 1000),
+    ("schil: Herstelcentrum -> Home", None, "switchMainView('home')", 1000),
+    ("schil: themamenu open", "closeThemeDropdown()", "toggleThemeDropdown()", 700),
+    ("schil: themamenu dicht", None, "closeThemeDropdown()", 500),
+    ("schil: zoekvenster open", "switchMainView('home')", "openSearch('')", 900),
+    ("schil: zoekvenster dicht", None, "closeSearch()", 600),
+    ("schil: segment glijdt", "openSearch('')",
+     "document.querySelector('#search-overlay .search-mode[data-mode=\"filename\"]').dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));"
+     " document.querySelector('#search-overlay .search-mode[data-mode=\"filename\"]').click()", 700),
+    ("schil: lege staat komt binnen", "closeSearch()", SHELL_EMPTY, 900),
+    ("schil: taak klaar (feestje)", "document.getElementById('perf-empty')?.remove()", SHELL_BURST, 900),
+]
+
 
 def start_server(workdir: Path, showcase: bool):
     python = server_python()
