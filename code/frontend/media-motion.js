@@ -353,15 +353,22 @@
         if (tile && !tile.closest('.mm-ghost')) lightOn(tile, e);
     }, { passive: true });
 
+    let lightSleeping = null;   // de tegel onder de muis na scrollen: aan bij de volgende beweging
     document.addEventListener('pointermove', (e) => {
-        if (!lightTile) return;
+        if (!lightTile) {
+            if (!lightSleeping) return;
+            const tile = e.target.closest && e.target.closest(LIGHT_TILES);
+            lightSleeping = null;
+            if (tile && !tile.closest('.mm-ghost')) lightOn(tile, e);
+            return;
+        }
         lightPos = { x: e.clientX, y: e.clientY };
         if (!lightQueued) { lightQueued = true; requestAnimationFrame(placeLight); }
     }, { passive: true });
 
     // Scrollen verschuift de tegel onder de muis: opnieuw meten bij de volgende beweging
     document.addEventListener('scroll', () => {
-        if (lightTile) lightOff();
+        if (lightTile) { lightOff(); lightSleeping = true; }
     }, { passive: true, capture: true });
 
     // ---------- 7. Viewer: volgende en vorige ----------
