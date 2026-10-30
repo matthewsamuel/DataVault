@@ -202,3 +202,10 @@ def test_the_offline_basemap_and_map_libraries_are_vendored_with_licenses():
     for ref in re.findall(r"url\(([^)]+)\)", _code(vendor / "leaflet-1.9.4" / "leaflet.css")):
         if not ref.strip("'\"").startswith(("data:", "#")):
             assert (vendor / "leaflet-1.9.4" / ref.strip("'\"")).resolve().is_file(), ref
+
+
+def test_the_frontend_has_no_password_fields():
+    """PRIV-6: an API key or Client ID is a masked text field; a password field makes Safari offer
+    to save it as a website password (in iCloud Keychain, outside DataVault's own Keychain item)."""
+    offending = _lines_matching(re.compile(r"""\btype\s*=\s*password\b|["'`]password["'`]""", re.IGNORECASE))
+    assert not offending, "\n".join(offending)
