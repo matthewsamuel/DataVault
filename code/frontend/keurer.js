@@ -74,10 +74,33 @@ async function keurerLoadStats() {
 function keurerApplyStats(stats) {
     if (!stats) { keurerLoadStats(); return; }
     const wasReached = keurerStats.goal_reached_today;
+    const before = keurerStats;
     keurerStats = stats;
     keurerRenderStats();
+    keurerStatsMotion(before, stats);
     if (!wasReached && stats.goal_reached_today) {
         showToast('🎉 Dagdoel bereikt!', `Je hebt vandaag ${stats.goal} fotos beoordeeld!`, 'success');
+    }
+}
+
+// Vandaag telt op: het getal tikt omhoog en de balk groeit vanaf waar hij was; het dagdoel
+// gehaald is een beloning (het icoon springt). Bij ongedaan maken tikt het terug.
+function keurerStatsMotion(before, after) {
+    if (!before || !after || before.today === after.today) return;
+    const bar = document.getElementById('keurer-stats-bar');
+    const blocks = bar ? bar.querySelectorAll('.keurer-stat') : [];
+    const today = blocks[1];
+    if (!today) return;
+    MediaMotion.nudge(today.querySelector('.keurer-stat-value'), after.today > before.today ? 1 : -1);
+    const fill = today.querySelector('.keurer-daily-fill');
+    const was = Math.min(100, (before.today / before.goal) * 100);
+    const now = Math.min(100, (after.today / after.goal) * 100);
+    if (fill && now > 0 && was !== now) {
+        Motion.animate(fill, [{ transform: `scaleX(${Math.max(0, was / now)})` }, { transform: 'none' }],
+            { spring: 'smooth', key: 'fill' });
+    }
+    if (!before.goal_reached_today && after.goal_reached_today) {
+        MediaMotion.pop(today.querySelector('.keurer-stat-icon'), { from: 0.5 });
     }
 }
 
@@ -163,6 +186,8 @@ async function keurerLoadFiles() {
         </div>`;
 
     try {
+        // Eerst de beslissingen die nog onderweg zijn: anders komen die foto's terug in de rij
+        await keurerDecisionChain;
         const data = await fetchJSON(`${API_BASE}/api/keurer/files?folder=${encodeURIComponent(keurerFolder)}`);
         // De server geeft de map in één vaste schrijfwijze terug (symlinks en Unicode-vorm
         // opgelost); die gebruiken we voortaan, zodat undo de beslissing aan deze map koppelt
@@ -259,7 +284,9 @@ function keurerShowNoMedia() {
 
 // ==================== KAART WEERGEVEN ====================
 
-function keurerShowCard() {
+// opts.arrive: de volgende kaart na een beslissing (kwam van onder de vorige vandaan);
+// opts.from: terug na ongedaan maken of een mislukte beslissing (uit die richting)
+function keurerShowCard(opts = {}) {
     const cardArea = document.getElementById('keurer-card-area');
     const btnArea  = document.getElementById('keurer-action-buttons');
 
@@ -327,7 +354,9 @@ function keurerShowCard() {
             </div>
         </div>`;
 
-    keurerSetupDrag(document.getElementById('keurer-card'));
+    const card = document.getElementById('keurer-card');
+    keurerSetupDrag(card);
+    if (opts.from || opts.arrive) MediaMotion.keurerArrive(card, opts.from || null);
 }
 
 function keurerHandleThumbError(el) {
@@ -338,68 +367,59 @@ function keurerHandleThumbError(el) {
 
 // ==================== BESLISSING & ANIMATIE ====================
 
+// De beslissing is meteen zichtbaar: de kaart vliegt weg (een spook, MediaMotion.keurerFly) en
+// de volgende foto staat er in hetzelfde beeld. Niets wacht op de animatie of op de server.
+// De beslissingen gaan wel op volgorde naar de server (keurerDecisionChain), zodat de
+// undo-stapel klopt. Mislukt er een, dan komt die foto terug als huidige kaart.
+let keurerDecisionChain = Promise.resolve();
+
 function keurerAnimateAndDecide(decision) {
-    if (keurerIsAnimating) return;
+    if (keurerUndoBusy || keurerMoveBusy) return;
     if (keurerIndex >= keurerFileQueue.length) return;
-
-    keurerIsAnimating = true;
+    const file = keurerFileQueue[keurerIndex];
     const card = document.getElementById('keurer-card');
-    if (!card) { keurerIsAnimating = false; return; }
+    if (card) MediaMotion.keurerFly(card, decision);
+    keurerIndex++;
+    keurerUpdateRemaining();
+    keurerShowCard({ arrive: true });
 
-    let flyX = 0, flyY = -60, rotate = 0;
-    if (decision === 'keep') {
-        flyX   = -Math.max(window.innerWidth * 1.1, 600);
-        rotate = -22;
-        const ol = document.getElementById('kc-overlay-keep');
-        if (ol) ol.style.opacity = '1';
-    } else {
-        flyX   = Math.max(window.innerWidth * 1.1, 600);
-        rotate = 22;
-        const ol = document.getElementById('kc-overlay-delete');
-        if (ol) ol.style.opacity = '1';
-    }
-
-    card.style.transition = 'transform 0.38s cubic-bezier(0.5,0,0.75,0), opacity 0.38s ease';
-    card.style.transform  = `translateX(${flyX}px) translateY(${flyY}px) rotate(${rotate}deg)`;
-    card.style.opacity    = '0';
-
-    const result = keurerSendDecision(decision, keurerFileQueue[keurerIndex]);
-
-    // Pas na het antwoord van de server door naar de volgende kaart;
-    // mislukt de beslissing, dan komt dezelfde kaart terug.
-    setTimeout(async () => {
-        const outcome = await result;
-        if (outcome === 'ok') {
-            keurerIndex++;
-        } else if (outcome === 'gone') {
-            keurerFileQueue.splice(keurerIndex, 1);
+    const result = keurerDecisionChain.then(() => keurerSendDecision(decision, file));
+    keurerDecisionChain = result.then(() => {}, () => {});
+    result.then((outcome) => {
+        if (outcome === 'ok') return;
+        const at = keurerFileQueue.indexOf(file);
+        if (at < 0) return;
+        keurerFileQueue.splice(at, 1);
+        if (at < keurerIndex) keurerIndex--;
+        if (outcome === 'failed') {
+            // Niet gelukt: dezelfde foto komt terug, uit de richting waar hij heen vloog
+            keurerFileQueue.splice(keurerIndex, 0, file);
+            keurerShowCard({ from: decision });
+        } else {
+            const progress = document.querySelector('#keurer-card .keurer-card-progress');
+            if (progress && keurerIndex < keurerFileQueue.length) progress.textContent = `${keurerIndex + 1} / ${keurerFileQueue.length}`;
         }
-        keurerIsAnimating = false;
         keurerUpdateRemaining();
-        keurerShowCard();
-    }, 390);
+    });
 }
 
-// Animeer kaart omhoog weg en open move-modal
+// Verplaatsen: de kaart komt omhoog en het mappenvenster opent meteen
 function keurerAnimateUp() {
-    if (keurerIsAnimating) return;
+    if (keurerUndoBusy || keurerMoveBusy) return;
     if (keurerIndex >= keurerFileQueue.length) return;
-
-    keurerIsAnimating = true;
     const card = document.getElementById('keurer-card');
-    if (!card) { keurerIsAnimating = false; return; }
-
-    const ol = document.getElementById('kc-overlay-move');
-    if (ol) ol.style.opacity = '1';
-
-    card.style.transition = 'transform 0.35s cubic-bezier(0.5,0,0.75,0), opacity 0.35s ease';
-    card.style.transform  = 'translateY(-120%) scale(0.85)';
-    card.style.opacity    = '0';
-
-    setTimeout(() => {
-        keurerIsAnimating = false;
-        keurerOpenMoveModal();
-    }, 350);
+    if (card) {
+        const ol = document.getElementById('kc-overlay-move');
+        if (ol) ol.style.opacity = '1';
+        const from = card.style.transform || 'none';
+        card.style.transition = '';
+        card.style.transform = '';
+        Motion.animate(card, [
+            { transform: from },
+            { transform: `translate3d(0, ${-Motion.px('--motion-distance-lg', 24)}px, 0) scale(0.96)` },
+        ], { spring: 'snappy', fill: 'forwards', key: 'lift' });
+    }
+    keurerOpenMoveModal();
 }
 
 // Geeft 'ok', 'gone' (bestand bestaat niet meer) of 'failed' terug
@@ -429,22 +449,29 @@ function keurerDecideMove()   { keurerAnimateUp(); }
 
 async function keurerUndo() {
     if (keurerIsAnimating || keurerUndoBusy) return;
+    keurerUndoBusy = true;
+    // Een beslissing die nog onderweg is, hoort eerst op de stapel
+    await keurerDecisionChain;
     if (keurerHistory.length === 0) {
+        keurerUndoBusy = false;
         showToast('Undo', 'Geen actie om ongedaan te maken', 'info');
         return;
     }
 
+    // De huidige kaart zakt een stukje terug; de teruggezette foto komt er zo overheen
     const card = document.getElementById('keurer-card');
     if (card) {
         const ol = document.getElementById('kc-overlay-undo');
         if (ol) ol.style.opacity = '1';
-        card.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
-        card.style.transform  = 'translateY(80px) scale(0.92)';
-        card.style.opacity    = '0';
+        card.style.transition = '';
+        Motion.animate(card, [
+            { transform: card.style.transform || 'none', opacity: 1 },
+            { transform: `translate3d(0, ${Motion.px('--motion-distance-lg', 24)}px, 0) scale(0.94)`, opacity: 0.35 },
+        ], { duration: '--dur-3', easing: '--ease-exit', fill: 'forwards', key: 'undo' });
     }
 
     const entry = keurerHistory[keurerHistory.length - 1];
-    keurerUndoBusy = true;
+    let returned = false;
 
     try {
         const data = await fetchJSON(`${API_BASE}/api/keurer/undo`, {
@@ -455,10 +482,18 @@ async function keurerUndo() {
         keurerDropHistory(entry.id);
         keurerApplyStats(data.stats);
 
-        // Alleen terug in de wachtrij als de beslissing bij de huidige map hoort
+        // Alleen terug in de wachtrij als de beslissing bij de huidige map hoort, en dan als
+        // huidige kaart (ook als hij nog achter ons in de rij stond: beoordeelde foto's blijven
+        // daar staan tot de rij opnieuw laadt)
         const file = data.file || entry.file;
-        if (data.folder === keurerFolder && !keurerFileQueue.some(f => f.path === file.path)) {
+        if (data.folder === keurerFolder) {
+            const at = keurerFileQueue.findIndex(f => f.path === file.path);
+            if (at >= 0) {
+                keurerFileQueue.splice(at, 1);
+                if (at < keurerIndex) keurerIndex--;
+            }
             keurerFileQueue.splice(keurerIndex, 0, file);
+            returned = true;
         }
         keurerUpdateRemaining();
 
@@ -474,7 +509,8 @@ async function keurerUndo() {
         keurerUndoBusy = false;
     }
 
-    setTimeout(() => { keurerShowCard(); }, 320);
+    // De foto komt terug uit de richting waar hij heen ging (houden links, prullenmand rechts)
+    keurerShowCard(returned ? { from: entry.decision } : {});
 }
 
 // ==================== VERPLAATS MODAL ====================
@@ -782,14 +818,15 @@ function keurerCloseMoveModal() {
     if (searchEl) searchEl.value = '';
     const clearBtn = document.getElementById('keurer-move-search-clear');
     if (clearBtn) clearBtn.style.display = 'none';
-    // Kaart terugzetten als annuleren
-    keurerShowCard();
+    // Kaart terugzetten als annuleren: hij zakt terug op zijn plek
+    keurerShowCard({ arrive: true });
 }
 
 async function keurerConfirmMove() {
     if (keurerMoveBusy || !keurerMoveSelectedFolder) return;
     if (keurerIndex >= keurerFileQueue.length) return;
     keurerMoveBusy = true;
+    await keurerDecisionChain;
 
     const file = keurerFileQueue[keurerIndex];
     const btn  = document.getElementById('btn-keurer-confirm-move');
@@ -824,7 +861,7 @@ async function keurerConfirmMove() {
         const newName = (movedData.dest_path || '').split('/').pop();
         const renamed = newName && newName !== file.name ? ` als ${newName}` : '';
         showToast('Verplaatst', `Bestand verplaatst naar ${destFolder.split('/').pop()}${renamed}`, 'success');
-        keurerShowCard();
+        keurerShowCard({ arrive: true });
 
     } catch (e) {
         btn.disabled = false;
@@ -984,9 +1021,11 @@ function keurerSetupDrag(card) {
         } else if (currentX > 100) {
             keurerAnimateAndDecide('delete');
         } else {
-            // Terugveren
-            card.style.transition = 'transform 0.32s cubic-bezier(0.34,1.56,0.64,1)';
-            card.style.transform  = 'translateX(0) translateY(0) rotate(0) scale(1)';
+            // Terugveren vanaf waar de hand losliet (snappy-veer)
+            const from = card.style.transform || 'none';
+            card.style.transition = '';
+            card.style.transform = '';
+            Motion.animate(card, [{ transform: from }, { transform: 'none' }], { spring: 'snappy', key: 'drag' });
             ['kc-overlay-keep', 'kc-overlay-delete', 'kc-overlay-move', 'kc-overlay-undo'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.style.opacity = '0';
@@ -1085,6 +1124,9 @@ document.addEventListener('keydown', function (e) {
     }
 
     if (keurerPreviewOpen) return;
+    // De knop van de toets geeft even mee: je ziet welke beslissing je nam
+    const pressed = { ArrowLeft: '.keurer-btn-keep', ArrowRight: '.keurer-btn-delete', ArrowUp: '.keurer-btn-move' }[e.key];
+    if (pressed) MediaMotion.press(document.querySelector(`#keurer-action-buttons ${pressed}`));
     if (e.key === 'ArrowLeft')        { e.preventDefault(); keurerDecideKeep(); }
     else if (e.key === 'ArrowRight')  { e.preventDefault(); keurerDecideDelete(); }
     else if (e.key === 'ArrowUp')     { e.preventDefault(); keurerDecideMove(); }
