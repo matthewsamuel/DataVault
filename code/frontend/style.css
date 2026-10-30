@@ -12042,8 +12042,9 @@ button.otd-settings-icon:hover {
 }
 
 .map-header,
-.map-filters {
-    /* Kop en filters op dezelfde plek als op de andere pagina's; de kaart zelf blijft breed */
+.map-filters,
+.map-layers {
+    /* Kop, filters en de Tijdlijn-rij op dezelfde plek als op de andere pagina's; de kaart zelf blijft breed */
     width: 100%;
     max-width: calc(var(--page-max) - 2 * var(--page-gutter));
     margin-inline: auto;
@@ -13497,7 +13498,11 @@ a.act-title:focus-visible {
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-sm);
-    margin-bottom: var(--space-md);
+}
+
+.map-layers[hidden],
+.map-layers [hidden] {
+    display: none;
 }
 
 .map-layers-title {

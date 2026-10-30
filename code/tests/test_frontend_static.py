@@ -175,3 +175,11 @@ def test_the_export_picker_accepts_every_suffix_the_server_takes():
     accept = set(m.group(1).split(","))
     for suffix in EXPORT_SUFFIXES:
         assert "." + suffix.rsplit(".", 1)[-1] in accept, suffix
+
+
+def test_date_only_activity_has_no_made_up_time_and_the_tijdlijn_row_is_in_the_column():
+    activity = (FRONTEND / "activity.js").read_text(encoding="utf-8")
+    assert "d.alleen_datum || d.hele_dag" in activity and "'Hele dag'" in activity
+    css = (FRONTEND / "style.css").read_text(encoding="utf-8")
+    assert re.search(r"\.map-header,\s*\.map-filters,\s*\.map-layers\s*\{[^}]*max-width", css)
+    assert re.search(r"\.map-layers\[hidden\],\s*\.map-layers \[hidden\]\s*\{\s*display: none", css)
