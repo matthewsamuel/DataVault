@@ -351,9 +351,11 @@ def skipped_note(raws: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
     skipped = (latest.get("stats") or {}).get("skipped") if latest else None
     if not skipped or not isinstance(skipped, list):
         return None
-    shown = "; ".join(str(s) for s in skipped[:3])
-    more = f" en nog {len(skipped) - 3}" if len(skipped) > 3 else ""
-    return {"tone": "warning", "text": f"Niet alles uit je laatste export is ingelezen. Overgeslagen: {shown}{more}.",
+    # Only the file names: the reasons ('name: error') can be a parser's English message
+    names = list(dict.fromkeys(str(s).split(": ", 1)[0] for s in skipped))
+    shown = ", ".join(names[:3])
+    more = f" en nog {len(names) - 3}" if len(names) > 3 else ""
+    return {"tone": "warning", "text": f"Niet alles uit je laatste export is ingelezen. Niet leesbaar: {shown}{more}.",
             "path": latest["path"]}
 
 
