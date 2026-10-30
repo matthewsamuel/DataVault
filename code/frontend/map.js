@@ -538,17 +538,20 @@
         const btn = $('btn-show-on-map');
         if (!btn) return;
         const known = file.has_gps === true || typeof file.lat === 'number';
-        if (known) { btn.hidden = false; return; }
-        btn.hidden = true;
-        // Zonder GPS toch even vragen: misschien is er een plek geschat uit de Tijdlijn
+        btn.hidden = !known;
         if (!['photo', 'video'].includes(file.type) || !file.path) return;
-        fetchJSON(`${API_BASE}/api/map/locate?path=${encodeURIComponent(file.path)}`).then(found => {
+        // Plaats, camera en afmetingen voor de gegevens, en zonder GPS misschien een plek
+        // geschat uit de Tijdlijn (één keer per bestand gevraagd)
+        const answer = file.map_locate || fetchJSON(`${API_BASE}/api/map/locate?path=${encodeURIComponent(file.path)}`);
+        file.map_locate = answer;
+        Promise.resolve(answer).then(found => {
             file.has_gps = found.has_gps;
             if (found.has_gps) { file.lat = found.lat; file.lon = found.lon; file.map_id = found.id; }
             if (viewerFile() !== file) return;
             btn.hidden = !found.has_gps && !found.inferred;
+            if (typeof viewerAddDetails === 'function') viewerAddDetails(file, found);
             if (found.inferred) { file.map_estimate = found; showEstimate(found); }
-        }).catch(() => { });
+        }).catch(() => { file.map_locate = null; });
     };
 
     // 'Locatie (geschat)' in de gegevens van de viewer: alleen in DataVault, nooit in het bestand

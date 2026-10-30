@@ -622,6 +622,11 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - **Pasha en je berichten**: Pasha leest je berichten alleen van de bronnen die je zelf aanzet
   (standaard alles uit), en dan alleen de paar berichten die bij je vraag passen.
 
+### Afwerking: één rustig geheel
+- **Viewer met meer gegevens**: naast de foto staan nu ook de plaats (offline opgezocht, bijvoorbeeld
+  'Lissabon, Portugal'), de camera en de afmetingen in pixels en megapixels. De datum is de
+  opnamedatum als die bekend is, met de bron er klein onder; het pad staat onderaan.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden

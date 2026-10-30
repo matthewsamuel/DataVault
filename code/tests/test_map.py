@@ -127,6 +127,23 @@ def test_osm_tiles_are_off_until_the_user_switches_them_on(client):
 def test_locate_gives_the_position_of_one_file(indexed, config):
     r = indexed.get("/api/map/locate", params={"path": str(config.VAULT_ROOT / "RAW/2019/zomer vakantie/IMG_0002.JPG")})
     assert r.status_code == 200 and r.json()["has_gps"] is True and abs(r.json()["lat"] - 43.7) < 0.01
-    no_gps = indexed.get("/api/map/locate", params={"path": str(config.VAULT_ROOT / "RAW/2021/🎉 feest/no exif.jpg")})
-    assert no_gps.json() == {"has_gps": False}
+    # The viewer's details: an offline place name, the capture date, pixel size and camera
+    found = r.json()
+    assert found["place"].endswith(", Frankrijk")   # (the nearest larger city in the data)
+    assert found["details"]["width"] == 800 and found["details"]["height"] == 600
+    assert found["details"]["camera"] == "Canon EOS 80D" and found["details"]["taken_source"] == "exif"
+    no_gps = indexed.get("/api/map/locate", params={"path": str(config.VAULT_ROOT / "RAW/2021/🎉 feest/no exif.jpg")}).json()
+    assert no_gps["has_gps"] is False and "lat" not in no_gps and "place" not in no_gps
+    assert no_gps["details"]["camera"] is None
     assert indexed.get("/api/map/locate", params={"path": "/etc/passwd"}).status_code == 403
+
+
+def test_describe_names_a_position_in_dutch_offline():
+    from backend import places
+    assert places.describe(52.37, 4.89) == "Amsterdam, Nederland"
+    assert places.describe(41.9, 12.49) == "Rome, Italië"
+    # A harbour just outside the simplified coast line still gets its country
+    assert places.describe(38.72, -9.14) == "Lissabon, Portugal"
+    # Far from any larger city: the country alone; at sea: nothing
+    assert places.describe(68.42, 27.41) == "Finland"
+    assert places.describe(0.0, -30.0) is None

@@ -165,19 +165,31 @@ def items(ids: str = Query(..., description="comma-separated media ids")) -> Dic
 
 @router.get("/locate")
 def locate(path: str = Query(..., min_length=1)) -> Dict[str, Any]:
-    """{has_gps, id?, lat?, lon?} for one file; the path is checked like every path from a request."""
+    """
+    {has_gps, id?, lat?, lon?, place?, details?} for one file; the path is checked like every
+    path from a request. details has what the viewer shows next to the photo: capture date,
+    pixel size and camera from the index. place is an offline name ('Lissabon, Portugal').
+    """
     from backend.paths import resolve_in_vault
     resolved = str(resolve_in_vault(path, config))
     with db._connect() as conn:
-        row = conn.execute("SELECT id, lat, lon FROM media WHERE path = ? AND missing = 0", (resolved,)).fetchone()
+        row = conn.execute("SELECT id, lat, lon, taken, taken_source, width, height, camera_make, camera_model "
+                           "FROM media WHERE path = ? AND missing = 0", (resolved,)).fetchone()
     if row is None:
         return {"has_gps": False}
+    make, model = row[7] or "", row[8] or ""
+    camera = model if make and model.lower().startswith(make.lower()) else " ".join(p for p in (make, model) if p)
+    details = {"taken": row[3], "taken_source": row[4], "width": row[5], "height": row[6], "camera": camera or None}
     if row[1] is None:
         # No GPS in the file: perhaps a position estimated from the location history ('Locatie (geschat)')
         from backend.datagatherer import geotag
         estimate = geotag.inferred(db, row[0])
-        return {"has_gps": False, "id": row[0], "inferred": estimate} if estimate else {"has_gps": False}
-    return {"has_gps": True, "id": row[0], "lat": row[1], "lon": row[2]}
+        if estimate:
+            return {"has_gps": False, "id": row[0], "inferred": estimate, "details": details}
+        return {"has_gps": False, "id": row[0], "details": details}
+    from backend import places
+    return {"has_gps": True, "id": row[0], "lat": row[1], "lon": row[2], "place": places.describe(row[1], row[2]),
+            "details": details}
 
 
 @router.get("/settings")

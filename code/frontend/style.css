@@ -3102,12 +3102,26 @@ a.breadcrumb-item:hover {
     line-height: var(--lh-snug);
 }
 
-/* Het pad (de eerste waarde) is een technische waarde */
-.metadata-grid > .metadata-value:nth-child(2) {
+/* Het pad is een technische waarde: mono, en afbreken bij de / (pathNodes) vóór midden in een woord */
+.metadata-value.metadata-path {
     font-family: var(--font-mono);
     font-size: var(--fs-2xs);
-    word-break: break-all;
+    line-height: var(--lh-normal);
+    overflow-wrap: anywhere;
+    word-break: normal;
     color: var(--text-secondary);
+}
+
+.metadata-path .copy-btn {
+    margin-top: var(--space-xs);
+}
+
+/* Een stille toevoeging achter een waarde: de bron van een datum, de grootte, megapixels */
+.metadata-note {
+    display: block;
+    margin-top: 2px;
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
 }
 
 #modal-viewer .metadata-label {
@@ -3118,7 +3132,8 @@ a.breadcrumb-item:hover {
     color: var(--on-media);
 }
 
-#modal-viewer .metadata-grid > .metadata-value:nth-child(2) {
+#modal-viewer .metadata-value.metadata-path,
+#modal-viewer .metadata-note {
     color: var(--on-media-muted);
 }
 
@@ -3170,16 +3185,25 @@ a.breadcrumb-item:hover {
     border-left: 1px solid var(--media-border);
 }
 
+/* Twee kolommen in de smalle kolom: Vergelijkbaar en Finder naast elkaar, Verplaatsen over de
+   hele breedte; met 'Op kaart tonen' erbij een nette 2 x 2 */
 .viewer-actions {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: var(--space-sm);
     width: 100%;
 }
 
-/* Drie knoppen (Vergelijkbaar, Finder, Verplaatsen) in de smalle kolom: twee rijen */
 .viewer-actions .btn {
-    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.viewer-actions #btn-move-file {
+    grid-column: span 2;
+}
+
+.viewer-actions:has(#btn-show-on-map:not([hidden])) #btn-move-file {
+    grid-column: auto;
 }
 
 #modal-viewer .btn-secondary {

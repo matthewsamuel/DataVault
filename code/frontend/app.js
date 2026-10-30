@@ -1323,29 +1323,65 @@ function renderViewerFile() {
 }
 
 // Alleen echte gegevens: de datum van het bestand (of de opnamedatum uit de tijdlijn) en
-// de Shows-waardering als er echt over dit bestand is gestemd
+// de Shows-waardering als er echt over dit bestand is gestemd. Plaats, camera en afmetingen
+// komen uit de bibliotheek zodra /api/map/locate antwoordt (viewerAddDetails, via map.js).
 function viewerMetadata(file) {
     const rows = [];
     const add = (label, ...value) => rows.push(
         createEl('span', { class: 'metadata-label', text: label }),
         createEl('span', { class: 'metadata-value' }, ...value));
 
-    add('Pad', createEl('span', { title: file.path }, ...pathNodes(archivePath(file.path))), ' ',
-        createEl('button', { class: 'copy-btn', text: 'Kopieer', title: 'Kopieer het volledige pad', onClick: () => copyToClipboard(file.path) }));
-    if (typeof file.size === 'number') add('Grootte', formatBytes(file.size));
     if (typeof file.timestamp === 'number' && file.timestamp > 0) {
-        add('Datum', new Date(file.timestamp * 1000).toLocaleString('nl-NL'));
-        const source = { exif: 'EXIF (opnamedatum)', video: 'video (opnamedatum)', birthtime: 'aanmaakdatum bestand', mtime: 'wijzigingsdatum bestand' }[file.date_source];
-        if (source) add('Bron', source);
+        const source = { exif: 'opnamedatum', video: 'opnamedatum', birthtime: 'aanmaakdatum van het bestand', mtime: 'wijzigingsdatum van het bestand' }[file.date_source];
+        add('Datum', formatTimestampNl(file.timestamp), source ? createEl('span', { class: 'metadata-note', text: source }) : null);
     } else if (typeof file.modified === 'number' && file.modified > 0) {
-        add('Gewijzigd', new Date(file.modified * 1000).toLocaleString('nl-NL'));
+        add('Gewijzigd', formatTimestampNl(file.modified));
     }
-    add('Soort', { photo: 'Foto', video: 'Video', audio: 'Audio', other: 'Ander bestand' }[file.type] || file.type);
+    add('Soort', { photo: 'Foto', video: 'Video', audio: 'Audio', other: 'Ander bestand' }[file.type] || file.type,
+        typeof file.size === 'number' ? createEl('span', { class: 'metadata-note mono', text: formatBytes(file.size) }) : null);
     if (typeof file.rating === 'number') {
         const votes = typeof file.votes === 'number' ? ` (${file.votes} ${file.votes === 1 ? 'stem' : 'stemmen'})` : '';
         add('Shows-waardering', createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), `${file.rating}${votes}`);
     }
+    rows.push(createEl('span', { class: 'metadata-label', text: 'Pad' }),
+        createEl('span', { class: 'metadata-value metadata-path' },
+            createEl('span', { title: file.path }, ...pathNodes(archivePath(file.path))),
+            createEl('button', { class: 'copy-btn', text: 'Kopieer', title: 'Kopieer het volledige pad', onClick: () => copyToClipboard(file.path) })));
     return createEl('div', { class: 'metadata-grid' }, ...rows);
+}
+
+// Een tijdstip (seconden) als '15 juni 2021, 11:20'
+function formatTimestampNl(seconds) {
+    return new Date(seconds * 1000).toLocaleString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// Plaats, camera en afmetingen uit de bibliotheek (antwoord van /api/map/locate) boven het
+// pad in de gegevens van de viewer zetten; alleen wat bekend is
+function viewerAddDetails(file, found) {
+    const grid = document.querySelector('#modal-metadata .metadata-grid');
+    if (!grid || viewerFile() !== file || grid.querySelector('.metadata-details')) return;
+    const d = found.details || {};
+    // Alleen een wijzigingsdatum bekend in de map? Dan de opnamedatum uit de bibliotheek
+    const changed = [...grid.querySelectorAll('.metadata-label')].find(el => el.textContent === 'Gewijzigd');
+    if (changed && typeof d.taken === 'number' && d.taken > 0) {
+        const source = { exif: 'opnamedatum', video: 'opnamedatum' }[d.taken_source];
+        changed.textContent = 'Datum';
+        changed.nextElementSibling.replaceChildren(formatTimestampNl(d.taken),
+            source ? createEl('span', { class: 'metadata-note', text: source }) : '');
+    }
+    const rows = [];
+    const add = (label, ...value) => rows.push(
+        createEl('span', { class: 'metadata-label metadata-details', text: label }),
+        createEl('span', { class: 'metadata-value' }, ...value));
+    if (found.place) add('Plaats', found.place);
+    if (d.camera) add('Camera', d.camera);
+    if (d.width && d.height) {
+        const mp = d.width * d.height / 1e6;
+        add('Afmetingen', createEl('span', { class: 'mono', text: `${d.width} × ${d.height}` }),
+            mp >= 0.1 ? createEl('span', { class: 'metadata-note mono', text: `${formatNumberNl(mp, 1)} MP` }) : null);
+    }
+    const before = grid.querySelector('.metadata-path');
+    rows.forEach(el => grid.insertBefore(el, before ? before.previousElementSibling : null));
 }
 
 function closeModal() {

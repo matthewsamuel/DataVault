@@ -150,3 +150,70 @@ def find(name: str) -> Optional[Place]:
     dlat = CITY_RADIUS_KM / 111.0
     dlon = CITY_RADIUS_KM / (111.0 * max(0.2, math.cos(math.radians(lat))))
     return Place("city", pname, [lat - dlat, lon - dlon, lat + dlat, lon + dlon])
+
+
+# Dutch display names for countries and cities that have a Dutch spelling (the aliases above
+# are folded; these keep the accents)
+_DUTCH_ACCENTS = {
+    "belgie": "België", "italie": "Italië", "tsjechie": "Tsjechië", "roemenie": "Roemenië",
+    "kroatie": "Kroatië", "slovenie": "Slovenië", "servie": "Servië", "albanie": "Albanië",
+    "oekraine": "Oekraïne", "brazilie": "Brazilië", "argentinie": "Argentinië", "tunesie": "Tunesië",
+    "indonesie": "Indonesië", "maleisie": "Maleisië", "australie": "Australië", "jordanie": "Jordanië",
+    "israel": "Israël", "groot-brittannie": "Groot-Brittannië", "venetie": "Venetië", "genève": "Genève",
+}
+DESCRIBE_CITY_KM = 40.0
+
+
+def _dutch(aliases: Dict[str, str]) -> Dict[str, str]:
+    """English name -> the first Dutch alias for it, written with capitals and accents."""
+    names: Dict[str, str] = {}
+    for alias, english in aliases.items():
+        if english in names or alias in ("vs", "usa", "amerika", "engeland", "schotland", "mnchen", "praag "):
+            continue
+        shown = _DUTCH_ACCENTS.get(alias) or " ".join(w[:1].upper() + w[1:] for w in alias.split(" "))
+        names[english] = "-".join(p[:1].upper() + p[1:] for p in shown.split("-")) if "-" in shown else shown
+    return names
+
+
+def _nearest_coast(lat: float, lon: float, max_km: float = 30.0) -> Optional[str]:
+    """The country whose outline passes closest (within max_km): the simplified outlines
+    put harbours and beaches just outside the coast line."""
+    pad = max_km / 111.0 * 2
+    cos = max(0.2, math.cos(math.radians(lat)))
+    best, best_km = None, max_km
+    for c in _countries:
+        for poly, (s, w, n, e) in c["polygons"]:
+            if not (s - pad <= lat <= n + pad and w - pad / cos <= lon <= e + pad / cos):
+                continue
+            for x, y in poly[0]:
+                km = math.hypot(y - lat, (x - lon) * cos) * 111.0
+                if km < best_km:
+                    best, best_km = c["name"], km
+    return best
+
+
+def describe(lat: float, lon: float) -> Optional[str]:
+    """
+    A short Dutch name for a position, offline: the nearest larger city within
+    DESCRIBE_CITY_KM and the country it lies in ('Lissabon, Portugal'), the country
+    alone, or None at sea or outside the data.
+    """
+    _load()
+    country = None
+    for c in _countries:
+        if Place("country", c["name"], [-90, -180, 90, 180], c["polygons"]).contains(lat, lon):
+            country = c["name"]
+            break
+    if country is None:
+        country = _nearest_coast(lat, lon)
+    best, best_km = None, DESCRIBE_CITY_KM
+    cos = max(0.2, math.cos(math.radians(lat)))
+    for pname, plat, plon, _capital in _places:
+        km = math.hypot(plat - lat, (plon - lon) * cos) * 111.0
+        if km < best_km:
+            best, best_km = pname, km
+    country_nl = _dutch(COUNTRY_ALIASES).get(country, country) if country else None
+    city_nl = _dutch(CITY_ALIASES).get(best, best) if best else None
+    if city_nl and country_nl:
+        return f"{city_nl}, {country_nl}"
+    return country_nl or city_nl
