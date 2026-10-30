@@ -30,7 +30,7 @@ from backend.jobs import JobManager
 from backend.job_types import build_job_types
 from backend.routes import (
     folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, albums,
-    series, datagatherer, search, geo, messages, history,
+    series, datagatherer, search, geo, messages, history, ui,
 )
 from backend.datagatherer import daemon as gather_daemon, jobs as gather_jobs, registry as gather_registry
 from backend.routes import backup as backup_routes
@@ -210,6 +210,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         backup_routes.init_router(config, app.state.auto_backup)
         search.init_router(config, db, job_manager)
         geo.init_router(config, db)
+        ui.init_router(config, db)
         export_routes.init_router(config, db)
         messages.init_router(config, db)
         history.init_router(config, db, job_manager)
@@ -248,6 +249,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.include_router(backup_routes.router, prefix="/api/backup", tags=["backup"])
     app.include_router(search.router, prefix="/api/search", tags=["search"], dependencies=vault)
     app.include_router(geo.router, prefix="/api/map", tags=["map"], dependencies=vault)
+    app.include_router(ui.router, prefix="/api/ui", tags=["ui"], dependencies=vault)
     app.include_router(export_routes.router, prefix="/api/export", tags=["export"], dependencies=vault)
     app.include_router(messages.router, prefix="/api/messages", tags=["messages"], dependencies=vault)
     app.include_router(history.router, tags=["history"], dependencies=vault)

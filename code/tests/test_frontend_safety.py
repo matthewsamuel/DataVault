@@ -115,4 +115,11 @@ def test_the_checker_catches_the_old_patterns():
 def test_dom_helpers_load_before_the_app():
     index = (FRONTEND / "index.html").read_text(encoding="utf-8")
     scripts = [s.split("?")[0] for s in re.findall(r'<script src="([^"]+)"', index)]
+    # motion.js runs first, in <head>, only to set html[data-motion] before the first paint. It
+    # makes no request of its own: it talks to the server through api.js's fetchJSON, after
+    # DOMContentLoaded, so the session token is always added.
+    if scripts and scripts[0] == "motion.js":
+        motion = (FRONTEND / "motion.js").read_text(encoding="utf-8")
+        assert not re.search(r"(?<![\w.])fetch\(|XMLHttpRequest", motion), "motion.js must use window.fetchJSON"
+        scripts = scripts[1:]
     assert scripts[:2] == ["api.js", "dom.js"], scripts

@@ -87,7 +87,21 @@ function setTheme(theme, skipSave = false) {
     if (!skipSave) {
         try { localStorage.setItem('theme', theme); } catch (_) { /* alleen voor deze sessie */ }
     }
+    // Een keuze van de gebruiker: het nieuwe thema loopt als een cirkel uit vanaf de knop
+    // (of het keuzerondje) waarmee hij koos. Bij het laden van de pagina: meteen.
+    const before = document.documentElement.getAttribute('data-theme');
+    const after = theme === 'auto' ? null : theme;
+    if (!skipSave && before !== after && Motion.full()) {
+        const from = document.activeElement && document.activeElement !== document.body
+            ? document.activeElement : document.getElementById('theme-button');
+        const r = from.getBoundingClientRect();
+        Motion.viewTransition(() => applyTheme(theme), { kind: 'theme', origin: { x: r.left + r.width / 2, y: r.top + r.height / 2 } });
+        return;
+    }
+    applyTheme(theme);
+}
 
+function applyTheme(theme) {
     const html = document.documentElement;
 
     if (theme === 'auto') {
@@ -196,8 +210,21 @@ const VIEW_TITLES = {
 // Het scherm waar een melding bij hoort: info en succes blijven niet hangen op een ander scherm
 let activeMainView = 'home';
 
+// Het menu-element van een onderdeel (Berichten en Activiteit horen bij DataGatherer)
+function navEntryFor(view) {
+    return [...document.querySelectorAll('.top-nav [data-view]')].find(tab =>
+        tab.dataset.view === view || (tab.dataset.also || '').split(' ').includes(view)) || null;
+}
+
+// Hoeveel de groene streep binnen een menu-element begint (zie .nav-tab.active::after)
+function navIndicatorInset(tab) {
+    return Motion.px(tab.classList.contains('nav-icon-btn') ? '--space-sm' : '--space-md');
+}
+
 function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
+    const previousView = activeMainView;
+    const previousTab = document.querySelector('.top-nav [data-view].active');
     if (view !== activeMainView) {
         document.querySelectorAll('#toast-container .toast[data-view]').forEach(t => {
             if (t.dataset.view !== view) { clearTimeout(t._hideTimer); t.remove(); }
@@ -231,6 +258,19 @@ function switchMainView(view) {
 
     // Show/hide sidebar
     document.getElementById('sidebar').style.display = view === 'viewer' ? 'flex' : 'none';
+
+    // Beweging (docs/MOTION.md): de groene streep glijdt naar het nieuwe onderdeel en de pagina
+    // komt binnen vanuit de richting van het menu. Alles is synchroon klaar; alleen de
+    // weergave beweegt, dus code die na switchMainView meteen verder werkt, merkt er niets van.
+    if (view !== previousView) {
+        const nextTab = navEntryFor(view);
+        Motion.glide(previousTab, nextTab, { inset: navIndicatorInset });
+        let direction = 0;
+        if (previousTab && nextTab && previousTab !== nextTab) {
+            direction = Math.sign(nextTab.getBoundingClientRect().left - previousTab.getBoundingClientRect().left);
+        }
+        Motion.enterPage(document.getElementById(`section-${view}`), { direction });
+    }
 
     // Clear search
     document.getElementById('global-search').value = '';
@@ -1022,6 +1062,7 @@ function createListMeta(file) {
 function createMediaCard(file) {
     const card = document.createElement('div');
     card.className = 'media-card thumb-tile';
+    card.dataset.motionKey = file.path;   // de viewer groeit hieruit en krimpt hierheen terug
     card.onclick = () => openMediaModal(file);
     card.setAttribute('role', 'button');
     card.setAttribute('aria-label', file.name);
@@ -1237,10 +1278,64 @@ function openViewer(items, index, { onRemoved = null, more = null } = {}) {
     viewer.moreDone = {};
     renderViewerFile();
     const modal = document.getElementById('modal-viewer');
+    const wasOpen = modal.classList.contains('active');
     modal.classList.add('active');
+    if (!wasOpen) viewerMorph('open');
     // Focus uit een bedekt veld halen (bv. de chat-invoer), anders typt de gebruiker daar blind verder
     const focused = document.activeElement;
     if (focused && focused !== document.body && !modal.contains(focused)) focused.blur();
+}
+
+// ---------- Beweging: de foto groeit uit zijn miniatuur (en krimpt terug) ----------
+// De miniatuur is wat de gebruiker net aanklikte (of met Enter opende), of een tegel met
+// data-motion-key gelijk aan het pad van het bestand. Zonder miniatuur in beeld: gewoon het
+// venster dat invaagt. Zie Motion.sharedElement en docs/MOTION.md.
+let viewerSourceEl = null;
+document.addEventListener('pointerdown', (e) => { viewerSourceEl = e.target.closest ? e.target.closest('img, [data-motion-key]') : null; }, true);
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') viewerSourceEl = document.activeElement;
+}, true);
+
+let viewerMorphFrom = null;     // {file, thumb}: waar de geopende foto vandaan kwam
+
+function viewerThumbFor(file, opening) {
+    if (!file) return null;
+    const keyed = [...document.querySelectorAll('[data-motion-key]')].find(el => el.dataset.motionKey === file.path
+        && !el.closest('#modal-viewer'));
+    const usable = img => (img && img.tagName === 'IMG' && img.naturalWidth > 0 && img.isConnected ? img : null);
+    if (keyed) {
+        const img = usable(keyed.tagName === 'IMG' ? keyed : keyed.querySelector('img'));
+        if (img) return img;
+    }
+    if (!opening) return viewerMorphFrom && viewerMorphFrom.file === file ? usable(viewerMorphFrom.thumb) : null;
+    const src = viewerSourceEl && viewerSourceEl.isConnected && !viewerSourceEl.closest('#modal-viewer') ? viewerSourceEl : null;
+    if (!src) return null;
+    return usable(src.tagName === 'IMG' ? src : src.querySelector('img'));
+}
+
+function viewerMorph(direction) {
+    if (!Motion.full()) return;
+    const file = viewerFile();
+    if (!file || file.type === 'audio' || file.type === 'other') return;
+    const big = document.getElementById('modal-image') || document.querySelector('#modal-body video');
+    const thumb = viewerThumbFor(file, direction === 'open');
+    if (direction === 'open') viewerMorphFrom = thumb ? { file, thumb } : null;
+    if (!big || !thumb) return;
+    if (direction === 'open') {
+        // Nog niet geladen: de plek uit de verhouding van de miniatuur en het vak van de viewer
+        const body = document.getElementById('modal-body').getBoundingClientRect();
+        let rect = null;
+        if (!(big.naturalWidth > 0)) {
+            const aspect = thumb.naturalWidth / thumb.naturalHeight;
+            const maxH = Math.min(body.height, window.innerHeight - 160);
+            let w = body.width, h = w / aspect;
+            if (h > maxH) { h = maxH; w = h * aspect; }
+            rect = { left: body.left + (body.width - w) / 2, top: body.top + (body.height - h) / 2, width: w, height: h };
+        }
+        Motion.sharedElement(thumb, big, { direction: 'open', rect, src: thumb.currentSrc || thumb.src });
+    } else {
+        Motion.sharedElement(thumb, big, { direction: 'close', src: big.tagName === 'IMG' ? (big.currentSrc || big.src) : (thumb.currentSrc || thumb.src) });
+    }
 }
 
 // De bestanden zoals ze in de Files-grid staan (zonder mappen), in dezelfde volgorde
@@ -1420,6 +1515,7 @@ function viewerAddDetails(file, found) {
 
 function closeModal() {
     stopViewerMedia();
+    viewerMorph('close');
     document.getElementById('modal-viewer').classList.remove('active');
     viewer.items = [];
     viewer.index = -1;
@@ -1975,11 +2071,15 @@ function showToast(title, message, type = 'info', action = null) {
     const container = document.getElementById('toast-container');
     const duration = TOAST_MS[type] || TOAST_MS.info;
     // Dezelfde melding nog in beeld (bijv. tien mislukte miniaturen): niet opstapelen, alleen langer tonen
-    const same = [...container.children].find(t => t.dataset.title === String(title) && t.dataset.message === String(message));
+    const same = [...container.children].find(t => !t._leaving && t.dataset.title === String(title) && t.dataset.message === String(message));
     if (same) {
         same.style.opacity = '1';
         clearTimeout(same._hideTimer);
         same._hideTimer = setTimeout(() => hideToast(same), duration);
+        restartToastTimer(same);
+        // Dezelfde melding nog eens: een kort knikje in plaats van een tweede melding
+        Motion.animate(same, [{ transform: 'none' }, { transform: `translate3d(${-Motion.px('--motion-distance-sm', 6)}px, 0, 0)` }, { transform: 'none' }],
+            { spring: 'snappy', key: 'nudge', calm: false });
         return;
     }
     const toast = document.createElement('div');
@@ -1995,8 +2095,10 @@ function showToast(title, message, type = 'info', action = null) {
             // Het soort melding zit in het icoon en de balk links; de titel blijft rustig
             createEl('i', { class: `fas ${TOAST_ICONS[type] || TOAST_ICONS.info} toast-icon`, 'aria-hidden': 'true' }),
             createEl('strong', { text: title }),
-            createEl('button', { onClick: () => toast.remove(), 'aria-label': 'Melding sluiten', title: 'Sluiten' }, '\u00d7')),
-        createEl('div', { class: 'toast-body', text: message }));
+            createEl('button', { onClick: () => hideToast(toast), 'aria-label': 'Melding sluiten', title: 'Sluiten' }, '\u00d7')),
+        createEl('div', { class: 'toast-body', text: message }),
+        createEl('div', { class: 'toast-timer', 'aria-hidden': 'true' }));
+    toast.style.setProperty('--toast-ms', `${duration}ms`);
     if (action) {
         toast.append(createEl('div', { class: 'toast-actions' },
             createEl('button', {
@@ -2009,13 +2111,37 @@ function showToast(title, message, type = 'info', action = null) {
 
     // Met de muis erop blijft hij staan, zodat een lange melding uit te lezen is
     toast._hideTimer = setTimeout(() => hideToast(toast), duration);
-    toast.addEventListener('mouseenter', () => { clearTimeout(toast._hideTimer); toast.style.opacity = '1'; });
-    toast.addEventListener('mouseleave', () => { toast._hideTimer = setTimeout(() => hideToast(toast), duration); });
+    toast.addEventListener('mouseenter', () => { if (!toast._leaving) { clearTimeout(toast._hideTimer); toast.style.opacity = '1'; } });
+    toast.addEventListener('mouseleave', () => {
+        if (toast._leaving) return;
+        clearTimeout(toast._hideTimer);
+        toast._hideTimer = setTimeout(() => hideToast(toast), duration);
+        restartToastTimer(toast);
+    });
 }
 
+// De leeglopende lijn opnieuw vol: de melding blijft weer de hele tijd staan
+function restartToastTimer(toast) {
+    const timer = toast.querySelector('.toast-timer');
+    if (!timer) return;
+    timer.style.animation = 'none';
+    void timer.offsetWidth;   // de animatie echt opnieuw laten beginnen
+    timer.style.animation = '';
+}
+
+// Weg naar rechts, versnellend; de meldingen eronder schuiven daarna op hun veer omhoog
 function hideToast(toast) {
-    toast.style.opacity = '0';
-    toast._hideTimer = setTimeout(() => toast.remove(), 300);
+    if (!toast || toast._leaving) return;
+    toast._leaving = true;
+    clearTimeout(toast._hideTimer);
+    const container = toast.parentElement;
+    const leave = Motion.exit(toast, {
+        to: { opacity: 0, transform: `translate3d(${Motion.px('--motion-distance-lg', 24) * 1.5}px, 0, 0) scale(0.96)` },
+    });
+    leave.finished.then(() => {
+        const others = container ? [...container.children].filter(t => t !== toast) : [];
+        Motion.flip(others, () => toast.remove());
+    }, () => toast.remove());
 }
 
 // Eén manier om een mislukt verzoek te melden (FRONTEND-ERR-1): de melding van de server in
@@ -2599,6 +2725,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     loadFolders();
     switchMainView('home');
+    // De eerste indruk: Home rijst rustig op, kop eerst (docs/MOTION.md)
+    Motion.enterPage(document.getElementById('section-home'));
     fetchHomeWidgets();
     loadChatModels();
     checkServerStatus();

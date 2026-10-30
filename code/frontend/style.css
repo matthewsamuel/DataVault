@@ -92,12 +92,51 @@
     --icon-2xl: 32px;
     --icon-3xl: 48px;
 
-    /* Beweging (prefers-reduced-motion zet ze op nul, zie onder) */
-    --duration-fast: 150ms;
-    --duration-base: 200ms;
-    --duration-slow: 250ms;
+    /* Beweging: de taal staat in docs/MOTION.md, de helpers in motion.js.
+       html[data-motion] (Volledig / Rustig / Uit, Instellingen > Beweging) en
+       prefers-reduced-motion stemmen ze af, zie onder het tokenblok. */
+    /* Duur: 1 micro (indrukken, kleur), 2 klein (chips, schakelaars), 3 standaard (menu's,
+       vertrek), 4 binnenkomst (vensters, pagina), 5 groot (gedeeld element), 6 sfeer (tellers) */
+    --dur-instant: 0ms;
+    --dur-1: 90ms;
+    --dur-2: 140ms;
+    --dur-3: 200ms;
+    --dur-4: 280ms;
+    --dur-5: 420ms;
+    --dur-6: 640ms;
+    /* Curves: standard voor alles wat binnen beeld verandert, emphasized voor binnenkomen,
+       exit (versnellend) voor vertrekken */
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+    --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
     --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
     --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+    /* Veren (massa 1), bemonsterd met linear(); elk met de duur waarin ze tot rust komen.
+       snappy k420 c34: bediening, indicatoren. smooth k190 c25: pagina's en vensters.
+       bouncy k320 c20 (12% doorschieten): alleen voor een beloning (vinkje, winnaar).
+       gentle k150 c24: grote vlakken en het gedeelde element miniatuur -> viewer. */
+    --spring-snappy: linear(0, 0.054, 0.156, 0.294, 0.435, 0.564, 0.665, 0.759, 0.833, 0.884, 0.927, 0.957, 0.978, 0.991, 0.999, 1.004, 1.007, 1.007, 1.007, 1.006, 1.006, 1.005, 1.004, 1.003, 1.002, 1.001, 1.001, 1.001, 1);
+    --spring-snappy-dur: 450ms;
+    --spring-smooth: linear(0, 0.03, 0.099, 0.198, 0.297, 0.395, 0.488, 0.572, 0.648, 0.718, 0.773, 0.819, 0.858, 0.889, 0.914, 0.936, 0.952, 0.964, 0.974, 0.981, 0.987, 0.991, 0.994, 0.997, 0.998, 0.999, 1, 1, 1);
+    --spring-smooth-dur: 520ms;
+    --spring-bouncy: linear(0, 0.036, 0.136, 0.258, 0.394, 0.547, 0.678, 0.794, 0.902, 0.979, 1.043, 1.082, 1.105, 1.116, 1.116, 1.108, 1.094, 1.079, 1.063, 1.045, 1.031, 1.018, 1.007, 0.999, 0.993, 0.989, 0.987, 0.986, 0.987, 0.988, 0.99, 0.992, 0.994, 0.996, 0.997, 0.999, 1, 1.001, 1.001, 1.001, 1);
+    --spring-bouncy-dur: 620ms;
+    --spring-gentle: linear(0, 0.041, 0.132, 0.243, 0.356, 0.464, 0.56, 0.643, 0.714, 0.772, 0.82, 0.859, 0.89, 0.915, 0.934, 0.948, 0.96, 0.97, 0.977, 0.982, 0.987, 0.99, 0.992, 0.994, 0.996, 0.997, 0.998, 0.998, 1);
+    --spring-gentle-dur: 700ms;
+    /* Ritme en afstand: elk volgend element 28 ms later, hooguit 10 stappen; korte afstanden */
+    --stagger-step: 28ms;
+    --stagger-max: 10;
+    --motion-distance-xs: 2px;
+    --motion-distance-sm: 6px;
+    --motion-distance-md: 12px;
+    --motion-distance-lg: 24px;
+    --motion-scale-in: 0.96;
+    --motion-scale-press: 0.97;
+    --motion-lift: -2px;
+    /* Oude namen, nu op de schaal hierboven */
+    --duration-fast: var(--dur-2);
+    --duration-base: var(--dur-3);
+    --duration-slow: var(--dur-4);
     --transition-fast: var(--duration-fast);
     --transition-normal: var(--duration-base);
 
@@ -386,12 +425,78 @@
     --border-hairline: var(--border-overlay);
 }
 
+/* ---------- Beweging: Volledig (standaard), Rustig en Uit ----------
+   motion.js zet html[data-motion] vóór de eerste weergave. Rustig: korte vervagingen, geen
+   verplaatsing, geen veren. Uit: niets beweegt. macOS 'Minder beweging' maakt van
+   Volledig vanzelf Rustig (motion.js) en zet hieronder alle CSS-animaties stil. */
+html[data-motion="rustig"] {
+    --dur-4: 160ms;
+    --dur-5: 200ms;
+    --dur-6: 240ms;
+    --spring-snappy: var(--ease-out);
+    --spring-smooth: var(--ease-out);
+    --spring-bouncy: var(--ease-out);
+    --spring-gentle: var(--ease-out);
+    --spring-snappy-dur: 160ms;
+    --spring-smooth-dur: 200ms;
+    --spring-bouncy-dur: 200ms;
+    --spring-gentle-dur: 240ms;
+    --stagger-step: 0ms;
+    --motion-distance-xs: 0px;
+    --motion-distance-sm: 0px;
+    --motion-distance-md: 0px;
+    --motion-distance-lg: 0px;
+    --motion-scale-in: 1;
+    --motion-scale-press: 1;
+    --motion-lift: 0px;
+}
+
+html[data-motion="uit"] {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-4: 0ms;
+    --dur-5: 0ms;
+    --dur-6: 0ms;
+    --spring-snappy-dur: 0ms;
+    --spring-smooth-dur: 0ms;
+    --spring-bouncy-dur: 0ms;
+    --spring-gentle-dur: 0ms;
+    --stagger-step: 0ms;
+    --motion-distance-xs: 0px;
+    --motion-distance-sm: 0px;
+    --motion-distance-md: 0px;
+    --motion-distance-lg: 0px;
+    --motion-scale-in: 1;
+    --motion-scale-press: 1;
+    --motion-lift: 0px;
+}
+
+html[data-motion="uit"] *,
+html[data-motion="uit"] *::before,
+html[data-motion="uit"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+}
+
 /* Minder beweging gevraagd (macOS: Toegankelijkheid > Beeldscherm): geen animaties */
 @media (prefers-reduced-motion: reduce) {
     :root {
         --duration-fast: 0ms;
         --duration-base: 0ms;
         --duration-slow: 0ms;
+        --stagger-step: 0ms;
+        --motion-distance-xs: 0px;
+        --motion-distance-sm: 0px;
+        --motion-distance-md: 0px;
+        --motion-distance-lg: 0px;
+        --motion-scale-in: 1;
+        --motion-scale-press: 1;
+        --motion-lift: 0px;
     }
 
     *,
@@ -552,7 +657,7 @@ kbd {
         border-color var(--duration-fast) var(--ease-out),
         color var(--duration-fast) var(--ease-out),
         box-shadow var(--duration-fast) var(--ease-out),
-        transform var(--duration-fast) var(--ease-out);
+        transform var(--spring-snappy-dur) var(--spring-snappy);
 }
 
 .btn i {
@@ -564,8 +669,10 @@ kbd {
     border-color: var(--btn-border-hover);
 }
 
+/* Indrukken: de knop geeft even mee en veert terug (snappy) */
 .btn:active:not(:disabled) {
-    transform: translateY(1px);
+    transform: scale(var(--motion-scale-press));
+    transition-duration: var(--dur-1);
 }
 
 .btn:focus-visible {
@@ -1245,12 +1352,43 @@ textarea.input {
 
 .modal.active {
     display: flex;
-    animation: dv-fade-in var(--duration-base) var(--ease-out);
+    animation: dv-fade-in var(--dur-4) var(--ease-out);
 }
 
+/* Binnenkomen: het venster rijst op een zachte veer en zet zich neer (docs/MOTION.md) */
 .modal.active > .modal-container,
 .modal.active > .move-modal-container {
-    animation: dv-pop-in var(--duration-slow) var(--ease-out);
+    animation: dv-modal-in var(--spring-smooth-dur) var(--spring-smooth) both;
+}
+
+/* Vertrekken: motion.js geeft een venster dat 'active' verliest even 'is-leaving'; korter
+   dan binnenkomen, versnellend, en niet meer klikbaar */
+.modal.is-leaving:not(.active),
+.dv-overlay.is-leaving:not(.active) {
+    display: flex;
+    pointer-events: none;
+    animation: dv-fade-out var(--dur-3) var(--ease-exit) forwards;
+}
+
+.modal.is-leaving:not(.active) > .modal-container,
+.modal.is-leaving:not(.active) > .move-modal-container,
+.dv-overlay.is-leaving:not(.active) > .dv-overlay-panel {
+    animation: dv-modal-out var(--dur-3) var(--ease-exit) forwards;
+}
+
+@keyframes dv-modal-in {
+    0% { opacity: 0; transform: translate3d(0, var(--motion-distance-lg), 0) scale(var(--motion-scale-in)); }
+    35% { opacity: 1; }
+    100% { opacity: 1; transform: none; }
+}
+
+@keyframes dv-modal-out {
+    to { opacity: 0; transform: translate3d(0, var(--motion-distance-sm), 0) scale(0.98); }
+}
+
+@keyframes dv-fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
 }
 
 @keyframes dv-fade-in {
@@ -1374,7 +1512,7 @@ textarea.input {
 
 .dv-overlay.active {
     display: flex;
-    animation: dv-fade-in var(--duration-base) var(--ease-out);
+    animation: dv-fade-in var(--dur-4) var(--ease-out);
 }
 
 .dv-overlay-panel {
@@ -1387,7 +1525,7 @@ textarea.input {
     box-shadow: var(--shadow-xl);
     padding: var(--space-xl) var(--space-2xl) var(--space-2xl);
     color: var(--text-primary);
-    animation: dv-pop-in var(--duration-slow) var(--ease-out);
+    animation: dv-modal-in var(--spring-smooth-dur) var(--spring-smooth) both;
 }
 
 .dv-overlay-header {
@@ -1512,8 +1650,46 @@ textarea.input {
     gap: 2px;
     font-size: var(--fs-sm);
     overflow: hidden;
-    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out);
-    animation: dv-toast-in var(--duration-slow) var(--ease-out);
+    transition: opacity var(--duration-base) var(--ease-out);
+    /* Komt van rechts op de snappy-veer; het icoon springt er een tel later in (beloning bij
+       succes, aandacht bij een fout). Vertrekken en opschuiven doet showToast via motion.js. */
+    animation: dv-toast-in var(--spring-snappy-dur) var(--spring-snappy) both;
+}
+
+.toast .toast-icon {
+    animation: dv-icon-pop var(--spring-bouncy-dur) var(--spring-bouncy) both;
+    animation-delay: var(--dur-1);
+}
+
+/* Hoe lang de melding nog blijft: een haarlijn in zijn eigen kleur die leegloopt;
+   met de muis erop staat hij stil */
+.toast-timer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--toast-tone);
+    opacity: 0.55;
+    transform-origin: left center;
+    animation: dv-toast-timer var(--toast-ms, 3500ms) linear forwards;
+    pointer-events: none;
+}
+
+.toast:hover .toast-timer,
+.toast:focus-within .toast-timer {
+    animation-play-state: paused;
+}
+
+@keyframes dv-toast-timer {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
+}
+
+@keyframes dv-icon-pop {
+    0% { opacity: 0; transform: scale(0.4) rotate(-12deg); }
+    40% { opacity: 1; }
+    100% { opacity: 1; transform: none; }
 }
 
 /* Een smalle kleurstreep links geeft de soort aan */
@@ -1528,8 +1704,9 @@ textarea.input {
 }
 
 @keyframes dv-toast-in {
-    from { opacity: 0; transform: translateX(12px); }
-    to { opacity: 1; transform: none; }
+    0% { opacity: 0; transform: translate3d(calc(var(--motion-distance-lg) * 1.5), 0, 0) scale(var(--motion-scale-in)); }
+    30% { opacity: 1; }
+    100% { opacity: 1; transform: none; }
 }
 
 .toast.success { --toast-tone: var(--success); --toast-icon: var(--success-text); }
@@ -2314,9 +2491,9 @@ button.nav-brand {
     flex-direction: column;
     min-height: 0;
     flex: 1;
-    /* Een ander onderdeel komt rustig in beeld (alleen dekking: geen transform, die zou vaste
-       vensters en de kaart in de sectie verschuiven) */
-    animation: dv-fade-in var(--duration-base) var(--ease-out);
+    /* Een ander onderdeel komt in beeld via Motion.enterPage (switchMainView): de sectie zelf
+       alleen in dekking (een transform zou vaste vensters en de kaart erin verschuiven), zijn
+       blokken in ritme vanuit de richting van het menu */
 }
 
 /* ==================== ZIJBALK: MAPPEN ==================== */
@@ -13564,4 +13741,144 @@ a.act-title:focus-visible {
 .btn[hidden],
 .pill[hidden] {
     display: none;
+}
+
+/* ==================== BEWEGING: GEDEELDE STUKKEN (motion.js, docs/MOTION.md) ==================== */
+
+/* Gedeeld element: de foto die van zijn miniatuur naar de viewer groeit (Motion.sharedElement) */
+.dv-shared-ghost {
+    position: fixed;
+    z-index: 15050;
+    margin: 0;
+    object-fit: cover;
+    pointer-events: none;
+    transform-origin: center center;
+    will-change: transform, clip-path;
+    background: var(--media-bg);
+}
+
+/* Wat nog in beeld moet scrollen (Motion.reveal); alleen in Volledig, anders staat het er al */
+html[data-motion="volledig"] [data-reveal="pending"] {
+    opacity: 0;
+}
+
+/* De groene indicator onder het actieve onderdeel glijdt (Motion.glide) vanuit zijn midden */
+.nav-tab.active::after,
+.nav-icon-btn.active::after {
+    transform-origin: center;
+}
+
+/* ---------- View Transitions (Motion.viewTransition) ---------- */
+
+/* Een overgang houdt nooit een klik tegen: de muis gaat door de momentopnamen heen */
+::view-transition {
+    pointer-events: none;
+}
+
+::view-transition-group(*) {
+    animation-duration: var(--dur-4);
+    animation-timing-function: var(--ease-standard);
+}
+
+/* Thema wisselen: het nieuwe thema loopt als een cirkel uit vanaf de knop die je koos */
+html[data-vt="theme"]::view-transition-old(root) {
+    animation: none;
+}
+
+html[data-vt="theme"]::view-transition-new(root) {
+    animation: dv-theme-reveal var(--dur-6) var(--ease-emphasized) both;
+}
+
+@keyframes dv-theme-reveal {
+    from { clip-path: circle(0 at var(--vt-x, 50%) var(--vt-y, 0)); }
+    to { clip-path: circle(150vmax at var(--vt-x, 50%) var(--vt-y, 0)); }
+}
+
+/* Een kleine weergavewissel (raster/lijst, een ander album): oud en nieuw vloeien in elkaar */
+html[data-vt="swap"]::view-transition-old(root) {
+    animation: dv-fade-out var(--dur-3) var(--ease-exit) both;
+}
+
+html[data-vt="swap"]::view-transition-new(root) {
+    animation: dv-fade-in var(--dur-4) var(--ease-out) both;
+}
+
+/* ---------- Aan het scrollen gekoppeld (alleen waar de browser het zelf kan) ---------- */
+
+/* .motion-scroll-reveal: een blok rijst en verschijnt terwijl het in beeld scrolt */
+@supports (animation-timeline: view()) {
+    html[data-motion="volledig"] .motion-scroll-reveal {
+        animation: dv-scroll-reveal linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 60%;
+    }
+}
+
+@keyframes dv-scroll-reveal {
+    from { opacity: 0; transform: translate3d(0, var(--motion-distance-lg), 0) scale(0.985); }
+    to { opacity: 1; transform: none; }
+}
+
+/* Minder beweging: geen overgangen tussen momentopnamen */
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+        animation: none !important;
+    }
+}
+
+html[data-motion="uit"]::view-transition-group(*),
+html[data-motion="uit"]::view-transition-old(*),
+html[data-motion="uit"]::view-transition-new(*) {
+    animation: none !important;
+}
+
+/* ---------- Instellingen > Beweging: keuze en een klein voorbeeld ---------- */
+
+.motion-setting {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3xl);
+    flex-wrap: wrap;
+}
+
+/* Vier tegels en een vinkje die bij elke keuze opnieuw binnenkomen, in de gekozen stand */
+.motion-preview {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, var(--space-2xl));
+    gap: var(--space-sm);
+    padding: var(--space-md);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-card);
+    background: var(--surface-sunken);
+}
+
+.motion-preview-tile {
+    display: block;
+    aspect-ratio: 1;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-default);
+}
+
+.motion-preview-tile:first-child {
+    background: var(--accent-subtle);
+    border-color: var(--accent-border);
+}
+
+.motion-preview-check {
+    position: absolute;
+    top: calc(var(--space-xs) * -1);
+    right: calc(var(--space-xs) * -1);
+    display: grid;
+    place-items: center;
+    width: var(--icon-lg);
+    height: var(--icon-lg);
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    color: var(--text-on-accent);
+    font-size: var(--fs-2xs);
+    box-shadow: var(--shadow-sm);
 }
