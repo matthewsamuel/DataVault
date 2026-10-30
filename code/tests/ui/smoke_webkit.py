@@ -337,6 +337,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             problems[seen:] = [p for p in problems[seen:] if "404" not in p]
             expect("verlopen" in page.inner_text("#chat-messages .chat-confirm-status"),
                    "chat tools: a forged id did not give the expired message")
+            # ... as an inline error (icon, danger colour), like every other inline error
+            expect(page.evaluate("""(() => { const s = document.querySelector('#chat-messages .chat-confirm-status');
+                return s.classList.contains('is-error') && !!s.querySelector('.fa-triangle-exclamation'); })()"""),
+                   "chat tools: the expired message is not shown as an inline error")
             page.click(".nav-tab[data-view='home']")
             for theme in ("light", "dark", "auto"):
                 step(f"theme {theme}", lambda: (page.click(".theme-button"),
@@ -1287,6 +1291,22 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(not dock["collapsed"] and dock["incomplete"] == ["-2"] and "1 onvolledig" in dock["title"]
                    and "2 eerder" not in dock["folded"] and "onvolledig" in dock["library"],
                    f"job dock: an incomplete run is folded away or not marked: {dock}")
+            # Only finished runs and folded: a small icon with the count, not a wide pill over the page
+            tiny = page.evaluate("""(() => {
+                const saved = { jobs: jobDock.jobs, idleOpen: jobDock.idleOpen, error: jobDock.error };
+                const now = Date.now() / 1000;
+                jobDock.jobs = [{ id: -4, type: 'dup_scan', label: 'Duplicaten zoeken', status: 'done', target: 'RAW',
+                    processed: 1, total: 1, params: {}, message: 'Klaar', summary: { complete: true, errors: 0 },
+                    finished_at: now, updated_at: now }];
+                jobDock.idleOpen = false; jobDock.error = null;
+                renderJobDock();
+                const el = document.getElementById('job-dock');
+                const result = { tiny: el.classList.contains('tiny'), width: Math.round(el.getBoundingClientRect().width) };
+                Object.assign(jobDock, saved);
+                renderJobDock();
+                return result;
+            })()""")
+            expect(tiny["tiny"] and tiny["width"] <= 96, f"job dock: the idle dock is not a small icon ({tiny})")
 
             # Beste uit reeks (second tab of Duplicaten): compare, decide with the keyboard, move one
             # series after the confirmation and put it back from the Herstelcentrum

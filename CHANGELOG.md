@@ -17,6 +17,18 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Exporteren met de originele mappen of per maand schrijft nooit meer in het archief, ook niet als je de map boven het archief kiest of als een maandmap een snelkoppeling naar het archief is; zo'n bestand telt als mislukt.
 - Pasha's kaart voor 'beste uit reeks houden' toont ook de exacte kopieën die mee verhuizen, en het aantal op de kaart is precies wat er na Uitvoeren verplaatst wordt.
 - Een half gekopieerde export die achterbleef na een crash, stroomuitval of een losgekoppelde schijf (een verborgen bestand '.…datavault-partial-…') wordt bij de volgende kopie van die bron en bij het starten van de app opgeruimd; echte exports blijven altijd staan.
+- Het takenpaneel is na afloop echt een klein icoon met het aantal, geen brede balk meer die over de pagina valt.
+- Kaart: de regel 'Uit je Tijdlijn' staat recht onder de filters, en op een smal venster heeft de kop dezelfde marge als de andere pagina's.
+- Spotify zonder luistergeschiedenis toont geen nullen en verzonnen luisterprofiel meer, maar één melding met een knop die je naar de Spotify-kaart in DataGatherer brengt.
+- Albums laat tijdens het laden grijze plaatshouders zien in de zijbalk en het raster, in plaats van 'Nog geen albums' met een knop om albums terug te zetten.
+- Shows houdt zijn titel en knoppen tijdens het laden en na een fout; de plaatshouders hebben de vorm van de pagina.
+- Activiteit en Keurer tonen geen lege omrande vakjes meer: zonder dagen krijgt de melding de hele breedte, de cijfers van de Keurer laden met plaatshouders en melden een fout met 'Opnieuw proberen', en 'Kies een map' schuift op een laag venster met open takenpaneel niet meer over de cijfers.
+- DataGatherer: het WhatsApp-venster noemt de app één keer in de titel, en lange paden staan in een eigen lettertype dat netjes afbreekt.
+- 'Welke is mooier?' telt overal hetzelfde: 'vergeleken' voor je keuzes tussen twee foto's, 'met een score' en 'stem in de slideshow' voor de rest.
+- Pasha's bevestigingskaart: Annuleren is een gewone knop naast Uitvoeren, en een verlopen of mislukte actie staat er als duidelijke foutmelding met icoon.
+- Berichten: de datum bij het gekozen gesprek is ook in het donkere thema goed leesbaar.
+- DataGatherer: de Spotify-kaart zegt tot wanneer je export gaat en dat hij nog niet is ingelezen, in plaats van 'Nog geen gegevens'; een kaart zonder gegevens toont geen lege grijze balk meer.
+- Kleine afwerking: een leeg archief in Albums heeft een knop 'Naar Bestanden', zoeken zonder treffers in Berichten heeft 'Zoekterm wissen', 'Bronnen beheren' bij Shows heeft een voettekst met Sluiten, en het opslagvenster zegt bovenaan 'van het totaal'.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
