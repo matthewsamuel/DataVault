@@ -401,3 +401,40 @@ The three groups that build on this foundation:
 - [ ] Photo tiles carry `data-motion-key` when they open the viewer.
 - [ ] It looks right in Volledig, Rustig and Uit, in both themes.
 - [ ] `motion_perf.py` stays green, with your transition added to `TRANSITIONS`.
+
+---
+
+## 12. Media: what is built (`media-motion.js`)
+
+The photo screens share one small layer on top of `window.Motion`, `window.MediaMotion`
+(`code/frontend/media-motion.js`), and one CSS section (`BEWEGING: MEDIA` at the end of
+`style.css`). Use these instead of writing a new variant.
+
+| Helper | What it does | Used by |
+| --- | --- | --- |
+| `cascade(tiles, {root, revealRest})` | The tiles in view arrive as a diagonal wave (row + column, capped at `--stagger-max`); with `revealRest` the rest waits for `revealTiles` | Bestanden (another folder), Tijdlijn (first screen), Albums (another filter), Op deze dag, Slim zoeken, Duplicaten (a new scan), Shows collections, Beste van een periode |
+| `revealTiles(tiles, {root})` | Tiles below the fold rise in per row when they scroll into view (one IntersectionObserver) | Files chunks, search pages, Duplicaten pages |
+| `flipByKey(els, keyFn, mutate, {after})` | A list that is drawn again: what stays glides to its new place, what is new arrives, what is gone leaves as a ghost. Only what is in view moves | Sort and type-to-filter in Bestanden, a moved file, Duplicaten filter and cleanup, a handled reeks, Shows shuffle, a removed best-of tile |
+| `ghost(el)` / `leave(el)` | A fixed copy of an element on the `.mm-ghost-layer` (or inside its modal or overlay) that animates away while the real list moves on | `flipByKey`, the Keurer |
+| `keurerFly(card, decision)` / `keurerArrive(card, from)` | The judged card flies out as a ghost (keep left, bin right, move up) while the next card is already there; an undone photo comes back from where it went | Keurer |
+| `viewerStep(...)` / `viewerSwipe(body, hooks)` | Next and previous: the old photo stays until the new one is decoded, then both move in `--dur-2`. Drag with the mouse or swipe with two fingers | Viewer |
+| `seriesSettle(card)` / `seriesWatch(cards)` | A reeks fans out from its best photo, then the best lifts and its star pops; once per reeks, when it scrolls into view | Beste uit reeks |
+| `rollText`, `nudge`, `pop`, `press` | A label that rolls to its new text, a number that ticks, a small reward, a key press on a button | Tijdlijn month, slideshow title, export count, Keurer stats and buttons, Duplicaten 'Blijft' |
+
+CSS-only pieces in the media section:
+
+- **Tile hover and selection** (`.thumb-tile`): lift on the snappy spring, a soft light that
+  follows the mouse (one `.mm-light` element for the whole app, moved with a transform), and
+  a selection ring plus check badge that are *transitions*, not animations, so a virtual list
+  that draws a selected tile again does not make it pop again. No tilt and no zoom on the photo.
+- **Rows that settle while scrolling** (`.tl-photo-row`, `.albums-row`, `.tl-group-header`):
+  `animation-timeline: view()`, so the browser runs it off the main thread; a row is complete
+  as soon as it is fully in view.
+- **Slideshow**: crossfade in `--dur-6 × 1.5`, Ken Burns from a random point (`--kb-x`,
+  `--kb-y`, `--kb-dur`), paused together with the show; progress is a `scaleX` animation.
+- **Shows collections**: a small stack of three photos (`stack` from `/api/shows/stories`)
+  that fans out on hover or focus.
+
+The frame-timing harness has the media transitions in `TRANSITIONS`, and
+`python3 code/tests/ui/motion_perf.py --stress 5000` adds a folder of 5000 photos to the
+throwaway vault and measures opening, scrolling, sorting and the viewer on it.
