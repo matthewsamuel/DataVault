@@ -79,6 +79,23 @@ OPEN_PHOTO_FOLDER = """(async () => {
     }
 })()"""
 
+# Keurer and Tijdlijn on a folder of the test vault (found from the folder tree, never a real path)
+KEURER_FOLDER = """(() => {
+    switchMainView('keurer');
+    const raw = folderTree.find(f => f.name === 'RAW');
+    keurerSelectedFolderForModal = raw.path + '/2022/bursts';
+    keurerConfirmFolderSelection();
+})()"""
+TIMELINE_FOLDER = """(() => {
+    localStorage.setItem('timeline_folders', JSON.stringify([folderTree.find(f => f.name === 'RAW').path]));
+    switchMainView('timeline');
+})()"""
+# A user scrolling: twelve steps, one per frame
+SCROLL_LOOP = """(async () => {
+    const s = document.getElementById('SCROLLER');
+    for (let i = 0; i < 12; i++) { s.scrollBy(0, 90); await new Promise(r => requestAnimationFrame(r)); }
+})()"""
+
 # (name, setup JS run before recording or None, trigger JS, settle ms)
 TRANSITIONS = [
     ("pagina: Home -> Bestanden", "switchMainView('home')", "switchMainView('viewer')", 900),
@@ -97,15 +114,52 @@ TRANSITIONS = [
     ("melding: weg", None, "hideToast(document.querySelector('#toast-container .toast'))", 800),
     ("thema: cirkel naar licht", "document.getElementById('theme-button').focus()", "setTheme('light')", 1000),
     ("thema: cirkel naar donker", "document.getElementById('theme-button').focus()", "setTheme('dark')", 1000),
+] + [
+    # ---------- Media (media-motion.js, docs/MOTION.md 'Media') ----------
+    ("bestanden: map komt binnen (golf)", OPEN_PHOTO_FOLDER, "selectFolder(currentFolder)", 1000),
+    ("bestanden: sorteren (FLIP)", "handleSort('name')", "handleSort('size')", 800),
+    ("bestanden: filteren tijdens typen", "handleSort('name')",
+     "(() => { const q = document.getElementById('global-search'); q.value = 'a'; handleGlobalSearch('a'); })()", 800),
+    ("bestanden: raster -> lijst", "(() => { const q = document.getElementById('global-search'); q.value = ''; handleGlobalSearch(''); })()",
+     "toggleView('list')", 800),
+    ("bestanden: lijst -> raster", None, "toggleView('grid')", 800),
+    ("viewer: volgende foto", "(() => { const c = document.querySelector('#media-grid .media-card[data-motion-key]:not(.other-card):not(.audio-card)');"
+     " c.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})); c.click(); })()", "nextFile()", 700),
+    ("viewer: vorige foto", None, "prevFile()", 700),
+    ("viewer: dicht", None, "closeModal()", 900),
+    ("keurer: houden (kaart vliegt)", KEURER_FOLDER, "keurerDecideKeep()", 800),
+    ("keurer: prullenmand (kaart vliegt)", None, "keurerDecideDelete()", 800),
+    ("keurer: ongedaan (komt terug)", None, "keurerUndo()", 900),
+    ("tijdlijn: eerste scherm (golf)", TIMELINE_FOLDER, "timelineInit()", 1200),
+    ("tijdlijn: scrollen (rijen zetten zich neer)", None, SCROLL_LOOP.replace("SCROLLER", "timeline-scroll"), 1000),
+    ("albums: ander filter (golf)", "switchMainView('albums')", "albumsShow(null, {kind: ['photo']}, 'taken')", 1100),
+    ("albums: scrollen", None, SCROLL_LOOP.replace("SCROLLER", "albums-scroll"), 1000),
+    ("reeksen: uitwaaieren op de beste", "switchMainView('duplicates'); dupShowTab('series')",
+     "(() => { const c = document.querySelector('#series-list .series-card'); if (c) MediaMotion.seriesSettle(c, {again: true}); })()", 1300),
+    ("shows: collecties husselen", "switchMainView('shows')", "shuffleShows()", 900),
+    ("shows: dia wisselt (kruisvervagen)", "startShow(_lastShowsData.featured)", "activeShow.next()", 1300),
+    ("shows: slideshow dicht", None, "activeShow.close()", 700),
+]
+
+# 5000+ photos in one folder (--stress): the first screen cascades, the rest reveals per row
+STRESS_TRANSITIONS = [
+    ("stress: map met veel foto's openen", "switchMainView('viewer')", "selectFolder(STRESS_PATH)", 1500),
+    ("stress: snel scrollen door het raster", None, SCROLL_LOOP.replace("document.getElementById('SCROLLER')", "document.scrollingElement").replace("90", "260"), 1200),
+    ("stress: sorteren (FLIP)", "window.scrollTo(0, 0)", "handleSort('size')", 1000),
+    ("stress: viewer open en volgende", "(() => { const c = document.querySelector('#media-grid .media-card[data-motion-key]');"
+     " c.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})); c.click(); })()", "nextFile()", 800),
+    ("stress: viewer dicht", None, "closeModal()", 900),
 ]
 
 
-def start_server(workdir: Path, showcase: bool):
+def start_server(workdir: Path, showcase: bool, stress: int = 0):
     python = server_python()
     vault = workdir / "vault"
     builder = "showcase_vault.py" if showcase else "vault_builder.py"
     subprocess.run([python, str(CODE_DIR / "tests" / "fixtures" / builder), str(vault)], check=True,
                    cwd=CODE_DIR, stdout=subprocess.DEVNULL)
+    if stress:
+        make_stress_folder(vault, stress)
     config = Path(f"{vault}_config.json")
     port = free_port()
     env = dict(os.environ, DATAVAULT_TESTING="1", DATAVAULT_CONFIG=str(config),
@@ -132,6 +186,22 @@ def start_server(workdir: Path, showcase: bool):
     return proc, base
 
 
+def make_stress_folder(vault: Path, count: int) -> Path:
+    """count small JPEGs in RAW/Beweging stress (copies of twelve colours; thumbnails come lazily)."""
+    from PIL import Image
+    folder = vault / "RAW" / "Beweging stress"
+    folder.mkdir(parents=True, exist_ok=True)
+    templates = []
+    for i in range(12):
+        path = folder / f"_tpl{i:02d}.jpg"
+        Image.new("RGB", (240, 180), ((i * 53) % 256, (i * 97 + 60) % 256, (i * 151 + 120) % 256)).save(path, quality=70)
+        templates.append(path.read_bytes())
+        path.unlink()
+    for i in range(count):
+        (folder / f"IMG_{i:05d}.jpg").write_bytes(templates[i % len(templates)])
+    return folder
+
+
 def measure(page, setup, trigger, settle_ms):
     if setup:
         page.evaluate(setup)
@@ -155,8 +225,13 @@ def run(args) -> int:
     failed = []
     try:
         base = args.base
+        transitions = list(TRANSITIONS)
         if not base:
-            proc, base = start_server(workdir, args.showcase)
+            proc, base = start_server(workdir, args.showcase, args.stress)
+        if args.stress and not args.base:
+            stress_path = str((workdir / "vault" / "RAW" / "Beweging stress").resolve())
+            transitions += [(n, s.replace("STRESS_PATH", json.dumps(stress_path)) if s else s,
+                             t.replace("STRESS_PATH", json.dumps(stress_path)), ms) for n, s, t, ms in STRESS_TRANSITIONS]
         with sync_playwright() as p:
             browser = launch(p, "webkit", args.headed)
             context = browser.new_context(viewport={"width": 1440, "height": 900})
@@ -177,7 +252,9 @@ def run(args) -> int:
                 page.wait_for_timeout(900)
             print(f"WebKit against {base}, budget {args.budget:.0f} ms per animation frame\n")
             print(f"  {'transition':38} {'work':>7} {'frames':>6} {'median':>7} {'p95':>7} {'max':>7}  result")
-            for name, setup, trigger, settle in TRANSITIONS:
+            if args.only:
+                transitions = [t for t in transitions if args.only in t[0]]
+            for name, setup, trigger, settle in transitions:
                 worst = []
                 for _ in range(args.runs):
                     work, deltas = measure(page, setup, trigger, settle)
@@ -221,4 +298,7 @@ if __name__ == "__main__":
     parser.add_argument("--budget", type=float, default=32.0, help="max ms per animation frame (default 32)")
     parser.add_argument("--runs", type=int, default=2, help="measure every transition this many times (worst counts)")
     parser.add_argument("--headed", action="store_true")
+    parser.add_argument("--stress", type=int, default=0, metavar="N",
+                        help="also measure a folder of N photos (e.g. 5000) in Bestanden")
+    parser.add_argument("--only", help="only the transitions whose name contains this text")
     sys.exit(run(parser.parse_args()))
