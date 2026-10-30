@@ -23,6 +23,12 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - In het serverlog staat het deel van een webadres na het vraagteken niet meer (zoals een inlogcode van Spotify), en de DataVault-app schrijft dat log in `~/Library/Logs/DataVault`, alleen leesbaar voor jou, in plaats van in `/tmp`.
 - Pasha: een cloudmodel van Ollama (draait bij ollama.com) is in de lijst gemarkeerd met 'cloud, niet lokaal' en wordt pas gebruikt nadat je bevestigt dat je vragen dan naar internet gaan.
 - Sleutelvelden (Spotify Client ID, Last.fm API-sleutel) zijn geen wachtwoordvelden meer: ze zijn gemaskeerd, met een knop om de sleutel te tonen, en Safari biedt niet meer aan ze als wachtwoord te bewaren.
+- Slim zoeken laat veel meer van de juiste foto's meteen zien, vooral bij Nederlandse zoekopdrachten: van de foto's die echt passen staat nu 86% (Nederlands) en 87% (Engels) bij de goede resultaten, was 77% en 80%, en er glipt minder onzin tussen.
+- Past niets echt goed, dan zie je meteen de foto's die er het meest op lijken, met een korte uitleg erboven, in plaats van alleen 'Niets gevonden' en een knop.
+- Foto's die je buiten de app toevoegt, verplaatst of verwijdert, kloppen in de zoekresultaten zodra je het zoekvenster opent: een verdwenen bestand verschijnt niet meer en nieuwe foto's worden meteen herkend.
+- Na het starten (of na een kwartier niet zoeken) zegt het zoekvenster 'Zoekmodel laden…' zolang het zoekmodel nog wordt ingelezen, en een zoekopdracht kan niet meer mislukken doordat het model net op dat moment werd vrijgegeven.
+- Dezelfde foto op meer plekken (bijvoorbeeld in je bibliotheek en in een back-upmap) staat één keer in de resultaten, met een teller voor de kopieën; als je de muis erop houdt, zie je waar ze staan.
+- Het zoekvenster legt uit dat woorden als 'zonder' en 'niet' niet werken bij Slim zoeken, en geeft een tip als je ze gebruikt.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
