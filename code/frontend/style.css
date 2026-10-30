@@ -5050,8 +5050,17 @@ a.breadcrumb-item:hover {
     font-size: var(--fs-sm);
 }
 
-.spotify-error[hidden] {
+.spotify-error[hidden],
+.spotify-empty[hidden],
+#section-spotify .year-selector[hidden] {
     display: none;
+}
+
+/* Nog geen luistergeschiedenis: de gedeelde lege staat, op de breedte van de inhoud */
+.spotify-empty {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: var(--space-3xl) 0;
 }
 
 .spotify-error p {

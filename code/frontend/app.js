@@ -3461,7 +3461,12 @@ async function loadSpotifyStats() {
     const show = (data) => {
         showSpotifyError(null);
         if (loading) loading.style.display = 'none';
-        if (content) content.style.display = 'block';
+        // Zonder één afgespeeld nummer geen nullen, lege lijsten en een verzonnen luister-DNA:
+        // de lege staat met de weg naar de Spotify-kaart in DataGatherer
+        const empty = !data.total_plays;
+        showSpotifyEmpty(empty && year === 'all');
+        if (content) content.style.display = empty && year === 'all' ? 'none' : 'block';
+        if (empty && year === 'all') return;
         renderSpotifyStats(data);
         populateYears(data);
     };
@@ -3475,6 +3480,7 @@ async function loadSpotifyStats() {
 
     // Normale laadprocedure
     showSpotifyError(null);
+    showSpotifyEmpty(false);
     if (loading) loading.style.display = 'flex';
     if (content) content.style.display = 'none';
 
@@ -3491,6 +3497,27 @@ async function loadSpotifyStats() {
         if (content) content.style.display = 'none';
         showSpotifyError(e.message);
     }
+}
+
+// Nog geen luistergeschiedenis: icoon, één zin en de knop naar de Spotify-kaart in DataGatherer
+function showSpotifyEmpty(show) {
+    let box = document.getElementById('spotify-empty');
+    const years = document.querySelector('#section-spotify .year-selector');
+    if (years) years.hidden = show;
+    if (!show) {
+        if (box) box.hidden = true;
+        return;
+    }
+    if (!box) {
+        box = createEl('div', { id: 'spotify-empty', class: 'spotify-empty' });
+        box.appendChild(emptyState({
+            icon: 'fa-headphones', title: 'Nog geen luistergeschiedenis',
+            text: 'Lees je Spotify-export in via DataGatherer; daarna zie je hier je topartiesten, je nummers en wanneer je luistert.',
+            action: { label: 'Spotify-export inlezen', primary: true, onClick: () => dgShowSource('spotify') },
+        }));
+        document.getElementById('spotify-content').before(box);
+    }
+    box.hidden = false;
 }
 
 // Foutmelding met een knop om het opnieuw te proberen; null verbergt hem

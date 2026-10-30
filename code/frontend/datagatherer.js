@@ -93,6 +93,28 @@ function dgRender() {
             createEl('div', { class: 'dg-grid' }, ...sources.map(dgCard)));
     }));
     dgRestoreFocus(focused);
+    dgRevealSource();
+}
+
+// Vanaf een ander scherm (bijv. de lege Spotify-pagina) naar de kaart van één bron: DataGatherer
+// opent, de kaart schuift in beeld en de hoofdknop krijgt de focus
+function dgShowSource(id) {
+    dgState.showSource = id;
+    if (dgState.filter !== 'all') { dgState.filter = 'all'; if (dgState.data) dgRender(); }
+    switchMainView('datagatherer');
+    if (dgState.data) dgRevealSource();
+}
+
+function dgRevealSource() {
+    const id = dgState.showSource;
+    if (!id) return;
+    const card = document.querySelector(`.dg-card[data-source="${CSS.escape(id)}"]`);
+    if (!card) return;
+    dgState.showSource = null;
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    card.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+    const primary = card.querySelector('.dg-primary');
+    if (primary) primary.focus({ preventScroll: true });
 }
 
 // Welke knop op de pagina de focus heeft, als sleutel die na opnieuw tekenen dezelfde knop vindt
