@@ -407,7 +407,7 @@ def get_network_log(source: Optional[str] = None, limit: int = 100) -> Dict[str,
     if source is not None:
         _connector(source)
     limit = max(1, min(int(limit), 500))
-    names = {c.id: c.name for c in registry.connectors()}
+    names = {**state.OTHER_SOURCES, **{c.id: c.name for c in registry.connectors()}}
     entries = state.network_log(db, source, limit)
     for entry in entries:
         entry["source_name"] = names.get(entry["source_id"], entry["source_id"])

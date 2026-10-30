@@ -512,6 +512,46 @@ def test_the_download_job_installs_the_model(client, config, tmp_path, monkeypat
     status = client.get("/api/search/status").json()
     assert status["model"]["installed"] is True and status["download"]["status"] == "done"
     assert client.post("/api/jobs", json={"type": "model_download", "params": {"model": "nee"}}).status_code == 400
+    # PRIV-1: every file it fetched is in the Netwerklog, like a DataGatherer request
+    log = client.get("/api/datagatherer/network-log").json()["entries"]
+    assert sorted(e["path"] for e in log) == sorted(f"/{name}" for name in payloads)
+    assert {(e["source_id"], e["source_name"], e["trigger"], e["host"], e["outcome"]) for e in log} == {
+        ("slim_zoeken", "Slim zoeken (zoekmodel)", "user", "example.invalid", "ok")}
+    assert sum(e["bytes"] for e in log) == 32
+
+
+def test_a_test_server_never_downloads_the_model_for_real(client, config, tmp_path, monkeypatch):
+    """PRIV-1: in test mode the real download is refused (and logged); urlopen is never called."""
+    import urllib.request
+    from backend import semantic
+    from backend.routes import search
+    opened = []
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: opened.append(a) or (_ for _ in ()).throw(
+        AssertionError("real network")))
+    monkeypatch.setattr(search.config, "MODELS_FOLDER", tmp_path / "models")
+    job = _job(client, "model_download", expect="failed")
+    assert opened == []
+    assert "testmodus" in (job.get("error") or "")
+    log = client.get("/api/datagatherer/network-log").json()["entries"]
+    assert [(e["source_id"], e["host"], e["outcome"]) for e in log] == [("slim_zoeken", "huggingface.co", "refused")]
+    assert not semantic.installed(search.config)
+
+
+def test_no_log_row_means_no_model_download(tmp_path, monkeypatch):
+    """The Netwerklog row is written first; when it cannot be, nothing is fetched."""
+    from types import SimpleNamespace
+    from backend import semantic
+    from backend.datagatherer import state
+    spec, served = _fake_model(tmp_path, monkeypatch, {"visual.onnx": b"v", "textual_fp16.onnx": b"t",
+                                                       "tokenizer.json": b"{}"})
+
+    def locked(db, **values):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(state, "log_request", locked)
+    with pytest.raises(semantic.DownloadRefused, match="netwerklog"):
+        semantic.download_model(SimpleNamespace(MODELS_FOLDER=tmp_path / "models"), spec, db=object())
+    assert served == []
 
 
 # ---------- speed of the search itself (synthetic vectors) ----------

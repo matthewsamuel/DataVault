@@ -239,9 +239,16 @@ def not_installed_message(config) -> str:
 
 # ---------- download (only when the user asks: the 'model_download' job) ----------
 
+class DownloadRefused(OSError):
+    """A model download that did not go out; the message is Dutch."""
+
+
 def _open_url(url: str, start: int):
     """The response for url from byte start on (a Range request when start > 0)."""
     import urllib.request
+    if os.environ.get("DATAVAULT_TESTING") == "1":
+        # Like the DataGatherer guard: a test server never reaches the network (tests fake _open_url)
+        raise DownloadRefused("Geen echte netwerkverbinding in testmodus")
     headers = {"User-Agent": "DataVault (model download on request)"}
     if start:
         headers["Range"] = f"bytes={start}-"
@@ -265,8 +272,35 @@ def _sha256_of(path: Path, stop: Callable[[], None] = lambda: None) -> "hashlib.
             stop()
 
 
+def _log_begin(db, url: str) -> Optional[int]:
+    """
+    The Netwerklog row of one file download, written before it goes out (source 'slim_zoeken',
+    trigger 'user': the download is always a click). No row, no download.
+    """
+    if db is None:
+        return None
+    from urllib.parse import urlsplit
+    from backend.datagatherer import net, state
+    parts = urlsplit(url)
+    try:
+        return state.log_request(db, source_id=state.SEARCH_MODEL_SOURCE, trigger="user", method="GET",
+                                 host=(parts.hostname or "?")[:255], path=parts.path[:300], outcome=net.PENDING)
+    except Exception:
+        raise DownloadRefused(net.LOG_UNAVAILABLE)
+
+
+def _log_finish(db, row_id: Optional[int], outcome: str, **values) -> None:
+    if db is None or row_id is None:
+        return
+    from backend.datagatherer import state
+    try:
+        state.finish_request(db, row_id, outcome=outcome, **values)
+    except Exception:
+        pass  # the download is in the log already (as 'pending'), only its outcome is missing
+
+
 def download_model(config, spec: Optional[ModelSpec] = None, progress: Callable[[int, int, str], None] = None,
-                   check: Callable[[], None] = lambda: None) -> Dict[str, Any]:
+                   check: Callable[[], None] = lambda: None, db=None) -> Dict[str, Any]:
     """
     Fetch the model files that are missing (resuming a .part file with a Range request),
     check each SHA-256, put it in place, and write installed.json once all are there.
@@ -307,31 +341,52 @@ def download_model(config, spec: Optional[ModelSpec] = None, progress: Callable[
             start = 0
         digest = _sha256_of(part, check) if start else hashlib.sha256()
         if start < f.size:
-            with _open_url(f.url, start) as response:
-                status = getattr(response, "status", 200)
-                if start and status != 206:     # the server ignored the Range: start over
-                    start = 0
-                    digest = hashlib.sha256()
-                with open(part, "ab" if start else "wb") as out:
-                    received = start
-                    last = 0.0
-                    while True:
-                        check()
-                        chunk = response.read(DOWNLOAD_CHUNK)
-                        if not chunk:
-                            break
-                        out.write(chunk)
-                        digest.update(chunk)
-                        received += len(chunk)
-                        fetched += len(chunk)
-                        now = time.monotonic()
-                        if now - last >= PROGRESS_SECONDS:
-                            last = now
-                            progress(done + received, total,
-                                     f"Downloaden: {_mb(done + received)} van {_mb(total)} MB")
-                    if received != f.size:
-                        raise OSError(0, f"Download van {f.path} onvolledig ({received} van {f.size} bytes); "
-                                         "probeer het opnieuw")
+            row_id = _log_begin(db, f.url)
+            began = time.monotonic()
+            received = start
+            status = None
+            try:
+                with _open_url(f.url, start) as response:
+                    status = getattr(response, "status", 200)
+                    if start and status != 206:     # the server ignored the Range: start over
+                        start = 0
+                        digest = hashlib.sha256()
+                    with open(part, "ab" if start else "wb") as out:
+                        received = start
+                        last = 0.0
+                        while True:
+                            check()
+                            chunk = response.read(DOWNLOAD_CHUNK)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                            digest.update(chunk)
+                            received += len(chunk)
+                            fetched += len(chunk)
+                            now = time.monotonic()
+                            if now - last >= PROGRESS_SECONDS:
+                                last = now
+                                progress(done + received, total,
+                                         f"Downloaden: {_mb(done + received)} van {_mb(total)} MB")
+                        if received != f.size:
+                            raise OSError(0, f"Download van {f.path} onvolledig ({received} van {f.size} bytes); "
+                                             "probeer het opnieuw")
+            except DownloadRefused as e:
+                _log_finish(db, row_id, "refused", note=str(e))
+                raise
+            except OSError as e:
+                code = getattr(e, "code", None)
+                _log_finish(db, row_id, "http_error" if isinstance(code, int) else "error",
+                            status=code if isinstance(code, int) else None, bytes=received - start,
+                            ms=int((time.monotonic() - began) * 1000), note=type(e).__name__)
+                raise
+            except BaseException:
+                # Stopped on purpose (pause, cancel): the connection itself worked
+                _log_finish(db, row_id, "ok", status=status, bytes=received - start,
+                            ms=int((time.monotonic() - began) * 1000), note="Gestopt")
+                raise
+            _log_finish(db, row_id, "ok", status=status, bytes=received - start,
+                        ms=int((time.monotonic() - began) * 1000))
         if digest.hexdigest() != f.sha256:
             part.unlink()
             raise ValueError(f"Controlegetal van {f.path} klopt niet: het bestand is verwijderd. "
@@ -1211,10 +1266,12 @@ def build_job_types(config, db) -> List[Any]:
         spec = MODELS[ctx.params["model"]]
         ctx.progress(0, spec.size, "Downloaden...")
         try:
-            result = download_model(config, spec, check=ctx.check,
+            result = download_model(config, spec, check=ctx.check, db=db,
                                     progress=lambda done, total, message: ctx.progress(done, total, message))
         except OSError as e:
             import urllib.error
+            if isinstance(e, DownloadRefused):
+                raise RuntimeError(f"Downloaden geweigerd: {e}")
             if isinstance(e, urllib.error.HTTPError):
                 raise RuntimeError(f"Downloaden mislukt: de server antwoordde {e.code}. Probeer het later opnieuw.")
             if isinstance(e, urllib.error.URLError):

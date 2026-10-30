@@ -760,11 +760,17 @@ function dgField(field, idPrefix) {
             help);
     }
     const secret = field.kind === 'secret';
+    // Een sleutel (API-key, Client ID) is geen wachtwoord: een gewoon tekstveld, met CSS gemaskeerd. Zo
+    // biedt Safari niet aan hem als websitewachtwoord in iCloud-sleutelhanger te bewaren; hij staat
+    // alleen in het eigen item van DataVault in de Sleutelhanger.
     const input = createEl('input', {
-        class: `input${secret ? ' mono' : ''}`, id, type: secret ? 'password' : 'text', autocomplete: 'off', spellcheck: 'false',
+        class: `input${secret ? ' mono dg-secret-input is-masked' : ''}`, id, type: 'text', autocomplete: 'off', spellcheck: 'false',
+        autocapitalize: secret ? 'off' : undefined, 'data-1p-ignore': secret ? '' : undefined,
+        'data-lpignore': secret ? 'true' : undefined, 'data-form-type': secret ? 'other' : undefined,
         placeholder: secret && field.stored ? 'Opgeslagen in de Sleutelhanger (leeg laten om te houden)' : (field.placeholder || ''),
         value: secret ? undefined : (field.value || ''), dataset: { key: field.key, kind: field.kind },
     });
+    const control = secret ? dgSecretControl(input) : input;
     const error = createEl('p', { class: 'dg-field-error', id: `${id}-error`, hidden: true });
     const help = field.help ? createEl('p', { class: 'dg-field-help', id: `${id}-help`, text: field.help }) : null;
     if (help) input.setAttribute('aria-describedby', help.id);
@@ -773,7 +779,25 @@ function dgField(field, idPrefix) {
         createEl('label', { class: 'dg-field-label', for: id }, field.label,
             secret && field.stored ? createEl('span', { class: 'badge badge-success' },
                 createEl('i', { class: 'fas fa-key', 'aria-hidden': 'true' }), 'In de Sleutelhanger') : null),
-        input, error, help);
+        control, error, help);
+}
+
+// Het sleutelveld met een knop Tonen/Verbergen erin
+function dgSecretControl(input) {
+    const icon = createEl('i', { class: 'fas fa-eye', 'aria-hidden': 'true' });
+    const toggle = createEl('button', {
+        type: 'button', class: 'btn btn-ghost btn-icon btn-sm dg-secret-toggle', title: 'Sleutel tonen',
+        'aria-label': 'Sleutel tonen', 'aria-pressed': 'false', 'aria-controls': input.id,
+        onClick: () => {
+            const shown = !input.classList.toggle('is-masked');
+            icon.className = `fas ${shown ? 'fa-eye-slash' : 'fa-eye'}`;
+            const label = shown ? 'Sleutel verbergen' : 'Sleutel tonen';
+            toggle.title = label;
+            toggle.setAttribute('aria-label', label);
+            toggle.setAttribute('aria-pressed', String(shown));
+        },
+    }, icon);
+    return createEl('div', { class: 'dg-secret' }, input, toggle);
 }
 
 // Een fout bij een veld: direct onder dat veld, en het veld zegt het ook tegen een schermlezer
@@ -1042,7 +1066,7 @@ function dgLogList(entries, withSource, compact) {
         if (compact) empty.classList.add('empty-state-compact');
         return empty;
     }
-    const outcome = { ok: ['Gelukt', 'badge-success'], refused: ['Geweigerd', 'badge-warning'],
+    const outcome = { ok: ['Gelukt', 'badge-success'], pending: ['Bezig', 'badge-info'], refused: ['Geweigerd', 'badge-warning'],
         http_error: ['Fout', 'badge-danger'], error: ['Geen verbinding', 'badge-danger'] };
     const trigger = { user: 'jouw klik', schedule: 'schema' };
     return createEl('ul', { class: 'dg-log' }, ...entries.map(e => createEl('li', { class: 'dg-log-row' },
@@ -1059,7 +1083,7 @@ function dgLogList(entries, withSource, compact) {
 async function dgOpenNetworkLog() {
     const box = createEl('div', { class: 'dg-log-box' }, skeletonRows(3));
     dgModal('dg-network', 'Netwerklog', 'fa-globe', [
-        createEl('p', { class: 'dg-modal-text', text: 'Elke verbinding die DataGatherer maakte of weigerde, nieuwste eerst. '
+        createEl('p', { class: 'dg-modal-text', text: 'Elke verbinding die DataVault maakte of weigerde (DataGatherer en het zoekmodel), nieuwste eerst. '
             + 'Zonder de rest van het adres: daar kan een sleutel in staan.' }), box],
     [createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Sluiten', 'data-autofocus': '', onClick: () => dgCloseModal('dg-network') })],
     true);

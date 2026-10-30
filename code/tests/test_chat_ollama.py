@@ -34,7 +34,8 @@ def test_the_model_is_chosen_in_the_ui_and_remembered(client, fake_ollama, app):
     data = client.get("/api/chat/models").json()
     assert data["current"] == "qwen2.5:3b" and data["default"] == "qwen2.5:3b" and data["reachable"]
     assert [m["name"] for m in data["models"]] == ["llama3.2:3b", "qwen2.5:3b"]
-    assert client.post("/api/chat/model", json={"model": "llama3.2:3b"}).json() == {"current": "llama3.2:3b"}
+    assert client.post("/api/chat/model", json={"model": "llama3.2:3b"}).json() == {"current": "llama3.2:3b",
+                                                                                    "cloud": False}
     assert client.get("/api/chat/models").json()["current"] == "llama3.2:3b"
     _events(client)
     assert json.loads(fake_ollama.requests[-1].content)["model"] == "llama3.2:3b"
@@ -46,6 +47,34 @@ def test_the_model_is_chosen_in_the_ui_and_remembered(client, fake_ollama, app):
     for bad in ("", "../../etc", 5, None, "a b"):
         assert client.post("/api/chat/model", json={"model": bad}).status_code == 400
     assert client.post("/api/chat/stream", json={"messages": [], "model": "; rm"}).status_code == 400
+
+
+def test_an_ollama_cloud_model_is_marked_and_needs_an_explicit_choice(client, fake_ollama, app):
+    """PRIV-4: a '-cloud' model (or one with a remote_host) runs on ollama.com: never without a yes."""
+    fake_ollama.models = ["qwen2.5:3b", "gpt-oss:120b-cloud", "eigen-model:latest"]
+    fake_ollama.remote = {"eigen-model:latest"}
+    models = {m["name"]: m["cloud"] for m in client.get("/api/chat/models").json()["models"]}
+    assert models == {"qwen2.5:3b": False, "gpt-oss:120b-cloud": True, "eigen-model:latest": True}
+    for name in ("gpt-oss:120b-cloud", "eigen-model:latest"):
+        # Not chosen without the confirmation, and not usable per request either
+        r = client.post("/api/chat/model", json={"model": name})
+        assert r.status_code == 409 and "ollama.com" in r.json()["detail"]
+        assert client.post("/api/chat/stream", json={"messages": [{"role": "user", "content": "hoi"}],
+                                                     "model": name}).status_code == 403
+    assert app.state.db.get_setting("chat_model") is None
+    assert not any(json.loads(r.content or b"{}").get("model", "").endswith("cloud")
+                   for r in fake_ollama.requests if r.url.path == "/api/chat")
+    # With the confirmation it is used, and the health check says it is not local
+    r = client.post("/api/chat/model", json={"model": "gpt-oss:120b-cloud", "allow_cloud": True})
+    assert r.json() == {"current": "gpt-oss:120b-cloud", "cloud": True}
+    _events(client)
+    assert json.loads(fake_ollama.requests[-1].content)["model"] == "gpt-oss:120b-cloud"
+    assert client.get("/api/health").json()["capabilities"]["chat"]["model_cloud"] is True
+    # The yes is for that one model only
+    assert client.post("/api/chat/stream", json={"messages": [], "model": "eigen-model:latest"}).status_code == 403
+    # Back to a local model withdraws it: the cloud model needs a new yes
+    client.post("/api/chat/model", json={"model": "qwen2.5:3b"})
+    assert client.post("/api/chat/stream", json={"messages": [], "model": "gpt-oss:120b-cloud"}).status_code == 403
 
 
 def test_a_missing_model_gives_a_clear_message(client, fake_ollama):

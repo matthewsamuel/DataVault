@@ -114,7 +114,8 @@ registerSettingsSection({
     title: 'Taalmodel van Pasha',
     icon: 'fa-robot',
     order: 20,
-    description: 'Pasha draait met Ollama op deze Mac; er gaat niets naar internet. Kies welk geïnstalleerd model hij gebruikt.',
+    description: 'Pasha draait met Ollama op deze Mac; er gaat niets naar internet. Kies welk geïnstalleerd model hij gebruikt. '
+        + 'Een cloudmodel van Ollama (gemarkeerd met cloud) draait bij ollama.com en vraagt eerst je toestemming.',
     render(body) {
         const select = createEl('select', {
             class: 'toolbar-select chat-model-select', id: 'settings-chat-model', 'aria-label': 'Taalmodel van Pasha',

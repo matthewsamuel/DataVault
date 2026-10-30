@@ -240,11 +240,16 @@ def last_request(db, source_id: str) -> Optional[Dict[str, Any]]:
 
 # ---------- network log ----------
 
+# Network log rows that do not come from a connector: the source id and its name in the Netwerklog
+SEARCH_MODEL_SOURCE = "slim_zoeken"
+OTHER_SOURCES = {SEARCH_MODEL_SOURCE: "Slim zoeken (zoekmodel)"}
+
 LOG_COLUMNS = ("id", "at", "source_id", "trigger", "method", "host", "path", "status", "outcome", "bytes", "ms",
                "job_id", "note")
 
 
-def log_request(db, **values) -> None:
+def log_request(db, **values) -> int:
+    """Write one dg_network_log row; returns its id (finish_request fills in a 'pending' row)."""
     values.setdefault("at", time.time())
     names = list(values)
     with db._connect() as conn:
@@ -252,6 +257,20 @@ def log_request(db, **values) -> None:
                            [values[n] for n in names])
         if cur.lastrowid and cur.lastrowid % 500 == 0:
             conn.execute("DELETE FROM dg_network_log WHERE id <= ?", (cur.lastrowid - NETWORK_LOG_KEEP,))
+        return cur.lastrowid
+
+
+FINISH_COLUMNS = ("status", "outcome", "bytes", "ms", "note")
+
+
+def finish_request(db, row_id: int, **values) -> None:
+    """The outcome of a request whose 'pending' row log_request wrote before it went out."""
+    names = [n for n in values if n in FINISH_COLUMNS]
+    if not names:
+        return
+    with db._connect() as conn:
+        conn.execute(f"UPDATE dg_network_log SET {', '.join(f'{n} = ?' for n in names)} WHERE id = ?",
+                     [values[n] for n in names] + [row_id])
 
 
 def network_log(db, source_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:

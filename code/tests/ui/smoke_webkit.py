@@ -1667,6 +1667,18 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect_focus_trapped("dg-connect", "datagatherer: connect window")
             page.fill("#dg-connect-username", "smoketest")
             page.fill("#dg-connect-api_key", "0123456789abcdef0123456789abcdef")
+            # A key is a masked text field, never a password field (no 'save password' prompt)
+            key_field = page.evaluate("""(() => { const i = document.getElementById('dg-connect-api_key');
+                return [i.type, i.classList.contains('is-masked'),
+                        getComputedStyle(i).webkitTextSecurity || getComputedStyle(i).getPropertyValue('-webkit-text-security')]; })()""")
+            expect(key_field[0] == "text" and key_field[1] and key_field[2] in ("disc", ""),
+                   f"datagatherer: the API key field is {key_field}")
+            page.click("#dg-connect .dg-secret-toggle")
+            expect(page.evaluate("!document.getElementById('dg-connect-api_key').classList.contains('is-masked')")
+                   and page.get_attribute("#dg-connect .dg-secret-toggle", "aria-pressed") == "true",
+                   "datagatherer: Sleutel tonen did not show the key")
+            expect(page.evaluate("document.querySelectorAll('input[type=password]').length") == 0,
+                   "datagatherer: a password field is on the page")
             step("datagatherer: save Last.fm", lambda: page.click("#dg-connect .modal-footer .btn-primary"), 1.2)
             expect(not page.is_visible("#dg-connect"), "datagatherer: the connect window stayed open after saving")
             expect(page.evaluate("(document.querySelector(\".dg-card[data-source='lastfm'] .dg-primary\") || {}).dataset.action") == "sync",
