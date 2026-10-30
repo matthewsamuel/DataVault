@@ -9,6 +9,14 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Verificatieronde
+- Het downloaden van het zoekmodel (Slim zoeken) staat nu ook in het Netwerklog, per bestand; een testserver downloadt het nooit echt.
+- Een verbinding van DataGatherer staat in het Netwerklog vóórdat hij vertrekt; lukt dat schrijven niet, dan gaat de verbinding niet door.
+- De browser mag alleen nog met DataVault zelf praten (en, als je die aanzet, met de OpenStreetMap-kaart): een webadres naar buiten wordt geweigerd, en de controle op externe adressen in de code is strenger.
+- In het serverlog staat het deel van een webadres na het vraagteken niet meer (zoals een inlogcode van Spotify), en de DataVault-app schrijft dat log in `~/Library/Logs/DataVault`, alleen leesbaar voor jou, in plaats van in `/tmp`.
+- Pasha: een cloudmodel van Ollama (draait bij ollama.com) is in de lijst gemarkeerd met 'cloud, niet lokaal' en wordt pas gebruikt nadat je bevestigt dat je vragen dan naar internet gaan.
+- Sleutelvelden (Spotify Client ID, Last.fm API-sleutel) zijn geen wachtwoordvelden meer: ze zijn gemaskeerd, met een knop om de sleutel te tonen, en Safari biedt niet meer aan ze als wachtwoord te bewaren.
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.
