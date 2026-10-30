@@ -163,3 +163,12 @@ def test_screen_bound_toasts_and_audio_tiles():
     app = (FRONTEND / "app.js").read_text()
     assert "toast.dataset.view = activeMainView" in app and "t.dataset.view !== view" in app
     assert "audioThumbUrl(file.name)" not in app and "fa-music" in app
+
+
+def test_the_idle_job_dock_is_a_small_icon_not_a_wide_pill():
+    css = _sources()["style.css"]
+    # the 200 px minimum of a collapsed dock must not apply to the tiny 'n klaar' icon
+    assert ".job-dock.collapsed:not(.compact):not(.tiny)" in css
+    assert not re.search(r"\.job-dock\.collapsed:not\(\.compact\)\s*\{", css)
+    # on a small screen the dock starts collapsed and stays low when opened
+    assert "JOB_DOCK_SMALL" in _sources()["jobs.js"]

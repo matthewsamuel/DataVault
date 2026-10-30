@@ -9226,8 +9226,14 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
-/* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar") */
-.job-dock.collapsed:not(.compact) {
+/* Klein icoon: precies zo breed als icoon en aantal, met gelijke ruimte links en rechts */
+.job-dock.tiny .job-dock-header {
+    height: 36px;
+    padding: 0 var(--space-md);
+}
+
+/* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar"); het kleine icoon nog smaller */
+.job-dock.collapsed:not(.compact):not(.tiny) {
     width: max-content;
     min-width: 200px;
 }
@@ -9235,6 +9241,13 @@ button.otd-settings-icon:hover {
 /* Ingeklapt paneel: de bibliotheekregel klapt mee in */
 .job-dock.collapsed:not(.compact) .job-library {
     display: none;
+}
+
+/* Klein of laag venster: het open paneel blijft laag (de lijst scrolt erin) */
+@media (max-width: 1279px), (max-height: 820px) {
+    .job-dock {
+        max-height: min(30vh, 240px);
+    }
 }
 
 @media (max-width: 600px) {
