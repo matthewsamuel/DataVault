@@ -29,6 +29,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Terug en Vooruit van de browser (⌘[ en ⌘], of vegen in Safari) gaan nu naar het vorige of volgende scherm in DataVault, ook tussen albums en Op deze dag, in plaats van de app te verlaten. Albums houdt daarbij zijn filters.
 - Albums: de aantallen achter jaren, camera's en bestandstypes staan er alleen als ze kloppen; staat er een ander filter aan, dan zie je alleen de namen, zodat een keuze niet onverwacht 0 bestanden geeft.
 - Beste uit reeks: 'nog te doen' telt alleen de foto's die nog vergeleken moeten worden, zodat de getallen optellen; daarna staat er 'reeksen zoeken volgt'. De knop op een reekskaart noemt hetzelfde aantal als het bevestigvenster, inclusief de exacte kopieën die meegaan.
+- Welke is mooier?: Vergelijken telt wat je 'vergeleken' hebt en de Ranglijst telt de foto's 'met een score'; het woord 'beoordeeld' betekende eerst twee dingen.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.

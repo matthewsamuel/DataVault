@@ -353,7 +353,7 @@ function eloUpdateProgress() {
     if (elo.round) parts.push(`${formatNumberNl(elo.round)} vergeleken in deze ronde`);
     if (elo.stats) {
         const photos = elo.stats.photos === 1 ? 'foto' : 'foto\'s';
-        parts.push(`${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} beoordeeld`);
+        parts.push(`${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} vergeleken`);
     }
     // Na Terugdraaien zegt de regel het zelf (een melding rechtsboven zou over de foto vallen)
     const notice = elo.notice ? createEl('span', { class: 'elo-notice' },
@@ -506,7 +506,7 @@ function eloRenderBoard(data) {
     if (!data.items.length) {
         eloSetBody(emptyState({
             icon: 'fa-ranking-star', title: 'Nog geen ranglijst',
-            text: 'Vergelijk een paar foto\'s (of stem in de slideshow); de best beoordeelde verschijnen hier.',
+            text: 'Vergelijk een paar foto\'s (of stem in de slideshow); de foto\'s met de hoogste score verschijnen hier.',
             action: { label: 'Begin met vergelijken', onClick: () => eloShowTab('compare'), primary: true },
         }));
         return;
@@ -523,7 +523,8 @@ function eloRenderBoard(data) {
                 createEl('span', { class: 'elo-board-sub', text: `${item.folder} · ${won}${votes}` })),
             createEl('span', { class: 'elo-board-score tabular', 'aria-label': `Score ${item.rating}`, text: formatNumberNl(item.rating) }));
     });
-    const shown = data.items.length < data.total ? `De beste ${data.items.length} van ${formatNumberNl(data.total)}` : `${formatNumberNl(data.total)} beoordeeld`;
+    // 'Met een score' (vergeleken of gestemd), niet 'beoordeeld': Vergelijken telt wat vergeleken is
+    const shown = data.items.length < data.total ? `De beste ${data.items.length} van ${formatNumberNl(data.total)} met een score` : `${formatNumberNl(data.total)} met een score`;
     eloSetBody(createEl('div', { class: 'elo-board' },
         createEl('p', { class: 'elo-board-caption' }, createEl('strong', { text: data.scope.title }), ` · ${shown}`),
         createEl('ol', { class: 'elo-board-list', 'aria-label': `Ranglijst ${data.scope.title}` }, ...rows)));
