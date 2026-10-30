@@ -12803,6 +12803,11 @@ button.otd-settings-icon:hover {
     font-size: var(--fs-2xs);
 }
 
+/* Op de groene achtergrond van het gekozen gesprek haalt tertiair in donker geen AA meer */
+.msg-item.active .msg-item-date {
+    color: var(--text-secondary);
+}
+
 .msg-thread > .empty-state {
     margin: auto;
 }
