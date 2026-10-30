@@ -13401,6 +13401,13 @@ button.otd-settings-icon:hover {
     text-align: right;
 }
 
+/* Alleen een datum bekend: woorden in plaats van een uur, in de gewone letter */
+.act-time-day {
+    padding-top: var(--space-xs);
+    color: var(--text-tertiary);
+    line-height: var(--lh-tight);
+}
+
 .act-icon {
     display: inline-flex;
     align-items: center;

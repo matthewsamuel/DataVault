@@ -211,8 +211,16 @@ function actDetailText(key, value) {
     return String(value);
 }
 
+// Alleen een datum (Netflix 'Title,Date', een agendapunt voor de hele dag, stappen per dag): geen verzonnen uur
+function actWholeDay(ev) {
+    const d = ev.details || {};
+    return Boolean(d.alleen_datum || d.hele_dag || ev.kind === 'steps');
+}
+
 function actEvent(ev) {
-    const time = new Date(ev.ts * 1000).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+    const wholeDay = actWholeDay(ev);
+    const time = wholeDay ? 'Hele dag'
+        : new Date(ev.ts * 1000).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
     const meta = [ev.kind_label, ev.source_name];
     Object.entries(ev.details || {}).forEach(([k, v]) => {
         if (ACT_DETAIL_LABELS[k] && v !== null && v !== '' && meta.length < 5) meta.push(`${ACT_DETAIL_LABELS[k]}: ${actDetailText(k, v)}`);
@@ -225,7 +233,9 @@ function actEvent(ev) {
     const text = ev.details && typeof ev.details.tekst === 'string' && ev.details.tekst.trim()
         ? createEl('p', { class: 'act-text', text: ev.details.tekst }) : null;
     return createEl('li', { class: 'act-event' },
-        createEl('time', { class: 'act-time mono', datetime: new Date(ev.ts * 1000).toISOString(), text: time }),
+        createEl('time', { class: wholeDay ? 'act-time act-time-day' : 'act-time mono',
+            datetime: wholeDay ? new Date(ev.ts * 1000).toISOString().slice(0, 10) : new Date(ev.ts * 1000).toISOString(),
+            title: wholeDay ? 'Geen tijdstip bekend, alleen de dag' : undefined, text: time }),
         createEl('span', { class: 'act-icon', 'aria-hidden': 'true' }, createEl('i', { class: `fas ${kind}` })),
         createEl('div', { class: 'act-body' }, title, text,
             createEl('div', { class: 'act-meta' }, createEl('i', { class: ev.source_icon, 'aria-hidden': 'true' }), ` ${meta.join(' · ')}`)));
