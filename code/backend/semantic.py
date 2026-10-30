@@ -124,6 +124,13 @@ CLEAR_SCORE = 0.07
 WEAK_FALLBACK = 5                 # search_photos: weaker hits returned when nothing is strong
 # Image to image cosines sit on another scale (0.6-0.95): a near-copy must not set the cut
 NEAR_COPY = 0.93
+# Text results show one tile per picture: a photo whose vector is this close to a better
+# result (the same picture in another folder, or saved again) is folded into that result
+# ('copies'). Burst shots and edits stay apart (they sit around 0.93-0.97).
+COPY_COSINE = 0.985
+COPY_SCORE_GAP = 0.01             # copies score (almost) the same for any text
+COPY_WINDOW = 64                  # better results compared with, at most
+COLLAPSE_LIMIT = 2000             # copies are folded within the best this many
 SIMILAR_SPREAD = 0.12
 MAX_QUERY_CHARS = 200
 
@@ -935,6 +942,16 @@ class VectorIndex:
                 return None
             return self.vectors[row].astype(np.float32)
 
+    def vectors_of(self, media_ids: Sequence[int]) -> np.ndarray:
+        """The vectors of these media ids as float32 rows (zeros for one that is not here)."""
+        with self._lock:
+            out = np.zeros((len(media_ids), self.dim), dtype=np.float32)
+            for k, media_id in enumerate(media_ids):
+                row = self._row_of.get(int(media_id))
+                if row is not None and self.ids[row] == media_id:
+                    out[k] = self.vectors[row]
+            return out
+
     def scores(self, query: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """(ids, cosine scores) of every row, in float32 chunks (float16 matmul is slow in numpy)."""
         with self._lock:
@@ -1062,6 +1079,27 @@ def relevance_cut(scores: np.ndarray, background: np.ndarray, spread: float = SC
     return cut
 
 
+def collapse_copies(ids: np.ndarray, scores: np.ndarray, vectors: np.ndarray):
+    """
+    Fold copies of one picture into their best result (ids and scores are best first,
+    vectors the image vectors of the first rows). Returns (keep mask, {kept id: [copy ids]}).
+    """
+    n = min(len(ids), len(vectors))
+    keep = np.ones(len(ids), dtype=bool)
+    copies: Dict[int, List[int]] = {}
+    for i in range(1, n):
+        lo = max(0, i - COPY_WINDOW)
+        near = lo + np.flatnonzero(keep[lo:i] & (scores[lo:i] - scores[i] <= COPY_SCORE_GAP))
+        if not len(near):
+            continue
+        sims = vectors[near] @ vectors[i]
+        j = int(np.argmax(sims))
+        if sims[j] >= COPY_COSINE:
+            keep[i] = False
+            copies.setdefault(int(ids[near[j]]), []).append(int(ids[i]))
+    return keep, copies
+
+
 def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: Dict[str, Any],
          exclude: Optional[int] = None, keep_stale: bool = False) -> Dict[str, Any]:
     """
@@ -1098,8 +1136,15 @@ def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: D
         ids, scores = ids[top], scores[top]
     order = np.argsort(-scores, kind="stable")
     ids, scores = ids[order], scores[order]
+    copies: Dict[int, List[int]] = {}
+    if key[0] == "text" and len(ids) > 1:
+        head = min(len(ids), COLLAPSE_LIMIT)
+        kept, copies = collapse_copies(ids[:head], scores[:head], _index.vectors_of(ids[:head]))
+        if copies:
+            kept = np.concatenate([kept, np.ones(len(ids) - head, dtype=bool)])
+            ids, scores = ids[kept], scores[kept]
     strong = int(np.searchsorted(-scores, -cut, side="right")) if len(scores) else 0
-    ranking = {"ids": ids, "scores": scores, "strong": strong, "state": state_key}
+    ranking = {"ids": ids, "scores": scores, "strong": strong, "copies": copies, "state": state_key}
     with _rankings_lock:
         _rankings[cache_key] = ranking
         while len(_rankings) > RANKING_CACHE:
@@ -1123,12 +1168,19 @@ def page(db, ranking: Dict[str, Any], offset: int, limit: int, include_weak: boo
     end_all = len(ranking["ids"]) if include_weak else ranking["strong"]
     ids = ranking["ids"][offset:min(offset + limit, end_all)]
     scores = ranking["scores"][offset:offset + len(ids)]
-    rows = _rows_by_id(db, ids)
+    folded = ranking.get("copies") or {}
+    copy_ids = [c for media_id in ids.tolist() for c in folded.get(media_id, ())]
+    rows = _rows_by_id(db, [*ids.tolist(), *copy_ids])
     items = []
     for media_id, score in zip(ids.tolist(), scores.tolist()):
         row = rows.get(media_id)
         if row is not None:   # hidden since (moved to TRASH): left out
-            items.append({**row, "score": round(score, 4)})
+            item = {**row, "score": round(score, 4)}
+            copies = [rows[c]["path"] for c in folded.get(media_id, ()) if c in rows]
+            if copies:        # the same picture elsewhere in the library: one tile with a badge
+                item["copies"] = len(copies)
+                item["copy_paths"] = copies
+            items.append(item)
     next_offset = offset + len(ids)
     return {
         "total": ranking["strong"],

@@ -200,3 +200,27 @@ def test_the_idle_unload_cannot_pull_the_text_model_away_mid_query(tmp_path):
     encoder.text_used -= 120
     semantic.Encoder.load_text(encoder)
     assert not encoder.unload_text(60)
+
+
+# ---------- copies ----------
+
+def test_copies_of_one_picture_are_one_result_with_their_paths(lib):
+    db, cfg, add, mix, query = lib
+    photo = mix(query, 0.15)
+    original = add(photo)
+    copy = add(photo)                                        # the same file in another folder
+    resaved = add(photo + 0.01 * mix(query, 0.0))            # saved again: almost the same vector
+    burst = add(mix(photo, 0.95) * 1.0)                      # a burst shot: alike, not a copy
+    for _ in range(40):
+        add(mix(query, 0.0))
+    result = semantic.search_text(db, cfg, "x")
+    ids = [it["id"] for it in result["items"]]
+    assert ids.count(original) + ids.count(copy) + ids.count(resaved) == 1
+    first = result["items"][0]
+    assert first["copies"] == 2 and len(first["copy_paths"]) == 2
+    assert {first["id"], *(int(p.split("/")[-1].split(".")[0]) for p in first["copy_paths"])} == {original, copy, resaved}
+    assert burst in ids and "copies" not in result["items"][ids.index(burst)]
+    assert result["total"] == len(ids)
+    # 'Vergelijkbaar' still shows every copy
+    similar = [it["id"] for it in semantic.search_similar(db, cfg, burst)["items"]]
+    assert {original, copy, resaved} <= set(similar)
