@@ -11175,9 +11175,16 @@ button.otd-settings-icon:hover {
 
 /* ==================== WELKE IS MOOIER? (elo.js) ==================== */
 /* Een groot venster: kop met collectie en tabbladen, twee foto's op een donker vlak, onderaan
-   de voortgang en Terugdraaien / Overslaan. De ranglijst gebruikt hetzelfde venster. */
+   het sessiedoel, de reeks, hoe zeker de ranglijst is en Terugdraaien / Gelijk / Overslaan. De
+   ranglijst gebruikt hetzelfde venster.
+   Beweging (alles in deze sectie, los van de rest van de app): de winnaar krijgt een groene ring
+   en een vinkje dat opveert, het paar zweeft weg (.is-leaving, absoluut over het nieuwe heen,
+   niet klikbaar) en het nieuwe komt omhoog. De choreografie zelf zit in elo.js (Web Animations
+   API); hier staan de toestanden en de overgangen. Alleen transform en opacity bewegen. */
 
 .elo-overlay {
+    --elo-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
+    --elo-ring-size: var(--control-h);
     padding: var(--space-lg);
 }
 
@@ -11230,6 +11237,7 @@ button.otd-settings-icon:hover {
 }
 
 .elo-body {
+    position: relative;
     flex: 1 1 0;
     min-height: 0;
     display: flex;
@@ -11251,6 +11259,14 @@ button.otd-settings-icon:hover {
     gap: var(--space-lg);
 }
 
+/* Het vorige paar, op weg naar buiten: over het nieuwe heen, maar nooit in de weg */
+.elo-stage.is-leaving {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+}
+
 .elo-choice {
     display: flex;
     flex-direction: column;
@@ -11263,6 +11279,7 @@ button.otd-settings-icon:hover {
     font: inherit;
     text-align: left;
     cursor: pointer;
+    will-change: transform, opacity;
 }
 
 .elo-frame {
@@ -11276,8 +11293,7 @@ button.otd-settings-icon:hover {
     border-radius: var(--radius-lg);
     background-color: var(--media-bg);
     border: 1px solid var(--media-border);
-    transition: box-shadow var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out),
-        opacity var(--duration-base) var(--ease-out);
+    transition: box-shadow var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--elo-spring);
 }
 
 .elo-img {
@@ -11285,18 +11301,26 @@ button.otd-settings-icon:hover {
     max-height: 100%;
     object-fit: contain;
     opacity: 0;
-    transition: opacity var(--duration-base) var(--ease-out);
+    transform: scale(1.015);
+    transition: opacity var(--duration-slow) var(--ease-out), transform var(--duration-slow) var(--ease-out);
     user-select: none;
 }
 
 .elo-img.is-loaded {
     opacity: 1;
+    transform: none;
 }
 
 .elo-choice:hover .elo-frame {
-    box-shadow: 0 0 0 2px var(--accent-border), var(--shadow-md);
+    transform: translateY(calc(-1 * var(--space-2xs)));
+    box-shadow: 0 0 0 2px var(--accent-border), var(--shadow-lg);
 }
 
+.elo-choice:active .elo-frame {
+    transform: scale(0.99);
+}
+
+.elo-choice:focus,
 .elo-choice:focus-visible {
     outline: none;
 }
@@ -11304,10 +11328,6 @@ button.otd-settings-icon:hover {
 .elo-choice:focus-visible .elo-frame,
 .elo-overlay.is-keyboard .elo-choice:focus .elo-frame {
     box-shadow: 0 0 0 2px var(--focus-ring), var(--shadow-md);
-}
-
-.elo-choice:focus {
-    outline: none;
 }
 
 /* WebKit geeft :focus-visible hier niet altijd (de focus wordt met de hand verplaatst); na Tab of
@@ -11323,13 +11343,18 @@ button.otd-settings-icon:hover {
     outline-offset: 2px;
 }
 
+/* De keuze: een groene ring met een zachte gloed en een vinkje dat opveert */
 .elo-choice.is-chosen .elo-frame {
-    box-shadow: 0 0 0 3px var(--accent), var(--shadow-lg);
+    box-shadow: 0 0 0 3px var(--accent), 0 0 var(--space-2xl) var(--accent-glow), var(--shadow-lg);
+}
+
+.elo-choice.is-draw .elo-frame {
+    box-shadow: 0 0 0 2px var(--border-strong), var(--shadow-md);
 }
 
 /* Alleen de foto zelf dooft uit: het donkere vlak eromheen en de −N blijven goed leesbaar */
 .elo-choice.is-passed .elo-img.is-loaded {
-    opacity: 0.4;
+    opacity: 0.45;
 }
 
 .elo-check {
@@ -11348,9 +11373,14 @@ button.otd-settings-icon:hover {
     box-shadow: var(--shadow-md);
 }
 
-.elo-choice.is-chosen .elo-check {
+.elo-choice.is-chosen .elo-check,
+.elo-choice.is-draw .elo-check {
     display: inline-flex;
-    animation: dv-pop-in var(--duration-base) var(--ease-out);
+}
+
+.elo-choice.is-draw .elo-check {
+    background-color: var(--media-control);
+    color: var(--on-media);
 }
 
 /* Hoeveel de score veranderde, kort op de foto */
@@ -11369,9 +11399,9 @@ button.otd-settings-icon:hover {
 }
 
 .elo-delta.is-up,
-.elo-delta.is-down {
+.elo-delta.is-down,
+.elo-delta.is-even {
     display: inline-block;
-    animation: dv-fade-in var(--duration-base) var(--ease-out);
 }
 
 /* De winnaar in het groen van het vinkje; de ander blijft rustig op het donkere vlak */
@@ -11426,16 +11456,32 @@ button.otd-settings-icon:hover {
 
 .elo-score {
     flex: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-xs);
+}
+
+.elo-score-value {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    font-weight: var(--fw-semibold);
+}
+
+.elo-score-band {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
     color: var(--text-secondary);
 }
 
-.elo-score .tabular {
-    font-family: var(--font-mono);
-    color: var(--text-primary);
-}
-
-.elo-games {
-    color: var(--text-tertiary);
+.elo-new-chip {
+    flex: none;
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background-color: var(--accent-subtle);
+    color: var(--accent-text);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    line-height: var(--control-h-sm);
 }
 
 .elo-choice.is-loading {
@@ -11450,13 +11496,13 @@ button.otd-settings-icon:hover {
     width: 40%;
 }
 
-/* ---------- Onderbalk ---------- */
+/* ---------- Onderbalk: doel, reeks, zekerheid, acties ---------- */
 
 .elo-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-lg);
+    gap: var(--space-md) var(--space-lg);
     flex-wrap: wrap;
     margin-top: var(--space-md);
     padding-top: var(--space-md);
@@ -11465,6 +11511,139 @@ button.otd-settings-icon:hover {
 
 .elo-footer[hidden] {
     display: none;
+}
+
+.elo-meters {
+    flex: 1 1 420px;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+}
+
+.elo-goal {
+    position: relative;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 0 var(--space-sm) 0 0;
+    border: none;
+    border-radius: var(--radius-full);
+    background: none;
+    color: var(--text-primary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.elo-goal:hover .elo-ring-track {
+    stroke: var(--border-strong);
+}
+
+.elo-ring {
+    width: var(--elo-ring-size);
+    height: var(--elo-ring-size);
+    transform: rotate(-90deg);
+}
+
+.elo-ring circle {
+    fill: none;
+    stroke-width: 3.5;
+}
+
+.elo-ring-track {
+    stroke: var(--border-default);
+    transition: stroke var(--duration-fast) var(--ease-out);
+}
+
+.elo-ring-fill {
+    stroke: var(--accent);
+    stroke-linecap: round;
+    stroke-dasharray: 100 100;
+    stroke-dashoffset: 100;
+    transition: stroke-dashoffset var(--duration-slow) var(--elo-spring);
+}
+
+.elo-goal.is-done .elo-ring {
+    filter: drop-shadow(0 0 var(--space-xs) var(--accent-glow));
+}
+
+.elo-goal-text {
+    display: flex;
+    flex-direction: column;
+    line-height: var(--lh-tight);
+    text-align: left;
+}
+
+.elo-goal-count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+}
+
+.elo-goal-of {
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+}
+
+.elo-spark {
+    position: absolute;
+    left: calc(var(--elo-ring-size) / 2);
+    top: 50%;
+    width: var(--space-xs);
+    height: var(--space-xs);
+    border-radius: var(--radius-full);
+    background-color: var(--accent);
+    pointer-events: none;
+}
+
+.elo-streak {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+}
+
+.elo-streak[hidden] {
+    display: none;
+}
+
+.elo-streak i {
+    color: var(--warning);
+}
+
+.elo-settled {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+}
+
+.elo-settled-track {
+    width: var(--space-4xl);
+    height: var(--space-xs);
+    border-radius: var(--radius-full);
+    background-color: var(--border-default);
+    overflow: hidden;
+}
+
+.elo-settled-fill {
+    height: 100%;
+    border-radius: inherit;
+    background-color: var(--accent);
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform var(--duration-slow) var(--elo-spring);
+}
+
+.elo-settled-text {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 .elo-progress {
@@ -11523,18 +11702,52 @@ button.otd-settings-icon:hover {
     padding-right: var(--space-xs);
 }
 
+.elo-board > .empty-state {
+    margin-top: var(--space-3xl);
+}
+
+.elo-board-tools {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-md) var(--space-lg);
+    padding-bottom: var(--space-md);
+    margin-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-hairline);
+    background-color: var(--surface-overlay);
+}
+
+.elo-board-heading {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.elo-board-title {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    letter-spacing: var(--tracking-tight);
+    color: var(--text-primary);
+}
+
 .elo-board-caption {
-    margin: 0 0 var(--space-md);
+    margin: var(--space-2xs) 0 0;
     color: var(--text-secondary);
     font-size: var(--fs-sm);
 }
 
-.elo-board-caption strong {
-    color: var(--text-primary);
-    font-weight: var(--fw-semibold);
+.elo-board-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
 }
 
 .elo-board-list {
+    outline: none;
     list-style: none;
     margin: 0;
     padding: 0;
@@ -11546,8 +11759,9 @@ button.otd-settings-icon:hover {
     display: flex;
     align-items: center;
     gap: var(--space-md);
-    padding: var(--space-sm) var(--space-sm);
+    padding: var(--space-sm);
     border-radius: var(--radius-md);
+    transition: background-color var(--duration-fast) var(--ease-out);
 }
 
 .elo-board-row + .elo-board-row {
@@ -11577,6 +11791,12 @@ button.otd-settings-icon:hover {
     font-weight: var(--fw-semibold);
 }
 
+.elo-board-row[data-rank="1"] .elo-rank {
+    background-color: var(--accent);
+    color: var(--text-on-accent);
+    box-shadow: 0 0 var(--space-md) var(--accent-glow);
+}
+
 .elo-board-thumb {
     flex: none;
     width: var(--thumb-sm);
@@ -11591,6 +11811,11 @@ button.otd-settings-icon:hover {
     height: 100%;
     object-fit: cover;
     display: block;
+    transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.elo-board-row:hover .elo-board-img {
+    transform: scale(1.06);
 }
 
 .elo-board-text {
@@ -11618,6 +11843,72 @@ button.otd-settings-icon:hover {
     font-size: var(--fs-xs);
 }
 
+/* De marge van de score (95%): een balkje met een punt op dezelfde schaal voor de hele lijst */
+.elo-board-band {
+    flex: none;
+    width: calc(var(--space-4xl) * 2);
+}
+
+.elo-band {
+    position: relative;
+    display: block;
+    height: var(--space-sm);
+    border-radius: var(--radius-full);
+    background-color: var(--border-hairline);
+}
+
+.elo-band.is-unknown {
+    opacity: 0.5;
+}
+
+.elo-band-range {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: var(--radius-full);
+    background-color: var(--accent-subtle);
+    border: 1px solid var(--accent-border);
+}
+
+.elo-band-dot {
+    position: absolute;
+    top: 50%;
+    width: var(--space-sm);
+    height: var(--space-sm);
+    border-radius: var(--radius-full);
+    background-color: var(--accent);
+    transform: translate(-50%, -50%);
+}
+
+/* Beweging sinds de vorige sessie */
+.elo-move {
+    flex: none;
+    min-width: var(--space-3xl);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2xs);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    color: var(--text-tertiary);
+}
+
+.elo-move.is-up {
+    color: var(--accent-text);
+}
+
+.elo-move.is-down {
+    color: var(--text-secondary);
+}
+
+.elo-move.is-new {
+    height: var(--space-lg);
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background-color: var(--accent-subtle);
+    color: var(--accent-text);
+}
+
 .elo-board-score {
     flex: none;
     min-width: var(--space-4xl);
@@ -11628,23 +11919,48 @@ button.otd-settings-icon:hover {
     color: var(--text-primary);
 }
 
+@media (max-width: 1180px) {
+    .elo-board-band {
+        width: var(--space-4xl);
+    }
+
+    .elo-settled-track {
+        width: var(--space-3xl);
+    }
+}
+
 @media (max-width: 900px) {
     .elo-panel {
         padding: var(--space-md) var(--space-lg);
     }
 
     .elo-subtitle,
-    .elo-keys {
+    .elo-keys,
+    .elo-board-band,
+    .elo-actions kbd {
         display: none;
     }
 
     .elo-stage {
         gap: var(--space-md);
     }
+}
 
-    .elo-games {
-        display: none;
+/* Minder beweging: geen zweven, geen gloed die aanzwelt; de toestanden blijven */
+@media (prefers-reduced-motion: reduce) {
+    .elo-choice:hover .elo-frame,
+    .elo-choice:active .elo-frame,
+    .elo-board-row:hover .elo-board-img {
+        transform: none;
     }
+
+    .elo-img {
+        transform: none;
+    }
+}
+
+:root[data-motion="reduce"] .elo-overlay * {
+    transition: none !important;
 }
 
 /* ==================== INSTELLINGEN > BACK-UPS (backup-settings.js) ==================== */
