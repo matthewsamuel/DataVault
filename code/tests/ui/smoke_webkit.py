@@ -1439,6 +1439,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                    " document.activeElement.id]")
             expect(dialog[0] and "RAW_DUPLICATES/near-duplicates" in dialog[1] and "null" not in dialog[1]
                    and dialog[2] == "btn-series-cancel", f"series: the confirmation is missing or unclear, or does not start on Annuleren ({dialog})")
+            # The card's button and the dialog name the same number (exact copies that move along included)
+            numbers = page.evaluate("[document.querySelector('.series-card .series-confirm-btn').textContent,"
+                                    " document.getElementById('btn-series-go').textContent]")
+            expect(re.sub(r"\D", "", numbers[0]) == re.sub(r"\D", "", numbers[1]),
+                   f"series: the card button and the dialog count differently ({numbers})")
             expect_focus_trapped("modal-series-confirm", "series: confirmation")
             page.focus("#btn-series-cancel")
             step("series: Escape moves nothing", lambda: page.keyboard.press("Escape"), 0.4)

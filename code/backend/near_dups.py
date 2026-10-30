@@ -413,7 +413,8 @@ def counts(db) -> Dict[str, int]:
         reviewed = conn.execute("SELECT COUNT(*) FROM near_dup_reviews").fetchone()[0]
     by_status = dict(rows)
     done = by_status.get(OK, 0) + by_status.get(UNDECODABLE, 0)
-    pending = max(0, photos - done) + unpaired
+    to_analyse = max(0, photos - done)
+    pending = to_analyse + unpaired
     if not pending and signature[0] and state(db).get("pairs_signature") not in (None, signature):
         pending = 1   # a photo left the index since the last lookup: the next run looks again
     return {
@@ -421,7 +422,8 @@ def counts(db) -> Dict[str, int]:
         "analysed": by_status.get(OK, 0),
         "undecodable": by_status.get(UNDECODABLE, 0),
         "errors": by_status.get(ERROR, 0),
-        "pending": pending,
+        "pending": pending,            # work for the next run: photos to analyse plus analysed-but-unpaired
+        "to_analyse": to_analyse,      # only the photos still to analyse (analysed + undecodable + this = photos)
         "pairs": pairs,
         "reviewed": reviewed,
     }
