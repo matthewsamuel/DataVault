@@ -229,3 +229,26 @@ def test_the_model_cannot_name_a_path_for_keep_best_or_a_delete(indexed, fake_ol
     events = _say(indexed, fake_ollama, {"action": "delete_file", "path": str(vault / STRAND)})
     assert not [e for e in events if "tool" in e]
     assert _tree(vault) == before
+
+
+def test_keep_best_card_shows_the_exact_copies_that_move_along(indexed, fake_ollama, vault):
+    import shutil
+    copy = vault / "RAW/misc/klein kopie.jpg"
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(vault / "RAW/2022/bursts/strand klein.jpg", copy)
+    _index(indexed)
+    _phash(indexed)
+    before = _tree(vault)
+    p = _tool(_say(indexed, fake_ollama, {"action": "propose_keep_best", "count": 5}))["pending"]
+    listed = p["items"] + [None] * p["more"]
+    assert len(listed) == p["count"]
+    twins = {"strand klein.jpg", "klein kopie.jpg"}
+    photos = {i["name"] for i in p["items"] if "exacte kopie" not in i["to"]}
+    copies = {i["name"] for i in p["items"] if "exacte kopie" in i["to"]}
+    assert photos & twins, p            # one of the twins goes (the smallest of its series) ...
+    assert copies == twins - photos and "1 exacte kopie" in p["title"]   # ... and the card shows the other
+    done = indexed.post(f"/api/chat/actions/{p['id']}/confirm").json()
+    assert done["moved"] == p["count"], (done, p)
+    for action in done["actions"]:
+        assert indexed.post("/api/recovery/undo", json={"action_id": action}).status_code == 200
+    assert _tree(vault) == before

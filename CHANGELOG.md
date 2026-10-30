@@ -12,6 +12,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 ### Verificatieronde
 - WhatsApp-exports en back-ups met een #, ? of % in de map- of bestandsnaam worden gewoon gelezen; er verschijnt geen leeg bestand meer naast de export, en de controle van een back-up kijkt echt naar het bestand.
 - Exporteren met de originele mappen of per maand schrijft nooit meer in het archief, ook niet als je de map boven het archief kiest of als een maandmap een snelkoppeling naar het archief is; zo'n bestand telt als mislukt.
+- Pasha's kaart voor 'beste uit reeks houden' toont ook de exacte kopieën die mee verhuizen, en het aantal op de kaart is precies wat er na Uitvoeren verplaatst wordt.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
