@@ -839,6 +839,8 @@
         state.pages = new Map();
         state.version = null;
         state.total = null;
+        // Een ander filter of album: de eerste tegels komen als een golf binnen (niet bij verversen)
+        state.enterMotion = !keepScroll;
         clearRows();
         const scroll = $('albums-scroll');
         if (!keepScroll) {
@@ -884,6 +886,10 @@
                 if (first) {
                     layout(false);
                     showEmptyOrNotReady();
+                    if (state.enterMotion) {
+                        state.enterMotion = false;
+                        MediaMotion.cascade($('albums-content').querySelectorAll('.albums-tile'), { root: $('albums-scroll') });
+                    }
                 } else {
                     refreshRows(page);
                 }
@@ -1084,6 +1090,7 @@
             card.appendChild(createEl('img', { class: 'loading', alt: '' }));
             return card;
         }
+        card.dataset.motionKey = file.path;   // de viewer groeit hieruit en krimpt hierheen terug
         const img = createEl('img', { class: 'loading', alt: file.name, loading: 'lazy', decoding: 'async' });
         img.addEventListener('load', () => img.classList.remove('loading'), { once: true });
         img.addEventListener('error', () => img.classList.remove('loading'), { once: true });
@@ -1534,6 +1541,7 @@
                 grid);
         });
         groups.replaceChildren(...sections);
+        MediaMotion.cascade(groups.querySelectorAll('.albums-otd-year-head, .albums-tile'), { root: $('albums-scroll'), revealRest: true });
         const first = groups.querySelector('.albums-tile');
         if (first) first.tabIndex = 0;
     }

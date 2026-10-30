@@ -438,7 +438,7 @@ function searchResultCard(item, index) {
     img.src = vaultFileUrl('thumb', item.path);
     const card = createEl('div', {
         class: 'search-result thumb-tile', role: 'listitem', tabindex: index === searchState.focusIndex ? '0' : '-1',
-        dataset: { index: String(index) }, 'aria-label': item.name, title: item.name,
+        dataset: { index: String(index), motionKey: item.path }, 'aria-label': item.name, title: item.name,
         onClick: () => searchOpen(index),
     }, img, createEl('div', { class: 'thumb-caption', text: item.name }));
     if (item.kind === 'video') {
@@ -454,6 +454,9 @@ function searchRenderResults(data, fresh) {
     const start = fresh ? 0 : results.children.length;
     const cards = data.items.map((item, i) => searchResultCard(item, start + i));
     if (fresh) results.replaceChildren(...cards); else results.append(...cards);
+    // De resultaten stromen binnen: een golf over wat in beeld staat, de rest bij het scrollen
+    if (fresh) MediaMotion.cascade(cards, { revealRest: true, root: results.closest('.search-scroll') || null });
+    else MediaMotion.revealTiles(cards, { root: results.closest('.search-scroll') || null });
     const more = overlay.querySelector('#search-more');
     more.replaceChildren();
     const count = data.total;
@@ -509,7 +512,9 @@ function searchOpen(index) {
             if (at < 0) return;
             searchState.items.splice(at, 1);
             const results = document.getElementById('search-results');
-            results.replaceChildren(...searchState.items.map(searchResultCard));
+            // Het verplaatste bestand gaat zichtbaar weg, de rest schuift aan
+            MediaMotion.flipByKey(results.children, el => el.dataset.motionKey,
+                () => results.replaceChildren(...searchState.items.map(searchResultCard)), { after: () => results.children });
         },
     });
 }

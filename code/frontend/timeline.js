@@ -349,6 +349,8 @@
             if (scrollEl) scrollEl.scrollTop = 0;
             tlRenderedRange = { start: -1, end: -1 };
             renderVisibleRows();
+            // De eerste foto's komen als een golf binnen (alleen wat in beeld staat)
+            if (tlContentEl) MediaMotion.cascade(tlContentEl.querySelectorAll('.tl-photo-card'), { root: scrollEl });
 
             if (data.next_offset !== null && data.next_offset !== undefined) {
                 // Not awaited: the timeline can be used while the rest arrives
@@ -695,6 +697,7 @@
         const card = document.createElement('div');
         card.className = 'tl-photo-card thumb-tile';
         card.setAttribute('data-index', index);
+        card.dataset.motionKey = file.path;   // de viewer groeit hieruit en krimpt hierheen terug
         card.setAttribute('role', 'button');
         card.tabIndex = index === tlFocusIndex ? 0 : -1;
 
@@ -936,7 +939,8 @@
         for (let i = searchStart; i >= 0; i--) {
             if (tlLayoutRows[i] && tlLayoutRows[i].type === 'header' && tlLayoutRows[i].top <= scrollTop + 60) {
                 if (label.textContent !== tlLayoutRows[i].label) {
-                    label.textContent = tlLayoutRows[i].label;
+                    // De maand rolt: omhoog als je verder scrolt, omlaag als je teruggaat
+                    MediaMotion.timelineLabel(label, tlLayoutRows[i].label, scrollTop);
                 }
                 return;
             }
@@ -1063,7 +1067,7 @@
                 const group = tlGroups[lr.groupIdx];
                 if (group && group.startIdx <= idx && group.endIdx >= idx) {
                     if (tlScrollContainer) {
-                        tlScrollContainer.scrollTo({ top: lr.top, behavior: 'smooth' });
+                        tlScrollContainer.scrollTo({ top: lr.top, behavior: Motion.full() ? 'smooth' : 'auto' });
                     }
                     return;
                 }
@@ -1075,7 +1079,7 @@
             if (tlGroups[i].startIdx <= idx && tlGroups[i].endIdx >= idx) {
                 const headerRow = tlLayoutRows.find(r => r.type === 'header' && r.groupIdx === i);
                 if (headerRow && tlScrollContainer) {
-                    tlScrollContainer.scrollTo({ top: headerRow.top, behavior: 'smooth' });
+                    tlScrollContainer.scrollTo({ top: headerRow.top, behavior: Motion.full() ? 'smooth' : 'auto' });
                 }
                 return;
             }
