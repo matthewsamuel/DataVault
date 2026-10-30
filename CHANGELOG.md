@@ -9,6 +9,20 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Verificatieronde
+- Facebook en Instagram: een nieuwere export van een groep waaruit iemand vertrok of die een nieuwe naam kreeg, komt in hetzelfde gesprek, zonder dubbele berichten.
+- Facebook en Instagram: verschillende chats met dezelfde mensen (twee groepen, of chats met 'Facebook-gebruiker') blijven aparte gesprekken; chats die eerder samengevoegd waren, worden bij de volgende import weer gesplitst.
+- Bestand kiezen laat in Safari ook NetflixViewingHistory.csv en Safari's History.db kiezen.
+- Een Facebook-export wordt herkend, ook als er 'instagram' in een chatnaam staat.
+- Google Mijn activiteit als HTML én als JSON geeft geen dubbele items meer; dubbels die er al waren, worden opgeruimd.
+- WhatsApp: een nieuwere chat-export met dezelfde bestandsnaam op dezelfde dag wordt geen tweede gesprek ('Anna 2') meer.
+- WhatsApp-exports van een Franse Android ('01/06/2024 à 21:34') worden herkend.
+- Een grote locatiegeschiedenis (Records.json van 1 GB of meer) wordt stukje voor stukje ingelezen in plaats van overgeslagen; een bestand dat niet gelezen kon worden, staat als waarschuwing op de kaart van de bron.
+- Een grote Gezondheid-export gebruikt veel minder geheugen.
+- iMessage: reacties met een emoji of sticker (iOS 18) staan bij het bericht, en een ingetrokken bericht toont 'Bericht ingetrokken'.
+- Activiteit toont 'Hele dag' bij items zonder tijdstip (Netflix, agendapunten voor de hele dag, stappen) in plaats van een verzonnen uur.
+- Kaart: de rij 'Uit je Tijdlijn' staat in dezelfde kolom als de kop en de filters, en is weg als er geen locatiegeschiedenis is.
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.
