@@ -184,6 +184,7 @@ def meta_export(path: Path, layout: str = "en", threads: Optional[Dict[str, Dict
         zf.writestr("personal_information/profile_information/profile_information.json",
                     json.dumps({"profile_v2": {"name": {"full_name": mojibake(owner)}}}))
         for folder, thread in (threads or {}).items():
+            thread = {**thread, "thread_path": f"inbox/{folder}"}      # Meta: the chat's own folder
             zf.writestr(f"{act}/{msgs}/{inbox}/{folder}/message_1.json", json.dumps(thread))
         if posts is not None:
             zf.writestr(f"{act}/posts/your_posts__check_ins__photos_and_videos_1.json", json.dumps(posts))
@@ -204,6 +205,7 @@ def instagram_export(path: Path, posts=None, threads: Optional[Dict[str, Dict]] 
         if posts is not None:
             zf.writestr("your_instagram_activity/content/posts_1.json", json.dumps(posts))
         for folder, thread in (threads or {}).items():
+            thread = {**thread, "thread_path": f"inbox/{folder}"}
             zf.writestr(f"your_instagram_activity/messages/inbox/{folder}/message_1.json", json.dumps(thread))
         if likes is not None:
             zf.writestr("your_instagram_activity/likes/liked_posts.json", json.dumps({"likes_media_likes": likes}))

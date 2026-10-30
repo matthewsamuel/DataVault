@@ -4,8 +4,14 @@ DataGatherer - reading a Meta export into the stores (shared by facebook, instag
 One export is owned by one connector (its dg_raw_imports row), but its contents may land
 under another source: the Messenger chats in a Facebook export are stored as source
 'messenger', next to the end-to-end encrypted chats of the Messenger secure storage
-download. Both key a chat by its participants and a message by
-(chat, timestamp_ms, sender, text), so the same message in both exports is stored once.
+download.
+
+A DYI chat is keyed by its folder id (meta_dyi.conv_key), so a newer export where a member
+left, a participant was renamed or the group got a new name lands in the same chat, and two
+groups with the same members stay apart. The secure storage download has no such id: its
+chat is linked to the one DYI chat with the same people (resolve_conversation). Within a
+chat a message is the same when its time in ms, sender and text are (import_export skips
+those), so overlapping exports and both downloads store every message once.
 
 Social items (posts, comments, reactions, Instagram media) go to social_items with a key of
 (kind, time, title, text, url, media names).
@@ -87,6 +93,102 @@ def insert_social(db, source: str, items: List[Dict[str, Any]], raw_id: int) -> 
     return added
 
 
+def _people(participants) -> frozenset:
+    return frozenset(p.casefold() for p in participants if p)
+
+
+def resolve_conversation(db, source: str, thread: Dict[str, Any]) -> int:
+    """
+    The conversation of a thread: by its key when known, else made, and then linked
+    (merged_into) to the chat it is the same as:
+    - a DYI chat ('t:') to the secure storage chat (or a chat stored before folder ids
+      were used) with the same people, 'p:'; a group only when no other DYI chat is linked
+      to that one yet and the names match;
+    - a DYI one-to-one chat to the one other DYI chat with the same two people (Meta gives
+      the pre-encryption copy of a chat its own folder);
+    - a secure storage chat ('p:') to the one DYI chat with the same people.
+    Placeholder names ('Facebook user') never link anything.
+    """
+    key = meta_dyi.conv_key(thread)
+    people = thread["participants"]
+    title = thread.get("title")
+    is_group = len(_people(people)) > 2
+    with db._connect() as conn:
+        known = conn.execute("SELECT 1 FROM msg_conversations WHERE source = ? AND conv_key = ?",
+                             (source, key)).fetchone()
+    if known:
+        return messages_store.conversation(db, source, key, title, people, is_group)
+    target = None
+    pkey = meta_dyi.participant_key(people)
+    if pkey and not key.startswith("f:"):
+        wanted = _people(people)
+        with db._connect() as conn:
+            same = [(cid, ckey, ctitle) for cid, ckey, ctitle, cpeople in conn.execute(
+                        "SELECT id, conv_key, title, participants FROM msg_conversations "
+                        "WHERE source = ? AND merged_into IS NULL", (source,))
+                    if _people(json.loads(cpeople or "[]")) == wanted]
+            if key.startswith("t:"):
+                exact = [(cid, ctitle) for cid, ckey, ctitle in same if ckey == pkey]
+                if exact:
+                    cid, ctitle = exact[0]
+                    taken = conn.execute("SELECT 1 FROM msg_conversations WHERE source = ? AND merged_into = ? "
+                                         "AND conv_key LIKE 't:%'", (source, cid)).fetchone()
+                    same_name = not ctitle or not title or ctitle.casefold() == title.casefold()
+                    if not is_group or (not taken and same_name):
+                        target = cid
+                elif not is_group:
+                    dyi = [cid for cid, ckey, _ in same if ckey.startswith("t:")]
+                    target = dyi[0] if len(dyi) == 1 else None
+            else:
+                dyi = [cid for cid, ckey, _ in same if ckey.startswith("t:")]
+                target = dyi[0] if len(dyi) == 1 else None
+    conv_id = messages_store.conversation(db, source, key, title, people, is_group)
+    if target is None or target == conv_id:
+        return conv_id
+    with db._connect() as conn:
+        conn.execute("UPDATE msg_conversations SET merged_into = ? WHERE id = ?", (target, conv_id))
+        conn.execute("UPDATE msg_messages SET conv_id = ? WHERE conv_id = ?", (target, conv_id))
+        row = conn.execute("SELECT title, participants FROM msg_conversations WHERE id = ?", (target,)).fetchone()
+        merged = sorted(set(json.loads(row[1] or "[]")) | {p for p in people if p})
+        conn.execute("UPDATE msg_conversations SET title = COALESCE(title, ?), participants = ? WHERE id = ?",
+                     (title, json.dumps(merged, ensure_ascii=False), target))
+        messages_store.refresh_conversations(conn, [conv_id, target])
+    return target
+
+
+def _content(sent_at_ms: int, sender: Optional[str], body: Optional[str]) -> tuple:
+    return (int(sent_at_ms), sender or "", messages_store.norm_text(body))
+
+
+def claim_messages(db, source: str, conv_id: int, thread: Dict[str, Any], origin: str) -> int:
+    """
+    Chats stored before folder ids were used were keyed by their people, so two groups with
+    the same members ended up as one. Move this thread's own messages (same time, sender and
+    text, from this kind of export) out of such a chat into conv_id. Returns how many moved.
+    """
+    pkey = meta_dyi.participant_key(thread["participants"])
+    if not pkey:
+        return 0
+    with db._connect() as conn:
+        row = conn.execute("SELECT id, merged_into FROM msg_conversations WHERE source = ? AND conv_key = ?",
+                           (source, pkey)).fetchone()
+        if row is None or row[0] == conv_id or row[1] == conv_id:
+            return 0
+        wanted = {_content(m["ts_ms"], m["sender"], m["text"]) for m in thread["messages"]}
+        ids = [mid for mid, ts, sender, body in conn.execute(
+                   "SELECT id, sent_at_ms, sender, body FROM msg_messages WHERE conv_id = ? AND origin = ?",
+                   (row[0], origin))
+               if _content(ts, sender, body) in wanted]
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            conn.execute(f"UPDATE msg_messages SET conv_id = ? WHERE id IN ({', '.join('?' * len(chunk))})",
+                         [conv_id] + chunk)
+        if ids:
+            messages_store.refresh_conversations(conn, [row[0], conv_id])
+            state.bump_version(conn, source)
+    return len(ids)
+
+
 def import_export(ctx: GatherContext, raw: Dict[str, Any], *, social_source: Optional[str], message_source: str,
                   origin: str, secure: bool = False) -> Dict[str, Any]:
     """
@@ -134,22 +236,32 @@ def import_export(ctx: GatherContext, raw: Dict[str, Any], *, social_source: Opt
     added = seen = 0
     for i, thread in enumerate(threads):
         ctx.check()
-        conv_key = meta_dyi.conv_key(thread)
-        conv_id = messages_store.conversation(db, message_source, conv_key, thread.get("title"),
-                                              thread["participants"], len(thread["participants"]) > 2)
+        conv_id = resolve_conversation(db, message_source, thread)
+        if thread.get("thread_id"):
+            claim_messages(db, message_source, conv_id, thread, origin)
+        with db._connect() as conn:
+            stored = {_content(*r) for r in conn.execute(
+                "SELECT sent_at_ms, sender, body FROM msg_messages WHERE source = ? AND conv_id = ?",
+                (message_source, conv_id))}
         rows = []
+        skipped = 0
         for m in thread["messages"]:
-            msg_key = messages_store.key(conv_key, m["ts_ms"], m["sender"], messages_store.norm_text(m["text"]))
+            lo = m["ts_ms"] if lo is None or m["ts_ms"] < lo else lo
+            hi = m["ts_ms"] if hi is None or m["ts_ms"] > hi else hi
+            content = _content(m["ts_ms"], m["sender"], m["text"])
+            if content in stored:           # already in this chat (an earlier export, or the other download)
+                skipped += 1
+                continue
+            stored.add(content)
+            msg_key = messages_store.key("conv", conv_id, m["ts_ms"], m["sender"], messages_store.norm_text(m["text"]))
             rows.append(messages_store.message_row(
                 conv_id, msg_key, origin, m["ts_ms"], source=message_source, ts_precision="ms", tz=None,
                 sender=m["sender"], is_me=(m["sender"] or "").casefold() in me if me else None, body=m["text"],
                 kind=m["kind"], attachments=_attachments(m["attachments"], raw_id), reactions=m["reactions"],
                 raw_import_id=raw_id))
-            lo = m["ts_ms"] if lo is None or m["ts_ms"] < lo else lo
-            hi = m["ts_ms"] if hi is None or m["ts_ms"] > hi else hi
         n_added, n_seen = messages_store.insert_messages(db, message_source, rows, check=ctx.check)
         added += n_added
-        seen += n_seen
+        seen += n_seen + skipped
         if i % 25 == 0:
             ctx.progress(message=f"Inlezen: {i + 1} van {len(threads)} gesprekken")
     return {"added": added + social_added, "seen": seen + social_seen, "messages_added": added,

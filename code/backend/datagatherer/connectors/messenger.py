@@ -9,8 +9,10 @@ Two parts, one source ('messenger' in the msg_* tables):
   data'): messages.zip with one JSON file per chat (camelCase keys) and a media folder.
   This connector recognises that zip in Downloads and reads it.
 
-The same chat in both is keyed by its participants, and a message by (chat, time in ms,
-sender, text), so overlapping downloads and exports add nothing twice.
+A chat from the Facebook export is keyed by its folder id; the same chat in the secure
+storage download is linked to it by its participants (meta_import.resolve_conversation),
+and a message within a chat is the same when its time in ms, sender and text are, so
+overlapping downloads and exports add nothing twice.
 """
 import json
 import zipfile

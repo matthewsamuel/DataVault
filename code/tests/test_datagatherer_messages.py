@@ -266,13 +266,78 @@ def test_messenger_secure_storage_merges_with_the_facebook_export(client, app, t
     assert registry.get("facebook").detect(zip_path, names) is None
     result = _upload(client, app, "messenger", zip_path)
     assert result["import_result"]["added"] == 1           # the overlapping message was already there
-    convs = _rows(app, "SELECT id, message_count FROM msg_conversations WHERE title = 'Anna Jansen'")
+    convs = _rows(app, "SELECT id, message_count FROM msg_conversations WHERE title = 'Anna Jansen' "
+                       "AND merged_into IS NULL")
     assert len(convs) == 1 and convs[0][1] == 3            # one chat across both exports
     thread = client.get(f"/api/messages/conversations/{convs[0][0]}").json()
     newest = thread["messages"][-1]
     assert newest["is_me"] is True and newest["origin"] == "messenger_e2ee"
     assert newest["attachments"][0]["preview"] is True
     assert client.get(f"/api/messages/attachments/{newest['id']}/0").status_code == 200
+
+
+def _group(people, messages, title, folder):
+    thread = fb_thread([ME] + people, [{"sender_name": who, "timestamp_ms": T0 * 1000 + sec * 1000, "content": text}
+                                       for who, sec, text in messages], title=title)
+    return {folder: thread}
+
+
+def _open_convs(app):
+    return _rows(app, "SELECT title, message_count FROM msg_conversations WHERE merged_into IS NULL "
+                      "AND message_count > 0 ORDER BY id")
+
+
+def test_a_member_who_left_and_a_renamed_group_stay_one_chat(client, app, tmp_path):
+    msgs = [("Anna", 1, "Wie komt er zondag?"), ("Bob", 2, "Ik!"), ("Carl", 3, "Ik ook")]
+    _upload(client, app, "facebook", meta_export(tmp_path / "facebook-1.zip", "en",
+                                                 _group(["Anna", "Bob", "Carl"], msgs, "Familie", "familie_555")))
+    # Newer, overlapping: Carl left, the group was renamed (so was its folder), one new message
+    newer = _group(["Anna", "Bob"], msgs + [("Anna", 4, "Carl is uit de groep")], "Familie ❤", "familieliefde_555")
+    result = _upload(client, app, "facebook", meta_export(tmp_path / "facebook-2.zip", "en", newer))
+    assert result["import_result"]["added"] == 1
+    assert _open_convs(app) == [("Familie", 4)]
+    assert len(_rows(app, "SELECT id FROM msg_messages")) == 4
+
+
+def test_different_chats_with_the_same_people_stay_apart(client, app, tmp_path):
+    threads = {}
+    threads.update(_group(["Anna", "Bob"], [("Anna", 1, "Fijne verjaardag")], "Familie", "familie_1"))
+    threads.update(_group(["Anna", "Bob"], [("Bob", 2, "Agenda voor maandag")], "Werkgroep", "werkgroep_2"))
+    # Two deactivated accounts: Meta calls both 'Facebook user'
+    threads.update(_group(["Facebook user"], [("Facebook user", 3, "Hallo van de eerste")], None, "facebookuser_111"))
+    threads.update(_group(["Facebook user"], [("Facebook user", 4, "Hallo van de tweede")], None, "facebookuser_222"))
+    _upload(client, app, "facebook", meta_export(tmp_path / "facebook.zip", "en", threads))
+    convs = _open_convs(app)
+    assert len(convs) == 4 and ("Familie", 1) in convs and ("Werkgroep", 1) in convs
+    # A secure storage chat of those people is ambiguous: it stays its own chat, nothing is lost
+    chat = {"participants": [ME, "Anna", "Bob"], "threadName": "Familie", "messages": [
+        {"senderName": "Anna", "text": "Nieuw bericht", "timestamp": T0 * 1000 + 9000, "type": "text",
+         "isUnsent": False, "reactions": [], "media": []}]}
+    _upload(client, app, "messenger", secure_storage(tmp_path / "messages.zip", {"familie": chat}))
+    assert len(_open_convs(app)) == 5 and len(_rows(app, "SELECT id FROM msg_messages")) == 5
+
+
+def test_chats_stored_by_their_people_before_are_split_and_not_doubled(client, app, tmp_path):
+    """A database from before folder ids: two groups with the same members in one 'p:' chat."""
+    from backend.datagatherer import meta_import, messages_store
+    db = app.state.db
+    old = messages_store.conversation(db, "messenger", "p:anna|bob|" + ME.casefold(), "Familie", [ME, "Anna", "Bob"], True)
+    rows = [messages_store.message_row(old, f"legacy{i}", "facebook_dyi", T0 * 1000 + sec * 1000, source="messenger",
+                                       sender=who, body=text)
+            for i, (who, sec, text) in enumerate([("Anna", 1, "Fijne verjaardag"), ("Bob", 2, "Agenda voor maandag")])]
+    rows.append(messages_store.message_row(old, "secure0", "messenger_e2ee", T0 * 1000 + 9000, source="messenger",
+                                           sender="Anna", body="Versleuteld"))
+    messages_store.insert_messages(db, "messenger", rows)
+    threads = {}       # Werkgroep first (folder order): it must not take over the chat called Familie
+    threads.update(_group(["Anna", "Bob"], [("Bob", 2, "Agenda voor maandag"), ("Bob", 5, "Nieuw")],
+                          "Werkgroep", "a_werkgroep_2"))
+    threads.update(_group(["Anna", "Bob"], [("Anna", 1, "Fijne verjaardag")], "Familie", "familie_1"))
+    result = _upload(client, app, "facebook", meta_export(tmp_path / "facebook.zip", "en", threads))
+    assert result["import_result"]["added"] == 1
+    assert len(_rows(app, "SELECT id FROM msg_messages")) == 4
+    by_title = {t: n for t, n in _open_convs(app)}
+    assert by_title == {"Familie": 2, "Werkgroep": 2}    # Familie kept the encrypted message, Werkgroep got its own
+    assert meta_import.claim_messages(db, "messenger", 999, {"participants": [], "messages": []}, "x") == 0
 
 
 def test_instagram_export_reads_media_metadata_and_direct_messages(client, app, tmp_path):

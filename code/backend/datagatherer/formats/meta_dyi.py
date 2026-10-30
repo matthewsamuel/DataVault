@@ -213,10 +213,10 @@ def parse_thread(value: Dict[str, Any], name: str) -> Dict[str, Any]:
             kind = "unsent"
         messages.append({"sender": (m.get("sender_name") or "").strip() or None, "ts_ms": ts, "text": text,
                          "attachments": attachments, "reactions": _reactions(m.get("reactions")), "kind": kind})
+    thread_path = value.get("thread_path") if isinstance(value.get("thread_path"), str) and value["thread_path"] else base
     return {"participants": _participants(value.get("participants")),
             "title": value.get("title") if isinstance(value.get("title"), str) else None,
-            "thread_path": value.get("thread_path") if isinstance(value.get("thread_path"), str) else base,
-            "messages": messages}
+            "thread_path": thread_path, "thread_id": thread_id(thread_path or base), "messages": messages}
 
 
 def parse_secure_thread(value: Dict[str, Any], name: str) -> Dict[str, Any]:
@@ -239,15 +239,48 @@ def parse_secure_thread(value: Dict[str, Any], name: str) -> Dict[str, Any]:
                          "attachments": attachments, "reactions": _reactions(m.get("reactions")), "kind": kind})
     return {"participants": _participants(value.get("participants")),
             "title": value.get("threadName") if isinstance(value.get("threadName"), str) else None,
-            "thread_path": base, "messages": messages}
+            "thread_path": name.rsplit(".", 1)[0], "thread_id": None, "messages": messages}
+
+
+# Names Meta shows for a deactivated or deleted account: never a way to tell two chats apart
+PLACEHOLDER_NAMES = frozenset({
+    "facebook user", "facebook-gebruiker", "facebookgebruiker", "gebruiker van facebook",
+    "instagram user", "instagram-gebruiker", "instagramgebruiker", "gebruiker van instagram",
+    "deleted user", "verwijderde gebruiker", "messenger user", "messenger-gebruiker",
+})
+
+
+def thread_id(thread_path: Optional[str]) -> Optional[str]:
+    """The stable id of a DYI chat from its folder ('inbox/familie_10158123' -> '10158123').
+    The name before the id follows the chat's title (it changes when a group is renamed), the
+    id does not; a chat that moved from inbox to archived_threads keeps it too."""
+    folder = (thread_path or "").replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].strip()
+    if not folder:
+        return None
+    head, sep, tail = folder.rpartition("_")
+    return tail if sep and head and tail else folder
+
+
+def participant_key(participants: List[str]) -> Optional[str]:
+    """'p:anna|bob|me', or None when a participant is a placeholder name (or there are none)."""
+    people = sorted({p.casefold() for p in participants if p})
+    if not people or any(p in PLACEHOLDER_NAMES for p in people):
+        return None
+    return "p:" + "|".join(people)
 
 
 def conv_key(thread: Dict[str, Any]) -> str:
-    """The same chat in the Facebook export and in the secure storage download: by its participants."""
-    people = sorted({p.casefold() for p in thread["participants"]})
-    if people:
-        return "p:" + "|".join(people)
-    return "t:" + (thread.get("thread_path") or thread.get("title") or "?").casefold()
+    """
+    The conversation key of a thread. A DYI chat by its folder id ('t:10158123'): members
+    may leave or be renamed between two exports, and two different chats may have the same
+    members. The secure storage download has no such id: there it is the participants
+    ('p:…'; meta_import links that to the DYI chat with the same people), or, with a
+    placeholder name among them, the chat file itself ('f:…').
+    """
+    if thread.get("thread_id"):
+        return "t:" + thread["thread_id"]
+    return participant_key(thread["participants"]) or \
+        "f:" + (thread.get("thread_path") or thread.get("title") or "?").casefold()
 
 
 # ---------- posts, comments, reactions, media ----------
