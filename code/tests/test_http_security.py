@@ -124,3 +124,37 @@ def test_request_with_token_goes_through(anon_client, vault):
 def test_reads_need_no_token(anon_client):
     for url in ["/api/health", "/api/folders", "/api/keurer/stats", "/api/shows/settings", "/"]:
         assert anon_client.get(url).status_code == 200, url
+
+
+# ---------- privacy: what the browser may load, and what the server log keeps ----------
+
+def _csp(response):
+    policy = response.headers.get("content-security-policy") or ""
+    return {part.split()[0]: part.split()[1:] for part in (p.strip() for p in policy.split(";")) if part}
+
+
+@pytest.mark.parametrize("url", ["/", "/index.html", "/app.js", "/api/health",
+                                 "/api/datagatherer/spotify/callback?code=x&state=y"])
+def test_every_response_carries_a_content_security_policy(client, url):
+    """PRIV-3: the browser itself refuses any load or connection to another host."""
+    policy = _csp(client.get(url))
+    assert policy["default-src"] == ["'self'"]
+    assert policy["connect-src"] == ["'self'"]
+    # The one internet host: the opt-in OpenStreetMap tiles, images only
+    assert policy["img-src"] == ["'self'", "data:", "blob:", "https://tile.openstreetmap.org"]
+    for directive in ("script-src", "style-src", "font-src", "media-src", "worker-src"):
+        assert not [s for s in policy[directive] if "://" in s or s in ("*", "https:", "http:", "wss:")], directive
+    assert policy["object-src"] == ["'none'"] and policy["frame-ancestors"] == ["'none'"]
+
+
+def test_query_strings_never_reach_the_access_log(app, caplog):
+    """PRIV-5: an OAuth callback (?code=...&state=...) is logged as its path only."""
+    import logging
+    logger = logging.getLogger("uvicorn.access")
+    with caplog.at_level(logging.INFO, logger="uvicorn.access"):
+        # uvicorn's own call (h11_impl / httptools_impl)
+        logger.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:61242", "GET",
+                    "/api/datagatherer/spotify/callback?code=AQB_fake_auth_code_123&state=zzz", "1.1", 200)
+    text = caplog.text
+    assert "/api/datagatherer/spotify/callback HTTP/1.1" in text
+    assert "AQB_fake_auth_code_123" not in text and "state=" not in text

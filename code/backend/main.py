@@ -112,6 +112,8 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.state.session_token = security.new_session_token()
     app.state.instance_id = uuid.uuid4().hex
     app.add_middleware(security.SessionTokenMiddleware, token=app.state.session_token)
+    app.add_middleware(security.ContentSecurityPolicyMiddleware)
+    security.strip_query_strings_from_access_log()
     # Added last = outermost: a foreign Host header (DNS rebinding) is refused first
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=security.allowed_hosts())
 
