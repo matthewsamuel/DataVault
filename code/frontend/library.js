@@ -626,6 +626,20 @@
         return state.customRange ? 'range' : '';
     }
 
+    // De aantallen in de keuzelijsten tellen het hele archief. Staat er nog een ander filter aan,
+    // dan kloppen ze niet meer voor deze selectie: dan alleen de namen, geen (misleidend) getal
+    const FACET_KEYS = {
+        when: ['year', 'month', 'period', 'date_from', 'date_to'],
+        camera: ['camera', 'camera_contains'],
+        ext: ['ext'],
+    };
+    function facetCount(facet, n) {
+        const own = FACET_KEYS[facet];
+        const other = Object.keys(state.spec).some(k => !own.includes(k) && state.spec[k] !== undefined
+            && state.spec[k] !== null && !(Array.isArray(state.spec[k]) && !state.spec[k].length));
+        return other ? '' : ` (${formatNumberNl(n)})`;
+    }
+
     function renderFilters() {
         const spec = state.spec;
         document.querySelectorAll('#albums-kinds .pill').forEach(pill => {
@@ -633,7 +647,7 @@
         });
         const years = (state.facets && state.facets.years) || [];
         const when = $('albums-when');
-        const yearOptions = years.map(([y, n]) => option(`y:${y}`, `${y} (${formatNumberNl(n)})`));
+        const yearOptions = years.map(([y, n]) => option(`y:${y}`, `${y}${facetCount('when', n)}`));
         if (spec.year && !years.some(([y]) => y === spec.year)) yearOptions.unshift(option(`y:${spec.year}`, String(spec.year)));
         when.replaceChildren(option('', 'Altijd'),
             ...Object.entries(PERIODS).map(([v, l]) => option(v, l)),
@@ -665,14 +679,14 @@
         // Meer filters
         const cameras = (state.facets && state.facets.cameras) || [];
         const camera = $('albums-camera');
-        const camOptions = cameras.map(c => option(c.value, `${c.label} (${formatNumberNl(c.count)})`));
+        const camOptions = cameras.map(c => option(c.value, `${c.label}${facetCount('camera', c.count)}`));
         if (spec.camera && !cameras.some(c => c.value === spec.camera)) camOptions.unshift(option(spec.camera, spec.camera));
         if (spec.camera_contains) camOptions.unshift(option(CAMERA_CONTAINS, `Bevat '${spec.camera_contains}'`));
         camera.replaceChildren(option('', 'Camera'), ...camOptions);
         camera.value = spec.camera || (spec.camera_contains ? CAMERA_CONTAINS : '');
         const exts = (state.facets && state.facets.exts) || [];
         const ext = $('albums-ext');
-        const extOptions = exts.map(x => option(x.ext, `${x.ext} (${formatNumberNl(x.count)})`));
+        const extOptions = exts.map(x => option(x.ext, `${x.ext}${facetCount('ext', x.count)}`));
         (spec.ext || []).forEach(x => { if (!exts.some(e => e.ext === x)) extOptions.unshift(option(x, x)); });
         ext.replaceChildren(option('', 'Bestandstype'), ...extOptions);
         ext.value = spec.ext && spec.ext.length === 1 ? spec.ext[0] : '';

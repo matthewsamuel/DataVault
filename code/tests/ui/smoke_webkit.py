@@ -931,6 +931,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                      document.getElementById('global-search').placeholder]""")
             expect(len(head[0]) == 3 and len(set(head[0])) == 1 and head[1] == "Zoeken…",
                    f"albums: at 1024 the header buttons sit at {head[0]}, search says {head[1]!r}")
+            # With another filter on, the camera list shows no archive-wide counts that would not match
+            labels = page.evaluate("[...document.querySelectorAll('#albums-camera option')].slice(1).map(o => o.textContent)")
+            expect(all("(" not in label for label in labels),
+                   f"albums: camera counts for the whole archive while Foto's is on ({labels[:3]})")
             page.set_viewport_size({"width": 1400, "height": 900})
             page.evaluate("albumsShow(null, {}, '-taken')")
 
