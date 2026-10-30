@@ -5861,6 +5861,24 @@ a.breadcrumb-item:hover {
     margin-bottom: var(--space-sm);
 }
 
+/* Laden: dezelfde vorm als de uitgelichte show en de collecties eronder */
+.shows-skeleton-hero {
+    height: clamp(300px, 46vh, 440px);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-2xl);
+}
+
+.shows-skeleton-title {
+    width: 120px;
+    height: 16px;
+    margin-bottom: var(--space-lg);
+}
+
+.show-card-skeleton {
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius-lg);
+}
+
 /* Collecties */
 
 .shows-grid-folders {

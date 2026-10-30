@@ -276,6 +276,45 @@ function switchMainView(view) {
 
 // ==================== SHOWS & STORIES ====================
 
+// De kop van Shows (titel, uitleg, knoppen) staat er altijd: tijdens het laden, na een fout en met inhoud
+const SHOWS_HEADER_HTML = html`
+        <div class="page-header shows-header">
+            <div>
+                <h1 class="page-title"><i class="fas fa-film" aria-hidden="true"></i> Shows</h1>
+                <p class="page-subtitle">Diavoorstellingen van je mappen, met je mooiste foto's vaker in beeld.</p>
+            </div>
+            <div class="shows-header-actions">
+            <button class="btn btn-secondary" id="btn-elo" onclick="openElo()">
+                <i class="fas fa-scale-balanced" aria-hidden="true"></i> Welke is mooier?
+            </button>
+            <button class="btn btn-secondary" id="btn-shuffle-shows" onclick="shuffleShows()">
+                <i class="fas fa-random" aria-hidden="true"></i> Shows husselen
+            </button>
+            <button class="btn btn-secondary" onclick="openSettingsModal()">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i> Bronnen beheren
+            </button>
+            </div>
+        </div>
+    `;
+
+function showsHeader({ busy = false } = {}) {
+    const tpl = document.createElement('template');
+    setHTML(tpl, SHOWS_HEADER_HTML);
+    const header = tpl.content.firstElementChild;
+    // Husselen heeft pas iets te doen als de shows er zijn
+    if (busy) header.querySelector('#btn-shuffle-shows').disabled = true;
+    return header;
+}
+
+// Plaatshouders in de vorm van wat komt: een grote uitgelichte show en een rij collecties
+function showsSkeleton() {
+    return createEl('div', { class: 'shows-skeleton', role: 'status', 'aria-label': 'Shows laden…' },
+        createEl('div', { class: 'skeleton shows-skeleton-hero', 'aria-hidden': 'true' }),
+        createEl('div', { class: 'skeleton skeleton-line shows-skeleton-title', 'aria-hidden': 'true' }),
+        createEl('div', { class: 'shows-grid-folders', 'aria-hidden': 'true' },
+            ...[0, 1, 2, 3].map(() => createEl('div', { class: 'skeleton show-card-skeleton' }))));
+}
+
 async function loadShows() {
     const container = document.getElementById('shows-container');
     if (!container) return;
@@ -289,14 +328,14 @@ async function loadShows() {
     }
 
     // Normale laadprocedure
-    container.replaceChildren(skeletonCards(8, 'skeleton-grid-shows'));
+    container.replaceChildren(showsHeader({ busy: true }), showsSkeleton());
     try {
         const stories = await fetchJSON(url);
         _prefetchCache[url] = Promise.resolve(stories);
         renderShows(stories);
     } catch (e) {
         console.error('Error loading shows:', e);
-        container.replaceChildren(errorState('Shows laden mislukt', e, loadShows));
+        container.replaceChildren(showsHeader({ busy: true }), errorState('Shows laden mislukt', e, loadShows));
     }
 }
 
@@ -327,25 +366,7 @@ function renderShows(data) {
     const empty = !data || (!featured && (!shows || shows.length === 0));
 
     // De kop staat er ook zonder shows: 'Welke is mooier?' werkt dan nog op de hele bibliotheek
-    container.innerHTML = `
-        <div class="page-header shows-header">
-            <div>
-                <h1 class="page-title"><i class="fas fa-film" aria-hidden="true"></i> Shows</h1>
-                <p class="page-subtitle">Diavoorstellingen van je mappen, met je mooiste foto's vaker in beeld.</p>
-            </div>
-            <div class="shows-header-actions">
-            <button class="btn btn-secondary" id="btn-elo" onclick="openElo()">
-                <i class="fas fa-scale-balanced" aria-hidden="true"></i> Welke is mooier?
-            </button>
-            <button class="btn btn-secondary" id="btn-shuffle-shows" onclick="shuffleShows()">
-                <i class="fas fa-random" aria-hidden="true"></i> Shows husselen
-            </button>
-            <button class="btn btn-secondary" onclick="openSettingsModal()">
-                <i class="fas fa-sliders-h" aria-hidden="true"></i> Bronnen beheren
-            </button>
-            </div>
-        </div>
-    `;
+    container.replaceChildren(showsHeader());
 
     if (empty) {
         // Husselen en Bronnen beheren staan dan al in de lege staat (of hebben niets om te doen)
