@@ -162,11 +162,16 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Snelheid (M3 Pro, 4 threads): 12 MP JPEG ~130 foto's/s; 4.000 foto's van 2 MP via de server in
   10 s (390/s; `/api/health` p95 12 ms tijdens de taak), een tweede ronde zonder nieuwe foto's
   0,2 s. HEIC wordt volledig gedecodeerd (36 MP: ~0,7 s per foto per thread, ~5 per seconde met
-  4 threads). Paren en bursts voor 100.000 foto's: ~5 s bij willekeurige hashes, 7-10 s als veel
-  foto's op elkaar lijkende hashes hebben (scans, screenshots; gemeten met 100.000 gemaakte hashes),
-  alleen als er iets nieuw of veranderd is; een pagina reeksen daarna in enkele ms. Het geheugen
-  blijft begrensd: de kandidaten worden per ~2 miljoen gecontroleerd (`CANDIDATE_BUDGET`), dubbele
-  paren tussendoor weggegooid (piek ~0,5-0,8 GB in dat scheve geval, was 1,7-2,4 GB). Werkt ook met
+  4 threads). Paren en bursts voor 100.000 foto's: ~3 s bij willekeurige hashes. Foto's met dezelfde
+  phash (scans, screenshots, effen afbeeldingen) worden als één waarde opgezocht en direct tegen de
+  dhash- en kleurgrens gehouden, zodat alleen echte paren bewaard worden: 100.000 tweekleurige
+  testbeelden (19.268 verschillende phashes, 89 miljoen kandidaten, 1,16 miljoen paren) in ~15 s
+  (waarvan ~9 s wegschrijven), piek ~0,5 GB, langste GIL-pauze 30 ms (was 296 s, 10,5 GB en 16 s).
+  Daarna zoekt een ronde alleen de groepen zonder anker op (`media_phash.paired = 2` markeert de
+  foto waarvandaan de paren van een groep zijn opgezocht): 2.000 nieuwe foto's erbij in ~2 s plus
+  het wegschrijven. Het geheugen blijft begrensd: de kandidaten worden per ~130.000 gecontroleerd
+  (`CANDIDATE_BUDGET`), en boven 4 miljoen paren (`NEAR_PAIR_LIMIT`) blijven alleen de paren over
+  die de reeksen maken (per strengheid een opspannend bos, `_forest`). Werkt ook met
   numpy ouder dan 2.0 (eigen bittelling als `np.bitwise_count` ontbreekt).
 
 ### Bibliotheek (media-index)

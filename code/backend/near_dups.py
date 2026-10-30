@@ -38,6 +38,7 @@ import os
 import stat as stat_module
 import threading
 import time
+from itertools import repeat
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -202,31 +203,7 @@ def _popcount_fallback(values: np.ndarray) -> np.ndarray:
 
 popcount = getattr(np, "bitwise_count", None) or _popcount_fallback
 
-CANDIDATE_BUDGET = 1 << 21    # candidates checked per step: bounds memory whatever the hashes look like
-
-
-class _PairSet:
-    """Pairs as i * n + j. The same pair turns up from several parts and masks: the
-    duplicates are dropped whenever the list has doubled, so it never grows far past
-    the number of distinct pairs."""
-
-    def __init__(self):
-        self.chunks: List[np.ndarray] = []
-        self.size = 0
-        self.limit = CANDIDATE_BUDGET
-
-    def add(self, keys: np.ndarray) -> None:
-        self.chunks.append(keys)
-        self.size += len(keys)
-        if self.size > self.limit:
-            self.chunks = [np.unique(np.concatenate(self.chunks))]
-            self.size = len(self.chunks[0])
-            self.limit = max(CANDIDATE_BUDGET, 2 * self.size)
-
-    def result(self) -> np.ndarray:
-        if not self.chunks:
-            return np.zeros(0, dtype=np.int64)
-        return np.unique(np.concatenate(self.chunks))
+CANDIDATE_BUDGET = 1 << 17    # candidates checked per step: bounds memory whatever the hashes look like
 
 
 class HashIndex:
@@ -238,10 +215,11 @@ class HashIndex:
     per 65536 values); a query looks up every value within that many bits of its own part
     and checks the full distance only for what it finds there.
 
-    The work grows with how full the buckets are: about 2 s for 100k uniformly random
-    hashes, but real photos share bit patterns (documents and screenshots fill a few
-    buckets with thousands of hashes), measured at 8-10 s for 100k such hashes. Memory
-    stays bounded either way: candidates are checked CANDIDATE_BUDGET at a time.
+    A pair counts only in the first part where it is that close (later parts skip it), so
+    every pair is reported exactly once and nothing has to be kept to drop duplicates:
+    scan() hands each slice of pairs to a sink as it goes, so memory stays bounded by
+    CANDIDATE_BUDGET whatever the hashes look like (documents and screenshots fill a few
+    buckets with thousands of hashes).
     """
 
     def __init__(self, hashes: np.ndarray):
@@ -264,14 +242,26 @@ class HashIndex:
         queries: only pairs with at least one of these positions (all when None).
         check() is called between steps (a job's cancel/pause check).
         """
-        masks = _flip_masks(_PART_BITS, radius // MIH_PARTS)
-        q = np.arange(self.n, dtype=np.int64) if queries is None else np.asarray(queries, dtype=np.int64)
+        out: List[Tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        self.scan(radius, lambda i, j, d: out.append((i, j, d)), queries, check)
+        if not out:
+            empty = np.zeros(0, dtype=np.int64)
+            return empty, empty, empty
+        i, j, d = (np.concatenate(parts) for parts in zip(*out))
+        order = np.lexsort((j, i))
+        return i[order], j[order], d[order]
+
+    def scan(self, radius: int, sink: Callable[[np.ndarray, np.ndarray, np.ndarray], None],
+             queries: Optional[np.ndarray] = None, check: Optional[Callable[[], None]] = None) -> None:
+        """Like pairs(), but hands the pairs to sink(i, j, distance) a slice at a time (not sorted)."""
+        per_part = radius // MIH_PARTS
+        masks = _flip_masks(_PART_BITS, per_part)
+        q = np.arange(self.n, dtype=np.int64) if queries is None else np.unique(np.asarray(queries, dtype=np.int64))
         is_query = None
         if queries is not None:
             is_query = np.zeros(self.n, dtype=bool)
             is_query[q] = True
-        found = _PairSet()
-        for keys, order, counts, starts in self.parts:
+        for p, (keys, order, counts, starts) in enumerate(self.parts):
             qkeys = keys[q]
             for mask in masks:
                 if check is not None:
@@ -288,16 +278,13 @@ class HashIndex:
                 while begin < len(hq):
                     base = int(ends[begin - 1]) if begin else 0
                     end = max(begin + 1, int(np.searchsorted(ends, base + CANDIDATE_BUDGET, side="right")))
-                    self._check_slice(hq[begin:end], starts[hlook[begin:end]], hcnt[begin:end],
-                                      order, is_query, radius, found)
+                    self._check_slice(p, per_part, hq[begin:end], starts[hlook[begin:end]], hcnt[begin:end],
+                                      order, is_query, radius, sink)
                     begin = end
                     if check is not None and begin < len(hq):
                         check()
-        both = found.result()
-        i, j = both // self.n, both % self.n
-        return i, j, popcount(self.hashes[i] ^ self.hashes[j]).astype(np.int64)
 
-    def _check_slice(self, qs, firsts, cnt, order, is_query, radius, found) -> None:
+    def _check_slice(self, part, per_part, qs, firsts, cnt, order, is_query, radius, sink) -> None:
         total = int(cnt.sum())
         qi = np.repeat(qs, cnt)
         offset = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(cnt) - cnt, cnt)
@@ -308,10 +295,16 @@ class HashIndex:
         else:
             keep = (qi != cj) & ((qi < cj) | ~is_query[cj])
         qi, cj = qi[keep], cj[keep]
-        close = popcount(self.hashes[qi] ^ self.hashes[cj]) <= radius
+        x = self.hashes[qi] ^ self.hashes[cj]
+        dist = popcount(x).astype(np.int64)
+        close = dist <= radius
+        # ... and only in the first part where it is within per_part bits
+        for earlier in range(part):
+            shift = np.uint64(earlier * _PART_BITS)
+            close &= popcount((x >> shift) & np.uint64((1 << _PART_BITS) - 1)) > per_part
         if close.any():
             a, b = qi[close], cj[close]
-            found.add(np.minimum(a, b) * self.n + np.maximum(a, b))
+            sink(np.minimum(a, b), np.maximum(a, b), dist[close])
 
 
 # ---------- strictness ----------
@@ -691,17 +684,191 @@ def hash_twins(db, check: Callable[[], None] = lambda: None,
     return done
 
 
+NEAR_PAIR_LIMIT = 4_000_000   # memory guard: near pairs kept from one lookup (~35 bytes each)
+
+
+def _passes(phash_d: np.ndarray, dhash_d: np.ndarray, color_d: np.ndarray, flat: np.ndarray, strictness: str) -> np.ndarray:
+    p, d, c = STRICTNESS[strictness]["near"]
+    color_d = np.round(color_d, 2)          # as stored (all_series compares the stored value)
+    return (phash_d <= p) & (dhash_d <= d) & (color_d <= np.where(flat, min(c, FLAT_COLOR), c))
+
+
+def _forest(found: Dict[str, np.ndarray], n: int) -> Dict[str, np.ndarray]:
+    """
+    Only the pairs that join photos into series: per strictness, a pair whose two photos
+    are already connected by others is left out (a spanning forest; the settings are
+    nested, so every series of every setting stays the same). The memory guard of
+    near_pairs: a few huge clusters of lookalikes (thousands of scans of one form) would
+    otherwise give tens of millions of pairs, while at most 3 per photo are needed.
+    """
+    keep = np.zeros(len(found["a"]), dtype=bool)
+    for strictness in STRICTNESS:
+        parent = list(range(n))
+        passing = np.flatnonzero(_passes(found["phash_d"], found["dhash_d"], found["color_d"], found["flat"], strictness))
+        for k, a, b in zip(passing.tolist(), found["a"][passing].tolist(), found["b"][passing].tolist()):
+            while parent[a] != a:
+                parent[a] = a = parent[parent[a]]
+            while parent[b] != b:
+                parent[b] = b = parent[parent[b]]
+            if a != b:
+                parent[a] = b
+                keep[k] = True
+    return {key: value[keep] for key, value in found.items()}
+
+
+_ALL, _OTHERS, _SAME = 0, 1, 2   # which photos of the other value a query photo is paired with
+
+
+def near_pairs(phashes: np.ndarray, dhashes: np.ndarray, colors: np.ndarray, flat: np.ndarray,
+               queries: Optional[np.ndarray] = None, check: Optional[Callable[[], None]] = None,
+               limit: Optional[int] = None) -> Dict[str, np.ndarray]:
+    """
+    Every pair of positions (a < b) that passes the loosest 'near' thresholds, as arrays
+    {a, b, phash_d, dhash_d, color_d, flat}. queries: only pairs with at least one of
+    these positions (all pairs when None).
+
+    Photos with the same phash are handled as one value: HashIndex finds the close pairs of
+    distinct values, and each is expanded to the photos behind them right away, keeping
+    only those within the dhash and colour limits. Uniform pictures (screenshots,
+    documents, two-tone graphics) share a few phash values between thousands of photos:
+    of 100k such photos 89 million pairs are within the phash radius, but only about a
+    million also look alike by dhash and colour, and only those are ever kept. Work goes
+    in slices of CANDIDATE_BUDGET pairs, so memory stays bounded, and with many short
+    numpy steps the server's other threads keep getting their turn. Past `limit` pairs
+    (NEAR_PAIR_LIMIT) they are thinned to the ones that make the series (_forest).
+    """
+    _, loose_d, loose_c = STRICTNESS[LOOSEST]["near"]
+    flat_c = min(loose_c, FLAT_COLOR)
+    limit = NEAR_PAIR_LIMIT if limit is None else limit
+    phashes = np.ascontiguousarray(phashes, dtype=np.uint64)
+    dhashes = np.ascontiguousarray(dhashes, dtype=np.uint64)
+    n = len(phashes)
+    found: Dict[str, List[np.ndarray]] = {k: [] for k in ("a", "b", "phash_d", "dhash_d", "color_d", "flat")}
+    kept = 0
+    compact_at = limit
+
+    def compact() -> None:
+        nonlocal kept, compact_at
+        forest = _forest({k: np.concatenate(v) for k, v in found.items()}, n)
+        for k, v in forest.items():
+            found[k] = [v]
+        kept = len(forest["a"])
+        compact_at = max(limit, 2 * kept)
+    if n >= 2:
+        values, value_of = np.unique(phashes, return_inverse=True)
+        value_of = value_of.reshape(-1)
+        members = np.argsort(value_of, kind="stable")          # the photos of each value, by position
+        counts = np.bincount(value_of, minlength=len(values))
+        starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
+        is_query = np.ones(n, dtype=bool)
+        if queries is not None:
+            is_query[:] = False
+            is_query[np.asarray(queries, dtype=np.int64)] = True
+        q_members = members[is_query[members]]                 # the query photos of each value
+        q_counts = np.bincount(value_of[q_members], minlength=len(values))
+        q_starts = np.concatenate(([0], np.cumsum(q_counts)[:-1]))
+
+        def slices(sizes: np.ndarray) -> Iterable[Tuple[int, int]]:
+            """[begin, end) ranges whose sizes add up to at most CANDIDATE_BUDGET (one item at least)."""
+            ends = np.cumsum(sizes)
+            begin = 0
+            while begin < len(sizes):
+                base = int(ends[begin - 1]) if begin else 0
+                end = max(begin + 1, int(np.searchsorted(ends, base + CANDIDATE_BUDGET, side="right")))
+                yield begin, end
+                begin = end
+
+        def spread(firsts: np.ndarray, sizes: np.ndarray) -> np.ndarray:
+            """firsts[k], firsts[k] + 1, ..., firsts[k] + sizes[k] - 1 for every k."""
+            total = int(sizes.sum())
+            return np.repeat(firsts, sizes) + (np.arange(total, dtype=np.int64)
+                                               - np.repeat(np.cumsum(sizes) - sizes, sizes))
+
+        def pair_photos(rows: np.ndarray, with_value: np.ndarray, mode: int) -> None:
+            nonlocal kept
+            sizes = counts[with_value]
+            for begin, end in slices(sizes):
+                if check is not None:
+                    check()
+                r = np.repeat(rows[begin:end], sizes[begin:end])
+                c = members[spread(starts[with_value[begin:end]], sizes[begin:end])]
+                if mode == _OTHERS:
+                    keep = ~is_query[c]                     # query pairs come from the other side
+                elif mode == _SAME:
+                    keep = (r != c) & (~is_query[c] | (r < c))
+                else:
+                    keep = None
+                if keep is not None:
+                    r, c = r[keep], c[keep]
+                dd = popcount(dhashes[r] ^ dhashes[c]).astype(np.int64)
+                ok = dd <= loose_d
+                r, c, dd = r[ok], c[ok], dd[ok]
+                if not len(r):
+                    continue
+                cd = np.abs(colors[r] - colors[c]).mean(axis=1)
+                fl = flat[r] | flat[c]
+                ok = cd <= np.where(fl, flat_c, loose_c)
+                if not ok.any():
+                    continue
+                r, c = r[ok], c[ok]
+                kept += len(r)
+                found["a"].append(np.minimum(r, c))
+                found["b"].append(np.maximum(r, c))
+                found["phash_d"].append(popcount(phashes[r] ^ phashes[c]).astype(np.int8))
+                found["dhash_d"].append(dd[ok].astype(np.int8))
+                found["color_d"].append(cd[ok])
+                found["flat"].append(fl[ok])
+                if kept > compact_at:
+                    compact()
+
+        def pair_values(x: np.ndarray, y: np.ndarray, mode: int) -> None:
+            """The query photos of value x[k] with the photos of value y[k]."""
+            sizes = q_counts[x]
+            use = (sizes > 0) & (counts[y] > 0)
+            x, y, sizes = x[use], y[use], sizes[use]
+            for begin, end in slices(sizes):
+                rows = q_members[spread(q_starts[x[begin:end]], sizes[begin:end])]
+                pair_photos(rows, np.repeat(y[begin:end], sizes[begin:end]), mode)
+
+        def close_values(u: np.ndarray, v: np.ndarray, _d: np.ndarray) -> None:
+            pair_values(u, v, _ALL)
+            if queries is not None:
+                pair_values(v, u, _OTHERS)
+
+        query_values = None if queries is None else np.flatnonzero(q_counts)
+        HashIndex(values).scan(PAIR_RADIUS, close_values, query_values, check)
+        same = np.flatnonzero((q_counts > 0) & (counts > 1))   # photos with the same phash as each other
+        pair_values(same, same, _SAME)
+    if not kept:
+        return {"a": np.zeros(0, dtype=np.int64), "b": np.zeros(0, dtype=np.int64),
+                "phash_d": np.zeros(0, dtype=np.int8), "dhash_d": np.zeros(0, dtype=np.int8),
+                "color_d": np.zeros(0, dtype=np.float64), "flat": np.zeros(0, dtype=bool)}
+    out = {k: np.concatenate(v) for k, v in found.items()}
+    order = np.lexsort((out["b"], out["a"]))                  # written in key order: faster inserts
+    return {k: v[order] for k, v in out.items()}
+
+
+ANCHOR = 2                    # media_phash.paired of the photo a group's near pairs were looked up from
+FULL_LOOKUP_SHARE = 0.5       # more groups than this share to look up: one full lookup is cheaper
+
+
 def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]:
     """
-    When any analysed photo is new or changed (paired = 0), find the pairs again from the
-    stored fingerprints (no photo is decoded; about 2 s for 100k photos):
+    When any analysed photo is new or changed (paired = 0), or a photo left the index,
+    look up the pairs from the stored fingerprints (no photo is decoded):
 
     - Photos that look exactly alike (same hashes and colours: 'twins') are one group.
-      Pairs are looked up once per group, between the groups' first photos, so a folder
-      of 1,500 copies of one shot is one group, not a million pairs. The series are made
-      from the groups when they are shown (all_series), so a group's first photo may be
-      gone (moved, or back after an undo) without breaking anything.
-    - Bursts: shots by the same camera within BURST_GAP seconds, compared one by one.
+      Pairs are looked up once per group, from one photo of it (its anchor, paired =
+      ANCHOR), so a folder of 1,500 copies of one shot is one group, not a million pairs.
+      The series are made from the groups when they are shown (all_series), so the anchor
+      may be gone (moved, or back after an undo) without breaking anything.
+    - Only the groups without an anchor are looked up: new photos, a photo that changed,
+      and a group whose anchor left the index or changed. The pairs of the other groups
+      stay as they are, so a few new photos cost a lookup of a few photos, not of all.
+      With more than FULL_LOOKUP_SHARE of the groups to look up (the first run), every
+      pair is looked up again at once.
+    - Bursts: shots by the same camera within BURST_GAP seconds, compared one by one
+      (cheap: they are looked up again every time).
 
     Which twins are byte-for-byte copies is hash_twins' work (run before this).
     Photos hidden as missing (moved to RAW_DUPLICATES by the app) stay in: when an undo
@@ -714,42 +881,62 @@ def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]
             f"JOIN media_phash h ON h.media_id = m.id "
             f"WHERE h.status = 'ok' AND {_CURRENT} ORDER BY m.id", (ALGO_VERSION,)).fetchall()
     dirty = [r[0] for r in rows if not r[4]]
-    # (also when a photo left the index: it may have been the first of its group)
+    # (also when a photo left the index: it may have been the anchor of its group)
     signature = [len(rows), sum(r[0] for r in rows)]
     if not dirty and state(db).get("pairs_signature") == signature:
         return {"near": 0, "burst": 0}
-    twins = _twins(rows)
-
-    # Near pairs between the groups, by their first photo
-    firsts = [members[0] for members in twins.values()]
+    twins = list(_twins(rows).values())
+    firsts = [members[0] for members in twins]
+    lookup = [k for k, members in enumerate(twins) if not any(rows[i][4] == ANCHOR for i in members)]
+    full = len(lookup) > FULL_LOOKUP_SHARE * len(twins)
     phashes = np.array([to_unsigned(rows[i][1]) for i in firsts], dtype=np.uint64)
     dhashes = np.array([to_unsigned(rows[i][2]) for i in firsts], dtype=np.uint64)
     colors = _color_matrix([rows[i][3] for i in firsts])
     flat = np.array([(rows[i][11] or 0.0) < FLAT_CONTRAST for i in firsts], dtype=bool)
-    loose_p, loose_d, loose_c = STRICTNESS[LOOSEST]["near"]
-    i, j, pd = HashIndex(phashes).pairs(PAIR_RADIUS, None, check)
-    dd = popcount(dhashes[i] ^ dhashes[j]).astype(np.int64)
-    cd = np.abs(colors[i] - colors[j]).mean(axis=1)
-    fl = flat[i] | flat[j]
-    keep = (dd <= loose_d) & (cd <= np.where(fl, min(loose_c, FLAT_COLOR), loose_c))
-    near = [(rows[firsts[a]][0], rows[firsts[b]][0], "near", p, d, round(c, 2), None, int(f), 0)
-            for a, b, p, d, c, f in zip(i[keep].tolist(), j[keep].tolist(), pd[keep].tolist(),
-                                        dd[keep].tolist(), cd[keep].tolist(), fl[keep].tolist())]
+    found = near_pairs(phashes, dhashes, colors, flat, None if full else np.array(lookup, dtype=np.int64), check)
+    ids = np.array([rows[i][0] for i in firsts], dtype=np.int64)
+    near = len(found["a"])
+
+    def near_rows() -> Iterable[Tuple]:
+        for start in range(0, near, 50_000):
+            part = slice(start, start + 50_000)
+            yield from zip(ids[found["a"][part]].tolist(), ids[found["b"][part]].tolist(), repeat("near"),
+                           found["phash_d"][part].tolist(), found["dhash_d"][part].tolist(),
+                           np.round(found["color_d"][part], 2).tolist(), repeat(None),
+                           found["flat"][part].astype(np.int64).tolist(), repeat(0))
 
     bursts = _burst_pairs(rows, np.array([to_unsigned(r[1]) for r in rows], dtype=np.uint64),
                           np.array([to_unsigned(r[2]) for r in rows], dtype=np.uint64),
                           _color_matrix([r[3] for r in rows]),
                           np.array([(r[11] or 0.0) < FLAT_CONTRAST for r in rows], dtype=bool))
+    anchors = [rows[firsts[k]][0] for k in (range(len(twins)) if full else lookup)]
     check()
     with db._connect() as conn:
-        conn.execute("DELETE FROM near_dup_pairs")
-        conn.executemany(_INSERT_PAIR, near)
-        conn.executemany(_INSERT_PAIR, bursts)
+        if full:
+            conn.execute("DELETE FROM near_dup_pairs WHERE kind = 'near'")
+            conn.execute(f"UPDATE media_phash SET paired = 1 WHERE paired = {ANCHOR}")
+        else:
+            # The pairs of a changed photo were looked up from its old fingerprint
+            for chunk in _chunks(dirty):
+                marks = ','.join('?' * len(chunk))
+                conn.execute(f"DELETE FROM near_dup_pairs WHERE kind = 'near' AND (a IN ({marks}) OR b IN ({marks}))",
+                             (*chunk, *chunk))
+        # Bursts: only what changed (most of them stay the same from run to run)
+        before = set(conn.execute("SELECT a, b, kind, phash_d, dhash_d, color_d, gap, flat, same_bytes "
+                                  "FROM near_dup_pairs WHERE kind = 'burst'"))
+        now = set(bursts)
+        conn.executemany("DELETE FROM near_dup_pairs WHERE a = ? AND b = ? AND kind = 'burst'",
+                         [(r[0], r[1]) for r in before - now])
+        conn.executemany(_INSERT_PAIR, sorted(now - before))
+        conn.executemany(_INSERT_PAIR, near_rows())
         for chunk in _chunks(dirty):
             conn.execute(f"UPDATE media_phash SET paired = 1 WHERE media_id IN ({','.join('?' * len(chunk))})", chunk)
+        for chunk in _chunks(anchors):
+            conn.execute(f"UPDATE media_phash SET paired = {ANCHOR} WHERE media_id IN ({','.join('?' * len(chunk))})",
+                         chunk)
     db.set_setting(STATE_KEY, {**state(db), "pairs_signature": signature})
     _bump()
-    return {"near": len(near), "burst": len(bursts)}
+    return {"near": near, "burst": len(bursts), "looked_up": len(twins) if full else len(lookup)}
 
 
 _INSERT_PAIR = ("INSERT OR REPLACE INTO near_dup_pairs (a, b, kind, phash_d, dhash_d, color_d, gap, flat, same_bytes) "

@@ -35,6 +35,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - iMessage: reacties met een emoji of sticker (iOS 18) staan bij het bericht, en een ingetrokken bericht toont 'Bericht ingetrokken'.
 - Activiteit toont 'Hele dag' bij items zonder tijdstip (Netflix, agendapunten voor de hele dag, stappen) in plaats van een verzonnen uur.
 - Kaart: de rij 'Uit je Tijdlijn' staat in dezelfde kolom als de kop en de filters, en is weg als er geen locatiegeschiedenis is.
+- Beste uit reeks: zoeken naar reeksen gaat bij veel op elkaar lijkende foto's (scans, screenshots, effen afbeeldingen) in seconden in plaats van minuten, met een fractie van het geheugen, en de app blijft er soepel bij reageren; nieuwe foto's worden alleen met de rest vergeleken in plaats van alles opnieuw.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
