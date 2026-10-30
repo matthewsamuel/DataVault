@@ -1041,7 +1041,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 step("shows: close slideshow", lambda: page.keyboard.press("Escape"), 0.8)
 
             # Welke is mooier?: two photos side by side; ← / 2 pick, z takes the last pick back exactly,
-            # spatie skips, the pair just compared never comes straight back, Tab stays in the window
+            # spatie is a draw, s skips, the next pair is there at once, the pair just compared never
+            # comes straight back, Tab stays in the window; the Ranglijst has bands, movement and filters
             def board():
                 return page.evaluate("""(async () => (await fetchJSON(`${API_BASE}/api/shows/leaderboard?limit=200`))
                     .items.map(i => [i.path, i.rating, i.games]).sort())()""")
@@ -1076,14 +1077,41 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             scores = {path: rating for path, rating, _ in board()}
             expect(scores.get(first[1], 0) > 1000, f"elo: 2 did not make the right photo win ({scores})")
             count, current = comparisons(), shown_pair()
-            step("elo: spatie skips", lambda: page.keyboard.press(" "), 0.8)
-            expect(comparisons() == count and shown_pair() != current, "elo: spatie did not just skip the pair")
+            step("elo: s skips", lambda: page.keyboard.press("s"), 0.8)
+            expect(comparisons() == count and shown_pair() != current, "elo: s did not just skip the pair")
+            draws = lambda: sum(i["draws"] for i in page.evaluate(
+                "(async () => (await fetchJSON(`${API_BASE}/api/shows/leaderboard?limit=200`)).items)()"))
+            draws_before, current = draws(), shown_pair()
+            step("elo: spatie is a draw", lambda: page.keyboard.press(" "), 1.0)
+            expect(comparisons() == count + 1 and draws() == draws_before + 2 and shown_pair() != current,
+                   f"elo: spatie did not record a draw ({comparisons()} vs {count}, draws {draws()} vs {draws_before})")
+            # The next pair is already loaded: a pick shows it within 50 ms (no waiting for the server)
+            page.wait_for_timeout(600)
+            swap_ms = page.evaluate("""() => new Promise(resolve => {
+                const body = document.getElementById('elo-body');
+                const before = elo.pair && elo.pair.map(p => p.path).join('|');
+                const t0 = performance.now();
+                const obs = new MutationObserver(() => {
+                    const now = elo.pair && elo.pair.map(p => p.path).join('|');
+                    if (now && now !== before && body.querySelector('.elo-stage:not(.is-leaving) .elo-choice:not(.is-loading)')) {
+                        obs.disconnect(); resolve(performance.now() - t0);
+                    }
+                });
+                obs.observe(body, {childList: true, subtree: true});
+                document.getElementById('elo-overlay').dispatchEvent(new KeyboardEvent('keydown', {key: '1', bubbles: true}));
+                setTimeout(() => { obs.disconnect(); resolve(9999); }, 3000);
+            })""")
+            expect(swap_ms < 50, f"elo: the next pair took {swap_ms:.0f} ms to appear after a pick")
+            page.wait_for_timeout(800)
+            count = comparisons()
             page.focus("#elo-scope")
             page.keyboard.press("1")
             page.wait_for_timeout(400)
             expect(comparisons() == count, "elo: a key in the collection list picked a photo")
 
-            # A second key while the next pair loads (slowed down here), and a held key, pick nothing more
+            # Double picks: a key that bounces (again within the dwell time after the new pair
+            # appeared) and a held key pick nothing more; neither does a key while no pair is ready
+            # (the queue emptied and the next pairs load slowly, faked here)
             page.evaluate("""(() => { window.__eloPosts = 0; window.__realFetchJSON = fetchJSON;
                 fetchJSON = async (url, options) => {
                     if (url.includes('/api/shows/compare/pair')) await new Promise(r => setTimeout(r, 900));
@@ -1091,17 +1119,34 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     return window.__realFetchJSON(url, options);
                 }; })()""")
             page.focus("#elo-overlay")
-            page.keyboard.press("1")
-            for _ in range(10):
-                page.wait_for_timeout(80)
-                page.keyboard.press("1")
-            page.keyboard.down("2")
-            page.keyboard.down("2")      # a repeat, as when the key is held
+            # A pick, then the same key bouncing three times within the dwell time (sent in the page,
+            # so the timing is exact)
+            page.evaluate("""() => new Promise(resolve => {
+                const overlay = document.getElementById('elo-overlay');
+                const key = (k, repeat = false) => overlay.dispatchEvent(new KeyboardEvent('keydown', {key: k, repeat, bubbles: true}));
+                key('1');
+                [50, 100, 150].forEach(ms => setTimeout(() => key('1'), ms));
+                setTimeout(resolve, 200);
+            })""")
+            page.wait_for_timeout(500)
+            page.keyboard.down("2")      # a real pick ...
+            page.keyboard.down("2")      # ... and its repeat, as when the key is held
             page.keyboard.up("2")
-            page.wait_for_timeout(1600)
-            expect(page.evaluate("window.__eloPosts") == 1,
-                   f"elo: a second key while the next pair loaded made {page.evaluate('window.__eloPosts')} comparisons")
+            page.wait_for_timeout(1400)      # also lets the (slowed) refill of the queue land
+            expect(page.evaluate("window.__eloPosts") == 2,
+                   f"elo: a bouncing or held key made {page.evaluate('window.__eloPosts')} comparisons (expected 2)")
+            page.evaluate("() => { elo.queue = []; }")
+            page.keyboard.press("1")     # the pair on screen: counts, then nothing is ready
+            page.wait_for_timeout(300)
+            for _ in range(4):
+                page.keyboard.press("1")
+                page.wait_for_timeout(60)
+            page.wait_for_timeout(1500)
+            expect(page.evaluate("window.__eloPosts") == 3,
+                   f"elo: keys while the next pair loaded made {page.evaluate('window.__eloPosts') - 2} comparisons (expected 1)")
             page.evaluate("() => { fetchJSON = window.__realFetchJSON; }")
+            page.wait_for_selector("#elo-body .elo-stage:not(.is-leaving) .elo-choice:not(.is-loading)", timeout=5000)
+            page.wait_for_timeout(400)
 
             # Tab to a photo, Enter picks it, and the keys still work after that (focus stays on a photo);
             # everything Tab reaches in the window shows a focus ring
@@ -1180,7 +1225,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # A collection with too few photos: Overslaan is off and the round counter starts again
             familie = str((vault / "library" / "Familie").resolve())
             step("elo: Familie", lambda: page.select_option("#elo-scope", familie), 1.0)
-            expect(page.is_disabled("#elo-skip"), "elo: Overslaan looks usable without a pair")
+            expect(page.is_disabled("#elo-skip") and page.is_disabled("#elo-draw"), "elo: Overslaan or Gelijk looks usable without a pair")
             expect("in deze ronde" not in (page.text_content("#elo-progress") or ""),
                    f"elo: the round counter of another collection is shown ({page.text_content('#elo-progress')})")
             step("elo: back to the library", lambda: page.select_option("#elo-scope", ""), 1.0)
@@ -1189,6 +1234,17 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("elo: Ranglijst", lambda: page.click("#elo-tab-board"), 1.0)
             ranks = page.evaluate("[...document.querySelectorAll('.elo-board-score')].map(e => Number(e.textContent.replace(/\\./g, '')))")
             expect(len(ranks) >= 2 and ranks == sorted(ranks, reverse=True), f"elo: the leaderboard is not sorted ({ranks})")
+            board_ui = page.evaluate("""({bands: document.querySelectorAll('.elo-board-row .elo-band-range').length,
+                moves: document.querySelectorAll('.elo-board-row .elo-move').length,
+                rows: document.querySelectorAll('.elo-board-row').length,
+                years: document.querySelectorAll('#elo-board-year option').length,
+                settled: (document.querySelector('#elo-board-settled .elo-settled-text') || {}).textContent || ''})""")
+            expect(board_ui["bands"] >= 2 and board_ui["moves"] == board_ui["rows"] and board_ui["years"] >= 1
+                   and board_ui["settled"].endswith("% zeker"), f"elo: Ranglijst misses bands, movement or filters ({board_ui})")
+            step("elo: top as an album", lambda: page.click("#elo-top-album"), 1.0)
+            expect(any("Album gemaakt" in (t or "") for t in page.eval_on_selector_all(".toast", "ts => ts.map(t => t.textContent)")),
+                   "elo: 'Als album' did not make an album")
+            page.evaluate("document.querySelectorAll('.toast').forEach(t => t.remove())")
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
                 for tab in ("board", "compare"):
