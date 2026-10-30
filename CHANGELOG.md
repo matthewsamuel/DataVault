@@ -626,6 +626,10 @@ Alle noemenswaardige wijzigingen aan DataVault Dashboard.
 - **Viewer met meer gegevens**: naast de foto staan nu ook de plaats (offline opgezocht, bijvoorbeeld
   'Lissabon, Portugal'), de camera en de afmetingen in pixels en megapixels. De datum is de
   opnamedatum als die bekend is, met de bron er klein onder; het pad staat onderaan.
+- **Home**: 'Spotify op deze dag' heeft een eigen hoes (een kleurverloop per artiest, zonder iets
+  van internet), met het tijdstip en het jaar eronder. De grote foto's op Home en in Shows worden
+  scherp: eerst de miniatuur, dan het originele bestand zodra dat geladen is (alleen JPEG, PNG en
+  WebP tot 20 MB). De naam op een lichte foto blijft leesbaar.
 
 ## Fase 2 – Stabiliseren
 

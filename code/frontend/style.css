@@ -2971,6 +2971,13 @@ a.breadcrumb-item:hover {
     object-fit: contain;
 }
 
+/* Foto-tegels in een venster (Beste van een periode, reeksen) blijven gevuld en vierkant */
+.modal-body .thumb-tile img,
+.modal-body .thumb-tile video {
+    max-height: none;
+    object-fit: cover;
+}
+
 #modal-viewer .modal-body img,
 #modal-viewer .modal-body video {
     border-radius: var(--radius-xs);
@@ -5320,11 +5327,6 @@ a.breadcrumb-item:hover {
     flex-shrink: 0;
 }
 
-.otd-vs {
-    color: var(--text-tertiary);
-    font-size: var(--fs-sm);
-}
-
 .otd-date-block {
     margin-left: auto;
     display: flex;
@@ -5890,8 +5892,9 @@ a.breadcrumb-item:hover {
     left: 0;
     right: 0;
     bottom: 0;
-    padding: var(--space-2xl) var(--space-md) var(--space-md);
-    background: linear-gradient(to top, var(--media-scrim), transparent);
+    padding: var(--space-3xl) var(--space-md) var(--space-md);
+    /* Sterk genoeg voor witte tekst op een lichte foto (sneeuw, strand) */
+    background: linear-gradient(to top, var(--media-scrim-strong), var(--media-scrim-soft) 55%, transparent);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -6812,35 +6815,91 @@ button.otd-settings-icon:hover {
     font-size: var(--fs-xs);
 }
 
-/* Spotify op deze dag */
+/* Spotify op deze dag: een eigen hoes (verloop per artiest), titel, artiest en wanneer */
+#spotify-otd-content {
+    height: 100%;
+}
+
 .otd-item {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 300px;
+    gap: var(--space-xs);
+    padding: var(--space-md);
+    text-align: center;
     cursor: pointer;
     border-radius: var(--radius-md);
-    transition: transform var(--duration-base) var(--ease-out);
+    transition: background-color var(--duration-base) var(--ease-out);
 }
 
 .otd-item:hover {
-    transform: translateY(-2px);
+    background-color: var(--surface-hover);
 }
 
-.otd-spotify-placeholder {
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    max-height: 180px;
+.otd-item:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.otd-cover {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--radius-thumb);
-    background: var(--spotify-subtle);
-    border: 1px solid var(--spotify-border);
+    width: 168px;
+    aspect-ratio: 1;
+    margin-bottom: var(--space-md);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    color: var(--on-media);
+    transition: transform var(--duration-base) var(--ease-out);
 }
 
-.otd-spotify-placeholder i {
+.otd-item:hover .otd-cover {
+    transform: translateY(-2px);
+}
+
+.otd-cover > i:first-child {
     font-size: var(--icon-3xl);
-    color: var(--spotify);
+    opacity: 0.9;
+}
+
+.otd-cover-brand {
+    position: absolute;
+    right: var(--space-sm);
+    bottom: var(--space-sm);
+    font-size: var(--icon-md);
+    opacity: 0.85;
+}
+
+.otd-cover-1 { background: linear-gradient(135deg, var(--viz-3), var(--viz-2)); }
+.otd-cover-2 { background: linear-gradient(135deg, var(--viz-2), var(--viz-5)); }
+.otd-cover-3 { background: linear-gradient(135deg, var(--viz-4), var(--viz-5)); }
+.otd-cover-4 { background: linear-gradient(135deg, var(--viz-1), var(--viz-3)); }
+.otd-cover-5 { background: linear-gradient(135deg, var(--viz-5), var(--viz-4)); }
+
+.otd-item .otd-title {
+    font-size: var(--fs-lg);
+    letter-spacing: var(--tracking-tight);
+}
+
+.otd-item .otd-subtitle {
+    font-size: var(--fs-sm);
+}
+
+.otd-when {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin-top: var(--space-sm);
+    padding: 2px var(--space-sm);
+    border-radius: var(--radius-full);
+    background: var(--surface-sunken);
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
 }
 
 .otd-title {
@@ -12396,7 +12455,8 @@ button.otd-settings-icon:hover {
 .export-field { display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; }
 .export-label { font-weight: 600; color: var(--text-primary); }
 .export-hint { margin: 0; color: var(--text-secondary); line-height: 1.5; }
-.export-summary { margin: 0; color: var(--text-primary); font-weight: 600; line-height: 1.5; }
+.export-summary { margin: 0; color: var(--text-secondary); line-height: var(--lh-normal); }
+.export-summary strong, #export-summary { color: var(--text-primary); font-weight: var(--fw-semibold); }
 .export-row { display: flex; align-items: center; gap: var(--space-sm); }
 .export-row > .input, .export-row > .select { flex: 1; min-width: 0; }
 .export-grid2 > .export-field { align-items: stretch; }

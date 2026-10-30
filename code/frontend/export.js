@@ -326,7 +326,8 @@
             });
             result.replaceChildren(
                 createEl('p', { class: 'export-summary', id: 'best-summary' },
-                    `${state.items.length.toLocaleString('nl-NL')} van ${data.pool.toLocaleString('nl-NL')} foto's, ${formatBytes(bytes)}. Hoogstens één per reeks of burst, verspreid over de periode. Haal weg wat je niet wilt.`),
+                    createEl('strong', { text: `${state.items.length.toLocaleString('nl-NL')} van ${data.pool.toLocaleString('nl-NL')} foto's, ${formatBytes(bytes)}.` }),
+                    ' Hoogstens één per reeks of burst, verspreid over de periode. Haal weg wat je niet wilt.'),
                 createEl('div', { class: 'best-grid' }, tiles));
             exportBtn.disabled = false;
         };

@@ -362,6 +362,7 @@ function renderShows(data) {
             </div>
         `;
         container.appendChild(hero);
+        upgradeHeroImage(hero.querySelector('.shows-hero-img'), cover);
     }
 
     // 2. Folder Shows Grid
@@ -1229,6 +1230,23 @@ function openViewer(items, index, { onRemoved = null, more = null } = {}) {
 // De bestanden zoals ze in de Files-grid staan (zonder mappen), in dezelfde volgorde
 function gridFiles() {
     return filteredMedia.filter(item => item.type !== 'folder');
+}
+
+// Een grote omslagfoto begint met de miniatuur (meteen in beeld) en wisselt naar het
+// originele bestand zodra dat geladen is, maar alleen voor JPEG/PNG/WebP tot 20 MB: geen
+// RAW of HEIC (de browser toont die niet overal) en geen enorme bestanden
+const HERO_FULL_EXTS = ['.jpg', '.jpeg', '.png', '.webp'];
+function loadFullImage(file, onReady) {
+    if (!file || !file.path) return;
+    const ext = (file.path.match(/\.[^./]+$/) || [''])[0].toLowerCase();
+    if (!HERO_FULL_EXTS.includes(ext) || (typeof file.size === 'number' && file.size > 20 * 1024 * 1024)) return;
+    const full = new Image();
+    full.onload = () => onReady(full.src);
+    full.src = vaultFileUrl('file', file.path);
+}
+
+function upgradeHeroImage(img, file) {
+    if (img) loadFullImage(file, src => { if (img.isConnected) img.src = src; });
 }
 
 function openMediaModal(file) {
@@ -2152,11 +2170,17 @@ async function fetchHomeWidgets() {
         const data = await fetchJSON(`${API_BASE}/api/stats/spotify-on-this-day`);
         if (data.track) {
             const t = data.track;
-            homeOtdShow('spotify-otd-loading', 'spotify-otd-content',
-                createEl('div', { class: 'otd-item', onClick: () => openSpotifySearch(`${t.track} ${t.artist}`) },
-                    createEl('div', { class: 'otd-spotify-placeholder' }, createEl('i', { class: 'fab fa-spotify' })),
-                    createEl('div', { class: 'otd-title', text: t.track }),
-                    createEl('div', { class: 'otd-subtitle', text: `${t.artist} • ${t.year}` })));
+            // Een eigen 'hoes': een verloop dat per artiest altijd hetzelfde is (geen cover van buitenaf)
+            const hue = [...String(t.artist || '')].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 5, 0) + 1;
+            const item = createEl('div', { class: 'otd-item', onClick: () => openSpotifySearch(`${t.track} ${t.artist}`) },
+                createEl('div', { class: `otd-cover otd-cover-${hue}`, 'aria-hidden': 'true' },
+                    createEl('i', { class: 'fas fa-music' }), createEl('i', { class: 'fab fa-spotify otd-cover-brand' })),
+                createEl('div', { class: 'otd-title', text: t.track }),
+                createEl('div', { class: 'otd-subtitle', text: t.artist }),
+                createEl('div', { class: 'otd-when' }, createEl('i', { class: 'fas fa-clock', 'aria-hidden': 'true' }),
+                    createEl('span', { class: 'mono', text: `${t.time || ''}` }), ` · ${t.year}`));
+            makeActivatable(item, `${t.track} van ${t.artist} zoeken in Spotify`);
+            homeOtdShow('spotify-otd-loading', 'spotify-otd-content', item);
 
             // Geen albumcover van buitenaf (zoals vroeger via iTunes): dat zou luistergeschiedenis
             // naar een externe dienst sturen. Het lokale Spotify-icoon blijft staan.
@@ -2295,6 +2319,8 @@ async function loadPhotoOtdWidget() {
                     onClick: () => openPhotoOTD(p.path),
                 });
                 image.style.backgroundImage = cssUrl(vaultFileUrl('thumb', p.path));
+                // (scherp voor de eerste paar; de rest van de rotatie blijft de miniatuur)
+                if (index < 4) loadFullImage(p, src => { if (image.isConnected) image.style.backgroundImage = cssUrl(src); });
                 // Ook met het toetsenbord te openen; alleen de foto die je ziet is een tabstop
                 makeActivatable(image, `${p.name} openen`);
                 image.tabIndex = index === 0 ? 0 : -1;
@@ -3619,7 +3645,7 @@ function renderSpotifyStats(data) {
             <div class="item-name">${play.track}</div>
             <div class="item-meta">${play.artist}</div>
         </div>
-        <div class="otd-play-time"><i class="far fa-clock" aria-hidden="true"></i> ${play.time}</div>
+        <div class="otd-play-time"><i class="fas fa-clock" aria-hidden="true"></i> ${play.time}</div>
     `;
             otdList.appendChild(el);
         });
