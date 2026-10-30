@@ -9227,7 +9227,7 @@ button.otd-settings-icon:hover {
 }
 
 /* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar") */
-.job-dock.collapsed:not(.compact) {
+.job-dock.collapsed:not(.compact):not(.tiny) {
     width: max-content;
     min-width: 200px;
 }
