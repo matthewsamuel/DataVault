@@ -52,7 +52,15 @@ def parse(stream: IO[bytes], check=None) -> Iterator[Dict[str, Any]]:
     steps: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
     export_day = None
     count = 0
-    for _, el in iterparse(stream, events=("end",)):
+    root = None
+    depth = 0
+    for event, el in iterparse(stream, events=("start", "end")):
+        if event == "start":
+            if root is None:
+                root = el
+            depth += 1
+            continue
+        depth -= 1
         tag = el.tag
         if tag == "Record":
             if el.get("type") == STEPS:
@@ -72,6 +80,10 @@ def parse(stream: IO[bytes], check=None) -> Iterator[Dict[str, Any]]:
         elif tag == "ExportDate":
             moment = health_time(el.get("value"))
             export_day = moment.strftime("%Y-%m-%d") if moment else None
+        if depth == 1:
+            # A child of the root is done: drop it from the root, or millions of emptied
+            # Records stay attached and memory grows with the export
+            root.clear()
         count += 1
         if check is not None and count % 50000 == 0:
             check()
