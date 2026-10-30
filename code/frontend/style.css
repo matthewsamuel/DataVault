@@ -10955,6 +10955,39 @@ button.otd-settings-icon:hover {
     font-family: var(--font-mono);
 }
 
+/* Sleutelveld: een gewoon tekstveld (geen wachtwoordveld, dus geen 'wachtwoord bewaren'),
+   gemaskeerd met CSS; de knop rechts erin toont of verbergt de sleutel */
+.dg-secret {
+    position: relative;
+}
+
+.dg-field .dg-secret .input {
+    padding-right: calc(var(--control-h-sm) + var(--space-sm));
+}
+
+.dg-secret-input.is-masked {
+    -webkit-text-security: disc;
+}
+
+.dg-secret-input.is-masked:placeholder-shown {
+    -webkit-text-security: none;
+}
+
+.dg-secret-toggle {
+    position: absolute;
+    top: 50%;
+    right: var(--space-xs);
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+}
+
+/* Binnen het veld: de ring aan de binnenkant, zoals bij een menu-item */
+.dg-secret-toggle:focus-visible {
+    box-shadow: none;
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
 .dg-field-help {
     font-size: var(--fs-xs);
     color: var(--text-tertiary);
