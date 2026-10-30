@@ -213,7 +213,7 @@ function dgCard(src) {
                     status),
                 createEl('p', { class: 'dg-card-desc', text: src.description }))),
         dgDataBlock(src),
-        createEl('p', { class: 'dg-next', text: src.next_step }),
+        createEl('p', { class: 'dg-next' }, ...dgTextWithPath(src.next_step, src.access && src.access.path)),
         src.last_error ? dgNote({ tone: 'danger', text: `Laatste keer bijwerken mislukt (${dgTime(src.last_sync_at)}): ${src.last_error}` }) : null,
         ...src.notes.map(dgNote),
         job ? dgProgress(job) : null,
@@ -221,6 +221,13 @@ function dgCard(src) {
         dgHelpPanel(src),
         dgFooter(src)]);
     return card;
+}
+
+// Een tekst met een pad erin: het pad als technische waarde (mono, mag overal afbreken)
+function dgTextWithPath(text, path) {
+    const at = path ? String(text).indexOf(path) : -1;
+    if (at < 0) return [String(text)];
+    return [text.slice(0, at), createEl('code', { class: 'dg-inline-path', text: path }), text.slice(at + path.length)];
 }
 
 function dgBadgeClass(tone) {
@@ -653,7 +660,7 @@ async function dgOpenAccess(id) {
     const src = dgSource(id);
     const access = src && src.access;
     if (!access) return dgDoAction(src, 'sync');
-    const body = [createEl('p', { class: 'dg-modal-text', text: access.text })];
+    const body = [createEl('p', { class: 'dg-modal-text' }, ...dgTextWithPath(access.text, access.path))];
     if (access.settings_path) {
         body.push(createEl('h3', { class: 'dg-modal-section', text: 'Waar in macOS' }),
             createEl('p', { class: 'dg-access-path' },
@@ -702,7 +709,9 @@ async function dgOpenAccess(id) {
     footer.push(createEl('span', { class: 'dg-actions-spacer' }),
         createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Sluiten', onClick: () => dgCloseModal('dg-access') }),
         check);
-    dgModal('dg-access', `${access.title}: ${src.name}`, 'fa-lock-open', body, footer, true);
+    // 'WhatsApp voor Mac niet gevonden op deze Mac' noemt de app al; 'Toegang nodig' nog niet
+    const title = access.code === 'missing' || access.title.includes(src.name) ? access.title : `${access.title}: ${src.name}`;
+    dgModal('dg-access', title, 'fa-lock-open', body, footer, true);
 }
 
 // ---------- In Downloads zoeken ----------

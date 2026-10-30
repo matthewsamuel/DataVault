@@ -10912,6 +10912,17 @@ button.otd-settings-icon:hover {
     word-break: break-all;
 }
 
+/* Een pad midden in een zin: mono en afbreekbaar op elke plek, zodat de regel niet midden in een woord knapt */
+.dg-inline-path {
+    padding: 0 var(--space-xs);
+    border-radius: var(--radius-xs);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    overflow-wrap: anywhere;
+}
+
 .dg-copy-row {
     display: flex;
     align-items: center;
