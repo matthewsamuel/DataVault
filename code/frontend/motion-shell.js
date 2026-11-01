@@ -202,6 +202,7 @@
     // ==================== 3. HOME ====================
 
     const counted = new WeakSet();     // tegels die deze sessie al hebben opgeteld
+    let introAt = 0;                   // wanneer de binnenkomst van de app begon (homeIntro)
 
     function homeVisible() {
         const home = document.getElementById('section-home');
@@ -338,7 +339,11 @@
             anims.push(M.animate(activeTab, [{ transform: 'scaleX(0)' }, { transform: 'none' }],
                 { spring: 'smooth', pseudoElement: '::after', delay: step * 8, key: 'glide' }));
         }
-        // De hero: datum, begroeting letter voor letter, ondertitel
+        // De hero: datum, begroeting letter voor letter, ondertitel. Eerst de echte begroeting
+        // ('Goedenavond' in plaats van 'Welkom'), anders tekent fetchHomeWidgets hem straks over
+        // de letters heen.
+        if (typeof homeRenderGreeting === 'function') homeRenderGreeting();
+        introAt = performance.now();
         anims.push(M.enter(document.getElementById('home-date'), 'rise', { delay: step * 2, key: 'intro' }));
         anims.push(greetingReveal(step * 4));
         anims.push(M.enter(document.querySelector('.home-subtitle'), 'rise', { delay: step * 10, key: 'intro' }));
@@ -413,10 +418,12 @@
         const first = !dockSeen;
         dockSeen = true;
         if (dock.hidden) return;
-        // Het paneel verschijnt: het rijst rechtsonder op
-        if (before.hidden && !first) {
+        // Het paneel verschijnt: het rijst rechtsonder op. De eerste keer hoort het bij de
+        // binnenkomst van de app: als stille meta, na de kaarten (docs/MOTION.md, volgorde)
+        const introLeft = first && introAt ? introAt + M.ms('--stagger-step', 28) * 14 - performance.now() : -1;
+        if ((before.hidden && !first) || introLeft > 0) {
             M.animate(dock, [{ opacity: 0, transform: `translate3d(0, ${M.px('--motion-distance-lg', 24)}px, 0) scale(0.97)` }, { opacity: 1, transform: 'none' }],
-                { spring: 'smooth', key: 'dock' });
+                { spring: 'smooth', key: 'dock', delay: Math.max(0, introLeft), fill: 'backwards' });
         }
         const now = performance.now();
         let celebrated = false;
@@ -512,7 +519,7 @@
             anims.push(M.animate(spark, [
                 { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)' },
                 { opacity: 0, transform: `translate3d(${Math.cos(angle) * reach}px, ${Math.sin(angle) * reach}px, 0) scale(0.3)` },
-            ], { duration: '--dur-5', easing: '--ease-emphasized', fill: 'forwards', delay: (i % 2) * 30, key: 'burst' }));
+            ], { duration: '--dur-5', easing: '--ease-emphasized', fill: 'forwards', delay: (i % 2) * M.ms('--stagger-step', 28), key: 'burst' }));
         });
         reduceAll(anims).finished.then(() => burst.remove());
         setTimeout(() => burst.remove(), 2000);

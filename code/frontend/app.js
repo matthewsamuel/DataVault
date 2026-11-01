@@ -2276,7 +2276,8 @@ function homeRenderGreeting() {
     const greeting = hour < 6 ? 'Goedenacht' : hour < 12 ? 'Goedemorgen' : hour < 18 ? 'Goedemiddag' : 'Goedenavond';
     const title = document.getElementById('home-greeting');
     const date = document.getElementById('home-date');
-    if (title) title.textContent = greeting;
+    // Alleen als het anders is: zo blijft de letter-voor-letter-begroeting (motion-shell.js) staan
+    if (title && title.textContent !== greeting) title.textContent = greeting;
     if (date) date.textContent = now.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 

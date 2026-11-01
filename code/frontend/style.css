@@ -14126,10 +14126,16 @@ html[data-motion="rustig"] .job-running .job-bar::after {
 
 html[data-vt="theme"]::view-transition-new(root) {
     -webkit-mask-image: radial-gradient(circle at var(--vt-x, 50%) var(--vt-y, 0px),
-        #000 calc(var(--shell-reveal) - var(--shell-reveal-feather)), transparent var(--shell-reveal));
+        black calc(var(--shell-reveal) - var(--shell-reveal-feather)), transparent var(--shell-reveal));
     mask-image: radial-gradient(circle at var(--vt-x, 50%) var(--vt-y, 0px),
-        #000 calc(var(--shell-reveal) - var(--shell-reveal-feather)), transparent var(--shell-reveal));
+        black calc(var(--shell-reveal) - var(--shell-reveal-feather)), transparent var(--shell-reveal));
     animation: shell-theme-reveal var(--dur-6) var(--ease-standard) both;
+}
+
+/* Gewoon over elkaar, niet optellen (plus-lighter): anders licht de zachte rand wit op */
+html[data-vt="theme"]::view-transition-old(root),
+html[data-vt="theme"]::view-transition-new(root) {
+    mix-blend-mode: normal;
 }
 
 @keyframes shell-theme-reveal {
@@ -14331,8 +14337,8 @@ html[data-motion="rustig"] .skeleton {
 .loading-spinner {
     border: none;
     background: conic-gradient(from 0deg, transparent 0deg, var(--accent) 330deg, transparent 331deg);
-    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
-    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 3px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 3px));
 }
 
 /* ---------- Herstelcentrum ---------- */
