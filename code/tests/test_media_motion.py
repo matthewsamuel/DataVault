@@ -59,3 +59,17 @@ def test_the_keurer_ghost_flies_under_the_next_card_and_the_next_photos_are_read
     assert re.search(r"\.mm-ghost-layer\.mm-ghost-under \{\s*z-index: auto;", css)
     keurer = (FRONTEND / "keurer.js").read_text(encoding="utf-8")
     assert "keurerPreloadNext();" in keurer and ".decode()" in keurer
+
+
+def test_the_viewer_lands_exactly_closes_faster_and_never_double_exposes():
+    app = (FRONTEND / "app.js").read_text(encoding="utf-8")
+    morph = app[app.index("function viewerMorph"):app.index("function gridFiles")]
+    # The guessed rect is the content box of the viewer (its padding left out)
+    assert "padding${side}" in morph and "radius" in morph
+    motion = (FRONTEND / "motion.js").read_text(encoding="utf-8")
+    shared = motion[motion.index("function sharedElement"):motion.index("// ---------- Getallen die tellen")]
+    assert "spring: opening ? 'gentle' : 'snappy'" in shared
+    assert "contentRect(big)" in shared   # the waiting ghost shrinks to the real photo, no snap
+    js = (FRONTEND / "media-motion.js").read_text(encoding="utf-8")
+    step = js[js.index("function viewerStep"):js.index("function viewerSwipe")]
+    assert "Motion.ms('--dur-1', 90) * 0.6" in step and "scale(0.98)" not in step

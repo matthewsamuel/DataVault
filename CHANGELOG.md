@@ -54,6 +54,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Berichten: een lange lijst gesprekken bouwt sneller op en de gesprekken stromen binnen zonder te haperen, ook met duizenden.
 - Rustig (en macOS 'minder beweging') is nu echt alleen vervagen: het icoon van een melding springt en draait niet meer, vensters en het themamenu krimpen niet bij het sluiten, skeletten en lege staten hebben geen glans of kring meer, en een foto in het raster zoomt bij het laden niet meer in (ook niet in Volledig).
 - Keurer: de weggevlogen kaart gaat onder de volgende foto door in plaats van erover, er vliegt er maar één tegelijk, en de volgende twee foto's staan al klaar, zodat de nieuwe kaart nooit even leeg is.
+- Viewer: de foto die opent landt precies op zijn plek (geen sprongetje meer als hij geladen is), sluiten gaat sneller dan openen, en bij volgende en vorige liggen nooit twee halfdoorzichtige foto's over elkaar: de oude is weg voor de nieuwe opkomt.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.

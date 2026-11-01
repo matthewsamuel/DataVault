@@ -390,7 +390,8 @@
         clearViewerGhost();
         const seq = ++viewerSeq;
         if (!media || !step || off()) return settled();
-        const d = Motion.px('--motion-distance-lg', 24) * 1.5;
+        const d = Motion.px('--motion-distance-md', 12);
+        const dSmall = Motion.px('--motion-distance-sm', 6);
         const dur = Motion.ms('--dur-2', 140);
         const isImg = media.tagName === 'IMG';
         // De oude foto als spook op precies zijn plek in de viewer
@@ -406,21 +407,23 @@
             body.appendChild(g);
             viewerGhost = g;
         }
+        // Nooit twee halfdoorzichtige foto's over elkaar: de oude is in --dur-1 weg (ease-out,
+        // dus meteen grotendeels) en de nieuwe komt pas op als de oude bijna weg is
         const run = () => {
             if (seq !== viewerSeq) return;
             const g = viewerGhost;
             if (g) {
                 const out = Motion.animate(g, [
                     { opacity: 1, transform: `translate3d(${carry}px, 0, 0)` },
-                    { opacity: 0, transform: `translate3d(${-step * d + carry}px, 0, 0) scale(0.98)` },
-                ], { duration: dur, easing: '--ease-exit', fill: 'forwards', key: 'step' });
+                    { opacity: 0, transform: `translate3d(${-step * dSmall + carry}px, 0, 0)` },
+                ], { duration: Motion.ms('--dur-1', 90), easing: '--ease-out', fill: 'forwards', key: 'step' });
                 out.finished.then(() => { if (viewerGhost === g) clearViewerGhost(); }, () => {});
                 if (out.stub) clearViewerGhost();
             }
             Motion.animate(media, [
                 { opacity: 0, transform: `translate3d(${step * d}px, 0, 0)` },
                 { opacity: 1, transform: 'none' },
-            ], { duration: dur + Motion.ms('--dur-1', 90), easing: '--ease-standard', key: 'step' });
+            ], { duration: dur, delay: g ? Motion.ms('--dur-1', 90) * 0.6 : 0, easing: '--ease-out', key: 'step' });
         };
         if (isImg && !media.complete && typeof media.decode === 'function') {
             // Hooguit een korte tel wachten: daarna gewoon door (een trage schijf)

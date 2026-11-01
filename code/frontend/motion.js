@@ -450,15 +450,27 @@
         hide.forEach(el => { el.style.opacity = '0'; });
         const restore = () => hide.forEach((el, i) => { el.style.opacity = before[i]; });
 
+        // Sluiten gaat sneller dan openen (principe 6): de snappy-veer in plaats van de gentle
         const anim = animate(ghost, opening ? [small, large] : [large, small], {
-            spring: 'gentle', key: 'shared', fill: 'forwards',
+            spring: opening ? 'gentle' : 'snappy', key: 'shared', fill: 'forwards',
         });
         const cleanup = () => {
             restore();
             // Is de grote foto nog niet geladen, dan blijft de miniatuur even staan en vervaagt hij
             if (opening && big && big.tagName === 'IMG' && !big.complete) {
-                const fade = () => animate(ghost, [{ opacity: 1 }, { opacity: 0 }], { duration: ms('--dur-3', 200), fill: 'forwards', key: 'ghost-out' })
-                    .finished.then(() => ghost.remove(), () => ghost.remove());
+                // Vervagen naar de echte plek: wijkt die af van de geschatte (een kleinere foto),
+                // dan krimpt het spook er tijdens het vervagen naartoe in plaats van te verspringen
+                const fade = () => {
+                    const r = big.isConnected ? contentRect(big) : null;
+                    const to = { opacity: 0 };
+                    if (r && r.width && r.height && (Math.abs(r.width - t.width) > 1 || Math.abs(r.top - t.top) > 1 || Math.abs(r.left - t.left) > 1)) {
+                        const mx = (r.left + r.width / 2) - (t.left + t.width / 2);
+                        const my = (r.top + r.height / 2) - (t.top + t.height / 2);
+                        to.transform = `translate3d(${mx}px, ${my}px, 0) scale(${r.width / t.width}, ${r.height / t.height})`;
+                    }
+                    return animate(ghost, [{ opacity: 1, transform: 'none' }, to], { duration: ms('--dur-3', 200), easing: '--ease-out', fill: 'forwards', key: 'ghost-out' })
+                        .finished.then(() => ghost.remove(), () => ghost.remove());
+                };
                 big.addEventListener('load', fade, { once: true });
                 big.addEventListener('error', fade, { once: true });
                 setTimeout(() => { if (ghost.isConnected) fade(); }, 2500);

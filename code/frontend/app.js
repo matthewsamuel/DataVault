@@ -1387,20 +1387,26 @@ function viewerMorph(direction) {
     const thumb = viewerThumbFor(file, direction === 'open');
     if (direction === 'open') viewerMorphFrom = thumb ? { file, thumb } : null;
     if (!big || !thumb) return;
+    const radius = parseFloat(getComputedStyle(big).borderTopLeftRadius) || 0;
     if (direction === 'open') {
-        // Nog niet geladen: de plek uit de verhouding van de miniatuur en het vak van de viewer
-        const body = document.getElementById('modal-body').getBoundingClientRect();
+        // Nog niet geladen: de plek uit de verhouding van de miniatuur en het inhoudsvak van de
+        // viewer (zonder zijn opvulling; de foto is daar hooguit 100% hoog, zoals in de CSS)
         let rect = null;
         if (!(big.naturalWidth > 0)) {
+            const bodyEl = document.getElementById('modal-body');
+            const b = bodyEl.getBoundingClientRect();
+            const cs = getComputedStyle(bodyEl);
+            const pad = side => parseFloat(cs[`padding${side}`]) || 0;
+            const box = { left: b.left + pad('Left'), top: b.top + pad('Top'),
+                width: b.width - pad('Left') - pad('Right'), height: b.height - pad('Top') - pad('Bottom') };
             const aspect = thumb.naturalWidth / thumb.naturalHeight;
-            const maxH = Math.min(body.height, window.innerHeight - 160);
-            let w = body.width, h = w / aspect;
-            if (h > maxH) { h = maxH; w = h * aspect; }
-            rect = { left: body.left + (body.width - w) / 2, top: body.top + (body.height - h) / 2, width: w, height: h };
+            let w = box.width, h = w / aspect;
+            if (h > box.height) { h = box.height; w = h * aspect; }
+            rect = { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h };
         }
-        Motion.sharedElement(thumb, big, { direction: 'open', rect, src: thumb.currentSrc || thumb.src });
+        Motion.sharedElement(thumb, big, { direction: 'open', rect, radius, src: thumb.currentSrc || thumb.src });
     } else {
-        Motion.sharedElement(thumb, big, { direction: 'close', src: big.tagName === 'IMG' ? (big.currentSrc || big.src) : (thumb.currentSrc || thumb.src) });
+        Motion.sharedElement(thumb, big, { direction: 'close', radius, src: big.tagName === 'IMG' ? (big.currentSrc || big.src) : (thumb.currentSrc || thumb.src) });
     }
 }
 
