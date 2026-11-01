@@ -394,11 +394,13 @@
     }
 
     // De groepen (Leaflet.markercluster). Bij veel punten (meer dan CLUSTER_ANIMATE_MAX) of met
-    // 'minder beweging' zonder de zoomanimatie van de groepen: die verschuift elke zichtbare
-    // groep apart en gaf haperingen tot ~450 ms per beeld bij 26.000 foto's. animate wordt
-    // alleen bij het maken gelezen, dus dan komt er een nieuwe (lege) groep voor in de plaats.
+    // minder beweging (van de Mac, of Beweging in Instellingen: html[data-motion="reduce"])
+    // zonder de zoomanimatie van de groepen: die verschuift elke zichtbare groep apart en gaf
+    // haperingen bij tienduizenden foto's. animate wordt alleen bij het maken gelezen, dus
+    // dan komt er een nieuwe (lege) groep voor in de plaats.
     function useCluster(animate) {
-        animate = animate && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        animate = animate && document.documentElement.dataset.motion !== 'reduce'
+            && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
         if (state.cluster && state.clusterAnimated === animate) return;
         if (state.cluster) state.map.removeLayer(state.cluster);
         state.clusterAnimated = animate;
