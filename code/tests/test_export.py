@@ -149,8 +149,9 @@ def test_refuses_paths_outside_the_archive_and_missing_files(indexed, vault, tmp
     body = {"paths": [str(outside), str(vault / "RAW/nietbestaand.jpg"), str(vault / STRAND)],
             "destination": str(tmp_path / "e2")}
     job = indexed.post("/api/jobs", json={"type": "export", "params": body}).json()["job"]
-    assert job["params"]["paths"] == [str(vault / STRAND)]
+    assert job["params"]["count"] == 1 and "paths" not in job["params"]     # the API shows the count (PERF-5)
     _manager().wait(job["id"], timeout=60)
+    assert indexed.get(f"/api/jobs/{job['id']}/result").json()["result"]["copied"] == 1
     assert not (tmp_path / "e2" / "secret.jpg").exists()
 
 
@@ -397,3 +398,38 @@ def test_a_month_folder_that_is_a_symlink_into_the_archive_is_refused(indexed, v
     assert result["copied"] == 1 and result["errors"] == 1
     assert (dest / "2020-10/koffie é à ü.jpg").is_file()
     assert _snapshot(vault) == before and _dirs(vault) == dirs
+
+
+def test_indexed_paths_take_the_quick_check_and_the_rest_the_full_one(indexed, vault, config, app, tmp_path, monkeypatch):
+    """PERF-5: a path exactly as the index has it needs no locate(); anything else (another
+    spelling, a symlink, a file gone since the index, outside the vault) still gets the full check."""
+    from backend import paths as paths_module
+    calls = []
+    real = export.locate
+    monkeypatch.setattr(export, "locate", lambda raw, cfg, *a, **k: calls.append(raw) or real(raw, cfg, *a, **k))
+    beach = str(vault / STRAND)
+    items, skipped = export.load_items(app.state.db, config, [beach, beach])
+    assert [i.path for i in items] == [beach] and skipped == 0 and calls == []
+    # Another spelling of the same file: the full check, the same file once
+    other = str(vault / "RAW" / ".." / STRAND)
+    items, skipped = export.load_items(app.state.db, config, [beach, other])
+    assert [i.path for i in items] == [beach] and calls == [other]
+    # A symlink where the indexed file was, pointing outside the vault: refused
+    outside = vault.parent / f"{vault.name}_outside" / "secret.jpg"
+    outside.parent.mkdir(exist_ok=True)
+    outside.write_bytes(b"x")
+    target = vault / STRAND
+    moved = target.with_name("moved.jpg")
+    target.rename(moved)
+    try:
+        target.symlink_to(outside)
+        items, skipped = export.load_items(app.state.db, config, [beach])
+        assert items == [] and skipped == 1
+        target.unlink()
+        items, skipped = export.load_items(app.state.db, config, [beach])     # gone since the index
+        assert items == [] and skipped == 1
+    finally:
+        if target.is_symlink():
+            target.unlink()
+        moved.rename(target)
+    assert paths_module.locate is real

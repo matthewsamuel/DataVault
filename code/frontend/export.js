@@ -254,7 +254,7 @@
                 const job = await jobsStart('export', { paths, destination: destination(), mode: state.mode, max_edge: state.edge,
                     structure: state.structure, manifest: state.manifest });
                 closeModal('modal-export');
-                showToast('Export gestart', `${job.params.paths.length} bestanden worden gekopieerd; de voortgang staat rechtsonder.`, 'success');
+                showToast('Export gestart', `${job.params.count} bestanden worden gekopieerd; de voortgang staat rechtsonder.`, 'success');
             } catch (e) {
                 state.busy = false;
                 status.className = 'export-status is-error';

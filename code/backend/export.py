@@ -29,6 +29,7 @@ import json
 import math
 import os
 import shutil
+import stat
 import threading
 import time
 from dataclasses import dataclass
@@ -202,19 +203,41 @@ def load_items(db, config: Config, paths: Any) -> Tuple[List[Item], int]:
         raise ExportError("Kies eerst bestanden om te exporteren")
     if len(paths) > MAX_ITEMS:
         raise ExportError(f"Te veel bestanden in één export (hoogstens {MAX_ITEMS})")
+    # A path exactly as the media index has it (present, not missing) is already a regular
+    # file inside the vault, outside the app's own folders and never a symlink (the index is
+    # built by the one archive walk, paths.ArchiveFilter): one lstat instead of resolving
+    # every folder above it and comparing each with the protected folders by inode (~0.3 ms
+    # a path, 16 s for 50,000). Every other path takes the full check (locate).
+    rows: Dict[str, Tuple] = {}
+    asked = list(dict.fromkeys(raw for raw in paths if isinstance(raw, str)))
+    with db._connect() as conn:
+        for chunk in _chunks(asked):
+            for row in conn.execute(
+                    f"SELECT path, kind, ext, size, taken, width, height FROM media "
+                    f"WHERE missing = 0 AND path IN ({', '.join('?' * len(chunk))})", chunk):
+                rows[row[0]] = row
     located: Dict[str, Path] = {}
     skipped = 0
     for raw in paths:
+        if isinstance(raw, str) and raw in rows:
+            try:
+                fast = stat.S_ISREG(os.lstat(raw).st_mode)
+            except OSError:
+                fast = False
+            if fast:
+                if raw not in located:
+                    located[raw] = Path(raw)
+                continue
         file = locate(raw, config) if isinstance(raw, str) else None
         if file is None or internal_folder_for(file, config) is not None or not file.is_file() \
                 or not (is_photo(file) or is_video(file) or is_audio(file)):
             skipped += 1
         elif str(file) not in located:
             located[str(file)] = file
-    rows: Dict[str, Tuple] = {}
     keys = list(located)
+    missing_rows = [k for k in keys if k not in rows]
     with db._connect() as conn:
-        for chunk in _chunks(keys):
+        for chunk in _chunks(missing_rows):
             for row in conn.execute(
                     f"SELECT path, kind, ext, size, taken, width, height FROM media "
                     f"WHERE path IN ({', '.join('?' * len(chunk))})", chunk):
@@ -541,10 +564,16 @@ def export_type(config: Config, db) -> JobType:
     def describe(params: Dict[str, Any]) -> str:
         return f"{len(params.get('paths') or [])} bestanden"
 
+    def public_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        # The dock polls the job list every second: the count, not 50,000 paths (4.5 MB a poll)
+        out = {k: v for k, v in params.items() if k != "paths"}
+        out["count"] = len(params.get("paths") or [])
+        return out
+
     keys = ("destination", "copied", "bytes", "skipped", "converted", "errors", "manifest", "complete")
     return JobType(EXPORT_JOB, "Exporteren", prepare, lambda ctx: run_export(ctx, config, db),
                    summarize=lambda r: {k: r.get(k) for k in keys}, results_to_keep=5, jobs_to_keep=10,
-                   describe=describe)
+                   describe=describe, public_params=public_params)
 
 
 # ---------- the best of a period ----------
