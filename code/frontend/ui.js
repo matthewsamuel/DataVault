@@ -318,3 +318,53 @@ function initOverlayWatch() {
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initOverlayWatch);
 else initOverlayWatch();
+
+// ==================== BEVESTIGEN ====================
+
+// Eén vraag in het gewone venster van de app (in plaats van de kale bevestigvraag van de browser).
+// Geeft een Promise<boolean>. De focus staat eerst op Annuleren (Enter doet dus niets onherroepelijks),
+// Escape, het kruisje en een klik naast het venster annuleren, en de focus gaat daarna terug.
+//   title:        de vraag, kort ('8 bestanden terugzetten?')
+//   body:         één tekst of een lijst regels (elke tekst een alinea; een element blijft zoals het is)
+//   confirmLabel: de knop die het doet ('Terugzetten')
+//   danger:       rode knop voor iets dat je niet zomaar terugdraait
+//   icon:         Font Awesome-icoon in de titel
+function dvConfirm({ title, body = '', confirmLabel = 'Doorgaan', danger = false, icon = 'fa-circle-question' } = {}) {
+    document.getElementById('modal-dv-confirm')?.remove();
+    const returnTo = focusReturnTarget(document.activeElement !== document.body ? document.activeElement : lastFocused);
+    return new Promise((resolve) => {
+        let done = false;
+        const finish = (answer) => {
+            if (done) return;
+            done = true;
+            modal.classList.remove('active');
+            // Meteen terug naar waar de focus was, zodat de code na 'await dvConfirm' daar verder kan
+            if (canTakeFocus(returnTo)) returnTo.focus({ preventScroll: true });
+            // Na de sluitanimatie weghalen; de focus is dan al terug (ui.js, overlayClosed)
+            setTimeout(() => modal.remove(), 250);
+            resolve(answer);
+        };
+        const lines = (Array.isArray(body) ? body : [body]).filter(Boolean);
+        const cancel = createEl('button', { type: 'button', class: 'btn btn-secondary', 'data-autofocus': '',
+            text: 'Annuleren', onClick: () => finish(false) });
+        const ok = createEl('button', { type: 'button', class: `btn ${danger ? 'btn-danger' : 'btn-primary'}`,
+            text: confirmLabel, onClick: () => finish(true) });
+        const modal = createEl('div', {
+            class: 'modal dv-confirm', id: 'modal-dv-confirm', role: 'alertdialog',
+            'aria-labelledby': 'dv-confirm-title', 'aria-describedby': lines.length ? 'dv-confirm-body' : null,
+            onClick: (e) => { if (e.target === modal) finish(false); },
+        },
+            createEl('div', { class: 'modal-container dv-confirm-container' },
+                createEl('div', { class: 'modal-header' },
+                    createEl('h2', { class: 'modal-title', id: 'dv-confirm-title' },
+                        createEl('i', { class: `fas ${icon}`, 'aria-hidden': 'true' }), ' ', createEl('span', { text: title })),
+                    createEl('button', { type: 'button', class: 'modal-close', 'aria-label': 'Annuleren', title: 'Annuleren (Esc)',
+                        onClick: () => finish(false) }, '×')),
+                lines.length ? createEl('div', { class: 'modal-body dv-confirm-body', id: 'dv-confirm-body' },
+                    ...lines.map(line => (typeof line === 'string' ? createEl('p', { text: line }) : line))) : null,
+                createEl('div', { class: 'modal-footer' }, cancel, ok)));
+        document.body.append(modal);
+        registerOverlayCloser('modal-dv-confirm', () => finish(false));
+        modal.classList.add('active');
+    });
+}

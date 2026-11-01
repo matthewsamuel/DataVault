@@ -46,6 +46,10 @@ SCAN_MAX = 20000          # points looked at for a country
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f<>  ]")
 
 
+NOT_RUN = ("Dat kon ik niet uitvoeren. Probeer het anders te vragen, bijvoorbeeld \"foto's uit 2019\" "
+           "of \"foto's van het strand\".")
+
+
 class ToolError(Exception):
     """A clear Dutch message for the chat (a prerequisite is missing, nothing found, ...)."""
 
@@ -142,19 +146,128 @@ def strip_actions(text: str) -> str:
     return UNFINISHED.sub("", text).strip()
 
 
+def _decode(raw: str) -> Any:
+    """One tag's JSON; a stray extra '}' or text after the object (a common slip of the model) is ignored."""
+    try:
+        return json.loads(raw)
+    except ValueError:
+        pass
+    try:
+        return json.JSONDecoder().raw_decode(raw.strip())[0]
+    except ValueError:
+        return None
+
+
+def _candidates(text: str) -> List[str]:
+    return [m.group(1) for m in TAG.finditer(text)] or [m.group(0) for m in BARE.finditer(text)]
+
+
+def _date_filter(value: Any) -> Optional[Dict[str, Any]]:
+    """'2019' / '2019-07' / '2019-07-14' -> library_filter arguments, else None."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        value = str(value)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if re.fullmatch(r"\d{4}", value):
+        return {"action": "library_filter", "year": value}
+    m = re.fullmatch(r"(\d{4})-(\d{1,2})", value)
+    if m:
+        return {"action": "library_filter", "year": m.group(1), "month": m.group(2)}
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return {"action": "library_filter", "date_from": value, "date_to": value}
+    return None
+
+
+def _near_miss(data: Any) -> Optional[Dict[str, Any]]:
+    """
+    An action the model almost got right, rewritten to the real one (then checked like any other):
+    find_photos with a date or only a year, show_photos with a year or month, a file-name search for a year.
+    """
+    if not isinstance(data, dict):
+        return None
+    name = data.get("action")
+    if name == "find_photos" and not data.get("query"):
+        for key in ("date", "day", "year"):
+            mapped = _date_filter(data.get(key))
+            if mapped:
+                if data.get("kind"):
+                    mapped["kind"] = data["kind"]
+                return mapped
+    if name == "show_photos" and not (isinstance(data.get("date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", data["date"])):
+        return _date_filter(data.get("date"))
+    if name in ("search_photos", "find_photos"):
+        return _date_filter(data.get("query"))
+    return None
+
+
+# Actions the chat screen runs itself (app.js CHAT_ACTIONS): the server leaves them to the page
+CHAT_VIEWS = ("home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline")
+CLIENT_ACTIONS: Dict[str, Dict[str, Callable]] = {
+    "open_tab": {"target": _enum(*CHAT_VIEWS)},
+    "scan_duplicates": {},
+    "open_folder": {"target": _text(255)},
+    "show_photos": {"date": _day},
+    "search_photos": {"query": _text(100)},
+    "open_file": {"path": _text(4096)},
+}
+
+
+def client_action(data: Any) -> Optional[Dict[str, Any]]:
+    """A valid action for the chat screen itself ({'action', args}), else None."""
+    if not isinstance(data, dict) or data.get("action") not in CLIENT_ACTIONS:
+        return None
+    out: Dict[str, Any] = {"action": data["action"]}
+    for key, check in CLIENT_ACTIONS[data["action"]].items():
+        value = data.get(key)
+        if isinstance(value, str) and value != value.strip():
+            return None
+        try:
+            out[key] = check(value)
+        except (ValueError, TypeError):
+            return None
+        if out[key] != value:      # the page checks the raw value: only pass what it will accept as is
+            return None
+    return out
+
+
+def resolve_actions(text: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], bool]:
+    """
+    The answer's actions: (server actions, at most 2), (actions for the page, at most 1),
+    and whether the model tried an action at all. When it tried but nothing is left, the chat
+    must say so instead of showing only the model's 'Hier zijn ze.'.
+    """
+    text = text or ""
+    server: List[Dict[str, Any]] = []
+    client: List[Dict[str, Any]] = []
+    raws = _candidates(text)
+    for raw in raws:
+        data = _decode(raw)
+        action = clean_action(data) or clean_action(_near_miss(data))
+        page = None if action else client_action(data)
+        if action:
+            server.append(action)
+        elif page:
+            client.append(page)
+    tried = bool(raws) or bool(UNFINISHED.search(text)) or is_bare_claim(text)
+    return server[:2], client[:1], tried
+
+
+# The short lead-ins of the prompt's examples. An answer that is only one of these ('Dit vond ik.')
+# promised a result but carries no action (the small model sometimes forgets the tag).
+CLAIMS = {"hier zijn ze", "hier zijn ze dan", "hier is het", "dit vond ik", "alsjeblieft", "ik kijk het na",
+          "even kijken", "dit zijn je reeksen", "ik stel het voor", "ik bereid het voor", "zoeken",
+          "ik zoek het op", "ik heb het opgezocht"}
+
+
+def is_bare_claim(text: str) -> bool:
+    words = re.sub(r"[^\w\s']", " ", (text or "").lower())
+    return " ".join(words.split()) in CLAIMS
+
+
 def parse_actions(text: str) -> List[Dict[str, Any]]:
     """The valid server-side actions in a model answer, in order (at most 2)."""
-    found = []
-    text = text or ""
-    candidates = [m.group(1) for m in TAG.finditer(text)] or [m.group(0) for m in BARE.finditer(text)]
-    for raw in candidates:
-        try:
-            action = clean_action(json.loads(raw))
-        except ValueError:
-            continue
-        if action:
-            found.append(action)
-    return found[:2]
+    return resolve_actions(text)[0]
 
 
 # ---------- pending actions ----------
@@ -320,15 +433,16 @@ def tool_photos_at_place(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
     place = places.find(a["place"])
     if place is None:
         raise ToolError(f"Ik ken de plaats \"{a['place']}\" niet. Probeer een land of een grotere stad.")
+    said = a["place"][:1].upper() + a["place"][1:]      # the user's own spelling ('Parijs', not 'Paris')
     ids, capped = _gps_rows(ctx, place, a.get("year"))
     if not ids:
         with ctx.db._connect() as conn:
             anywhere = conn.execute("SELECT COUNT(*) FROM media WHERE lat IS NOT NULL AND missing = 0").fetchone()[0]
         if not anywhere:
             raise ToolError("Er zijn nog geen foto's met een locatie in je bibliotheek; zonder GPS kan ik geen plaats vinden.")
-        raise ToolError(f"Geen foto's met een locatie in {place.name}.")
+        raise ToolError(f"Geen foto's met een locatie in {said}.")
     where = "in" if place.kind == "country" else "bij"
-    return {"title": f"{len(ids)}{'+' if capped else ''} foto's {where} {place.name}", "total": len(ids),
+    return {"title": f"{len(ids)}{'+' if capped else ''} foto's {where} {said}", "total": len(ids),
             "items": _items_by_ids(ctx.db, ids[:STRIP_ITEMS]),
             "link": {"view": "map", "bounds": place.bbox, "label": "Op de kaart tonen"}}
 
@@ -472,19 +586,27 @@ def propose_keep_best(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
     if not near_dups.counts(ctx.db).get("analysed"):
         raise ToolError("De reeksen zijn nog niet berekend. Open Duplicaten, kies Beste uit reeks en start de vergelijking.")
     data = near_dups.page(ctx.db, near_dups.DEFAULT_STRICTNESS, "size", 0, a.get("count", 1))
-    groups, preview, loose = [], [], 0
+    groups, preview, loose, copies = [], [], 0, 0
+    to = "RAW_DUPLICATES/near-duplicates"
     for s in data["items"]:
         keep = [s["best"]]
         losers = [m for m in s["members"] if m["id"] != s["best"]]
         groups.append({"members": [m["id"] for m in s["members"]], "keep": keep})
-        loose += len(losers)
+        # near_dups.keep_best moves each loser's byte-identical copies along: the card shows them too
         for m in losers:
-            preview.append({"path": m["path"], "name": m["name"], "to": "RAW_DUPLICATES/near-duplicates"})
+            preview.append({"path": m["path"], "name": m["name"], "to": to})
+            for c in m.get("copies") or []:
+                preview.append({"path": c["path"], "name": c["path"].rsplit("/", 1)[-1], "to": f"{to} (exacte kopie)"})
+                copies += 1
+        loose += len(losers)
     if not groups:
         raise ToolError("Ik vond geen reeksen om op te ruimen.")
+    total = loose + copies
     title = (f"In {len(groups)} {'reeks' if len(groups) == 1 else 'reeksen'} de beste foto houden en "
-             f"{loose} andere naar RAW_DUPLICATES/near-duplicates verplaatsen")
-    return _pending(ctx, "keep_best", title, {"groups": groups}, preview, loose)
+             f"{total} andere naar {to} verplaatsen")
+    if copies:
+        title += f" (waarvan {copies} {'exacte kopie' if copies == 1 else 'exacte kopieën'})"
+    return _pending(ctx, "keep_best", title, {"groups": groups}, preview, total)
 
 
 def propose_export(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:

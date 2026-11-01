@@ -576,9 +576,20 @@ function eloRenderEmpty(reason) {
 
 // ==================== HET PAAR IN BEELD ====================
 
+// Eén woordkeus overal: 'vergeleken' = duels hier, 'stem' = een stem in de slideshow. Beide
+// bewegen de score; een foto met alleen stemmen heeft dus wel een score, maar is niet vergeleken.
+function eloVotesText(votes) {
+    return votes === 1 ? '1 stem in de slideshow' : `${formatNumberNl(votes)} stemmen in de slideshow`;
+}
+
+function eloJudgedText(games, votes) {
+    if (games) return games === 1 ? '1 vergelijking' : `${formatNumberNl(games)} vergelijkingen`;
+    return votes ? `nog niet vergeleken, ${eloVotesText(votes)}` : 'nog niet vergeleken';
+}
+
 function eloChoice(photo, side, img) {
     const keys = side === 0 ? ['←', '1'] : ['→', '2'];
-    const games = photo.games === 1 ? '1 vergelijking' : `${formatNumberNl(photo.games)} vergelijkingen`;
+    const games = eloJudgedText(photo.games, photo.votes);
     const sure = photo.games && photo.rd ? `± ${formatNumberNl(Math.round(2 * photo.rd))}` : '';
     return createEl('button', {
         type: 'button', class: 'elo-choice', dataset: { side: String(side) },
@@ -945,14 +956,15 @@ function eloKeydown(e) {
 // ==================== VOORTGANG ====================
 
 // De voortgangsregel onderin: een melding (teruggedraaid, doel gehaald) en hoeveel foto's van
-// deze collectie al beoordeeld zijn. De naam van de collectie staat al bovenin (in de keuzelijst).
+// deze collectie al vergeleken zijn. De naam van de collectie staat al bovenin (in de keuzelijst).
 function eloUpdateProgress() {
     const box = document.getElementById('elo-progress');
     if (!box) return;
     let text = '';
     if (elo.stats) {
         const photos = elo.stats.photos === 1 ? 'foto' : 'foto\'s';
-        text = `${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} beoordeeld`;
+        // 'vergeleken' = in een duel geweest; stemmen in de slideshow tellen hier niet mee (de ranglijst zegt 'met een score')
+        text = `${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} vergeleken`;
     }
     const notice = elo.notice ? createEl('span', { class: 'elo-notice' },
         eloIcon(elo.noticeIcon), ` ${elo.notice}`) : null;
@@ -1158,7 +1170,8 @@ function eloBoardTools(data) {
 }
 
 function eloBoardCaption(data) {
-    const shown = data.items.length < data.total ? `De beste ${data.items.length} van ${formatNumberNl(data.total)}` : `${formatNumberNl(data.total)} beoordeeld`;
+    // 'Met een score' (vergeleken of gestemd), niet 'beoordeeld': Vergelijken telt wat vergeleken is
+    const shown = data.items.length < data.total ? `De beste ${data.items.length} van ${formatNumberNl(data.total)} met een score` : `${formatNumberNl(data.total)} met een score`;
     const year = data.year ? ` uit ${data.year}` : '';
     const date = eloSessionDate(data);
     const since = date ? ` · pijltjes: verschil met vóór je laatste sessie (${date})` : '';
@@ -1183,7 +1196,7 @@ function eloRenderBoard(data) {
     if (!data.items.length) {
         eloSetBody(createEl('div', { class: 'elo-board' }, tools, emptyState({
             icon: 'fa-ranking-star', title: data.year ? `Nog niets uit ${data.year}` : 'Nog geen ranglijst',
-            text: data.year ? 'Kies een ander jaar of alle jaren.' : 'Vergelijk een paar foto\'s (of stem in de slideshow); de best beoordeelde verschijnen hier.',
+            text: data.year ? 'Kies een ander jaar of alle jaren.' : 'Vergelijk een paar foto\'s (of stem in de slideshow); de foto\'s met de hoogste score verschijnen hier.',
             action: { label: 'Begin met vergelijken', onClick: () => eloShowTab('compare'), primary: true },
         })));
         return;
@@ -1196,8 +1209,8 @@ function eloRenderBoard(data) {
         const record = item.games
             ? [`${formatNumberNl(item.wins)} gewonnen`, item.draws ? `${formatNumberNl(item.draws)} gelijk` : null,
                 `${formatNumberNl(item.losses)} verloren`].filter(Boolean).join(' · ')
-            : 'Nog niet vergeleken';
-        const votes = item.votes ? ` · ${item.votes === 1 ? '1 stem' : `${formatNumberNl(item.votes)} stemmen`}` : '';
+            : eloJudgedText(0, item.votes);
+        const votes = item.games && item.votes ? ` · ${eloVotesText(item.votes)}` : '';
         const sure = item.rd ? `Ligt voor 95% zeker tussen ${formatNumberNl(item.low)} en ${formatNumberNl(item.high)}` : 'Nog niet vergeleken: nog geen marge';
         return createEl('li', { class: `elo-board-row${item.rank <= 3 ? ' is-top' : ''}`, dataset: { rank: String(item.rank) } },
             createEl('span', { class: 'elo-rank tabular', text: String(item.rank) }),

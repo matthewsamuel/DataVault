@@ -32,7 +32,8 @@ Na een herstart vanuit de app draait de server los van het Terminal-venster van 
   `~/Library/Logs/DataVault/server.log` (te openen met de app Console, of
   `tail -f ~/Library/Logs/DataVault/server.log`). Een ander bestand kies je met de
   omgevingsvariabele `DATAVAULT_LOG_FILE`. Boven 10 MB wordt het oude log `server.log.1`.
-  Gestart via de DataVault-app blijft de uitvoer gewoon in `/tmp/datavault_server.log`.
+  De DataVault-app schrijft zijn uitvoer ook naar dit bestand (alleen leesbaar voor jou); webadressen
+  staan erin zonder het deel na het vraagteken.
 - **Stoppen:** Ctrl+C in het Terminal-venster stopt de herstarte server niet meer (dat venster
   is alweer terug bij de prompt). Stop hem met `./stop_datavault.sh` (zie hieronder).
 

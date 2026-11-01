@@ -2,7 +2,8 @@
 DataVault Dashboard - Database backup routes (backend/backup.py)
 
 GET  /api/backup/status    where the backups are, the newest, how many, when the next is due
-POST /api/backup/run       make one now ('Nu back-uppen' in Instellingen)
+POST /api/backup/run       make one now ('Nu back-uppen' in Instellingen): starts the 'backup' job
+                           (job_types.backup_type) and answers 202 with it at once
 
 Restoring is not an API call: it needs the app stopped (see code/restore_backup.py).
 """
@@ -17,12 +18,14 @@ router = APIRouter()
 
 config: Config = None
 auto = None
+jobs = None
 
 
-def init_router(cfg: Config, auto_backup=None):
-    global config, auto
+def init_router(cfg: Config, auto_backup=None, job_manager=None):
+    global config, auto, jobs
     config = cfg
     auto = auto_backup
+    jobs = job_manager
 
 
 def _require_config():
@@ -42,14 +45,17 @@ def _status() -> Dict[str, Any]:
                          next_check_at=getattr(auto, "next_check_at", None))
 
 
-@router.post("/run")
+@router.post("/run", status_code=202)
 def backup_run() -> Dict[str, Any]:
-    """Make a backup now. A plain def: FastAPI runs it in a worker thread, so copying a
-    large database (a second or two) never blocks other requests."""
+    """Start a backup as a job: copying a large database takes minutes (2 min for 1 GB), which
+    must not hold a request open. The page and the job dock follow the job."""
     _require_config()
+    if jobs is None:
+        raise HTTPException(status_code=503, detail="Achtergrondtaken zijn niet beschikbaar")
+    from backend.job_types import BACKUP_JOB
+    from backend.jobs import JobError
     try:
-        result = backup.make_backup(config, manual=True, keep_daily=config.BACKUP_KEEP_DAILY,
-                                    keep_weekly=config.BACKUP_KEEP_WEEKLY)
-    except backup.BackupError as e:
-        raise HTTPException(status_code=e.status, detail=str(e))
-    return {"backup": result, "status": _status()}
+        job, _ = jobs.start(BACKUP_JOB, {})
+    except JobError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    return {"job": job, "status": _status()}

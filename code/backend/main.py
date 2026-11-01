@@ -32,7 +32,8 @@ from backend.routes import (
     folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, albums,
     series, datagatherer, search, geo, messages, history,
 )
-from backend.datagatherer import daemon as gather_daemon, jobs as gather_jobs, registry as gather_registry
+from backend.datagatherer import (cards as gather_cards, daemon as gather_daemon, jobs as gather_jobs,
+                                  registry as gather_registry)
 from backend.routes import backup as backup_routes
 from backend.routes import export as export_routes
 
@@ -112,6 +113,8 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.state.session_token = security.new_session_token()
     app.state.instance_id = uuid.uuid4().hex
     app.add_middleware(security.SessionTokenMiddleware, token=app.state.session_token)
+    app.add_middleware(security.ContentSecurityPolicyMiddleware)
+    security.strip_query_strings_from_access_log()
     # Added last = outermost: a foreign Host header (DNS rebinding) is refused first
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=security.allowed_hosts())
 
@@ -171,6 +174,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             media_index.set_updater(app.state.auto_index.request)
             # Slim zoeken: photos are recognised after the index, once the model is installed
             app.state.auto_semantic = semantic.SemanticAuto(job_manager, config, db)
+            media_index.set_new_files_listener(app.state.auto_semantic.request)
             # ... and the text model is read from disk now (10-20 s the first time after a boot),
             # so the first query does not wait for it
             def _warm():
@@ -181,9 +185,13 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
             threading.Thread(target=_warm, daemon=True, name="semantic-warm").start()
         else:
             media_index.set_updater(None)
+            media_index.set_new_files_listener(None)
         # DATAVAULT_GATHER_DAEMON=0 turns the DataGatherer thread off (tests tick it themselves)
         if os.environ.get("DATAVAULT_GATHER_DAEMON", "1") != "0":
             app.state.gather_daemon = gather_daemon.Daemon(config, db, lambda: app.state.jobs)
+            # The coverage of every card (counts over millions of rows) is cached in the background
+            db.when_ready(lambda: threading.Thread(target=gather_cards.warm, args=(config, db), daemon=True,
+                                                   name="dg-warm").start())
 
         # The database is copied to the Mac's own disk (backend/backup.py): on start when the
         # newest backup is older than a day, then daily (DATAVAULT_AUTO_BACKUP=0: tests). While
@@ -207,7 +215,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         recovery.init_router(config, db)
         series.init_router(config, db, job_manager)
         datagatherer.init_router(config, db, job_manager)
-        backup_routes.init_router(config, app.state.auto_backup)
+        backup_routes.init_router(config, app.state.auto_backup, job_manager)
         search.init_router(config, db, job_manager)
         geo.init_router(config, db)
         export_routes.init_router(config, db)

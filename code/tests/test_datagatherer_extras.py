@@ -185,3 +185,28 @@ def test_apple_health_steps_per_day_workouts_and_a_dutch_file_name(client, app, 
     again = fx.health_zip(tmp_path / "second" / "export.zip", xml_name="apple_health_export/export.xml")
     _upload(client, app, "apple_health", again)
     assert _count(app, "apple_health") == 2
+
+
+def test_apple_health_memory_does_not_grow_with_the_export():
+    """Every Record is dropped from the root after reading: 200k records stay in a few MB."""
+    import io
+    import tracemalloc
+    from backend.datagatherer.connectors import apple_health
+
+    def export(n):
+        rec = ('<Record type="HKQuantityTypeIdentifierStepCount" sourceName="iPhone" unit="count" '
+               'startDate="2024-06-%02d 10:00:00 +0200" endDate="2024-06-%02d 10:05:00 +0200" value="12">'
+               '<MetadataEntry key="x" value="y"/></Record>\n')
+        body = "".join(rec % (1 + i % 28, 1 + i % 28) for i in range(n))
+        return io.BytesIO(('<?xml version="1.0" encoding="UTF-8"?>\n<HealthData locale="nl_BE">\n'
+                           '<ExportDate value="2024-07-01 10:00:00 +0200"/>\n' + body + "</HealthData>\n").encode())
+
+    stream = export(200_000)
+    tracemalloc.start()
+    try:
+        events = list(apple_health.parse(stream))
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert len(events) == 28 and events[0]["details"]["stappen"] > 0
+    assert peak < 8 * 1024 * 1024, peak

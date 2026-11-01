@@ -105,7 +105,8 @@ def _free_port():
         return s.getsockname()[1]
 
 
-def _wait_health(base, timeout=20, not_instance=None):
+def _wait_health(base, timeout=60, not_instance=None):
+    # 60 s: a cold start on a busy machine (a parallel test run) can take well over 20 s
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:

@@ -111,7 +111,7 @@ def make_chat_db(path: Path, handles: Dict[int, str], chats: List[Dict], message
     """
     handles: {rowid: 'id'}; chats: {rowid, guid, name?, style, handles[]}; messages: {rowid, guid,
     chat, handle, me, text?, body? (attributedBody only), ts (unix), seconds? (old date format),
-    assoc?, assoc_type?}; attachments: {rowid, message, filename, mime, transfer}.
+    assoc?, assoc_type?, emoji?, retracted?}; attachments: {rowid, message, filename, mime, transfer}.
     """
     conn = sqlite3.connect(str(path))
     conn.executescript("""
@@ -126,7 +126,7 @@ def make_chat_db(path: Path, handles: Dict[int, str], chats: List[Dict], message
             date INTEGER, date_read INTEGER, date_delivered INTEGER, is_from_me INTEGER DEFAULT 0,
             item_type INTEGER DEFAULT 0, cache_has_attachments INTEGER DEFAULT 0,
             associated_message_guid TEXT DEFAULT NULL, associated_message_type INTEGER DEFAULT 0,
-            date_edited INTEGER DEFAULT 0, date_retracted INTEGER DEFAULT 0);
+            date_edited INTEGER DEFAULT 0, date_retracted INTEGER DEFAULT 0, associated_message_emoji TEXT);
         CREATE TABLE chat_message_join (chat_id INTEGER REFERENCES chat (ROWID), message_id INTEGER
             REFERENCES message (ROWID), message_date INTEGER DEFAULT 0, PRIMARY KEY (chat_id, message_id));
         CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER, UNIQUE(chat_id, handle_id));
@@ -147,9 +147,11 @@ def make_chat_db(path: Path, handles: Dict[int, str], chats: List[Dict], message
     for m in messages:
         date = int(m["ts"] - APPLE_EPOCH) if m.get("seconds") else int((m["ts"] - APPLE_EPOCH) * 1e9)
         conn.execute("INSERT INTO message (ROWID, guid, text, attributedBody, handle_id, service, date, is_from_me, "
-                     "associated_message_guid, associated_message_type) VALUES (?, ?, ?, ?, ?, 'iMessage', ?, ?, ?, ?)",
+                     "associated_message_guid, associated_message_type, associated_message_emoji, date_retracted) "
+                     "VALUES (?, ?, ?, ?, ?, 'iMessage', ?, ?, ?, ?, ?, ?)",
                      (m["rowid"], m["guid"], m.get("text"), m.get("body"), m.get("handle", 0), date,
-                      1 if m.get("me") else 0, m.get("assoc"), m.get("assoc_type", 0)))
+                      1 if m.get("me") else 0, m.get("assoc"), m.get("assoc_type", 0), m.get("emoji"),
+                      date + 10 ** 9 if m.get("retracted") else 0))
         conn.execute("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)", (m["chat"], m["rowid"]))
     for a in attachments or []:
         conn.execute("INSERT INTO attachment (ROWID, guid, filename, mime_type, transfer_name) VALUES (?, ?, ?, ?, ?)",
@@ -184,6 +186,7 @@ def meta_export(path: Path, layout: str = "en", threads: Optional[Dict[str, Dict
         zf.writestr("personal_information/profile_information/profile_information.json",
                     json.dumps({"profile_v2": {"name": {"full_name": mojibake(owner)}}}))
         for folder, thread in (threads or {}).items():
+            thread = {**thread, "thread_path": f"inbox/{folder}"}      # Meta: the chat's own folder
             zf.writestr(f"{act}/{msgs}/{inbox}/{folder}/message_1.json", json.dumps(thread))
         if posts is not None:
             zf.writestr(f"{act}/posts/your_posts__check_ins__photos_and_videos_1.json", json.dumps(posts))
@@ -204,6 +207,7 @@ def instagram_export(path: Path, posts=None, threads: Optional[Dict[str, Dict]] 
         if posts is not None:
             zf.writestr("your_instagram_activity/content/posts_1.json", json.dumps(posts))
         for folder, thread in (threads or {}).items():
+            thread = {**thread, "thread_path": f"inbox/{folder}"}
             zf.writestr(f"your_instagram_activity/messages/inbox/{folder}/message_1.json", json.dumps(thread))
         if likes is not None:
             zf.writestr("your_instagram_activity/likes/liked_posts.json", json.dumps({"likes_media_likes": likes}))
@@ -239,6 +243,9 @@ WHATSAPP_TXT = {
     # Android in US English: month first, AM/PM
     "android_us": ("6/1/24, 10:01 AM - Anna Jansen: Hoi! Zin in koffie?\n"
                    "6/13/24, 6:30 PM - Matthias: See you\n"),
+    # Android in French: ' à ' between date and time
+    "android_fr": ("01/06/2024 à 10:01 - Anna Jansen: Hoi! Zin in koffie?\n"
+                   "13/06/2024 à 21:34 - Matthias: Oui\n"),
 }
 
 

@@ -115,11 +115,38 @@ def forget_existing_cache() -> None:
         _existing_cache.clear()
 
 
+def _unread_until(connector: Connector, gctx: GatherContext) -> Optional[float]:
+    try:
+        return connector.unread_until(gctx)
+    except Exception:  # a hint on the card only: never let it break the page
+        return None
+
+
+def coverage(connector: Connector, gctx: GatherContext):
+    """The connector's coverage, cached until its data changes: counting millions of rows per visit took seconds."""
+    return state.cached(gctx.db, "coverage", lambda: connector.coverage(gctx), connector.id)
+
+
+def warm(config, db) -> None:
+    """Fill the coverage cache in the background after the start, so the first visit of the tab is quick too."""
+    from backend.datagatherer import registry
+    for connector in registry.connectors():
+        try:
+            coverage(connector, GatherContext(config, db, connector))
+        except Exception:
+            pass    # the card reports it when the tab is opened
+    try:
+        from backend.datagatherer import location_store
+        location_store.days(db)     # Kaart: 'Route per dag'
+    except Exception:
+        pass
+
+
 def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) -> Dict[str, Any]:
     gctx = GatherContext(config, db, connector)
     st = state.get_state(db, connector.id)
     now = time.time()
-    cov = connector.coverage(gctx)
+    cov = coverage(connector, gctx)
     api = connector.has("api_sync")
     local = connector.has("local_import")
     access = connector.access(gctx) if local else None
@@ -271,6 +298,9 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     if watched is not None:
         notes.append({"tone": "info", "text": f"DataVault kijkt altijd in je gesynchroniseerde map {watched.name} en "
                                               "leest een nieuwe export daar vanzelf in.", "path": str(watched)})
+    skipped = skipped_note(raws)
+    if skipped:
+        notes.append(skipped)
     notice = downloads_notice(raws, now)
     if notice:
         notes.append({"tone": "info", "text": f"{notice['name']} staat in het archief. Het origineel in Downloads mag je "
@@ -289,6 +319,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         "tone": tone,
         "data_from": cov.first,
         "data_until": cov.last,
+        "unread_until": None if cov.records else _unread_until(connector, gctx),
         "gap_days": gap_days,
         "stale_days": connector.stale_days,
         "records": cov.records,
@@ -341,6 +372,21 @@ def _request_view(connector: Connector, request: Dict[str, Any]) -> Dict[str, An
             "expected_days": list(kind.expected_days) if kind else None}
 
 
+def skipped_note(raws: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    """A warning when the newest read export had files that could not be read (stats 'skipped',
+    for example a location history that was too large): otherwise only the job stats say so."""
+    latest = next((r for r in raws if r["status"] == "imported"), None)
+    skipped = (latest.get("stats") or {}).get("skipped") if latest else None
+    if not skipped or not isinstance(skipped, list):
+        return None
+    # Only the file names: the reasons ('name: error') can be a parser's English message
+    names = list(dict.fromkeys(str(s).split(": ", 1)[0] for s in skipped))
+    shown = ", ".join(names[:3])
+    more = f" en nog {len(names) - 3}" if len(names) > 3 else ""
+    return {"tone": "warning", "text": f"Niet alles uit je laatste export is ingelezen. Niet leesbaar: {shown}{more}.",
+            "path": latest["path"]}
+
+
 def downloads_notice(raws: List[Dict[str, Any]], now: float) -> Optional[Dict[str, str]]:
     """The newest export copied from Downloads whose original is still there (shown for two weeks)."""
     for raw in raws:
@@ -372,7 +418,7 @@ def watch_folder(connector: Connector, settings: Dict[str, Any]) -> Optional[Pat
 
 def since_for(connector: Connector, gctx: GatherContext) -> Optional[str]:
     """The 'since' date for an incremental export request: the data's last day, minus one day of overlap."""
-    cov = connector.coverage(gctx)
+    cov = coverage(connector, gctx)
     if not cov.last:
         return None
     return (datetime.fromtimestamp(cov.last) - timedelta(days=1)).strftime("%Y-%m-%d")

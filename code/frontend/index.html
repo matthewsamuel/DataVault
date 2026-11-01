@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=69">
+    <link rel="stylesheet" href="style.css?v=74">
 </head>
 
 <body>
@@ -729,16 +729,18 @@
                 <div class="map-filters" role="group" aria-label="Filters voor de kaart">
                     <select class="select select-sm" id="map-year" aria-label="Jaar"></select>
                     <label class="map-date-field"><span>Van</span>
-                        <input type="date" class="input input-sm" id="map-date-from" aria-label="Van datum"></label>
+                        <input type="date" class="input input-sm" id="map-date-from" aria-label="Van datum" aria-describedby="map-range-error"></label>
                     <label class="map-date-field"><span>Tot</span>
-                        <input type="date" class="input input-sm" id="map-date-to" aria-label="Tot en met datum"></label>
+                        <input type="date" class="input input-sm" id="map-date-to" aria-label="Tot en met datum" aria-describedby="map-range-error"></label>
+                    <p class="albums-range-error" id="map-range-error" role="alert" hidden></p>
                     <select class="select select-sm" id="map-camera" aria-label="Camera"></select>
                     <select class="select select-sm" id="map-album" aria-label="Album"></select>
                     <button type="button" class="btn btn-ghost btn-sm" id="map-reset" hidden>Filters wissen</button>
-                    <span class="map-filter-spacer"></span>
-                    <span class="map-count" id="map-count" role="status" aria-live="polite"></span>
-                    <button type="button" class="pill map-nogps" id="map-nogps" hidden aria-label="Foto's zonder locatie"
-                        title="Toon deze foto's in Albums"></button>
+                    <span class="map-summary">
+                        <span class="map-count" id="map-count" role="status" aria-live="polite"></span>
+                        <button type="button" class="pill map-nogps" id="map-nogps" hidden aria-label="Bestanden zonder locatie"
+                            title="Toon deze bestanden in Albums"></button>
+                    </span>
                 </div>
 
                 <div class="map-layers" id="map-layers" role="group" aria-label="Locatiegeschiedenis" hidden>
@@ -1588,31 +1590,31 @@
     <!-- api.js eerst: zet het sessietoken op elk wijzigend verzoek -->
     <script src="api.js?v=3"></script>
     <script src="dom.js?v=1"></script>
-    <script src="ui.js?v=2"></script>
+    <script src="ui.js?v=3"></script>
     <script src="folder-tree.js?v=7"></script>
     <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
     <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
-    <script src="app.js?v=73"></script>
-    <script src="pasha-tools.js?v=1"></script>
-    <script src="jobs.js?v=15"></script>
-    <script src="duplicates.js?v=28"></script>
-    <script src="series.js?v=2"></script>
-    <script src="keurer.js?v=21"></script>
+    <script src="app.js?v=76"></script>
+    <script src="pasha-tools.js?v=2"></script>
+    <script src="jobs.js?v=17"></script>
+    <script src="duplicates.js?v=29"></script>
+    <script src="series.js?v=3"></script>
+    <script src="keurer.js?v=23"></script>
     <script src="timeline.js?v=13"></script>
     <script src="wave-background.js?v=4"></script>
     <script src="resizable-sidebar.js?v=1"></script>
-    <script src="recovery.js?v=7"></script>
-    <script src="settings.js?v=4"></script>
-    <script src="map.js?v=7"></script>
+    <script src="recovery.js?v=8"></script>
+    <script src="settings.js?v=5"></script>
+    <script src="map.js?v=9"></script>
     <script src="shortcuts.js?v=9"></script>
-    <script src="export.js?v=3"></script>
-    <script src="library.js?v=5"></script>
-    <script src="datagatherer.js?v=4"></script>
-    <script src="activity.js?v=3"></script>
-    <script src="elo.js?v=5"></script>
-    <script src="backup-settings.js?v=5"></script>
-    <script src="search.js?v=3"></script>
-    <script src="messages.js?v=1"></script>
+    <script src="export.js?v=4"></script>
+    <script src="library.js?v=7"></script>
+    <script src="datagatherer.js?v=8"></script>
+    <script src="activity.js?v=5"></script>
+    <script src="elo.js?v=6"></script>
+    <script src="backup-settings.js?v=6"></script>
+    <script src="search.js?v=5"></script>
+    <script src="messages.js?v=2"></script>
 </body>
 
 </html>

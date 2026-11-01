@@ -202,6 +202,14 @@ class Connector:
         """What the data of this source covers; shown on the card."""
         return Coverage()
 
+    def unread_until(self, ctx: "GatherContext") -> Optional[float]:
+        """
+        Up to when data that the app already shows elsewhere goes, while nothing was read in
+        yet (the Spotify tab reads the export files directly). The card then says 'Gegevens
+        t/m ... · nog niet ingelezen' instead of 'Nog geen gegevens'. None: nothing like that.
+        """
+        return None
+
     def access(self, ctx: "GatherContext") -> Optional[Dict[str, Any]]:
         """
         local_import: None when the local data can be read; else what the card shows under

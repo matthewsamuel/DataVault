@@ -26,7 +26,8 @@ erbij: liever luid bij de start dan een halve kaart.
 - **Alleen online na een klik of een schema.** Gebruik voor elk verzoek `ctx.http()`. Die client komt
   alleen bij je eigen `allowed_hosts`, via https, en alleen als de actie van de gebruiker kwam
   (trigger `user`) of het schema van de bron aan staat (trigger `schedule`). Elk verzoek, ook een
-  geweigerd verzoek, staat in het netwerklog (`dg_network_log`), zonder querystring.
+  geweigerd verzoek, staat in het netwerklog (`dg_network_log`), zonder querystring. De rij wordt
+  geschreven vóórdat het verzoek vertrekt; lukt dat niet, dan wordt het verzoek geweigerd.
 - **Ruwe exports blijven onaangeroerd.** `raw_store.archive_file` kopieert een export naar
   `data/<eigenaar>/<raw_folder>/<JJJJ-MM-DD> <soort>/`. Het origineel wordt nooit verplaatst,
   gewijzigd, overschreven of gewist. Dezelfde bytes (sha256) worden nooit twee keer opgeslagen.

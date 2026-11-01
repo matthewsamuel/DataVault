@@ -61,13 +61,38 @@ function keurerVaultReturned() {
 
 // ==================== STATISTIEKEN ====================
 
+let keurerStatsLoaded = false;
+
 async function keurerLoadStats() {
+    // Nog nooit cijfers gehad: plaatshouders in de vorm van de drie cijfers, geen lege balk
+    if (!keurerStatsLoaded) keurerRenderStatsPlaceholder();
     try {
         keurerStats = await fetchJSON(`${API_BASE}/api/keurer/stats`);
+        keurerStatsLoaded = true;
         keurerRenderStats();
     } catch (e) {
         console.warn('Keurer stats ophalen mislukt:', e);
+        if (!keurerStatsLoaded) keurerRenderStatsPlaceholder(e);
     }
+}
+
+// Laden (zonder fout) of mislukt (met fout): de balk is nooit een lege, omrande strook
+function keurerRenderStatsPlaceholder(error) {
+    const el = document.getElementById('keurer-stats-bar');
+    if (!el) return;
+    if (!error) {
+        el.replaceChildren(...[0, 1, 2].map(() => createEl('div', { class: 'keurer-stat keurer-stat-skeleton', 'aria-hidden': 'true' },
+            createEl('span', { class: 'skeleton keurer-stat-icon' }),
+            createEl('span', { class: 'skeleton skeleton-line' }),
+            createEl('span', { class: 'skeleton skeleton-line skeleton-line-short' }))));
+        el.setAttribute('aria-busy', 'true');
+        return;
+    }
+    el.removeAttribute('aria-busy');
+    el.replaceChildren(createEl('p', { class: 'keurer-stats-error', role: 'alert' },
+        createEl('i', { class: 'fas fa-triangle-exclamation', 'aria-hidden': 'true' }),
+        createEl('span', { text: `Je cijfers konden niet geladen worden: ${(error && error.message) || 'onbekende fout'}` }),
+        createEl('button', { type: 'button', class: 'btn btn-secondary btn-sm', text: 'Opnieuw proberen', onClick: () => keurerLoadStats() })));
 }
 
 // Statistieken altijd van de server overnemen (na beslissing of undo)
@@ -113,6 +138,7 @@ function keurerUpdateRemaining() {
 function keurerRenderStats() {
     const el = document.getElementById('keurer-stats-bar');
     if (!el) return;
+    el.removeAttribute('aria-busy');
 
     const streakIcon = keurerStats.streak > 0 ? 'fa-fire' : 'fa-snowflake';
     const todayPct = Math.min(100, (keurerStats.today / keurerStats.goal) * 100);
@@ -427,10 +453,21 @@ function keurerDecideKeep()   { keurerAnimateAndDecide('keep'); }
 function keurerDecideDelete() { keurerAnimateAndDecide('delete'); }
 function keurerDecideMove()   { keurerAnimateUp(); }
 
+// Zet een teruggedraaide foto als eerstvolgende kaart in de wachtrij (en telt hem weer mee)
+function keurerRequeue(file) {
+    const at = keurerFileQueue.findIndex(f => f.path === file.path);
+    if (at >= keurerIndex) return;          // nog niet beoordeeld: staat al in de rij
+    if (at >= 0) {
+        keurerFileQueue.splice(at, 1);
+        keurerIndex--;
+    }
+    keurerFileQueue.splice(keurerIndex, 0, file);
+}
+
 async function keurerUndo() {
     if (keurerIsAnimating || keurerUndoBusy) return;
     if (keurerHistory.length === 0) {
-        showToast('Undo', 'Geen actie om ongedaan te maken', 'info');
+        showToast('Ongedaan maken', 'Er is geen actie om ongedaan te maken.', 'info');
         return;
     }
 
@@ -455,11 +492,10 @@ async function keurerUndo() {
         keurerDropHistory(entry.id);
         keurerApplyStats(data.stats);
 
-        // Alleen terug in de wachtrij als de beslissing bij de huidige map hoort
+        // Alleen terug in de wachtrij als de beslissing bij de huidige map hoort. De foto komt
+        // als volgende kaart terug: staat hij al beoordeeld achter ons, dan haalt hij daar weg.
         const file = data.file || entry.file;
-        if (data.folder === keurerFolder && !keurerFileQueue.some(f => f.path === file.path)) {
-            keurerFileQueue.splice(keurerIndex, 0, file);
-        }
+        if (data.folder === keurerFolder) keurerRequeue(file);
         keurerUpdateRemaining();
 
         const label = entry.decision === 'delete' ? 'Prullenmand' : entry.decision === 'move' ? 'Verplaatsing' : 'Bewaren';
@@ -469,7 +505,7 @@ async function keurerUndo() {
     } catch (e) {
         // 404/409/410: deze stap kan niet (meer) terug; haal hem van de stapel
         if ([404, 409, 410].includes(e.status)) keurerDropHistory(entry.id);
-        toastFetchError('Undo mislukt', e);
+        toastFetchError('Ongedaan maken mislukt', e);
     } finally {
         keurerUndoBusy = false;
     }

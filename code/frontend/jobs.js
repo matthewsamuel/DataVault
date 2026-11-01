@@ -43,8 +43,13 @@ const jobDock = {
     libraryLoading: false,
 };
 
+// Op een klein scherm (1024x768) bedekt het open paneel een derde van de pagina: daar begint
+// het ingeklapt, tot je het zelf openklikt (die keuze wordt bewaard)
+const JOB_DOCK_SMALL = '(max-width: 1279px), (max-height: 820px)';
+
 try {
-    jobDock.collapsed = localStorage.getItem('jobDockCollapsed') === '1';
+    const saved = localStorage.getItem('jobDockCollapsed');
+    jobDock.collapsed = saved === null ? window.matchMedia(JOB_DOCK_SMALL).matches : saved === '1';
     JSON.parse(localStorage.getItem('jobDockDismissed') || '[]').forEach(id => jobDock.dismissed.add(id));
 } catch (e) { /* geen opslag: alles zichtbaar */ }
 
@@ -459,6 +464,7 @@ function jobsInit() {
         // Een automatische ronde meldt zich alleen als er iets misging
         if (jobIsAuto(job) && job.status !== 'failed') return;
         if (job.type === 'export') return;   // export.js meldt dit zelf (met 'Toon in Finder')
+        if (job.type === 'backup') return;   // backup-settings.js meldt dit zelf (met de grootte)
         const kind = job.status === 'done' ? 'success' : job.status === 'failed' ? 'error' : 'info';
         const text = job.status === 'failed' ? (job.error || 'Mislukt') : (job.message || JOB_STATUS_LABELS[job.status]);
         showToast(`${job.label}: ${JOB_STATUS_LABELS[job.status] || job.status}`, text, kind);
@@ -470,8 +476,11 @@ function jobsInit() {
 
 async function startThumbnailJob() {
     const folder = typeof currentFolder === 'string' && currentFolder ? currentFolder : null;
-    if (!folder && !confirm('Miniaturen maken voor het hele archief?\n\nDit kan bij een groot archief uren duren. ' +
-                            'Het loopt op de achtergrond; je kunt het pauzeren en later hervatten.')) {
+    if (!folder && !await dvConfirm({
+        title: 'Miniaturen maken voor het hele archief?', icon: 'fa-images', confirmLabel: 'Miniaturen maken',
+        body: ['Dit kan bij een groot archief uren duren.',
+               'Het loopt op de achtergrond; je kunt het pauzeren en later hervatten.'],
+    })) {
         return;
     }
     try {

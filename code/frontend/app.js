@@ -196,6 +196,35 @@ const VIEW_TITLES = {
 // Het scherm waar een melding bij hoort: info en succes blijven niet hangen op een ander scherm
 let activeMainView = 'home';
 
+// ---------- Terug en Vooruit van de browser ----------
+// Elk ander scherm is een stap in de geschiedenis ({view}), zodat ⌘[ of terugvegen in Safari naar
+// het vorige scherm gaat in plaats van de app uit. Albums houdt zijn eigen adres (#albums?...).
+let navRestoring = false;
+
+function navRecord(view) {
+    if (navRestoring) return;
+    const keepHash = view === 'albums' && location.hash.startsWith('#albums');
+    const url = location.pathname + location.search + (keepHash ? location.hash : '');
+    const state = { view };
+    // Een nieuwe pagina (nog zonder stap) of hetzelfde scherm: deze stap bijwerken, niet stapelen
+    if (history.state && history.state.view && history.state.view !== view) history.pushState(state, '', url);
+    else history.replaceState(state, '', url);
+}
+
+window.addEventListener('popstate', (e) => {
+    const albumsHash = location.hash.startsWith('#albums');
+    const view = e.state && MAIN_VIEWS.includes(e.state.view) ? e.state.view : (albumsHash ? 'albums' : 'home');
+    // Tot na de hashchange die bij deze stap hoort: Albums leest het adres hier, niet nog eens daar
+    navRestoring = true;
+    setTimeout(() => { navRestoring = false; }, 0);
+    if (view === 'albums' && currentMainView() === 'albums' && typeof albumsRestore === 'function') albumsRestore();
+    else switchMainView(view);
+});
+
+function navIsRestoring() {
+    return navRestoring;
+}
+
 function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
     if (view !== activeMainView) {
@@ -204,6 +233,7 @@ function switchMainView(view) {
         });
     }
     activeMainView = view;
+    navRecord(view);
     document.title = view === 'home' ? 'DataVault' : `${VIEW_TITLES[view]} · DataVault`;
     // Update tabs (ook de tandwielknop van Instellingen)
     document.querySelectorAll('.top-nav [data-view]').forEach(tab => {
@@ -276,6 +306,45 @@ function switchMainView(view) {
 
 // ==================== SHOWS & STORIES ====================
 
+// De kop van Shows (titel, uitleg, knoppen) staat er altijd: tijdens het laden, na een fout en met inhoud
+const SHOWS_HEADER_HTML = html`
+        <div class="page-header shows-header">
+            <div>
+                <h1 class="page-title"><i class="fas fa-film" aria-hidden="true"></i> Shows</h1>
+                <p class="page-subtitle">Diavoorstellingen van je mappen, met je mooiste foto's vaker in beeld.</p>
+            </div>
+            <div class="shows-header-actions">
+            <button class="btn btn-secondary" id="btn-elo" onclick="openElo()">
+                <i class="fas fa-scale-balanced" aria-hidden="true"></i> Welke is mooier?
+            </button>
+            <button class="btn btn-secondary" id="btn-shuffle-shows" onclick="shuffleShows()">
+                <i class="fas fa-random" aria-hidden="true"></i> Shows husselen
+            </button>
+            <button class="btn btn-secondary" onclick="openSettingsModal()">
+                <i class="fas fa-sliders-h" aria-hidden="true"></i> Bronnen beheren
+            </button>
+            </div>
+        </div>
+    `;
+
+function showsHeader({ busy = false } = {}) {
+    const tpl = document.createElement('template');
+    setHTML(tpl, SHOWS_HEADER_HTML);
+    const header = tpl.content.firstElementChild;
+    // Husselen heeft pas iets te doen als de shows er zijn
+    if (busy) header.querySelector('#btn-shuffle-shows').disabled = true;
+    return header;
+}
+
+// Plaatshouders in de vorm van wat komt: een grote uitgelichte show en een rij collecties
+function showsSkeleton() {
+    return createEl('div', { class: 'shows-skeleton', role: 'status', 'aria-label': 'Shows laden…' },
+        createEl('div', { class: 'skeleton shows-skeleton-hero', 'aria-hidden': 'true' }),
+        createEl('div', { class: 'skeleton skeleton-line shows-skeleton-title', 'aria-hidden': 'true' }),
+        createEl('div', { class: 'shows-grid-folders', 'aria-hidden': 'true' },
+            ...[0, 1, 2, 3].map(() => createEl('div', { class: 'skeleton show-card-skeleton' }))));
+}
+
 async function loadShows() {
     const container = document.getElementById('shows-container');
     if (!container) return;
@@ -289,14 +358,14 @@ async function loadShows() {
     }
 
     // Normale laadprocedure
-    container.replaceChildren(skeletonCards(8, 'skeleton-grid-shows'));
+    container.replaceChildren(showsHeader({ busy: true }), showsSkeleton());
     try {
         const stories = await fetchJSON(url);
         _prefetchCache[url] = Promise.resolve(stories);
         renderShows(stories);
     } catch (e) {
         console.error('Error loading shows:', e);
-        container.replaceChildren(errorState('Shows laden mislukt', e, loadShows));
+        container.replaceChildren(showsHeader({ busy: true }), errorState('Shows laden mislukt', e, loadShows));
     }
 }
 
@@ -327,25 +396,7 @@ function renderShows(data) {
     const empty = !data || (!featured && (!shows || shows.length === 0));
 
     // De kop staat er ook zonder shows: 'Welke is mooier?' werkt dan nog op de hele bibliotheek
-    container.innerHTML = `
-        <div class="page-header shows-header">
-            <div>
-                <h1 class="page-title"><i class="fas fa-film" aria-hidden="true"></i> Shows</h1>
-                <p class="page-subtitle">Diavoorstellingen van je mappen, met je mooiste foto's vaker in beeld.</p>
-            </div>
-            <div class="shows-header-actions">
-            <button class="btn btn-secondary" id="btn-elo" onclick="openElo()">
-                <i class="fas fa-scale-balanced" aria-hidden="true"></i> Welke is mooier?
-            </button>
-            <button class="btn btn-secondary" id="btn-shuffle-shows" onclick="shuffleShows()">
-                <i class="fas fa-random" aria-hidden="true"></i> Shows husselen
-            </button>
-            <button class="btn btn-secondary" onclick="openSettingsModal()">
-                <i class="fas fa-sliders-h" aria-hidden="true"></i> Bronnen beheren
-            </button>
-            </div>
-        </div>
-    `;
+    container.replaceChildren(showsHeader());
 
     if (empty) {
         // Husselen en Bronnen beheren staan dan al in de lege staat (of hebben niets om te doen)
@@ -2487,7 +2538,11 @@ async function restartServer() {
 
     // Dubbele klik beveiliging
     if (brand && brand.dataset.restarting) return;
-    if (!confirm('DataVault-server herstarten?\n\nDe app is dan een paar seconden niet bereikbaar.')) return;
+    if (!await dvConfirm({
+        title: 'DataVault-server herstarten?', icon: 'fa-rotate-right', confirmLabel: 'Herstarten',
+        body: 'De app is dan een paar seconden niet bereikbaar.',
+    })) return;
+    if (brand && brand.dataset.restarting) return;
 
     setBrandRestarting(true);
 
@@ -2784,6 +2839,8 @@ async function storageNavigateToPath(folderPath) {
                 text: folderPath ? 'Deze map heeft geen submappen.' : 'Het archief heeft nog geen mappen.' }));
         }
 
+        // Bovenaan is het aandeel in het hele archief; in een map het aandeel in die map
+        const shareOf = folderPath ? 'van deze map' : 'van het totaal';
         entries.forEach(([folder, size]) => {
             const percent = total > 0 ? (size / total * 100).toLocaleString('nl-NL', { maximumFractionDigits: 1 }) : '0';
             const newPath = folderPath ? `${folderPath}/${folder}` : folder;
@@ -2799,7 +2856,7 @@ async function storageNavigateToPath(folderPath) {
                 <div class="storage-progress-bar">
                     <div class="storage-progress-fill" style="width: ${total > 0 ? size / total * 100 : 0}%"></div>
                 </div>
-                <div class="storage-folder-percent"><span class="storage-folder-percent-value">${percent}%</span> van deze map</div>
+                <div class="storage-folder-percent"><span class="storage-folder-percent-value">${percent}%</span> ${shareOf}</div>
             `;
             list.appendChild(li);
         });
@@ -2943,6 +3000,10 @@ async function openSettingsModal() {
                 <div id="settings-folders-list" class="settings-list">
                     <div class="loading-spinner"></div>
                 </div>
+            </div>
+            <div class="modal-footer">
+                <span class="modal-footer-note">Een wijziging wordt meteen bewaard.</span>
+                <button type="button" class="btn btn-secondary" onclick="closeSettingsModal()">Sluiten</button>
             </div>
         </div>
     `;
@@ -3461,7 +3522,12 @@ async function loadSpotifyStats() {
     const show = (data) => {
         showSpotifyError(null);
         if (loading) loading.style.display = 'none';
-        if (content) content.style.display = 'block';
+        // Zonder één afgespeeld nummer geen nullen, lege lijsten en een verzonnen luister-DNA:
+        // de lege staat met de weg naar de Spotify-kaart in DataGatherer
+        const empty = !data.total_plays;
+        showSpotifyEmpty(empty && year === 'all');
+        if (content) content.style.display = empty && year === 'all' ? 'none' : 'block';
+        if (empty && year === 'all') return;
         renderSpotifyStats(data);
         populateYears(data);
     };
@@ -3475,6 +3541,7 @@ async function loadSpotifyStats() {
 
     // Normale laadprocedure
     showSpotifyError(null);
+    showSpotifyEmpty(false);
     if (loading) loading.style.display = 'flex';
     if (content) content.style.display = 'none';
 
@@ -3491,6 +3558,27 @@ async function loadSpotifyStats() {
         if (content) content.style.display = 'none';
         showSpotifyError(e.message);
     }
+}
+
+// Nog geen luistergeschiedenis: icoon, één zin en de knop naar de Spotify-kaart in DataGatherer
+function showSpotifyEmpty(show) {
+    let box = document.getElementById('spotify-empty');
+    const years = document.querySelector('#section-spotify .year-selector');
+    if (years) years.hidden = show;
+    if (!show) {
+        if (box) box.hidden = true;
+        return;
+    }
+    if (!box) {
+        box = createEl('div', { id: 'spotify-empty', class: 'spotify-empty' });
+        box.appendChild(emptyState({
+            icon: 'fa-headphones', title: 'Nog geen luistergeschiedenis',
+            text: 'Lees je Spotify-export in via DataGatherer; daarna zie je hier je topartiesten, je nummers en wanneer je luistert.',
+            action: { label: 'Spotify-export inlezen', primary: true, onClick: () => dgShowSource('spotify') },
+        }));
+        document.getElementById('spotify-content').before(box);
+    }
+    box.hidden = false;
 }
 
 // Foutmelding met een knop om het opnieuw te proberen; null verbergt hem
@@ -3793,7 +3881,8 @@ function renderChatModelSelects() {
     document.querySelectorAll('[data-chat-model]').forEach(select => {
         const options = (models || []).map(m => createEl('option', {
             value: m.name,
-            text: m.parameter_size ? `${m.name} (${m.parameter_size})` : m.name,
+            // Een cloudmodel van Ollama draait bij ollama.com: dat staat er altijd bij
+            text: m.cloud ? `${m.name} · cloud, niet lokaal` : (m.parameter_size ? `${m.name} (${m.parameter_size})` : m.name),
         }));
         if (current && !installed) options.unshift(createEl('option', { value: current, text: `${current} (niet geïnstalleerd)` }));
         select.replaceChildren(...options);
@@ -3802,7 +3891,9 @@ function renderChatModelSelects() {
     });
     if (!reachable) setChatStatus('Ollama offline', 'error', error || 'Start de Ollama-app');
     else if (!installed) setChatStatus('Model ontbreekt', 'warning', `Kies een ander model, of installeer het met: ollama pull ${current}`);
-    else setChatStatus('Online', 'ok', `Taalmodel: ${current}`);
+    else if ((models || []).some(m => m.name === current && m.cloud)) {
+        setChatStatus('In de cloud (ollama.com)', 'warning', `Taalmodel: ${current}. Het draait bij ollama.com: je vragen en wat Pasha uit je archief meestuurt gaan naar internet.`);
+    } else setChatStatus('Online', 'ok', `Taalmodel: ${current}`);
 }
 
 async function loadChatModels() {
@@ -3816,14 +3907,28 @@ async function loadChatModels() {
 
 async function chooseChatModel(model) {
     if (!model || model === chatModelState.current) return;
+    // Een cloudmodel (Ollama '-cloud') stuurt de vraag en de archiefcontext naar ollama.com: alleen na een ja
+    const cloud = (chatModelState.models || []).some(m => m.name === model && m.cloud);
+    if (cloud && !await dvConfirm({
+        title: 'Cloudmodel gebruiken?',
+        icon: 'fa-cloud',
+        body: [`${model} draait niet op deze Mac maar bij ollama.com.`,
+            'Alles wat je Pasha vraagt gaat dan naar internet, met wat hij uit je archief meestuurt '
+            + '(mappen, plekken, Spotify en, als je dat aanzette, berichten).'],
+        confirmLabel: 'Toch gebruiken',
+    })) {
+        renderChatModelSelects();
+        return;
+    }
     try {
         const data = await fetchJSON(`${API_BASE}/api/chat/model`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model }),
+            body: JSON.stringify(cloud ? { model, allow_cloud: true } : { model }),
         });
         chatModelState.current = data.current;
-        showToast('Pasha', `Gebruikt nu het model ${data.current}`, 'success');
+        showToast('Pasha', data.cloud ? `Gebruikt nu ${data.current}, in de cloud bij ollama.com` : `Gebruikt nu het model ${data.current}`,
+            data.cloud ? 'warning' : 'success');
     } catch (e) {
         showToast('Model niet gekozen', e.message, 'error');
     }
@@ -4145,6 +4250,7 @@ async function sendChat({ inputEl, btn }) {
     };
 
     let fullText = '';
+    let rawText = '';      // het antwoord van het model zoals het kwam, met de ACTION-tag
     const toolEvents = [];
 
     try {
@@ -4186,10 +4292,11 @@ async function sendChat({ inputEl, btn }) {
                     return;
                 }
 
-                if (typeof event.replace === 'string') { fullText = event.replace; showText(fullText); continue; }
+                if (typeof event.replace === 'string') { fullText = event.replace; showText(fullText.replace(/<<ACTION[\s\S]*$/, '').trimEnd()); continue; }
 
                 if (typeof event.token === 'string' && event.token) {
                     fullText += event.token;
+                    rawText += event.token;
                     // Een half binnengekomen ACTION-tag niet laten zien
                     showText(fullText.replace(/(?:<<|<\|)ACTION[\s\S]*$|\{\s*"action"[^}]*$/, '').trimEnd());
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -4201,10 +4308,17 @@ async function sendChat({ inputEl, btn }) {
                     fullText = reply.text;
                     showText(fullText);
                     // Alleen een actie en geen tekst: de lege ballon weglaten, de resultaten komen eronder
-                    if (!fullText && toolEvents.length) { aiMsg.remove(); fullText = 'Ik heb het opgezocht.'; }
+                    if (!fullText && toolEvents.length) {
+                        aiMsg.remove();
+                        const allFailed = toolEvents.every(t => t.error);
+                        fullText = allFailed ? toolEvents[0].error : 'Ik heb het opgezocht.';
+                    }
                     toolEvents.forEach(chatRenderToolEvent);
                     if (reply.action) setTimeout(() => executeAIAction(reply.action), 1000);
-                    window.chatHistory.push({ role: 'assistant', content: fullText });
+                    // Lukte een actie, dan onthoudt de geschiedenis het antwoord mét de tag: zo blijft het
+                    // model ook bij de volgende vraag een actie schrijven in plaats van alleen 'Dit vond ik.'
+                    const acted = reply.action || toolEvents.some(t => !t.error);
+                    window.chatHistory.push({ role: 'assistant', content: acted && rawText.trim() ? rawText.trim() : fullText });
                 }
             }
         }

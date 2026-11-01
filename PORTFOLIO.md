@@ -1,3 +1,5 @@
+> Let op: dit is een oudere uitgebreide beschrijving uit fase 1 (Engelstalig) en loopt achter op de huidige app. Begin bij de [README](README.md) en de [CHANGELOG](CHANGELOG.md).
+
 # DataVault Dashboard: A Comprehensive Personal Media Management System
 
 ## PART 1: EXECUTIVE SUMMARY

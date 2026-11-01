@@ -1358,6 +1358,49 @@ textarea.input {
     gap: var(--space-sm);
 }
 
+/* Een vraag vóór een actie (dvConfirm in ui.js): smal, rustig, boven een ander venster */
+.modal.dv-confirm {
+    z-index: 10050;
+}
+
+.dv-confirm-container {
+    max-width: 480px;
+}
+
+.dv-confirm-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: var(--space-sm);
+    padding: var(--space-lg) var(--space-xl) var(--space-xl);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.dv-confirm-body p {
+    margin: 0;
+}
+
+.dv-confirm-list {
+    margin: 0;
+    padding-left: var(--space-xl);
+}
+
+.dv-confirm-body .mono {
+    font-size: var(--fs-xs);
+    color: var(--text-primary);
+}
+
+/* Een korte uitleg links in de voettekst, de knoppen rechts */
+.modal-footer-note {
+    margin-right: auto;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+}
+
 /* Vensters zoals het sneltoetsenoverzicht (ui.js) */
 .dv-overlay {
     position: fixed;
@@ -5050,8 +5093,17 @@ a.breadcrumb-item:hover {
     font-size: var(--fs-sm);
 }
 
-.spotify-error[hidden] {
+.spotify-error[hidden],
+.spotify-empty[hidden],
+#section-spotify .year-selector[hidden] {
     display: none;
+}
+
+/* Nog geen luistergeschiedenis: de gedeelde lege staat, op de breedte van de inhoud */
+.spotify-empty {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: var(--space-3xl) 0;
 }
 
 .spotify-error p {
@@ -5850,6 +5902,24 @@ a.breadcrumb-item:hover {
     font-size: var(--fs-md);
     color: var(--on-media-muted);
     margin-bottom: var(--space-sm);
+}
+
+/* Laden: dezelfde vorm als de uitgelichte show en de collecties eronder */
+.shows-skeleton-hero {
+    height: clamp(300px, 46vh, 440px);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-2xl);
+}
+
+.shows-skeleton-title {
+    width: 120px;
+    height: 16px;
+    margin-bottom: var(--space-lg);
+}
+
+.show-card-skeleton {
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius-lg);
 }
 
 /* Collecties */
@@ -7042,6 +7112,11 @@ button.otd-settings-icon:hover {
     opacity: 0.6;
 }
 
+/* In Instellingen is er ruimte: de hele naam (en 'niet lokaal' bij een cloudmodel) blijft leesbaar */
+.settings-row .chat-model-select {
+    max-width: min(360px, 100%);
+}
+
 .chat-error-text {
     color: var(--danger-text);
     white-space: pre-wrap;
@@ -7690,6 +7765,33 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
+/* Plaatshouders terwijl de cijfers laden (zelfde maat als een echt cijfer) */
+.keurer-stat-skeleton {
+    row-gap: var(--space-xs);
+}
+
+.keurer-stat-skeleton .skeleton-line {
+    width: 64px;
+}
+
+.keurer-stat-skeleton .skeleton-line-short {
+    width: 40px;
+    height: 8px;
+}
+
+.keurer-stats-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    margin: 0;
+    padding: 0 var(--space-md);
+    color: var(--danger-text);
+    font-size: var(--fs-sm);
+    text-align: center;
+}
+
 .keurer-stat-divider {
     width: 1px;
     height: 32px;
@@ -7783,6 +7885,12 @@ button.otd-settings-icon:hover {
     flex: 1 1 0;
     min-height: 220px;
     position: relative;
+}
+
+/* Een melding (kies een map, klaar, mislukt) krimpt niet onder zijn eigen hoogte: met een open
+   takenpaneel op een laag venster schoof hij anders over de cijfers en de toetsen heen */
+.keurer-card-area:has(> .keurer-state-card) {
+    min-height: auto;
 }
 
 /* Lege, klare of mislukte stand */
@@ -9226,8 +9334,14 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
-/* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar") */
-.job-dock.collapsed:not(.compact) {
+/* Klein icoon: precies zo breed als icoon en aantal, met gelijke ruimte links en rechts */
+.job-dock.tiny .job-dock-header {
+    height: 36px;
+    padding: 0 var(--space-md);
+}
+
+/* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar"); het kleine icoon nog smaller */
+.job-dock.collapsed:not(.compact):not(.tiny) {
     width: max-content;
     min-width: 200px;
 }
@@ -9235,6 +9349,13 @@ button.otd-settings-icon:hover {
 /* Ingeklapt paneel: de bibliotheekregel klapt mee in */
 .job-dock.collapsed:not(.compact) .job-library {
     display: none;
+}
+
+/* Klein of laag venster: het open paneel blijft laag (de lijst scrolt erin) */
+@media (max-width: 1279px), (max-height: 820px) {
+    .job-dock {
+        max-height: min(30vh, 240px);
+    }
 }
 
 @media (max-width: 600px) {
@@ -9846,6 +9967,22 @@ button.otd-settings-icon:hover {
 .albums-side-flag {
     font-size: var(--icon-xs);
     color: var(--text-tertiary);
+}
+
+/* Zijbalk tijdens het laden: rijen van dezelfde hoogte als een album */
+.albums-side-skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    height: var(--control-h);
+    padding: 0 var(--space-sm);
+}
+
+.albums-side-skeleton-icon {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--radius-xs);
 }
 
 .albums-side-note {
@@ -10903,6 +11040,17 @@ button.otd-settings-icon:hover {
     word-break: break-all;
 }
 
+/* Een pad midden in een zin: mono en afbreekbaar op elke plek, zodat de regel niet midden in een woord knapt */
+.dg-inline-path {
+    padding: 0 var(--space-xs);
+    border-radius: var(--radius-xs);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    overflow-wrap: anywhere;
+}
+
 .dg-copy-row {
     display: flex;
     align-items: center;
@@ -10948,6 +11096,39 @@ button.otd-settings-icon:hover {
 
 .dg-field .input.mono {
     font-family: var(--font-mono);
+}
+
+/* Sleutelveld: een gewoon tekstveld (geen wachtwoordveld, dus geen 'wachtwoord bewaren'),
+   gemaskeerd met CSS; de knop rechts erin toont of verbergt de sleutel */
+.dg-secret {
+    position: relative;
+}
+
+.dg-field .dg-secret .input {
+    padding-right: calc(var(--control-h-sm) + var(--space-sm));
+}
+
+.dg-secret-input.is-masked {
+    -webkit-text-security: disc;
+}
+
+.dg-secret-input.is-masked:placeholder-shown {
+    -webkit-text-security: none;
+}
+
+.dg-secret-toggle {
+    position: absolute;
+    top: 50%;
+    right: var(--space-xs);
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+}
+
+/* Binnen het veld: de ring aan de binnenkant, zoals bij een menu-item */
+.dg-secret-toggle:focus-visible {
+    box-shadow: none;
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 .dg-field-help {
@@ -12122,6 +12303,14 @@ button.otd-settings-icon:hover {
     color: var(--text-tertiary);
 }
 
+.backup-actions {
+    align-items: center;
+}
+
+.backup-step {
+    font-size: var(--fs-sm);
+}
+
 .backup-note {
     margin: 0;
     max-width: 640px;
@@ -12394,6 +12583,82 @@ button.otd-settings-icon:hover {
     pointer-events: none;
 }
 
+/* The same picture in more places: one tile, the number of other copies top right */
+.search-result-copies {
+    position: absolute;
+    top: var(--space-sm);
+    right: var(--space-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    height: var(--icon-xl);
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background: var(--media-scrim);
+    color: var(--on-media);
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-semibold);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+}
+
+.search-result-copies .fas {
+    font-size: var(--icon-xs);
+}
+
+/* Nothing fits well: a quiet note above what looks most like it */
+.search-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
+    padding: var(--space-md) var(--space-lg);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-card);
+    background: var(--surface-raised);
+}
+
+.search-notice-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: var(--space-2xl);
+    height: var(--space-2xl);
+    border-radius: var(--radius-full);
+    background: var(--surface-sunken);
+    color: var(--text-tertiary);
+    font-size: var(--icon-sm);
+}
+
+.search-notice-title {
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    line-height: var(--lh-normal);
+}
+
+.search-notice-text {
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.search-hint {
+    max-width: 520px;
+    margin: var(--space-lg) 0 0;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal);
+    text-wrap: balance;
+}
+
+.search-hint .fas {
+    margin-right: var(--space-xs);
+}
+
 .search-more {
     display: flex;
     justify-content: center;
@@ -12495,8 +12760,9 @@ button.otd-settings-icon:hover {
 }
 
 .map-header,
-.map-filters {
-    /* Kop en filters op dezelfde plek als op de andere pagina's; de kaart zelf blijft breed */
+.map-filters,
+.map-layers {
+    /* Kop, filters en de Tijdlijn-rij op dezelfde plek als op de andere pagina's; de kaart zelf blijft breed */
     width: 100%;
     max-width: calc(var(--page-max) - 2 * var(--page-gutter));
     margin-inline: auto;
@@ -12548,6 +12814,18 @@ button.otd-settings-icon:hover {
     min-width: 120px;
 }
 
+/* Een lange albumnaam (tot 80 tekens) mag de rij niet oprekken: afgekapt met … */
+.map-filters .select-sm {
+    max-width: 200px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.map-date-field .input[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
 .map-date-field {
     display: inline-flex;
     align-items: center;
@@ -12560,8 +12838,13 @@ button.otd-settings-icon:hover {
     display: none;
 }
 
-.map-filter-spacer {
-    flex: 1;
+/* Aantal en 'Zonder locatie' blijven samen, rechts; past het niet, dan samen op de volgende regel */
+.map-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-left: auto;
+    white-space: nowrap;
 }
 
 .map-count {
@@ -12941,7 +13224,7 @@ button.otd-settings-icon:hover {
 
 @media (max-width: 1100px) {
     .map-page {
-        padding: var(--space-lg) var(--space-xl);
+        padding: var(--space-lg) var(--page-gutter);
     }
 }
 
@@ -13253,6 +13536,11 @@ button.otd-settings-icon:hover {
     margin-top: 2px;
     color: var(--text-tertiary);
     font-size: var(--fs-2xs);
+}
+
+/* Op de groene achtergrond van het gekozen gesprek haalt tertiair in donker geen AA meer */
+.msg-item.active .msg-item-date {
+    color: var(--text-secondary);
 }
 
 .msg-thread > .empty-state {
@@ -13604,9 +13892,22 @@ button.otd-settings-icon:hover {
 }
 
 .chat-confirm-status {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
     font-size: var(--fs-sm);
     line-height: 1.5;
     color: var(--text-secondary);
+}
+
+.chat-confirm-status > i {
+    flex: none;
+    color: var(--accent-text);
+}
+
+.chat-confirm-status.is-error,
+.chat-confirm-status.is-error > i {
+    color: var(--danger-text);
 }
 
 .chat-confirm-status:empty {
@@ -13854,6 +14155,13 @@ button.otd-settings-icon:hover {
     text-align: right;
 }
 
+/* Alleen een datum bekend: woorden in plaats van een uur, in de gewone letter */
+.act-time-day {
+    padding-top: var(--space-xs);
+    color: var(--text-tertiary);
+    line-height: var(--lh-tight);
+}
+
 .act-icon {
     display: inline-flex;
     align-items: center;
@@ -13943,7 +14251,11 @@ a.act-title:focus-visible {
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-sm);
-    margin-bottom: var(--space-md);
+}
+
+.map-layers[hidden],
+.map-layers [hidden] {
+    display: none;
 }
 
 .map-layers-title {

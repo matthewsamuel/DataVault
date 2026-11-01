@@ -18,6 +18,7 @@ Everything becomes points (time in UTC ms, lat, lon, accuracy in metres when kno
 visits (a span of time at one place). Coordinates are rounded to 6 decimals (about 10 cm),
 so the same point from two overlapping exports is one row (UNIQUE(ts_ms, lat, lon)).
 """
+import io
 import json
 import math
 import re
@@ -135,14 +136,19 @@ def parse(data: Any) -> Tuple[str, List[tuple], List[dict]]:
     return fmt, points, visits
 
 
+def _record_point(loc: Any) -> Optional[tuple]:
+    if not isinstance(loc, dict):
+        return None
+    ts = parse_time(loc.get("timestamp") or loc.get("timestampMs"))
+    pos = _e7(loc)
+    return (ts, pos[0], pos[1], _num(loc.get("accuracy"))) if ts is not None and pos else None
+
+
 def _records(data, points, visits) -> None:
     for loc in data["locations"]:
-        if not isinstance(loc, dict):
-            continue
-        ts = parse_time(loc.get("timestamp") or loc.get("timestampMs"))
-        pos = _e7(loc)
-        if ts is not None and pos:
-            points.append((ts, pos[0], pos[1], _num(loc.get("accuracy"))))
+        point = _record_point(loc)
+        if point:
+            points.append(point)
 
 
 def _duration(obj: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
@@ -245,6 +251,69 @@ def parse_bytes(blob: bytes) -> Tuple[str, List[tuple], List[dict]]:
     return parse(data)
 
 
+# ---------- a large Records.json, read as it goes ----------
+
+STREAM_FROM = 32 * 1024 * 1024          # smaller files are simply parsed whole
+STREAM_CHUNK = 1024 * 1024               # characters per read
+_RECORDS_HEAD = re.compile(r'\ufeff?\s*\{\s*"locations"\s*:\s*\[')
+_BETWEEN = re.compile(r"[\s,]*")
+
+
+def iter_records(opener, chunk: int = STREAM_CHUNK) -> Iterator[tuple]:
+    """
+    The points of a Records.json ({"locations": [...]}, Android's full location history,
+    often 1-2 GB) one location object at a time: memory stays at one chunk plus one object,
+    however long the history. opener() returns a binary stream.
+    """
+    decoder = json.JSONDecoder()
+    with opener() as raw:
+        text = io.TextIOWrapper(raw, encoding="utf-8-sig")
+        buf, eof = "", False
+        while len(buf) < 4096 and not eof:      # enough to see the opening '{"locations": ['
+            more = text.read(chunk)
+            buf, eof = buf + more, not more
+        head = _RECORDS_HEAD.match(buf)
+        if head is None:
+            raise NotLocationHistory("Dit is geen Records.json van Google")
+        pos = head.end()
+        while True:
+            pos = _BETWEEN.match(buf, pos).end()
+            if pos >= len(buf) and not eof:
+                more = text.read(chunk)
+                buf, pos, eof = buf[pos:] + more, 0, not more
+                continue
+            if pos >= len(buf):
+                raise NotLocationHistory("Records.json houdt halverwege op")
+            if buf[pos] == "]":
+                return
+            try:
+                obj, end = decoder.raw_decode(buf, pos)
+            except ValueError:
+                if eof:
+                    raise NotLocationHistory("Records.json is beschadigd")
+                more = text.read(chunk)       # the object runs on in the next chunk
+                buf, pos, eof = buf[pos:] + more, 0, not more
+                continue
+            pos = end
+            point = _record_point(obj)
+            if point:
+                yield point
+
+
+def parse_export_file(read) -> Tuple[str, Iterable[tuple], List[dict]]:
+    """
+    parse_bytes for one file of an export (raw_store.ExportFile, or any read()): a large
+    Records.json is streamed (its points come as an iterator), anything else is parsed whole.
+    """
+    opener = getattr(read, "open", None)
+    if opener is not None and (getattr(read, "size", 0) or 0) > STREAM_FROM:
+        with opener() as f:
+            head = f.read(4096).decode("utf-8", "ignore")
+        if _RECORDS_HEAD.match(head):
+            return "records", iter_records(opener), []
+    return parse_bytes(read())
+
+
 # ---------- storing ----------
 
 def insert(db, origin: str, raw_import_id: Optional[int], fmt: str, points: Iterable[tuple],
@@ -329,7 +398,11 @@ def track(db, start_ms: int, end_ms: int, limit: int = 20000) -> Dict[str, Any]:
 
 
 def days(db) -> List[Dict[str, Any]]:
-    """[{day, count}] for every local day with location points, oldest first."""
+    """[{day, count}] for every local day with location points, oldest first (cached until the data changes)."""
+    return state.cached(db, "location_days", lambda: _days(db))
+
+
+def _days(db) -> List[Dict[str, Any]]:
     with db._connect() as conn:
         rows = conn.execute("SELECT date(ts_ms / 1000, 'unixepoch', 'localtime') AS day, COUNT(*) FROM location_points "
                             "GROUP BY day ORDER BY day").fetchall()

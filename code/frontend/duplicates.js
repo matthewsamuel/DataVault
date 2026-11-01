@@ -878,9 +878,12 @@ function renderDuplicateRuns(runs) {
 
 async function undoDuplicateRun(run, button) {
     const n = run.restorable;
-    if (!confirm(`${n} bestand${n === 1 ? '' : 'en'} terugzetten naar de oorspronkelijke plek?\n\n` +
-                 'Staat daar intussen een ander bestand, dan komt het teruggezette bestand ernaast ' +
-                 '(naam_RESTORED_001); er wordt niets overschreven.')) {
+    if (!await dvConfirm({
+        title: `${n} bestand${n === 1 ? '' : 'en'} terugzetten?`, icon: 'fa-rotate-left', confirmLabel: 'Terugzetten',
+        body: ['Ze gaan terug naar de oorspronkelijke plek.',
+               'Staat daar intussen een ander bestand, dan komt het teruggezette bestand ernaast '
+               + '(naam_RESTORED_001); er wordt niets overschreven.'],
+    })) {
         return;
     }
     button.disabled = true;

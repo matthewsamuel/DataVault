@@ -70,7 +70,8 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Set
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
+from urllib.parse import quote
 
 from backend import migrations
 from backend.config import DEFAULT_CONFIG_PATH
@@ -99,6 +100,8 @@ NO_HARD_LINKS = {errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errn
 
 class BackupError(Exception):
     """A backup or restore that could not be made (Dutch message); status is the HTTP code."""
+
+    quiet = True   # a Dutch message the user can act on: no stack trace when a job fails with it
 
     def __init__(self, message: str, status: int = 500):
         super().__init__(message)
@@ -295,8 +298,15 @@ def _rebuildable(conn: sqlite3.Connection) -> List[str]:
     return sorted(names)
 
 
+def _ro_uri(path: Path) -> str:
+    """A read-only SQLite URI. The path is percent-encoded: unquoted, a '#' or '?' in a
+    folder name cuts the path short and drops mode=ro, so SQLite would create an empty
+    database at the shortened path and check that one instead."""
+    return f"file:{quote(str(path))}?mode=ro"
+
+
 def _integrity(path: Path) -> str:
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn = sqlite3.connect(_ro_uri(path), uri=True)
     try:
         rows = conn.execute("PRAGMA integrity_check").fetchall()
     finally:
@@ -305,7 +315,7 @@ def _integrity(path: Path) -> str:
 
 
 def _schema_version(path: Path) -> Optional[int]:
-    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn = sqlite3.connect(_ro_uri(path), uri=True)
     try:
         row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         return row[0] if row else None
@@ -426,32 +436,65 @@ def _check_space(folder: Path, needed: int) -> None:
             f"{(needed + FREE_SPACE_MARGIN) // (1024 * 1024)} MB, vrij {free // (1024 * 1024)} MB.", 507)
 
 
+def _preflight(config) -> Tuple[Path, Path, int]:
+    """The quick checks before a backup: the folder can be made and written, there is room."""
+    folder = folder_of(config)
+    db_path = Path(config.DB_PATH)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        if e.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+            raise BackupError(f"De back-upmap {folder} kon niet worden aangemaakt: geen schrijfrechten. "
+                              "Kies een andere map in config.json (backup_folder).", 500)
+        raise _reason(e, folder)
+    if not _writable(folder):
+        raise _not_writable(folder)
+    live_size = _live_size(db_path)
+    _check_space(folder, live_size + live_size // 2)
+    return folder, db_path, live_size
+
+
+def preflight(config) -> None:
+    """
+    Before 'Nu back-uppen' starts its job: the answers that need no copy (database not
+    reachable, folder not writable, too little room, one already running) come at once, as
+    BackupError with their HTTP status, and are reported as the last error like a failed backup.
+    """
+    global _last_error
+    try:
+        if running():
+            raise BackupError("Er wordt al een back-up gemaakt", 409)
+        if not Path(config.DB_PATH).is_file():
+            raise BackupError("De database is niet bereikbaar. Is de schijf aangesloten?", 503)
+        _preflight(config)
+    except BackupError as e:
+        if e.status != 409:
+            _last_error = {"message": str(e), "at": time.time()}
+        raise
+
+
+STEPS = 5   # copy, compact, check, compress, place: the progress a job shows (backup_type in job_types.py)
+
+
 def make_backup(config, manual: bool = False, compact: bool = True, keep_daily: Optional[int] = None,
-                keep_weekly: Optional[int] = None) -> Dict[str, Any]:
+                keep_weekly: Optional[int] = None,
+                step: Optional[Callable[[int, str], None]] = None) -> Dict[str, Any]:
     """
     Make one backup now (see the module docstring). Returns {name, path, size, created_at,
     kind, schema_version, integrity, emptied, live_size, seconds, removed}. Raises
     BackupError (status 409 when one is already running).
+
+    step(done, message) is called before each of the STEPS steps (a job's progress); it may
+    raise to stop (a cancelled job): the temporary copies are removed, nothing is kept.
     """
+    step = step or (lambda done, message: None)
     global _last_error, _last_result
     if not _lock.acquire(blocking=False):
         raise BackupError("Er wordt al een back-up gemaakt", 409)
     started = time.time()
     tmp = packed = None
     try:
-        folder = folder_of(config)
-        db_path = Path(config.DB_PATH)
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            if e.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
-                raise BackupError(f"De back-upmap {folder} kon niet worden aangemaakt: geen schrijfrechten. "
-                                  "Kies een andere map in config.json (backup_folder).", 500)
-            raise _reason(e, folder)
-        if not _writable(folder):
-            raise _not_writable(folder)
-        live_size = _live_size(db_path)
-        _check_space(folder, live_size + live_size // 2)
+        folder, db_path, live_size = _preflight(config)
         stamp = _stamp(started)
         final = folder / f"datavault-{stamp}{'-handmatig' if manual else ''}.db.gz"
         while final.exists():   # two in the same second: wait for the next one
@@ -461,19 +504,24 @@ def make_backup(config, manual: bool = False, compact: bool = True, keep_daily: 
         tmp = folder / f".{final.name}.{os.getpid()}.{threading.get_ident()}.partial"
         packed = folder / f"{tmp.name}.gz"
         try:
+            step(0, "Database kopiëren...")
             _snapshot(db_path, tmp)
+            step(1, "Kopie opschonen...")
             emptied = _compact(tmp) if compact else {}
         except (sqlite3.Error, OSError) as e:
             if not db_path.is_file():
                 raise BackupError("De database is niet bereikbaar. Is de schijf aangesloten?", 503)
             raise _reason(e, folder)
+        step(2, "Kopie controleren...")
         integrity = _integrity(tmp)
         if integrity != "ok":
             raise BackupError(f"De controle vond fouten in de kopie, dus hij is niet bewaard ({integrity}).", 500)
         version = _schema_version(tmp)
         size = tmp.stat().st_size
         try:
+            step(3, "Comprimeren en vergelijken...")
             _compress(tmp, packed)
+            step(4, "Bewaren...")
             _place(packed, final)
         except OSError as e:
             raise _reason(e, folder)
@@ -776,7 +824,7 @@ def _restore_plain(config, db_path: Path, backup: Path, plain: Path, version: in
         elif not db_path.parent.is_dir():
             raise BackupError(f"De map van de database bestaat niet: {db_path.parent}. Is de schijf aangesloten?", 503)
         say(f"Back-up terugzetten: {backup}")
-        source = sqlite3.connect(f"file:{plain}?mode=ro", uri=True)
+        source = sqlite3.connect(_ro_uri(plain), uri=True)
         try:
             dest = sqlite3.connect(str(db_path), timeout=30)
             try:

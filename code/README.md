@@ -162,11 +162,16 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Snelheid (M3 Pro, 4 threads): 12 MP JPEG ~130 foto's/s; 4.000 foto's van 2 MP via de server in
   10 s (390/s; `/api/health` p95 12 ms tijdens de taak), een tweede ronde zonder nieuwe foto's
   0,2 s. HEIC wordt volledig gedecodeerd (36 MP: ~0,7 s per foto per thread, ~5 per seconde met
-  4 threads). Paren en bursts voor 100.000 foto's: ~5 s bij willekeurige hashes, 7-10 s als veel
-  foto's op elkaar lijkende hashes hebben (scans, screenshots; gemeten met 100.000 gemaakte hashes),
-  alleen als er iets nieuw of veranderd is; een pagina reeksen daarna in enkele ms. Het geheugen
-  blijft begrensd: de kandidaten worden per ~2 miljoen gecontroleerd (`CANDIDATE_BUDGET`), dubbele
-  paren tussendoor weggegooid (piek ~0,5-0,8 GB in dat scheve geval, was 1,7-2,4 GB). Werkt ook met
+  4 threads). Paren en bursts voor 100.000 foto's: ~3 s bij willekeurige hashes. Foto's met dezelfde
+  phash (scans, screenshots, effen afbeeldingen) worden als één waarde opgezocht en direct tegen de
+  dhash- en kleurgrens gehouden, zodat alleen echte paren bewaard worden: 100.000 tweekleurige
+  testbeelden (19.268 verschillende phashes, 89 miljoen kandidaten, 1,16 miljoen paren) in ~15 s
+  (waarvan ~9 s wegschrijven), piek ~0,5 GB, langste GIL-pauze 30 ms (was 296 s, 10,5 GB en 16 s).
+  Daarna zoekt een ronde alleen de groepen zonder anker op (`media_phash.paired = 2` markeert de
+  foto waarvandaan de paren van een groep zijn opgezocht): 2.000 nieuwe foto's erbij in ~2 s plus
+  het wegschrijven. Het geheugen blijft begrensd: de kandidaten worden per ~130.000 gecontroleerd
+  (`CANDIDATE_BUDGET`), en boven 4 miljoen paren (`NEAR_PAIR_LIMIT`) blijven alleen de paren over
+  die de reeksen maken (per strengheid een opspannend bos, `_forest`). Werkt ook met
   numpy ouder dan 2.0 (eigen bittelling als `np.bitwise_count` ontbreekt).
 
 ### Bibliotheek (media-index)
@@ -414,7 +419,9 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
 - Stap 3.9c: Google Takeout (nl/en) en de Tijdlijn van de telefoon, Chrome- en Safari-geschiedenis
   (`local_import`, uit een kopie), Netflix, Snapchat, TikTok, Apple (privacy.apple.com) en Apple
   Gezondheid. Migratie 110: `activity_events`, `location_points`, `location_visits` en
-  `media_location_inferred` (geschatte plek van foto's zonder GPS, alleen in de database). API's:
+  `media_location_inferred` (geschatte plek van foto's zonder GPS, alleen in de database). Migratie
+  135 geeft elk item uit Mijn activiteit een sleutel op de seconde, zodat HTML en JSON van dezelfde
+  Takeout één rij geven. API's:
   `/api/activity/{facets,days,events}`, `/api/location/{summary,days,track,settings,geotag}` en
   `/api/map/inferred`; de taak `datagatherer.geotag` schat opnieuw. Tijdzones offline via de Natural
   Earth-landen en `backend/data/country_zones.json` (uit de tz-database). Het scherm Activiteit
@@ -435,7 +442,9 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
 ### Back-ups van de database
 - `backend/backup.py` kopieert de database naar de schijf van de Mac: bij het starten als de nieuwste
   back-up ouder is dan 24 uur, daarna elk uur een controle (dus ongeveer dagelijks), en met
-  **Nu back-uppen** in Instellingen (`POST /api/backup/run`; `GET /api/backup/status` geeft de stand).
+  **Nu back-uppen** in Instellingen (`POST /api/backup/run` start de taak `backup` en antwoordt meteen met 202;
+  de stappen staan in het takenpaneel, de taak is te stoppen; `GET /api/backup/status` geeft de stand).
+  Een database van 600 MB: ~75 s als taak, waar het verzoek eerst 115 s openstond.
   `DATAVAULT_AUTO_BACKUP=0` zet het automatische deel uit (de tests doen dat). De volledige kopie
   vóór elke migratie (`db_backups/` naast de database) blijft daarnaast bestaan.
 - Zo wordt hij gemaakt: de SQLite backup API maakt één consistente momentopname (ook wat nog in het
@@ -538,7 +547,9 @@ metingen uit de simulatie. Kort:
   WhatsApp-stanza-id, of gesprek + tijd + afzender + tekst). Een chat-export van WhatsApp wordt
   samengevoegd met de chat uit de database; berichten die de database ook heeft krijgen
   `superseded_by` en worden nooit gewist. Facebook-export en Messenger-download komen samen in één
-  gesprek (op deelnemers). Meta's mojibake wordt hersteld; Nederlandse en Engelse mapnamen werken.
+  gesprek. Een Meta-chat heeft als sleutel het id van zijn map in de export, zodat een groep waaruit
+  iemand vertrok of die een nieuwe naam kreeg één gesprek blijft; de Messenger-download wordt op
+  deelnemers aan die chat gekoppeld. Meta's mojibake wordt hersteld; Nederlandse en Engelse mapnamen werken.
 - **Volledige schijftoegang**: de server heeft ze niet nodig. Hij leest de database als hij mag;
   anders kopieert de kleine hulp `backend/datagatherer/fda_helper.py` (alleen standaardbibliotheek,
   start je zelf in een Terminal met Volledige schijftoegang) de database met `-wal` en `-shm` naar
