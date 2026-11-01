@@ -306,6 +306,29 @@ The three groups that build on this foundation:
 - **Don't** delay focus. The keyboard overview opens with the modal motion. Its contents do
   not stagger.
 
+#### What the shell does (`code/frontend/motion-shell.js`, `window.ShellMotion`)
+
+The shell motion loads as the last script. Every caller guards with `if (window.ShellMotion)`,
+so a page without it keeps working. Its CSS is the `BEWEGING: SCHIL` block in `style.css`.
+
+| Piece | Hook | Motion |
+| --- | --- | --- |
+| Nav indicator | `ShellMotion.navGlide` (switchMainView) | The green line stretches elastically: the front edge leads and the back edge follows, on the smooth spring's time |
+| Nav hover | `initNavHover` | A soft pill glides under the pointer from tab to tab (clip-path, snappy) |
+| Page change | `ShellMotion.enterView` | `Motion.enterPage` plus the title icon settling in. A block more than 3 screens tall (a huge grid) is left out of the slide and only fades with the section |
+| Home | `homeIntro`, `statValue`, `storageFill`, `otdShow` | Nav drops in, the greeting rises letter by letter, tiles count up once per session, the storage bar fills, 'Op deze dag' opens like a curtain, the job dock arrives last |
+| Job dock | `jobDockBefore` / `jobDockAfter` (renderJobDock) | Bars grow from their old value, one sheen on a running bar, a burst and pop when a job finishes (also on the tiny icon), unroll and fold on collapse |
+| Toasts | `initToastSwipe` | Swipe right to dismiss, rubber band to the left |
+| Modals | `overlayOrigin` | `transform-origin` at the click or the focused trigger, so a window grows from its button |
+| Menus | CSS `shell-menu-in` / `-out` | The theme menu and `.menu` spring open, items follow on the stagger step |
+| Theme | `themeChanged` | Soft-edged circle (masked view transition) and the icon turns half a turn |
+| Segments | `initSegmented` | A thumb glides between the old and new `.segmented` / `.view-toggle` choice |
+| Shortcut overview | `initShortcutEcho` | The key you press lights up |
+| Pasha | `initChat` | Bubbles rise from their own side, breathing dots, one nod on an answer |
+| Empty and error states | `watchStates` | Icon settles with a halo, an error shakes once; the same state redrawn by polling does not animate again |
+| Skeletons | CSS | A sheen moved by transform, staggered diagonally; Rustig breathes in opacity only |
+| Herstelcentrum | `ShellMotion.keyedFlip` (recoveryRender) | First load staggers in, then keyed FLIP; a changed entry glows once |
+
 ### Media
 - **Do** tag every photo tile that opens the viewer with `data-motion-key="<file.path>"`.
   The shared element then works from Tijdlijn, Albums, search, Reeksen and the map list too.

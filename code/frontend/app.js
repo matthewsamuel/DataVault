@@ -96,6 +96,7 @@ function setTheme(theme, skipSave = false) {
             ? document.activeElement : document.getElementById('theme-button');
         const r = from.getBoundingClientRect();
         Motion.viewTransition(() => applyTheme(theme), { kind: 'theme', origin: { x: r.left + r.width / 2, y: r.top + r.height / 2 } });
+        if (window.ShellMotion) ShellMotion.themeChanged();
         return;
     }
     applyTheme(theme);
@@ -264,12 +265,19 @@ function switchMainView(view) {
     // weergave beweegt, dus code die na switchMainView meteen verder werkt, merkt er niets van.
     if (view !== previousView) {
         const nextTab = navEntryFor(view);
-        Motion.glide(previousTab, nextTab, { inset: navIndicatorInset });
         let direction = 0;
         if (previousTab && nextTab && previousTab !== nextTab) {
             direction = Math.sign(nextTab.getBoundingClientRect().left - previousTab.getBoundingClientRect().left);
         }
-        Motion.enterPage(document.getElementById(`section-${view}`), { direction });
+        // De schil (motion-shell.js): een elastische streep en een eigen ritme per onderdeel
+        const section = document.getElementById(`section-${view}`);
+        if (window.ShellMotion) {
+            ShellMotion.navGlide(previousTab, nextTab, { inset: navIndicatorInset });
+            ShellMotion.enterView(view, section, direction);
+        } else {
+            Motion.glide(previousTab, nextTab, { inset: navIndicatorInset });
+            Motion.enterPage(section, { direction });
+        }
     }
 
     // Clear search
@@ -2268,7 +2276,8 @@ function homeRenderGreeting() {
     const greeting = hour < 6 ? 'Goedenacht' : hour < 12 ? 'Goedemorgen' : hour < 18 ? 'Goedemiddag' : 'Goedenavond';
     const title = document.getElementById('home-greeting');
     const date = document.getElementById('home-date');
-    if (title) title.textContent = greeting;
+    // Alleen als het anders is: zo blijft de letter-voor-letter-begroeting (motion-shell.js) staan
+    if (title && title.textContent !== greeting) title.textContent = greeting;
     if (date) date.textContent = now.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
@@ -2278,8 +2287,10 @@ function homeRenderLibraryStats(lib) {
     const show = (id, value) => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.textContent = ready ? Number(value || 0).toLocaleString('nl-NL') : '–';
         el.classList.toggle('is-empty', !ready);
+        // De eerste keer dat Home in beeld is, telt het getal op (motion-shell.js)
+        if (ready && window.ShellMotion) ShellMotion.statValue(el, value);
+        else el.textContent = ready ? Number(value || 0).toLocaleString('nl-NL') : '–';
     };
     show('home-stat-photos', lib && lib.photos);
     show('home-stat-videos', lib && lib.videos);
@@ -2364,12 +2375,14 @@ function homeRenderStorage(data, error) {
         return;
     }
     meta.removeAttribute('title');
-    used.textContent = gb(data.used_gb);
+    if (window.ShellMotion) ShellMotion.storageValue(used, Number(data.used_gb), gb);
+    else used.textContent = gb(data.used_gb);
     meta.replaceChildren('van ', createEl('span', { text: gb(data.total_gb) }), ' · ',
         createEl('span', { text: gb(data.free_gb) }), ' vrij');
     bar.style.width = `${data.percent_used}%`;
     bar.classList.toggle('critical', data.percent_used > 90);
     bar.classList.toggle('warning', data.percent_used > 75 && data.percent_used <= 90);
+    if (window.ShellMotion) ShellMotion.storageFill(bar);
 }
 
 // 'Op deze dag': eerst de draaier, daarna de inhoud of een lege of mislukte staat. Er komt
@@ -2384,6 +2397,7 @@ function homeOtdShow(loadingId, contentId, ...nodes) {
     document.getElementById(loadingId).style.display = 'none';
     content.style.display = 'block';
     content.replaceChildren(...nodes);
+    if (window.ShellMotion) ShellMotion.otdShow(content);
 }
 
 // Een lege of mislukte staat, compact genoeg voor een kaart op Home
@@ -2472,6 +2486,7 @@ async function loadPhotoOtdWidget() {
                     createEl('div', { class: 'otd-large-subtitle', text: p.year }));
                 content.append(image, overlay);
             });
+            if (window.ShellMotion) ShellMotion.otdShow(content);
 
             if (data.photos.length > 1) {
                 let currentOtd = 0;
@@ -2495,6 +2510,7 @@ async function loadPhotoOtdWidget() {
                     images[currentOtd].classList.add('active');
                     images[currentOtd].tabIndex = 0;
                     overlays[currentOtd].style.display = 'flex';
+                    if (window.ShellMotion) ShellMotion.otdText(overlays[currentOtd]);
                 };
                 homeOtdCycle(!document.getElementById('section-home').classList.contains('hidden'));
             }
@@ -2725,8 +2741,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     loadFolders();
     switchMainView('home');
-    // De eerste indruk: Home rijst rustig op, kop eerst (docs/MOTION.md)
-    Motion.enterPage(document.getElementById('section-home'));
+    // De eerste indruk: het menu valt op zijn plek, de begroeting rijst op, dan de kaarten
+    // (motion-shell.js; docs/MOTION.md)
+    if (window.ShellMotion) ShellMotion.homeIntro();
+    else Motion.enterPage(document.getElementById('section-home'));
     fetchHomeWidgets();
     loadChatModels();
     checkServerStatus();

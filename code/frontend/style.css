@@ -13882,3 +13882,520 @@ html[data-motion="uit"]::view-transition-new(*) {
     font-size: var(--fs-2xs);
     box-shadow: var(--shadow-sm);
 }
+
+/* ==================== BEWEGING: SCHIL (motion-shell.js) ====================
+   Menu, pagina's, Home, takenpaneel, meldingen, vensters, menu's, thema, segmenten,
+   sneltoetsen, Pasha en de lege, mislukte en ladende staten. De taal: docs/MOTION.md.
+   Alles hier gebruikt de bewegingstokens, dus Rustig en Uit kloppen vanzelf; waar een lus
+   verschuift (glans, puntjes) krijgt Rustig een rustige variant met alleen dekking. */
+
+:root {
+    /* Lussen van de schil: één glans over een lopende balk of een skelet, en de ademhaling
+       van Pasha's puntjes. Lussen mogen alleen bij voortgang en laden (docs/MOTION.md §10). */
+    --shell-sheen-period: 2200ms;
+    --shell-breathe-period: 1400ms;
+    /* De zachte rand van de cirkel waarmee een nieuw thema uitloopt */
+    --shell-reveal-feather: 14vmax;
+}
+
+/* ---------- Menu: een zwevende vlek onder de muis, indrukken ---------- */
+
+.nav-tabs.has-hover-pill {
+    position: relative;
+}
+
+.nav-hover-pill {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    height: 32px;
+    margin-top: -16px;
+    border-radius: var(--radius-sm);
+    background-color: var(--surface-hover);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.nav-hover-pill.is-shown {
+    opacity: 1;
+}
+
+.nav-tabs.has-hover-pill .nav-tab {
+    z-index: 1;
+}
+
+.nav-tabs.has-hover-pill .nav-tab:hover {
+    background-color: transparent;
+}
+
+.nav-tab,
+.nav-icon-btn {
+    transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out),
+        transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.nav-tab:active,
+.nav-icon-btn:active {
+    transform: scale(var(--motion-scale-press));
+    transition-duration: var(--dur-1);
+}
+
+/* ---------- Zoekveld bovenaan: het vergrootglas licht op, de toetshint wisselt ---------- */
+
+.nav-search > i {
+    transition: color var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.nav-search:focus-within > i {
+    color: var(--accent-text);
+    transform: scale(1.15);
+}
+
+/* De '/'-hint blijft staan en vervaagt (in plaats van te verdwijnen); de Enter-hint komt op.
+   Smaller dan 1100 px zijn de hints er niet (zie hierboven). */
+@media (min-width: 1101px) {
+    .nav-search .search-input:focus + .search-kbd,
+    .nav-search .search-input:not(:placeholder-shown) + .search-kbd {
+        display: inline-block;
+        opacity: 0;
+        transform: scale(var(--motion-scale-in));
+    }
+}
+
+.nav-search .search-kbd:not(.search-enter) {
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.nav-search.search-elsewhere .search-input:not(:placeholder-shown) ~ .search-enter {
+    animation: shell-kbd-in var(--spring-snappy-dur) var(--spring-snappy) both;
+}
+
+@keyframes shell-kbd-in {
+    from { opacity: 0; transform: translate3d(var(--motion-distance-sm), 0, 0); }
+    to { opacity: 1; transform: none; }
+}
+
+/* ---------- Home: de begroeting letter voor letter uit een masker ---------- */
+
+.hero-mask {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: top;
+    /* ruimte voor de staart van de g, zonder dat de regel hoger wordt */
+    padding-bottom: 0.14em;
+    margin-bottom: -0.14em;
+}
+
+.hero-letter {
+    display: inline-block;
+    transform-origin: left bottom;
+}
+
+/* 'Op deze dag': de foto's vloeien in elkaar over, op de tokens */
+.otd-large-image {
+    transition: opacity var(--dur-6) var(--ease-standard), transform var(--dur-5) var(--ease-out);
+}
+
+/* De opslagtegel is een knop: hij komt een tikje omhoog onder de muis */
+#widget-storage {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy), border-color var(--dur-2) var(--ease-out);
+}
+
+#widget-storage:hover {
+    transform: translate3d(0, var(--motion-lift), 0);
+}
+
+#widget-storage:active {
+    transform: scale(var(--motion-scale-press));
+    transition-duration: var(--dur-1);
+}
+
+/* ---------- Takenpaneel: een balk met leven, een feestje bij klaar ---------- */
+
+.job-bar {
+    position: relative;
+    overflow: hidden;
+    transform-origin: left center;
+}
+
+/* Eén glans die over een lopende balk trekt; motion-shell.js zet de vertraging zo dat hij
+   doorloopt als het paneel opnieuw getekend wordt */
+.job-running .job-bar:not(.indeterminate)::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--on-media) 45%, transparent) 50%, transparent 100%);
+    transform: translate3d(-100%, 0, 0);
+    animation: shell-sheen var(--shell-sheen-period) var(--ease-in-out) infinite;
+    animation-delay: var(--job-sheen-delay, 0ms);
+    pointer-events: none;
+}
+
+@keyframes shell-sheen {
+    from { transform: translate3d(-100%, 0, 0); }
+    to { transform: translate3d(100%, 0, 0); }
+}
+
+html[data-motion="rustig"] .job-running .job-bar::after {
+    display: none;
+}
+
+.job-dock.tiny .job-dock-title i {
+    transition: color var(--dur-5) var(--ease-out);
+}
+
+.job-dock.tiny.is-celebrating .job-dock-title i {
+    color: var(--accent-text);
+}
+
+.job-item.is-celebrating .job-status::before {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+/* De kring en de vonkjes staan los boven alles (het paneel tekent zich elke seconde opnieuw) */
+.job-burst {
+    position: fixed;
+    z-index: 2600;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+
+.job-burst-ring,
+.job-burst-spark {
+    position: absolute;
+    border-radius: var(--radius-full);
+    opacity: 0;
+}
+
+.job-burst-ring {
+    left: -6px;
+    top: -6px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--accent);
+}
+
+.job-burst-spark {
+    left: -2px;
+    top: -2px;
+    width: 4px;
+    height: 4px;
+    background: var(--accent);
+}
+
+/* ---------- Meldingen: wegvegen ---------- */
+
+.toast {
+    touch-action: pan-y;
+}
+
+.toast.is-dragging {
+    cursor: grabbing;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: none;
+}
+
+/* ---------- Menu's: openveren, wegvervagen ---------- */
+
+.theme-dropdown,
+.menu {
+    transform-origin: top right;
+}
+
+.theme-dropdown.open,
+.menu:not([hidden]) {
+    animation: shell-menu-in var(--spring-snappy-dur) var(--spring-snappy) both;
+}
+
+.theme-dropdown.open .theme-option,
+.menu:not([hidden]) > .menu-item {
+    animation: shell-menu-item-in var(--spring-smooth-dur) var(--spring-smooth) both;
+}
+
+.theme-dropdown.open .theme-option:nth-child(2),
+.menu:not([hidden]) > .menu-item:nth-child(2) {
+    animation-delay: var(--stagger-step);
+}
+
+.theme-dropdown.open .theme-option:nth-child(3),
+.menu:not([hidden]) > .menu-item:nth-child(3) {
+    animation-delay: calc(var(--stagger-step) * 2);
+}
+
+.theme-dropdown.open .theme-option:nth-child(n + 4),
+.menu:not([hidden]) > .menu-item:nth-child(n + 4) {
+    animation-delay: calc(var(--stagger-step) * 3);
+}
+
+.theme-dropdown.is-leaving:not(.open) {
+    display: block;
+    pointer-events: none;
+    animation: shell-menu-out var(--dur-3) var(--ease-exit) forwards;
+}
+
+@keyframes shell-menu-in {
+    0% { opacity: 0; transform: translate3d(0, calc(var(--motion-distance-sm) * -1), 0) scale(var(--motion-scale-in)); }
+    40% { opacity: 1; }
+    100% { opacity: 1; transform: none; }
+}
+
+@keyframes shell-menu-item-in {
+    from { opacity: 0; transform: translate3d(0, calc(var(--motion-distance-sm) * -0.5), 0); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes shell-menu-out {
+    to { opacity: 0; transform: translate3d(0, calc(var(--motion-distance-sm) * -0.5), 0) scale(0.98); }
+}
+
+/* ---------- Thema: de cirkel krijgt een zachte rand ---------- */
+
+@property --shell-reveal {
+    syntax: '<length>';
+    inherits: false;
+    initial-value: 0px;
+}
+
+html[data-vt="theme"]::view-transition-new(root) {
+    -webkit-mask-image: radial-gradient(circle at var(--vt-x, 50%) var(--vt-y, 0px),
+        black calc(var(--shell-reveal) - var(--shell-reveal-feather)), transparent var(--shell-reveal));
+    mask-image: radial-gradient(circle at var(--vt-x, 50%) var(--vt-y, 0px),
+        black calc(var(--shell-reveal) - var(--shell-reveal-feather)), transparent var(--shell-reveal));
+    animation: shell-theme-reveal var(--dur-6) var(--ease-standard) both;
+}
+
+/* Gewoon over elkaar, niet optellen (plus-lighter): anders licht de zachte rand wit op */
+html[data-vt="theme"]::view-transition-old(root),
+html[data-vt="theme"]::view-transition-new(root) {
+    mix-blend-mode: normal;
+}
+
+@keyframes shell-theme-reveal {
+    from { --shell-reveal: 0px; }
+    to { --shell-reveal: calc(var(--shell-reveal-end, 150vmax) + var(--shell-reveal-feather)); }
+}
+
+/* ---------- Segmenten: het gekozen vlak glijdt ---------- */
+
+.segmented,
+.view-toggle {
+    position: relative;
+}
+
+.seg-thumb {
+    position: absolute;
+    z-index: 0;
+    border-radius: var(--radius-sm);
+    background: var(--surface-card);
+    box-shadow: var(--shadow-sm);
+    transform-origin: top left;
+    pointer-events: none;
+}
+
+.segmented.is-gliding > :not(.seg-thumb),
+.view-toggle.is-gliding > :not(.seg-thumb) {
+    position: relative;
+    z-index: 1;
+}
+
+.segmented.is-gliding > button.active,
+.segmented.is-gliding > button[aria-pressed="true"],
+.segmented.is-gliding > .settings-choice:has(input:checked),
+.view-toggle.is-gliding > .view-toggle-btn.active {
+    background: transparent;
+    box-shadow: none;
+}
+
+/* Schakelaar: het bolletje veert, en rekt even uit terwijl je drukt */
+.switch .slider::before {
+    transform-origin: left center;
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.switch input:checked + .slider::before {
+    transform-origin: right center;
+}
+
+.switch:active .slider::before {
+    transform: scaleX(1.18);
+    transition-duration: var(--dur-2);
+}
+
+.switch:active input:checked + .slider::before {
+    transform: translateX(16px) scaleX(1.18);
+}
+
+/* ---------- Sneltoetsen: de toets die je indrukt licht op ---------- */
+
+.shortcut-help kbd {
+    transition: background-color var(--dur-4) var(--ease-out), border-color var(--dur-4) var(--ease-out),
+        color var(--dur-4) var(--ease-out);
+}
+
+.shortcut-help kbd.is-pressed {
+    background-color: var(--accent-subtle);
+    border-color: var(--accent-border);
+    color: var(--accent-text);
+    transition-duration: var(--dur-1);
+}
+
+/* ---------- Pasha: puntjes die ademen ---------- */
+
+.message-loading .dot {
+    animation: shell-breathe var(--shell-breathe-period) var(--ease-in-out) infinite both;
+}
+
+.message-loading .dot:nth-child(1) {
+    animation-delay: calc(var(--shell-breathe-period) * -0.4);
+}
+
+.message-loading .dot:nth-child(2) {
+    animation-delay: calc(var(--shell-breathe-period) * -0.25);
+}
+
+.message-loading .dot:nth-child(3) {
+    animation-delay: calc(var(--shell-breathe-period) * -0.1);
+}
+
+@keyframes shell-breathe {
+    0%, 70%, 100% { opacity: 0.35; transform: scale(0.7); }
+    35% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shell-breathe-calm {
+    0%, 70%, 100% { opacity: 0.35; }
+    35% { opacity: 1; }
+}
+
+html[data-motion="rustig"] .message-loading .dot {
+    animation-name: shell-breathe-calm;
+}
+
+.chat-mascot {
+    transform-origin: 50% 85%;
+}
+
+/* ---------- Leeg, fout, laden ---------- */
+
+/* Een kring die één keer uitdijt rond het icoon van een lege staat (motion-shell.js zet
+   .is-arriving); Font Awesome tekent zijn glyph in ::before, de kring staat in ::after */
+.empty-state-icon {
+    position: relative;
+}
+
+.empty-state-icon.is-arriving::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid var(--border-strong);
+    pointer-events: none;
+    animation: shell-halo var(--dur-6) var(--ease-emphasized) var(--dur-2) both;
+}
+
+.empty-state-error .empty-state-icon.is-arriving::after {
+    border-color: var(--danger-text);
+}
+
+@keyframes shell-halo {
+    from { opacity: 0.9; transform: scale(1); }
+    to { opacity: 0; transform: scale(1.8); }
+}
+
+html[data-motion="rustig"] .empty-state-icon.is-arriving::after {
+    display: none;
+}
+
+/* Skeletten: een glans die via transform overtrekt (geen achtergrond die per beeld opnieuw
+   geschilderd wordt), in een golf schuin over het raster. Ze verschijnen pas na een tel,
+   zodat snel laden niet flitst. */
+.skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--skeleton-base);
+    animation: none;
+}
+
+.skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 15%,
+        color-mix(in srgb, var(--skeleton-highlight) 80%, transparent) 50%, transparent 85%);
+    transform: translate3d(-100%, 0, 0);
+    animation: shell-sheen var(--shell-sheen-period) var(--ease-in-out) infinite;
+    pointer-events: none;
+}
+
+.skeleton-grid > .skeleton:nth-child(6n + 2)::after,
+.skeleton-list > .skeleton-row:nth-child(2) .skeleton::after {
+    animation-delay: calc(var(--stagger-step) * 2);
+}
+
+.skeleton-grid > .skeleton:nth-child(6n + 3)::after,
+.skeleton-list > .skeleton-row:nth-child(3) .skeleton::after {
+    animation-delay: calc(var(--stagger-step) * 4);
+}
+
+.skeleton-grid > .skeleton:nth-child(6n + 4)::after,
+.skeleton-list > .skeleton-row:nth-child(4) .skeleton::after {
+    animation-delay: calc(var(--stagger-step) * 6);
+}
+
+.skeleton-grid > .skeleton:nth-child(6n + 5)::after {
+    animation-delay: calc(var(--stagger-step) * 8);
+}
+
+.skeleton-grid > .skeleton:nth-child(6n)::after {
+    animation-delay: calc(var(--stagger-step) * 10);
+}
+
+.skeleton-grid,
+.skeleton-list {
+    animation: dv-fade-in var(--dur-3) var(--ease-out) var(--dur-2) backwards;
+}
+
+/* Rustig: geen schuivende glans, alleen een zachte ademhaling */
+html[data-motion="rustig"] .skeleton::after {
+    display: none;
+}
+
+html[data-motion="rustig"] .skeleton {
+    animation: shell-breathe-calm var(--shell-sheen-period) var(--ease-in-out) infinite;
+}
+
+/* Laden: een boog met een staart die vervaagt (draait via transform) */
+.spinner,
+.loading-spinner {
+    border: none;
+    background: conic-gradient(from 0deg, transparent 0deg, var(--accent) 330deg, transparent 331deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 3px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 3px));
+}
+
+/* ---------- Herstelcentrum ---------- */
+
+.recovery-entry.is-changed {
+    animation: shell-changed calc(var(--dur-6) * 2) var(--ease-standard) both;
+}
+
+@keyframes shell-changed {
+    from { box-shadow: 0 0 0 3px var(--accent-subtle), var(--shadow-sm); }
+    to { box-shadow: 0 0 0 0 transparent, var(--shadow-sm); }
+}
+
+.recovery-chevron {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+/* Minder beweging gevraagd: de lussen hierboven staan stil */
+@media (prefers-reduced-motion: reduce) {
+    .job-running .job-bar::after,
+    .skeleton::after,
+    .empty-state-icon.is-arriving::after {
+        display: none;
+    }
+}

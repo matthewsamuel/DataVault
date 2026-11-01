@@ -16,6 +16,16 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Wisselen tussen licht en donker loopt als een cirkel uit vanaf de knop die je gebruikte. Knoppen geven even mee als je ze indrukt.
 - Nieuw in Instellingen: **Beweging** met Volledig (standaard), Rustig (alleen korte vervagingen) en Uit, met een klein voorbeeld. Vraagt macOS om minder beweging, dan beweegt de app vanzelf rustig. Snelle toetsen in de Keurer en bij Welke is mooier? blijven meteen reageren.
 
+### Beweging: de schil van de app
+- Het groene streepje in het menu rekt elastisch mee naar het nieuwe onderdeel en een zachte vlek glijdt onder de muis van onderdeel naar onderdeel. Het icoon van de paginatitel zet zich met een kleine draai neer.
+- Bij het openen van de app valt het menu zacht op zijn plek, rijst de begroeting letter voor letter op en tellen de tegels op Home hun getal op. De opslagbalk vult zich en 'Op deze dag' opent als een gordijn.
+- Het takenpaneel leeft: een balk groeit vloeiend naar de nieuwe stand en er trekt een glans over zolang een taak bezig is. Klaar is een klein feestje met een groen vinkje. Uitklappen rolt de lijst onder de kop uit, inklappen laat de kop zakken.
+- Een melding veeg je met de muis of een vinger naar rechts weg. Vensters groeien uit de knop of de plek waar je klikte en krimpen daar weer naartoe. Het themamenu veert open.
+- Het nieuwe thema loopt als een cirkel met een zachte rand uit, terwijl het pictogram een halve slag draait. Het gekozen segment van een keuzeknop glijdt naar zijn plek.
+- Het zoekveld bovenaan licht op als je erin klikt. In het sneltoetsenoverzicht licht de toets op die je indrukt. Pasha knikt als zijn antwoord er is.
+- Lege en mislukte staten komen vriendelijk binnen en skeletten glanzen rustig. Instellingen en het Herstelcentrum komen in ritme binnen; in het Herstelcentrum glijden de acties naar hun nieuwe plek en licht een veranderde actie even op.
+- Rustig en Uit (Instellingen > Beweging) gelden ook hier. Niets houdt een klik of toets tegen.
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.

@@ -376,7 +376,10 @@ function jobDockReserveSpace() {
 function renderJobDock() {
     const dock = document.getElementById('job-dock');
     if (!dock) return;
+    // Beweging (motion-shell.js): de balken groeien van hun oude stand, klaar is een feestje
+    const before = window.ShellMotion ? ShellMotion.jobDockBefore(dock) : null;
     try { renderJobDockContent(dock); } finally { jobDockReserveSpace(); }
+    if (before) ShellMotion.jobDockAfter(dock, before);
 }
 
 function renderJobDockContent(dock) {
