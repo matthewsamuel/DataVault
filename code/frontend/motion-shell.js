@@ -108,8 +108,11 @@
         strip.classList.add('has-hover-pill');
         let shown = false;
         let current = null;
+        // Zo breed als de onderdelen (nooit breder: de vlek mag het menu niet laten scrollen)
         const clipFor = (tab) => {
-            const width = strip.scrollWidth;
+            const tabs = strip.querySelectorAll('.nav-tab');
+            const last = tabs[tabs.length - 1];
+            const width = Math.max(strip.clientWidth, last ? last.offsetLeft + last.offsetWidth : 0);
             pill.style.width = `${width}px`;
             const left = tab.offsetLeft;
             const right = width - (tab.offsetLeft + tab.offsetWidth);
@@ -137,8 +140,11 @@
             shown = false;
             current = null;
             pill.classList.remove('is-shown');
-            M.animate(pill, [{ opacity: 1 }, { opacity: 0 }], { duration: '--dur-3', easing: '--ease-exit', key: 'pill-fade' });
+            const fade = M.animate(pill, [{ opacity: 1 }, { opacity: 0 }], { duration: '--dur-3', easing: '--ease-exit', key: 'pill-fade' });
+            // Weg is weg: zonder breedte telt hij niet mee als het venster later smaller wordt
+            fade.finished.then(() => { if (!shown) pill.style.width = '0px'; }, () => {});
         };
+        const reset = () => { hide(); if (!shown) pill.style.width = '0px'; };
         strip.addEventListener('pointerover', (e) => {
             if (e.pointerType === 'touch') return;
             const tab = e.target.closest && e.target.closest('.nav-tab');
@@ -146,7 +152,7 @@
         });
         strip.addEventListener('pointerleave', hide);
         strip.addEventListener('scroll', hide, { passive: true });
-        window.addEventListener('resize', hide, { passive: true });
+        window.addEventListener('resize', reset, { passive: true });
     }
 
     // ==================== 2. PAGINA'S ====================
