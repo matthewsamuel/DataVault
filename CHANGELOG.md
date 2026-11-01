@@ -55,6 +55,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Rustig (en macOS 'minder beweging') is nu echt alleen vervagen: het icoon van een melding springt en draait niet meer, vensters en het themamenu krimpen niet bij het sluiten, skeletten en lege staten hebben geen glans of kring meer, en een foto in het raster zoomt bij het laden niet meer in (ook niet in Volledig).
 - Keurer: de weggevlogen kaart gaat onder de volgende foto door in plaats van erover, er vliegt er maar één tegelijk, en de volgende twee foto's staan al klaar, zodat de nieuwe kaart nooit even leeg is.
 - Viewer: de foto die opent landt precies op zijn plek (geen sprongetje meer als hij geladen is), sluiten gaat sneller dan openen, en bij volgende en vorige liggen nooit twee halfdoorzichtige foto's over elkaar: de oude is weg voor de nieuwe opkomt.
+- Welke is mooier?: de beweging volgt nu ook de instelling Beweging; bij Rustig of Uit wisselen de paren zonder animatie.
 
 ### Verificatieronde
 - Database-updates die later zijn toegevoegd maar een lager nummer hebben (Slim zoeken en 'Welke is mooier?') worden nu altijd uitgevoerd, ook op een database die al verder was bijgewerkt. Ontbrak er zo een, dan vult de app hem bij de volgende start alsnog aan en blijven alle gegevens staan.

@@ -90,3 +90,9 @@ def test_rustig_only_fades():
     assert css.count("--motion-scale-out: 1;") >= 3   # Rustig, Uit and prefers-reduced-motion
     # No zoom on the photo itself while it loads
     assert not re.search(r"\.thumb-tile img\.loading \{[^}]*transform", css)
+
+
+def test_the_elo_duel_follows_beweging():
+    js = (FRONTEND / "elo.js").read_text(encoding="utf-8")
+    ok = js[js.index("function eloMotionOK"):js.index("function eloAnimate")]
+    assert "Motion.full()" in ok and "'reduce'" not in ok
