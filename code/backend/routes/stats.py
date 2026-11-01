@@ -107,12 +107,29 @@ def get_storage_breakdown() -> Dict[str, Any]:
     vault_path = config.VAULT_ROOT
     return _breakdown_answer(_du_breakdown(vault_path, _subfolder_names(vault_path)))
 
+def _loose_files(target_path: Path) -> Tuple[int, int]:
+    """
+    (count, bytes) of the files directly in target_path, outside any subfolder: a folder
+    of photos without subfolders used to total 0 B. Same filter as the largest files.
+    """
+    count = size = 0
+    for entry in scan_dir(target_path, ArchiveFilter(config)):
+        try:
+            if entry.is_file(follow_symlinks=False):
+                size += entry.stat(follow_symlinks=False).st_size
+                count += 1
+        except OSError:
+            continue
+    return count, size
+
 @router.get("/storage-breakdown-nested")
 def get_storage_breakdown_nested(folder_path: str = None) -> Dict[str, Any]:
-    """Get storage breakdown for a specific folder and its subfolders."""
+    """Get storage breakdown for a specific folder: its subfolders and its own files."""
     target_path = _stats_folder(folder_path)
     sizes = _du_breakdown(target_path, _subfolder_names(target_path))
-    return {**_breakdown_answer(sizes), "path": folder_path or "/"}
+    files_count, files_size = _loose_files(target_path)
+    return {**_breakdown_answer(sizes), "files_count": files_count, "files_size": files_size,
+            "path": folder_path or "/"}
 
 @router.get("/largest-files")
 def get_largest_files(folder_path: str = None, limit: int = 20) -> Dict[str, Any]:

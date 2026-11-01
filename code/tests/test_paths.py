@@ -504,3 +504,17 @@ def test_storage_overview_keeps_folders_and_files_under_5_mb(client, vault):
     tiny.write_bytes(b"x" * 10)
     files = client.get("/api/stats/largest-files", params={"folder_path": "RAW/klein"}).json()["files"]
     assert [f["name"] for f in files] == ["a.bin", "b.txt"]   # 10 bytes no longer rounds away
+
+
+def test_nested_breakdown_counts_the_files_in_the_folder_itself(client, vault):
+    """A folder with only photos (no subfolders) totalled 0 B in Opslag per map."""
+    folder = vault / "losse-fotos"
+    folder.mkdir()
+    (folder / "a.jpg").write_bytes(b"\x01" * 3000)
+    (folder / "b.jpg").write_bytes(b"\x01" * 2000)
+    (folder / ".verborgen").write_bytes(b"\x01" * 9000)
+    (folder / "sub").mkdir()
+    (folder / "sub" / "c.jpg").write_bytes(b"\x01" * 4000)
+    body = client.get("/api/stats/storage-breakdown-nested", params={"folder_path": "losse-fotos"}).json()
+    assert body["files_count"] == 2 and body["files_size"] == 5000
+    assert set(body["sizes"]) == {"sub"}

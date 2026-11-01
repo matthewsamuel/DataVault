@@ -2983,10 +2983,13 @@ async function storageNavigateToPath(folderPath) {
         const sizes = data.sizes || Object.fromEntries(
             Object.entries(data.breakdown || {}).map(([name, gb]) => [name, parseFloat(gb) * 2 ** 30]));
         const entries = Object.entries(sizes).sort((a, b) => b[1] - a[1]);
-        const total = entries.reduce((sum, [, size]) => sum + size, 0);
+        // Bestanden die los in de map zelf staan tellen mee; een map met alleen foto's was 0 B
+        const filesSize = data.files_size || 0;
+        const filesCount = data.files_count || 0;
+        const total = entries.reduce((sum, [, size]) => sum + size, 0) + filesSize;
 
-        // Reset tab naar subfolders bij elke navigatie
-        storageShowTab('subfolders');
+        // Elke navigatie begint bij de submappen; zonder submappen meteen bij de bestanden
+        storageShowTab(folderPath && !entries.length && filesCount ? 'largest-files' : 'subfolders');
 
         if (folderPath) {
             breadcrumb.style.display = 'flex';
@@ -3000,11 +3003,13 @@ async function storageNavigateToPath(folderPath) {
         }
 
         totalDisplay.textContent = formatBytes(total);
-        largestDisplay.textContent = entries.length > 0 ? `${entries[0][0]} (${formatBytes(entries[0][1])})` : '-';
+        largestDisplay.textContent = entries.length > 0 ? `${entries[0][0]} (${formatBytes(entries[0][1])})` : '';
+        largestDisplay.parentElement.style.display = entries.length ? '' : 'none';
 
         if (entries.length === 0) {
             list.replaceChildren(emptyState({ icon: 'fa-folder-open', title: 'Geen submappen',
-                text: folderPath ? 'Deze map heeft geen submappen.' : 'Het archief heeft nog geen mappen.' }));
+                text: !folderPath ? 'Het archief heeft nog geen mappen.'
+                    : filesCount ? 'Alles staat los in deze map; zie Grootste bestanden.' : 'Deze map is leeg.' }));
         }
 
         // Bovenaan is het aandeel in het hele archief; in een map het aandeel in die map
@@ -3028,6 +3033,27 @@ async function storageNavigateToPath(folderPath) {
             `;
             list.appendChild(li);
         });
+
+        // Naast submappen ook losse bestanden: een eigen rij die naar Grootste bestanden gaat
+        if (folderPath && entries.length && filesSize > 0) {
+            const percent = (filesSize / total * 100).toLocaleString('nl-NL', { maximumFractionDigits: 1 });
+            const label = filesCount === 1 ? '1 los bestand' : `${filesCount.toLocaleString('nl-NL')} losse bestanden`;
+            const li = createEl('li', { class: 'storage-folder-item', tabindex: '0', role: 'button',
+                'aria-label': `${label}, ${formatBytes(filesSize)}: toon de grootste`,
+                onClick: () => storageShowTab('largest-files'),
+                onKeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); storageShowTab('largest-files'); } } });
+            li.innerHTML = html`
+                <div class="storage-folder-header">
+                    <span class="storage-folder-name"><i class="fas fa-file"></i>${label}</span>
+                    <span class="storage-folder-size">${formatBytes(filesSize)}</span>
+                </div>
+                <div class="storage-progress-bar">
+                    <div class="storage-progress-fill" style="width: ${filesSize / total * 100}%"></div>
+                </div>
+                <div class="storage-folder-percent"><span class="storage-folder-percent-value">${percent}%</span> ${shareOf}</div>
+            `;
+            list.appendChild(li);
+        }
 
         if (folderPath) {
             const filesData = await fetchJSON(`${API_BASE}/api/stats/largest-files?folder_path=${encodeURIComponent(folderPath)}&limit=20`)
