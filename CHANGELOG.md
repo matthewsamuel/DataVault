@@ -663,7 +663,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - **Sneller een goede ranglijst.** Elke foto heeft nu naast zijn score ook een *onzekerheid*
   (Glicko-2). Een nieuwe foto beweegt bij zijn eerste keuzes veel en vindt zo snel zijn plek; een
   foto die al vaak vergeleken is, beweegt nog maar weinig. In een simulatie met 100 foto's bereikt
-  de ranglijst dezelfde kwaliteit als voorheen met 22 tot 45% minder keuzes (zie docs/ELO.md).
+  de ranglijst dezelfde kwaliteit als voorheen met 15 tot 45% minder keuzes (zie docs/ELO.md).
 - **Slimmere paren.** De app kiest het paar waar het meest van te leren valt: twee foto's die dicht
   bij elkaar liggen en waarover nog twijfel is, met af en toe een nieuwe of weinig vergeleken foto
   ertussen, en wat meer aandacht voor foto's die bij de top kunnen horen. Een foto komt niet in twee
@@ -689,6 +689,28 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - **Je bestaande keuzes blijven.** Alle eerdere vergelijkingen blijven bewaard; de scores worden
   eenmalig opnieuw uitgerekend met het nieuwe model uit precies dezelfde keuzes, en je duimpjes uit
   de slideshow tellen mee zoals altijd.
+- **Een net gekozen paar komt niet meer terug.** Koos je snel achter elkaar, dan kon het paar dat je
+  net beoordeelde drie keuzes later opnieuw verschijnen, vooral in een klein album. Nu onthoudt het
+  scherm de laatste acht paren, ook als de keuze nog wordt opgeslagen, en gaat een klein album alle
+  paren langs in plaats van steeds hetzelfde dozijn.
+- **Je ziet wat je koos.** De gekozen foto blijft even staan met zijn groene ring, vinkje en +punten,
+  en vliegt dan als miniatuur naar onderin, waar de uitslag (+35 · −24) even staat. Het nieuwe paar
+  is er meteen en vrijwel direct helemaal zichtbaar: geen witte flits meer tussen twee paren. Een
+  keuze die te snel komt (binnen een kwart seconde) telt nog steeds niet, maar de foto schudt dan
+  even nee.
+- **Sessiedoel voorbij.** Haal je je doel, dan staat er "doel gehaald" en begint de ring aan een
+  nieuwe ronde, in plaats van "127 van 20". De dubbele teller "in deze ronde" is weg.
+- **Ranglijst met uitleg.** Boven de kolommen staat nu wat ze zijn: Marge (95%), Laatste sessie en
+  Score, en de meter heet "Ranglijst 81% zeker". De balkjes zijn in het lichte thema beter te zien.
+  Een lege ranglijst toont geen "0% zeker" meer. "Als album" bevestigt op de knop zelf, met
+  Bekijken ernaast (een melding bedekte de knoppen), en het nieuwe album staat meteen in de
+  keuzelijst.
+- **Albums met alleen video's** doen niet meer mee als collectie: het album Video's rangschikte
+  foto's.
+- **Sneller bij een grote geschiedenis.** Met 10.000 foto's en 75.000 vergelijkingen duurt het
+  volgende paar 40 ms in plaats van 159 ms, en opslaan 31 in plaats van 88 ms.
+- Twee foto's die duizenden punten uit elkaar liggen (door veel duimpjes) gaven een fout bij
+  vergelijken, en konden de app bij het bijwerken van de database laten vastlopen. Opgelost.
 
 ## Fase 2 – Stabiliseren
 

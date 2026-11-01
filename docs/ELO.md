@@ -93,8 +93,16 @@ On top of that:
 
 - Photos from the last 8 pairs are held back, so no photo appears twice in a row.
 - Pairs compared before rarely come back.
+- The screen sends the last 8 pairs it showed (`recent=`), also those whose pick is still being
+  saved. They do not come back while other pairs can, and their photos are held back. New pairs
+  are only asked for after the pending picks are saved. In an 8-photo album, 40 fast picks in
+  WebKit used to show 12 of the 28 pairs, the pair just picked returning every third step; now
+  they show 26 of them and none returns within 8 steps.
+- In a small collection the new pairs may share a photo with a queued pair (in a tiny one, also
+  with the pair on screen). Keeping every queued photo out left so few photos that the same
+  handful of pairs came round again and again.
 - These pairs are never shown:
-  - the pair on screen;
+  - the pair on screen and the pairs already queued;
   - a pair skipped in the last 30 days;
   - exact copies;
   - burst frames (one series in a folder, each frame within 2 s of the previous);
@@ -125,8 +133,18 @@ test checks this.
   - A pick within 250 ms of a pair appearing does not count. No human judges two photos that fast.
   - Each POST carries a `client_token`, and a repeated token counts once.
 - **Speed.** The screen keeps two pairs ready, with their images loaded and decoded. A pick swaps to
-  the next pair at once; the smoke test measures under 50 ms. The save runs behind it in a strict
-  queue, so an undo pressed during a save waits for that save and then undoes it.
+  the next pair at once; the smoke test measures under 50 ms, and the new pair is at least 90%
+  visible within 200 ms (about 130 ms). The save runs behind it in a strict queue, so an undo
+  pressed during a save waits for that save and then undoes it.
+- **Server time.** How often each pair was compared, the comparisons per day (the streak) and per
+  scope, and the current session are kept in memory per database and follow the table: new rows
+  are added by id, an undo takes its row out, a move that renames paths starts over, and a row
+  count that does not match rebuilds it. Migration 161 adds covering indexes for reading every
+  rating below a folder. With 10,000 photos and 75,000 comparisons (7.5 per photo), the next-pair
+  request went from 159 to 40 ms (median, over HTTP) and saving a pick from 88 to 31 ms.
+- **Far-apart ratings.** Votes have no upper cap, so two photos can be thousands of points apart.
+  The expected score is clamped just inside 0 and 1, so the update never divides by zero, also not
+  while migration 160 replays an old history.
 
 ## Measuring it
 
@@ -156,7 +174,10 @@ Two kinds of user, with 100 photos and 20 seeds:
 
 The first three rows of each table use the accuracy the **old** system reaches with its full
 budget (15 comparisons per photo, 1500 in total). The table shows how many comparisons each system
-needs to get there.
+needs to get there. The "extra level" rows are a lower bar, not the old system's final
+level; that saving depends more on the seeds (hesitant, seeds 101 to 120: 607 against 575, 5%).
+The headline numbers are the first three rows: 15 to 24% fewer comparisons for a hesitant user,
+35 to 45% for a decisive one.
 
 **Hesitant user** (100 photos):
 
@@ -165,7 +186,7 @@ needs to get there.
 | Spearman ρ 0.89 | 1390 | 1078 | **22%** |
 | Kendall τ 0.72 | 1405 | 1072 | **24%** |
 | Top-10 precision 0.67 | 825 | 700 | 15% |
-| Top-10 precision 0.60 | 666 | 475 | **29%** |
+| Top-10 precision 0.60 (extra level) | 666 | 475 | 29% |
 | Spearman ρ 0.80 (rough order) | 592 | 513 | 13% |
 
 **Decisive user** (100 photos):
@@ -175,7 +196,7 @@ needs to get there.
 | Spearman ρ 0.92 | 1168 | 757 | **35%** |
 | Kendall τ 0.77 | 1287 | 799 | **38%** |
 | Top-10 precision 0.78 | 1263 | 694 | **45%** |
-| Top-10 precision 0.60 | 425 | 269 | **37%** |
+| Top-10 precision 0.60 (extra level) | 425 | 269 | 37% |
 | Spearman ρ 0.80 (rough order) | 335 | 316 | 6% |
 
 With 200 photos (8 seeds) the pattern is the same and stronger at the top. For the hesitant user,
