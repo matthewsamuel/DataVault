@@ -118,13 +118,32 @@ function backupRenderStatus(box, status) {
         createEl('p', { class: 'backup-note',
             text: 'Elke back-up wordt eerst op fouten gecontroleerd en pas daarna bewaard. Niet erin: wat de app '
                 + 'zelf opnieuw maakt (hashes, datums, de mappenlijst van de index, scanresultaten); zo blijft hij klein.' }),
-        createEl('div', { class: 'settings-actions' }, button),
+        createEl('div', { class: 'settings-actions backup-actions' }, button,
+            createEl('span', { id: 'settings-backup-step', class: 'backup-muted backup-step', 'aria-live': 'polite',
+                text: running ? backupStepText(backupJob()) : '' })),
         backupRestoreHelp(status));
     if (backupRefocus) {
         backupRefocus = false;
         button.focus();
     }
 }
+
+// De lopende back-up-taak (uit het takenpaneel), en wat er naast de knop staat zolang hij loopt
+function backupJob() {
+    return (typeof jobDock !== 'undefined' ? jobDock.jobs : []).find(j => j.type === 'backup' && JOB_ACTIVE.has(j.status)) || null;
+}
+
+function backupStepText(job) {
+    if (!job) return 'Bezig…';
+    const step = (job.message || 'Bezig…').replace(/\.\.\.$/, '…');
+    return job.total ? `Stap ${Math.min(job.processed + 1, job.total)} van ${job.total}: ${step.charAt(0).toLowerCase()}${step.slice(1)}` : step;
+}
+
+jobsOnChange((job) => {
+    if (job.type !== 'backup' || !JOB_ACTIVE.has(job.status)) return;
+    const step = document.getElementById('settings-backup-step');
+    if (step) step.textContent = backupStepText(job);
+});
 
 // Na het opnieuw tekenen de focus terug op 'Nu back-uppen' (het stuk wordt pas getekend als
 // de stand binnen is)
