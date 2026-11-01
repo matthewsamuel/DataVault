@@ -141,6 +141,7 @@ class JobType:
     describe: Optional[Callable[[Dict[str, Any]], str]] = None   # what it works on, for the dock
     jobs_to_keep: Optional[int] = None                       # finished jobs of this type kept (None: no own limit)
     on_cancel: Optional[Callable[[Dict[str, Any]], None]] = None   # params of a job cancelled without (or after) running: clean up
+    public_params: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None   # params as the API shows them (small)
 
 
 class _Live:
@@ -608,7 +609,7 @@ class JobManager:
             "type": row["type"],
             "label": job_type.label if job_type else row["type"],
             "target": job_type.describe(row["params"]) if job_type and job_type.describe else None,
-            "params": row["params"],
+            "params": job_type.public_params(row["params"]) if job_type and job_type.public_params else row["params"],
             "status": status,
             "processed": row["processed"],
             "total": row["total"],

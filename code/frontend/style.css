@@ -11850,6 +11850,14 @@ button.otd-settings-icon:hover {
     color: var(--text-tertiary);
 }
 
+.backup-actions {
+    align-items: center;
+}
+
+.backup-step {
+    font-size: var(--fs-sm);
+}
+
 .backup-note {
     margin: 0;
     max-width: 640px;

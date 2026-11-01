@@ -880,3 +880,146 @@ def test_migration_30_adds_the_tables_and_keeps_every_user_row(tmp_path, monkeyp
         row = conn.execute("SELECT dhash, phash FROM media_phash").fetchone()
     assert [near_dups.to_unsigned(v) for v in row] == [2 ** 64 - 1, 2 ** 63]
     db.close_all()
+
+
+# ---------- pairs of lookalike groups (PERF-1) ----------
+
+def _crowded_fingerprints(n=1200, values=40, seed=4):
+    """Uniform pictures: few distinct phash values shared by many photos, dhash and colours close by."""
+    rng = np.random.default_rng(seed)
+    base = rng.integers(0, 2 ** 63, values, dtype=np.uint64)
+    for k in range(1, values):                       # values close to each other too
+        if rng.random() < 0.6:
+            base[k] = base[k - 1] ^ (np.uint64(1) << np.uint64(int(rng.integers(64))))
+    phashes = base[rng.integers(0, values, n)]
+    dbase = rng.integers(0, 2 ** 63, 6, dtype=np.uint64)
+    dhashes = dbase[rng.integers(0, 6, n)]
+    for i in range(n):
+        for bit in rng.choice(64, int(rng.integers(0, 12)), replace=False):
+            dhashes[i] ^= np.uint64(1) << np.uint64(int(bit))
+    colors = rng.integers(0, 40, (n, 12)).astype(np.int16)
+    flat = rng.random(n) < 0.1
+    return phashes, dhashes, colors, flat
+
+
+def _brute_near(phashes, dhashes, colors, flat):
+    p, d, c = near_dups.STRICTNESS[near_dups.LOOSEST]["near"]
+    pd = near_dups.popcount(phashes[:, None] ^ phashes[None, :]).astype(np.int64)
+    dd = near_dups.popcount(dhashes[:, None] ^ dhashes[None, :]).astype(np.int64)
+    cd = np.abs(colors[:, None, :] - colors[None, :, :]).mean(axis=2)
+    fl = flat[:, None] | flat[None, :]
+    ok = np.triu((pd <= p) & (dd <= d) & (cd <= np.where(fl, min(c, near_dups.FLAT_COLOR), c)), k=1)
+    i, j = np.nonzero(ok)
+    return {(a, b, pd[a, b], dd[a, b]) for a, b in zip(i.tolist(), j.tolist())}
+
+
+def _as_set(found):
+    return set(zip(found["a"].tolist(), found["b"].tolist(), found["phash_d"].tolist(), found["dhash_d"].tolist()))
+
+
+def test_near_pairs_of_crowded_phash_values_are_exactly_the_brute_force_pairs(monkeypatch):
+    monkeypatch.setattr(near_dups, "CANDIDATE_BUDGET", 300)          # many slices
+    fp = _crowded_fingerprints()
+    brute = _brute_near(*fp)
+    assert len(brute) > 5000
+    assert _as_set(near_dups.near_pairs(*fp)) == brute
+    # Only the pairs of some photos (new ones), each once
+    queries = np.arange(3, len(fp[0]), 11)
+    found = near_dups.near_pairs(*fp, queries=queries)
+    assert len(found["a"]) == len(_as_set(found))
+    assert _as_set(found) == {p for p in brute if p[0] % 11 == 3 or p[1] % 11 == 3}
+
+
+def _components(found, n, strictness):
+    keep = near_dups._passes(found["phash_d"], found["dhash_d"], found["color_d"], found["flat"], strictness)
+    groups = near_dups._UnionFind()
+    for i in range(n):
+        groups.find(i)
+    for a, b in zip(found["a"][keep].tolist(), found["b"][keep].tolist()):
+        groups.union(a, b)
+    return sorted(sorted(g) for g in groups.groups().values())
+
+
+def test_past_the_memory_guard_pairs_are_thinned_but_every_series_stays_the_same():
+    fp = _crowded_fingerprints(seed=9)
+    n = len(fp[0])
+    full = near_dups.near_pairs(*fp)
+    thin = near_dups.near_pairs(*fp, limit=500)
+    assert len(thin["a"]) < len(full["a"]) / 4
+    assert len(thin["a"]) <= 3 * n
+    for strictness in near_dups.STRICTNESS:
+        assert _components(thin, n, strictness) == _components(full, n, strictness), strictness
+
+
+def _fingerprint_db(tmp_path, fp, ids):
+    from backend.database import Database
+    db = Database(tmp_path / "pairs.db")
+    _add_fingerprints(db, fp, ids)
+    return db
+
+
+def _add_fingerprints(db, fp, ids):
+    phashes, dhashes, colors, flat = fp
+    now = time.time()
+    with db._connect() as conn:
+        for k in ids:
+            path = f"/v/RAW/f{k}.jpg"
+            conn.execute("INSERT INTO media (id, path, folder, name, kind, ext, size, mtime_ns, added_at, indexed_at, "
+                         "seen_at) VALUES (?, ?, '/v/RAW', ?, 'photo', '.jpg', 10, 1, ?, ?, ?)",
+                         (k + 1, path, f"f{k}.jpg", now, now, now))
+            conn.execute(near_dups._UPSERT, (k + 1, near_dups.ALGO, near_dups.ALGO_VERSION, 10, 1, "ok",
+                                             near_dups.to_signed(int(dhashes[k])), near_dups.to_signed(int(phashes[k])),
+                                             bytes(colors[k].astype(np.uint8).tolist()), 1.0, 0, 0, 100,
+                                             5.0 if flat[k] else 50.0, None, now))
+
+
+def _stored_pairs(db):
+    with db._connect() as conn:
+        return conn.execute("SELECT a, b, kind, phash_d, dhash_d, color_d, flat FROM near_dup_pairs "
+                            "ORDER BY a, b, kind").fetchall()
+
+
+def test_new_photos_are_paired_without_looking_up_every_pair_again(tmp_path, monkeypatch):
+    fp = _crowded_fingerprints(n=600, seed=13)
+    db = _fingerprint_db(tmp_path, fp, range(500))
+    assert near_dups.update_pairs(db)["near"] > 1000
+    looked_up = []
+    real = near_dups.near_pairs
+    monkeypatch.setattr(near_dups, "near_pairs", lambda *a, **k: looked_up.append(a[4]) or real(*a, **k))
+    assert near_dups.update_pairs(db) == {"near": 0, "burst": 0}     # nothing new: nothing to do
+    assert looked_up == []
+
+    _add_fingerprints(db, fp, range(500, 600))
+    result = near_dups.update_pairs(db)
+    assert looked_up[-1] is not None and len(looked_up[-1]) <= 100    # only the groups of the new photos
+    assert result["looked_up"] <= 100
+    incremental = _stored_pairs(db)
+
+    # The same as looking up every pair from scratch
+    with db._connect() as conn:
+        conn.execute("UPDATE media_phash SET paired = 0")
+    near_dups.update_pairs(db)
+    assert looked_up[-1] is None
+    assert _stored_pairs(db) == incremental
+
+
+def test_a_group_whose_anchor_left_is_looked_up_again(tmp_path):
+    phashes, dhashes, colors, flat = _crowded_fingerprints(n=300, seed=21)
+    for k in (1, 2, 3):                       # photos 0-3 look exactly alike: one group, anchored on photo 0
+        phashes[k], dhashes[k], colors[k], flat[k] = phashes[0], dhashes[0], colors[0], flat[0]
+    db = _fingerprint_db(tmp_path, (phashes, dhashes, colors, flat), range(300))
+    near_dups.update_pairs(db)
+    with db._connect() as conn:
+        anchors = {r[0] for r in conn.execute(f"SELECT media_id FROM media_phash WHERE paired = {near_dups.ANCHOR}")}
+        assert 1 in anchors and not anchors & {2, 3, 4}
+        assert conn.execute("SELECT COUNT(*) FROM near_dup_pairs WHERE a = 1 OR b = 1").fetchone()[0] > 0
+        conn.execute("DELETE FROM media WHERE id = 1")            # the anchor leaves the index
+    near_dups.forget_orphans(db)
+    result = near_dups.update_pairs(db)
+    assert result["looked_up"] == 1                               # only that group, now from photo 1 (id 2)
+    after = _stored_pairs(db)
+    assert any(2 in (a, b) for a, b, *_ in after)
+    with db._connect() as conn:
+        conn.execute("UPDATE media_phash SET paired = 0")
+    near_dups.update_pairs(db)
+    assert _stored_pairs(db) == after

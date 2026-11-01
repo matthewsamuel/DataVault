@@ -464,6 +464,7 @@ function jobsInit() {
         // Een automatische ronde meldt zich alleen als er iets misging
         if (jobIsAuto(job) && job.status !== 'failed') return;
         if (job.type === 'export') return;   // export.js meldt dit zelf (met 'Toon in Finder')
+        if (job.type === 'backup') return;   // backup-settings.js meldt dit zelf (met de grootte)
         const kind = job.status === 'done' ? 'success' : job.status === 'failed' ? 'error' : 'info';
         const text = job.status === 'failed' ? (job.error || 'Mislukt') : (job.message || JOB_STATUS_LABELS[job.status]);
         showToast(`${job.label}: ${JOB_STATUS_LABELS[job.status] || job.status}`, text, kind);

@@ -398,7 +398,11 @@ def track(db, start_ms: int, end_ms: int, limit: int = 20000) -> Dict[str, Any]:
 
 
 def days(db) -> List[Dict[str, Any]]:
-    """[{day, count}] for every local day with location points, oldest first."""
+    """[{day, count}] for every local day with location points, oldest first (cached until the data changes)."""
+    return state.cached(db, "location_days", lambda: _days(db))
+
+
+def _days(db) -> List[Dict[str, Any]]:
     with db._connect() as conn:
         rows = conn.execute("SELECT date(ts_ms / 1000, 'unixepoch', 'localtime') AS day, COUNT(*) FROM location_points "
                             "GROUP BY day ORDER BY day").fetchall()

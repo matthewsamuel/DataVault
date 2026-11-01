@@ -390,6 +390,11 @@ def _spans(points: List[Tuple[float, float]]) -> List[List[float]]:
 
 
 def coverage(db) -> Dict[str, Any]:
+    """What the merged plays cover (see _coverage), cached until the data changes. Do not change the result."""
+    return state.cached(db, "spotify_coverage", lambda: _coverage(db))
+
+
+def _coverage(db) -> Dict[str, Any]:
     """
     What the merged plays cover, per source: the spans the exports cover (complete, real
     listening time), the spans of API and Last.fm plays after them (estimated listening time),

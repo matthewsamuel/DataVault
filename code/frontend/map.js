@@ -23,6 +23,7 @@
     const COUNTRIES_URL = 'vendor/naturalearth/countries-50m.geojson';
     const PLACES_URL = 'vendor/naturalearth/places-50m.json';
     const CHUNK = 10000;
+    const CLUSTER_ANIMATE_MAX = 5000;  // meer foto's: groepen zonder zoomanimatie (zie useCluster)
     const NEIGHBOUR_PX = 28;            // foto's binnen zoveel pixels van de aangeklikte horen bij 'deze plek'
     const NEIGHBOUR_MAX = 200;          // zoveel bladert de viewer er hoogstens doorheen
     const MAX_LABELS = 120;
@@ -146,22 +147,7 @@
         const pin = L_.divIcon({ className: 'map-pin-wrap', html: '<span class="map-pin"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
         state.pinIcon = pin;
         state.estimatedIcon = L_.divIcon({ className: 'map-pin-wrap', html: '<span class="map-pin map-pin-estimated"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
-        state.cluster = L_.markerClusterGroup({
-            chunkedLoading: true, chunkInterval: 120, chunkDelay: 30,
-            maxClusterRadius: 56, showCoverageOnHover: false, spiderfyOnMaxZoom: true, zoomToBoundsOnClick: true,
-            iconCreateFunction: cluster => {
-                const n = cluster.getChildCount();
-                const size = n < 10 ? 'sm' : n < 100 ? 'md' : n < 1000 ? 'lg' : 'xl';
-                const dim = { sm: 34, md: 40, lg: 48, xl: 56 }[size];
-                return L_.divIcon({
-                    className: 'map-cluster-wrap',
-                    html: `<span class="map-cluster map-cluster-${size}">${n < 1000 ? n : Math.round(n / 100) / 10 + 'k'}</span>`,
-                    iconSize: [dim, dim],
-                });
-            },
-        });
-        state.cluster.on('click', e => markerClicked(e.layer));
-        map.addLayer(state.cluster);
+        useCluster(true);
         map.getContainer().setAttribute('aria-label', "Kaart met foto's op locatie. Pijltjestoetsen verschuiven, plus en min zoomen, Enter opent een groep of foto.");
 
         map.on('zoomend moveend', () => { updateLabels(); updateHint(); });
@@ -433,6 +419,35 @@
         return p[3] ? `${kind} van ${new Date(p[3] * 1000).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' })}` : kind;
     }
 
+    // De groepen (Leaflet.markercluster). Bij veel punten (meer dan CLUSTER_ANIMATE_MAX) of met
+    // minder beweging (van de Mac, of Beweging in Instellingen: html[data-motion="reduce"])
+    // zonder de zoomanimatie van de groepen: die verschuift elke zichtbare groep apart en gaf
+    // haperingen bij tienduizenden foto's. animate wordt alleen bij het maken gelezen, dus
+    // dan komt er een nieuwe (lege) groep voor in de plaats.
+    function useCluster(animate) {
+        animate = animate && document.documentElement.dataset.motion !== 'reduce'
+            && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        if (state.cluster && state.clusterAnimated === animate) return;
+        if (state.cluster) state.map.removeLayer(state.cluster);
+        state.clusterAnimated = animate;
+        state.cluster = L.markerClusterGroup({
+            chunkedLoading: true, chunkInterval: 120, chunkDelay: 30, animate,
+            maxClusterRadius: 56, showCoverageOnHover: false, spiderfyOnMaxZoom: true, zoomToBoundsOnClick: true,
+            iconCreateFunction: cluster => {
+                const n = cluster.getChildCount();
+                const size = n < 10 ? 'sm' : n < 100 ? 'md' : n < 1000 ? 'lg' : 'xl';
+                const dim = { sm: 34, md: 40, lg: 48, xl: 56 }[size];
+                return L.divIcon({
+                    className: 'map-cluster-wrap',
+                    html: `<span class="map-cluster map-cluster-${size}">${n < 1000 ? n : Math.round(n / 100) / 10 + 'k'}</span>`,
+                    iconSize: [dim, dim],
+                });
+            },
+        });
+        state.cluster.on('click', e => markerClicked(e.layer));
+        state.map.addLayer(state.cluster);
+    }
+
     async function loadPoints({ fit = false } = {}) {
         const token = ++state.loadToken;
         state.loading = true;
@@ -455,6 +470,7 @@
                     state.withoutGps = data.without_gps;
                     state.version = data.version;
                     state.bounds = data.bounds;
+                    useCluster(data.total <= CLUSTER_ANIMATE_MAX);
                     renderCounts();
                     if (!data.total && !state.showInferred) {
                         setProgress('');

@@ -118,7 +118,9 @@ function backupRenderStatus(box, status) {
         createEl('p', { class: 'backup-note',
             text: 'Elke back-up wordt eerst op fouten gecontroleerd en pas daarna bewaard. Niet erin: wat de app '
                 + 'zelf opnieuw maakt (hashes, datums, de mappenlijst van de index, scanresultaten); zo blijft hij klein.' }),
-        createEl('div', { class: 'settings-actions' }, button),
+        createEl('div', { class: 'settings-actions backup-actions' }, button,
+            createEl('span', { id: 'settings-backup-step', class: 'backup-muted backup-step', 'aria-live': 'polite',
+                text: running ? backupStepText(backupJob()) : '' })),
         backupRestoreHelp(status));
     if (backupRefocus) {
         backupRefocus = false;
@@ -126,46 +128,87 @@ function backupRenderStatus(box, status) {
     }
 }
 
+// De lopende back-up-taak (uit het takenpaneel), en wat er naast de knop staat zolang hij loopt
+function backupJob() {
+    return (typeof jobDock !== 'undefined' ? jobDock.jobs : []).find(j => j.type === 'backup' && JOB_ACTIVE.has(j.status)) || null;
+}
+
+function backupStepText(job) {
+    if (!job) return 'Bezig…';
+    const step = (job.message || 'Bezig…').replace(/\.\.\.$/, '…');
+    return job.total ? `Stap ${Math.min(job.processed + 1, job.total)} van ${job.total}: ${step.charAt(0).toLowerCase()}${step.slice(1)}` : step;
+}
+
+jobsOnChange((job) => {
+    if (job.type !== 'backup' || !JOB_ACTIVE.has(job.status)) return;
+    const step = document.getElementById('settings-backup-step');
+    if (step) step.textContent = backupStepText(job);
+});
+
 // Na het opnieuw tekenen de focus terug op 'Nu back-uppen' (het stuk wordt pas getekend als
 // de stand binnen is)
 let backupRefocus = false;
 
+// 'Nu back-uppen' start een achtergrondtaak (een grote database kopiëren, controleren en
+// comprimeren duurt minuten): de stappen staan in het takenpaneel, je kunt hem stoppen en de
+// uitkomst komt ook na een herlaad als melding (zie jobsOnFinished hieronder)
 async function backupNow(e) {
     if (backupBusy) return;
     backupBusy = true;
     const button = e && e.currentTarget;
-    const box = button && button.closest('.backup-status');
     if (button) {
         button.classList.add('is-loading');
         button.setAttribute('aria-busy', 'true');
     }
+    try {
+        await jobsStart('backup', {});
+    } catch (err) {
+        backupBusy = false;
+        toastFetchError('Back-up mislukt', err);
+        backupRedraw(button);
+    }
+}
+
+// Het stuk opnieuw tekenen op dezelfde plek, zonder skelet ertussen: dan springt de pagina niet
+async function backupRedraw(button) {
+    const box = (button && button.closest('.backup-status')) || document.querySelector('.backup-status');
+    const focused = !!button && document.activeElement === button;
     let status = null;
     try {
-        const data = await fetchJSON(`${API_BASE}/api/backup/run`, { method: 'POST' });
-        status = data.status;
-        showToast('Back-up gemaakt', `${formatBytes(data.backup.size)}, gecontroleerd en bewaard.`, 'success');
-    } catch (err) {
-        toastFetchError('Back-up mislukt', err);
-    }
-    backupBusy = false;
-    backupRefocus = !!button && document.activeElement === button;
-    // Op dezelfde plek opnieuw tekenen, zonder skelet ertussen: dan springt de pagina niet
-    try {
-        if (!status) status = await fetchJSON(`${API_BASE}/api/backup/status`);
+        status = await fetchJSON(`${API_BASE}/api/backup/status`);
     } catch (_) {
         status = null;
     }
     if (box && box.isConnected && status) {
+        backupRefocus = focused;
         // De knop blijft op dezelfde plek in beeld (Chromium verschuift anders de pagina als de
         // inhoud vervangen wordt)
-        const before = button.getBoundingClientRect().top;
+        const old = document.getElementById('settings-backup-now');
+        const before = old ? old.getBoundingClientRect().top : null;
         backupRenderStatus(box, status);
         const now = document.getElementById('settings-backup-now');
-        if (now) window.scrollBy(0, now.getBoundingClientRect().top - before);
+        if (now && before !== null) window.scrollBy(0, now.getBoundingClientRect().top - before);
     } else {
         settingsRefreshSection('backups');
     }
 }
+
+// De uitkomst van een back-up (ook een die liep terwijl je op een ander scherm was)
+jobsOnFinished((job) => {
+    if (job.type !== 'backup') return;
+    backupBusy = false;
+    if (job.status === 'done') {
+        const size = job.summary && job.summary.size;
+        showToast('Back-up gemaakt', `${size ? `${formatBytes(size)}, ` : ''}gecontroleerd en bewaard.`, 'success');
+    } else if (job.status === 'failed') {
+        showToast('Back-up mislukt', job.error || 'Onbekende fout', 'error');
+    } else if (job.status === 'paused') {
+        showToast('Back-up gepauzeerd', 'Hervat hem in het takenpaneel; hij begint dan opnieuw.', 'info');
+    } else {
+        showToast('Back-up gestopt', 'Er is niets bewaard; je eerdere back-ups blijven staan.', 'info');
+    }
+    backupRedraw(document.getElementById('settings-backup-now'));
+});
 
 registerSettingsSection({
     id: 'backups',
