@@ -74,6 +74,9 @@ def test_long_lists_contain_their_paint_and_only_the_active_item_is_a_layer():
     # The sliding selection needs a stacking context, but only on the selected item
     assert not re.search(r"(^|\})\s*\.msg-item,\s*\.act-day\s*\{", css)
     assert "\n.act-icon {\n    position" not in css
+    # Rows out of view are skipped entirely (content-visibility), so rows that arrive do not
+    # repaint 5000 others every frame; the selected row is not, its glide leaves its box
+    assert re.search(r"\.msg-list > \.msg-item:not\(\.active\)\s*\{\s*content-visibility:\s*auto;\s*contain-intrinsic-size:\s*auto ", css)
 
 
 def test_chat_motion_shares_its_keys_with_the_shell_group():

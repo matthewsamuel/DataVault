@@ -12855,6 +12855,7 @@ button.otd-settings-icon:hover {
 }
 
 .msg-list {
+    --msg-avatar-size: 40px;
     position: relative;
     flex: 1;
     min-height: 0;
@@ -12905,8 +12906,8 @@ button.otd-settings-icon:hover {
     display: inline-grid;
     place-items: center;
     flex: none;
-    width: 40px;
-    height: 40px;
+    width: var(--msg-avatar-size, 40px);
+    height: var(--msg-avatar-size, 40px);
     border-radius: var(--radius-full);
     background: var(--surface-raised);
     border: 1px solid var(--border-hairline);
@@ -15161,6 +15162,14 @@ html[data-motion="volledig"] .dg-progress .progress:not(.is-indeterminate) .prog
 .msg-list,
 .msg-scroll {
     contain: strict;
+}
+
+/* Gesprekken buiten beeld slaat WebKit helemaal over (geen opmaak, geen tekenwerk): een lijst
+   van 5000 maakt zo nog maar een paar rijen echt, en de rijen die binnenkomen kosten geen
+   beelden meer. Het actieve item niet: zijn selectie in ::before glijdt buiten zijn rand. */
+.msg-list > .msg-item:not(.active) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto calc(var(--msg-avatar-size) + 2 * var(--space-sm) + 2px);
 }
 
 .act-days-panel {

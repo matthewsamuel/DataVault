@@ -51,6 +51,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 ### Beweging: reparaties na de controle
 - Spotify: de golven op de achtergrond staan stil bij Beweging Rustig of Uit, en beginnen of stoppen meteen als je de instelling wijzigt.
 - Een venster of het themamenu dat aan het verdwijnen is, kan de toetsenbordfocus niet meer krijgen: Tab direct na Escape springt er niet meer in en een schermlezer leest het niet meer voor.
+- Berichten: een lange lijst gesprekken bouwt sneller op en de gesprekken stromen binnen zonder te haperen, ook met duizenden.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
