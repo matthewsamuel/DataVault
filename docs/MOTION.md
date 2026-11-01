@@ -285,13 +285,13 @@ so code that calls `switchMainView()` and then works with the new section keeps 
 
 The three groups that build on this foundation:
 
-- **Shell:** top nav, global search and its overlay, Home, Instellingen, Pasha chat, job
+- **Shell:** top nav, global search and its overlay, Home, Instellingen, Herstelcentrum, job
   dock, keyboard overview.
-- **Media:** Bestanden, Tijdlijn, Albums, Kaart, Reeksen (Beste uit reeks), Duplicaten,
+- **Media:** Bestanden, Tijdlijn, Albums, Reeksen (Beste uit reeks), Duplicaten,
   viewer, Keurer, Shows (slideshow and the Elo duel "Welke is mooier?"), Slim zoeken results,
   export.
-- **Data:** Spotify, Herstelcentrum, DataGatherer, Berichten, Activiteit, back-ups, charts,
-  stat tiles and tables.
+- **Data:** Spotify, Kaart, DataGatherer, Berichten, Activiteit, Pasha chat, back-ups,
+  charts, stat tiles and tables (Herstelcentrum is animated by the shell).
 
 ### Shell
 - **Do** let the search overlay rise like a modal and stagger its first results (max 8).
@@ -324,7 +324,7 @@ so a page without it keeps working. Its CSS is the `BEWEGING: SCHIL` block in `s
 | Theme | `themeChanged` | Soft-edged circle (masked view transition) and the icon turns half a turn |
 | Segments | `initSegmented` | A thumb glides between the old and new `.segmented` / `.view-toggle` choice |
 | Shortcut overview | `initShortcutEcho` | The key you press lights up |
-| Pasha | `initChat` | Bubbles rise from their own side, breathing dots, one nod on an answer |
+| Pasha | (none) | Owned by `motion-data.js` (section 13); the shell only gives the typing dots a calm opacity breath in Rustig |
 | Empty and error states | `watchStates` | Icon settles with a halo, an error shakes once; the same state redrawn by polling does not animate again |
 | Skeletons | CSS | A sheen moved by transform, staggered diagonally; Rustig breathes in opacity only |
 | Herstelcentrum | `ShellMotion.keyedFlip` (recoveryRender) | First load staggers in, then keyed FLIP; a changed entry glows once |
@@ -462,3 +462,32 @@ CSS-only pieces in the media section:
 The frame-timing harness has the media transitions in `TRANSITIONS`, and
 `python3 code/tests/ui/motion_perf.py --stress 5000` adds a folder of 5000 photos to the
 throwaway vault and measures opening, scrolling, sorting and the viewer on it.
+
+## 13. Data screens: what is built (`motion-data.js`)
+
+`code/frontend/motion-data.js` (`window.MotionData`) loads after the screens it calls and
+before `motion-shell.js`. Its CSS is the section `BEWEGING: GEGEVENSSCHERMEN (motion-data.js)`
+at the end of `style.css`. The screens call it after they render, behind
+`if (window.MotionData)`.
+
+| Screen | What moves |
+| --- | --- |
+| Spotify | Numbers count up the first time and tick when the year changes; cards stagger in; chart bars grow from the baseline when they scroll into view and morph between years; a thin share bar per top-list row; the Luister-DNA helix spins into view and on hover |
+| Kaart | Clusters split and merge on the token curve and pop in when the map opens; popups rise from the pin; Route per dag draws along its path with a light dot in front, and each place pops when the line reaches it (zoom or pan shows the whole route at once) |
+| DataGatherer | Cards arrive per group, coverage bars grow, a busy source gets an orbiting dot, progress runs on with a sheen, a finished source gets a ring, a burst and a short glow |
+| Berichten | The conversation list staggers in and the selection glides; messages come in from their own side; a found message lights up once; typing in the search only fades |
+| Activiteit | Days stagger in and the selection glides; the timeline line draws down the day and each icon pops as the line reaches it |
+| Pasha | The avatar breathes after contact, tilts while you type, sways while thinking, nods on an answer (droops on an error); bubbles spring in from their own corner; typing dots wave; a streaming answer has a soft cursor; action and confirmation cards unfold, a confirmed action gets a green check, a failed one a small shake |
+
+Reusable helpers on `window.MotionData`: `tick(el, n)`, `swapText(el)`,
+`glideY(from, to, '::before')`, `arrive(els, {root})` (visible items stagger, the rest reveal
+on scroll, capped at 48), `whenVisible(el, fn)` and `celebrate(el)` (rewards only).
+
+Performance lesson: an animation inside a list of thousands of rows that are each their own
+layer (position plus isolation or z-index) costs about 200 ms in WebKit. Put
+`contain: strict` or `contain: content` on the scroller and give a layer only to the active
+row (`.msg-list`, `.msg-scroll`, `.act-days-panel` do this).
+
+The frame-timing harness has these in `DATA_TRANSITIONS`, including a 5000-conversation list.
+The Berichten and Activiteit entries need conversations in the vault (the showcase vault has
+none).

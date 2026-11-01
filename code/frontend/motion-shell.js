@@ -17,7 +17,7 @@
 //   Thema        het pictogram draait een halve slag mee met de cirkel van het nieuwe thema
 //   Segmenten    het gekozen segment van elke .segmented en .view-toggle glijdt naar zijn plek
 //   Sneltoetsen  in het overzicht licht de toets op die je indrukt
-//   Pasha        berichten rijzen op, Pasha knikt als zijn antwoord er is
+//   Pasha        alleen rustige puntjes in Rustig; de rest is van motion-data.js
 //   Leeg, fout   lege en mislukte staten komen vriendelijk binnen (één keer, niet bij elke
 //                peiling opnieuw); de skeletglans loopt via transform
 //
@@ -818,35 +818,7 @@
     }
 
     // ==================== 10. PASHA ====================
-
-    function initChat() {
-        const list = document.getElementById('chat-messages');
-        if (!list) return;
-        const mascot = document.querySelector('#section-home .chat-mascot');
-        const observer = new MutationObserver(records => {
-            if (M.off()) return;
-            const added = [];
-            records.forEach(r => r.addedNodes.forEach(n => {
-                if (n.nodeType === 1 && n.classList.contains('chat-message')) added.push(n);
-            }));
-            added.forEach(msg => {
-                const user = msg.classList.contains('user-message');
-                const d = M.px('--motion-distance-sm', 6);
-                msg.style.transformOrigin = user ? 'bottom right' : 'bottom left';
-                M.animate(msg, [
-                    { opacity: 0, transform: `translate3d(${user ? d : 0}px, ${d * 1.5}px, 0) scale(0.97)` },
-                    { opacity: 1, transform: 'none' },
-                ], { spring: 'smooth', key: 'chat-in' });
-                // Een echt antwoord (geen puntjes): Pasha knikt één keer
-                if (!user && !msg.querySelector('.message-loading') && mascot && inView(mascot)) {
-                    M.animate(mascot, [
-                        { transform: 'none' }, { transform: 'rotate(-8deg) translate3d(0, 2px, 0)', offset: 0.35 }, { transform: 'none' },
-                    ], { spring: 'bouncy', key: 'nod' });
-                }
-            });
-        });
-        observer.observe(list, { childList: true });
-    }
+    // Pasha (bubbels, knikken, luisteren, nadenken) beweegt via motion-data.js, niet hier.
 
     // ==================== 11. LEEG EN FOUT ====================
 
@@ -971,7 +943,6 @@
         watchOverlaysAndMenus();
         initSegmented();
         initShortcutEcho();
-        initChat();
         watchStates();
         initDetails();
     }

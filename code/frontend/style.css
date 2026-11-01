@@ -14242,40 +14242,29 @@ html[data-vt="theme"]::view-transition-new(root) {
     transition-duration: var(--dur-1);
 }
 
-/* ---------- Pasha: puntjes die ademen ---------- */
+/* ---------- Pasha: puntjes in Rustig ----------
+   Pasha zelf (kopje, bubbels, typende puntjes in Volledig) beweegt via motion-data.js; de schil
+   geeft de puntjes in Rustig alleen een rustige ademhaling zonder schalen. */
 
-.message-loading .dot {
-    animation: shell-breathe var(--shell-breathe-period) var(--ease-in-out) infinite both;
+html[data-motion="rustig"] .message-loading .dot {
+    animation: shell-breathe-calm var(--shell-breathe-period) var(--ease-in-out) infinite both;
 }
 
-.message-loading .dot:nth-child(1) {
+html[data-motion="rustig"] .message-loading .dot:nth-child(1) {
     animation-delay: calc(var(--shell-breathe-period) * -0.4);
 }
 
-.message-loading .dot:nth-child(2) {
+html[data-motion="rustig"] .message-loading .dot:nth-child(2) {
     animation-delay: calc(var(--shell-breathe-period) * -0.25);
 }
 
-.message-loading .dot:nth-child(3) {
+html[data-motion="rustig"] .message-loading .dot:nth-child(3) {
     animation-delay: calc(var(--shell-breathe-period) * -0.1);
-}
-
-@keyframes shell-breathe {
-    0%, 70%, 100% { opacity: 0.35; transform: scale(0.7); }
-    35% { opacity: 1; transform: scale(1); }
 }
 
 @keyframes shell-breathe-calm {
     0%, 70%, 100% { opacity: 0.35; }
     35% { opacity: 1; }
-}
-
-html[data-motion="rustig"] .message-loading .dot {
-    animation-name: shell-breathe-calm;
-}
-
-.chat-mascot {
-    transform-origin: 50% 85%;
 }
 
 /* ---------- Leeg, fout, laden ---------- */
