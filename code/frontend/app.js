@@ -3796,7 +3796,7 @@ function renderSpotifyStats(data) {
         // Record Day
         if (insights.record_day) {
             const hoursEl = document.getElementById('stat-record-day-hours');
-            if (hoursEl) hoursEl.replaceChildren(formatNumberNl(insights.record_day.hours, 1),
+            if (hoursEl) hoursEl.replaceChildren(createEl('span', { class: 'stat-number', text: formatNumberNl(insights.record_day.hours, 1) }),
                 createEl('span', { class: 'stat-unit', text: 'uur' }));
             updateText('stat-record-day-date', `Recorddag: ${formatDateNl(insights.record_day.date)}`);
         }
@@ -3939,6 +3939,8 @@ function renderSpotifyStats(data) {
     renderSimpleChart('hourly-chart', data.hourly_activity,
         i => (i % 6 === 0 ? `${i}:00` : ''),
         (i, n) => `${i}:00–${(i + 1) % 24}:00: ${formatNumberNl(n)} nummers`);
+    // Beweging (motion-data.js): tellers, kaarten in ritme, groeiende staafjes, de DNA-helix
+    if (window.MotionData) MotionData.spotifyRendered(data);
 }
 
 // De server noemt luistertypes in het Engels (met een emoji); op het scherm staat Nederlands

@@ -166,6 +166,7 @@ function msgRenderList() {
         items.push(...msgState.convs.map(msgConvItem));
     }
     list.replaceChildren(...items);
+    if (window.MotionData) MotionData.msgList(list);
 }
 
 function msgAvatar(title, sourceId, isGroup) {
@@ -282,6 +283,7 @@ async function msgOpen(convId, { around = null, before = null, focusList = true 
         msgRenderThread();
         const again = pane.querySelector('.msg-scroll');
         if (again) again.scrollTop = again.scrollHeight - keep;
+        if (window.MotionData) MotionData.msgThread(pane, { older: true });
         return;
     }
     msgState.thread = data;
@@ -291,6 +293,7 @@ async function msgOpen(convId, { around = null, before = null, focusList = true 
     // Alleen het gesprek scrolt (scrollIntoView zou ook de pagina verschuiven)
     if (scroller && target) scroller.scrollTop = target.offsetTop - scroller.clientHeight / 2 + target.offsetHeight / 2;
     else if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    if (window.MotionData) MotionData.msgThread(pane, { highlight: !!target });
 }
 
 function msgRenderThread() {
