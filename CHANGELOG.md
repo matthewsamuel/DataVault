@@ -24,8 +24,8 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Keurer: de kaart vliegt weg in de richting van je keuze terwijl de volgende foto er al staat; je hoeft nooit te wachten, ook niet als je snel achter elkaar beslist. Ongedaan maken haalt de foto terug uit de richting waar hij heen ging (en hij is dan ook echt weer de huidige foto). De knop van de toets geeft even mee en de dagbalk groeit mee.
 - Beste uit reeks: de foto's van een reeks waaieren uit vanaf de beste foto en komen daarop tot rust; de ster springt erop. Een afgehandelde reeks gaat zichtbaar weg en de volgende schuift op.
 - Duplicaten: de groepen komen in ritme binnen, na het opruimen schuift de rest op, en het label 'Blijft' springt naar de kopie die je kiest.
-- Tijdlijn en Albums: rijen zetten zich neer terwijl je scrolt en het label met de maand rolt mee.
-- Shows: een collectie is nu een stapeltje foto's dat uitwaaiert als je erover gaat. De diavoorstelling vervaagt rustiger tussen de foto's, de Ken Burns begint telkens op een ander punt, en pauze zet alles stil waar het is (de voortgangslijn loopt daarna verder).
+- Tijdlijn en Albums: rijen zetten zich neer terwijl je scrolt en het label met de maand rolt mee. In de zijbalk van Albums glijdt de groene markering naar het album dat je kiest.
+- Shows: een collectie is nu een stapeltje foto's dat uitwaaiert als je erover gaat. De diavoorstelling vervaagt rustiger tussen de foto's, de Ken Burns begint telkens op een ander punt en drijft er zacht bij weg, als een camera die meebeweegt, en pauze zet alles stil waar het is (de voortgangslijn loopt daarna verder).
 - Exporteren: de selectiebalk komt omhoog en zakt weer weg, het aantal tikt mee, en weggelaten foto's bij 'Beste van een periode' verdwijnen zichtbaar.
 - In Rustig is dit alles een korte vervaging; in Uit staat alles meteen op zijn plek.
 

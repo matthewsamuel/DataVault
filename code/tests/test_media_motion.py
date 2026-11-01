@@ -42,6 +42,7 @@ def test_media_motion_css_uses_tokens_and_stays_still_in_rustig_and_uit():
     start = css.index("BEWEGING: MEDIA")
     section = css[start:]
     assert not re.search(r"\b\d+ms\b", section), "durations come from the motion tokens"
+    assert "cubic-bezier(" not in section, "curves come from the motion tokens"
     # Scroll-linked rows and the hover light only in Volledig
     assert 'html[data-motion="volledig"] .tl-photo-row' in section
     assert 'html:not([data-motion="volledig"]) .mm-light' in section

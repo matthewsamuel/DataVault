@@ -419,6 +419,7 @@ The photo screens share one small layer on top of `window.Motion`, `window.Media
 | `keurerFly(card, decision)` / `keurerArrive(card, from)` | The judged card flies out as a ghost (keep left, bin right, move up) while the next card is already there; an undone photo comes back from where it went | Keurer |
 | `viewerStep(...)` / `viewerSwipe(body, hooks)` | Next and previous: the old photo stays until the new one is decoded, then both move in `--dur-2`. Drag with the mouse or swipe with two fingers | Viewer |
 | `seriesSettle(card)` / `seriesWatch(cards)` | A reeks fans out from its best photo, then the best lifts and its star pops; once per reeks, when it scrolls into view | Beste uit reeks |
+| `slideMarker(fromRect, el, pseudo)` | The marker of a list (its `::before`) glides from the old item to the new one, in any direction (a vertical sidebar), on the snappy spring | Albums sidebar |
 | `rollText`, `nudge`, `pop`, `press` | A label that rolls to its new text, a number that ticks, a small reward, a key press on a button | Tijdlijn month, slideshow title, export count, Keurer stats and buttons, Duplicaten 'Blijft' |
 
 CSS-only pieces in the media section:
@@ -431,7 +432,7 @@ CSS-only pieces in the media section:
   `animation-timeline: view()`, so the browser runs it off the main thread; a row is complete
   as soon as it is fully in view.
 - **Slideshow**: crossfade in `--dur-6 × 1.5`, Ken Burns from a random point (`--kb-x`,
-  `--kb-y`, `--kb-dur`), paused together with the show; progress is a `scaleX` animation.
+  `--kb-y`, `--kb-dur`) with a small drift (`--kb-tx`, `--kb-ty`, at most 2%) on `--ease-in-out`, paused together with the show; progress is a `scaleX` animation.
 - **Shows collections**: a small stack of three photos (`stack` from `/api/shows/stories`)
   that fans out on hover or focus.
 
