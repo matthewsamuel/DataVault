@@ -396,8 +396,10 @@
 
     // Vóór het opnieuw tekenen: hoe ver elke balk nu zichtbaar is, en wat er stond
     function jobDockBefore(dock) {
-        const state = { hidden: !dock || dock.hidden, bars: new Map(), status: new Map(), tiny: null };
+        const state = { hidden: !dock || dock.hidden, bars: new Map(), status: new Map(), tiny: null, rect: null, collapsed: null };
         if (!dock || dock.hidden) return state;
+        state.collapsed = dock.classList.contains('collapsed');
+        state.rect = dock.getBoundingClientRect();
         dock.querySelectorAll('.job-item[data-id]').forEach(item => {
             const id = item.dataset.id;
             const track = item.querySelector('.job-progress');
@@ -424,6 +426,9 @@
         if ((before.hidden && !first) || introLeft > 0) {
             M.animate(dock, [{ opacity: 0, transform: `translate3d(0, ${M.px('--motion-distance-lg', 24)}px, 0) scale(0.97)` }, { opacity: 1, transform: 'none' }],
                 { spring: 'smooth', key: 'dock', delay: Math.max(0, introLeft), fill: 'backwards' });
+        }
+        if (!before.hidden && before.collapsed !== null && before.collapsed !== dock.classList.contains('collapsed')) {
+            dockFold(dock, before.rect);
         }
         const now = performance.now();
         let celebrated = false;
@@ -476,6 +481,31 @@
         // Het getal op het kleine icoon (afgeronde taken) springt als het verandert
         if (tiny && before.tiny !== null && before.tiny !== tiny.textContent) {
             M.animate(tiny, M.presets.pop(), { spring: 'bouncy', key: 'tiny' });
+        }
+    }
+
+    // Uit- en inklappen. Het paneel staat rechtsonder vast. Uitklappen: de kop begint waar hij
+    // ingeklapt stond en rijst op, de lijst rolt zich eronder uit (clip-path). Inklappen: de kop
+    // zakt van waar hij stond naar zijn nieuwe plek. Alleen transform en clip-path, en de inhoud
+    // is meteen klikbaar.
+    function dockFold(dock, from) {
+        if (!from || !M.full()) return;
+        const to = dock.getBoundingClientRect();
+        if (!to.width || !to.height) return;
+        const radius = M.px('--radius-lg', 12);
+        if (to.height > from.height + 1) {
+            const rise = Math.max(0, to.height - from.height);
+            M.animate(dock, [
+                { transform: `translate3d(0, ${rise}px, 0)`, clipPath: `inset(0px 0px ${rise}px 0px round ${radius}px)` },
+                { transform: 'none', clipPath: `inset(0px 0px 0px 0px round ${radius}px)` },
+            ], { spring: 'smooth', key: 'dock-fold' });
+            M.stagger([...dock.children].slice(1), () => M.presets.rise(M.px('--motion-distance-sm', 6)),
+                { spring: 'smooth', delay: M.ms('--stagger-step', 28) * 2, key: 'dock-fold' });
+        } else {
+            const dy = from.top - to.top;
+            if (Math.abs(dy) < 1) return;
+            M.animate(dock, [{ transform: `translate3d(0, ${dy}px, 0)` }, { transform: 'none' }],
+                { spring: 'snappy', key: 'dock-fold' });
         }
     }
 

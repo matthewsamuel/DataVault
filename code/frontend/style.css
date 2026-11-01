@@ -13940,6 +13940,41 @@ html[data-motion="uit"]::view-transition-new(*) {
     transition-duration: var(--dur-1);
 }
 
+/* ---------- Zoekveld bovenaan: het vergrootglas licht op, de toetshint wisselt ---------- */
+
+.nav-search > i {
+    transition: color var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.nav-search:focus-within > i {
+    color: var(--accent-text);
+    transform: scale(1.15);
+}
+
+/* De '/'-hint blijft staan en vervaagt (in plaats van te verdwijnen); de Enter-hint komt op.
+   Smaller dan 1100 px zijn de hints er niet (zie hierboven). */
+@media (min-width: 1101px) {
+    .nav-search .search-input:focus + .search-kbd,
+    .nav-search .search-input:not(:placeholder-shown) + .search-kbd {
+        display: inline-block;
+        opacity: 0;
+        transform: scale(var(--motion-scale-in));
+    }
+}
+
+.nav-search .search-kbd:not(.search-enter) {
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.nav-search.search-elsewhere .search-input:not(:placeholder-shown) ~ .search-enter {
+    animation: shell-kbd-in var(--spring-snappy-dur) var(--spring-snappy) both;
+}
+
+@keyframes shell-kbd-in {
+    from { opacity: 0; transform: translate3d(var(--motion-distance-sm), 0, 0); }
+    to { opacity: 1; transform: none; }
+}
+
 /* ---------- Home: de begroeting letter voor letter uit een masker ---------- */
 
 .hero-mask {
