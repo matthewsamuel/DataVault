@@ -75,18 +75,23 @@ function chatConfirmCard(p) {
             createEl('span', { class: 'chat-confirm-to', text: ` → ${i.to}` }))));
     if (p.more) list.appendChild(createEl('li', { class: 'chat-confirm-more', text: `en nog ${p.more} andere` }));
     const run = createEl('button', { type: 'button', class: 'btn btn-primary btn-sm', text: 'Uitvoeren' });
-    const cancel = createEl('button', { type: 'button', class: 'btn btn-ghost btn-sm', text: 'Annuleren' });
-    const actions = createEl('div', { class: 'chat-confirm-actions' }, run, cancel);
+    const cancel = createEl('button', { type: 'button', class: 'btn btn-secondary btn-sm', text: 'Annuleren' });
+    // Zoals elke bevestiging in de app: Annuleren (secundair) links van de hoofdknop
+    const actions = createEl('div', { class: 'chat-confirm-actions' }, cancel, run);
     const card = createEl('div', { class: 'chat-confirm', role: 'group', 'aria-label': 'Bevestig de actie' },
         createEl('div', { class: 'chat-tool-title' },
             createEl('i', { class: 'fas fa-shield-halved', 'aria-hidden': 'true' }), ` ${p.title}`),
         list,
         createEl('div', { class: 'chat-confirm-note', text: 'Er gebeurt niets voordat je op Uitvoeren klikt. Verplaatsen kun je terugzetten in het Herstelcentrum.' }),
         actions, status);
+    // De uitkomst als inline melding: een fout met waarschuwingsicoon in de foutkleur, anders rustig met een vinkje
     const settle = (text, isError) => {
         actions.remove();
-        status.textContent = text;
-        status.classList.toggle('chat-error-text', !!isError);
+        status.replaceChildren(
+            createEl('i', { class: `fas ${isError ? 'fa-triangle-exclamation' : 'fa-circle-check'}`, 'aria-hidden': 'true' }),
+            createEl('span', { text }));
+        status.classList.toggle('is-error', !!isError);
+        if (isError) status.setAttribute('role', 'alert');
         chatScrollDown();
     };
     const call = (verb) => fetchJSON(`${API_BASE}/api/chat/actions/${encodeURIComponent(p.id)}/${verb}`, { method: 'POST' });

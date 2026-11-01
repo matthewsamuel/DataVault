@@ -48,6 +48,17 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Albums: de aantallen achter jaren, camera's en bestandstypes staan er alleen als ze kloppen; staat er een ander filter aan, dan zie je alleen de namen, zodat een keuze niet onverwacht 0 bestanden geeft.
 - Beste uit reeks: 'nog te doen' telt alleen de foto's die nog vergeleken moeten worden, zodat de getallen optellen; daarna staat er 'reeksen zoeken volgt'. De knop op een reekskaart noemt hetzelfde aantal als het bevestigvenster, inclusief de exacte kopieën die meegaan.
 - Welke is mooier?: Vergelijken telt wat je 'vergeleken' hebt en de Ranglijst telt de foto's 'met een score'; het woord 'beoordeeld' betekende eerst twee dingen.
+- Kaart: op een smal venster heeft de kop dezelfde marge als de andere pagina's.
+- Spotify zonder luistergeschiedenis toont geen nullen en verzonnen luisterprofiel meer, maar één melding met een knop die je naar de Spotify-kaart in DataGatherer brengt.
+- Albums laat tijdens het laden grijze plaatshouders zien in de zijbalk en het raster, in plaats van 'Nog geen albums' met een knop om albums terug te zetten.
+- Shows houdt zijn titel en knoppen tijdens het laden en na een fout; de plaatshouders hebben de vorm van de pagina.
+- Activiteit en Keurer tonen geen lege omrande vakjes meer: zonder dagen krijgt de melding de hele breedte, de cijfers van de Keurer laden met plaatshouders en melden een fout met 'Opnieuw proberen', en 'Kies een map' schuift op een laag venster met open takenpaneel niet meer over de cijfers.
+- DataGatherer: het WhatsApp-venster noemt de app één keer in de titel, en lange paden staan in een eigen lettertype dat netjes afbreekt.
+- 'Welke is mooier?': in de Ranglijst staat bij een foto zonder duels 'nog niet vergeleken' met het aantal stemmen in de slideshow.
+- Pasha's bevestigingskaart: Annuleren is een gewone knop naast Uitvoeren, en een verlopen of mislukte actie staat er als duidelijke foutmelding met icoon.
+- Berichten: de datum bij het gekozen gesprek is ook in het donkere thema goed leesbaar.
+- DataGatherer: de Spotify-kaart zegt tot wanneer je export gaat en dat hij nog niet is ingelezen, in plaats van 'Nog geen gegevens'; een kaart zonder gegevens toont geen lege grijze balk meer.
+- Kleine afwerking: een leeg archief in Albums heeft een knop 'Naar Bestanden', zoeken zonder treffers in Berichten heeft 'Zoekterm wissen', 'Bronnen beheren' bij Shows heeft een voettekst met Sluiten, en het opslagvenster zegt bovenaan 'van het totaal'.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.

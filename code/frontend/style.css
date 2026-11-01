@@ -1394,6 +1394,13 @@ textarea.input {
     color: var(--text-primary);
 }
 
+/* Een korte uitleg links in de voettekst, de knoppen rechts */
+.modal-footer-note {
+    margin-right: auto;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+}
+
 /* Vensters zoals het sneltoetsenoverzicht (ui.js) */
 .dv-overlay {
     position: fixed;
@@ -5086,8 +5093,17 @@ a.breadcrumb-item:hover {
     font-size: var(--fs-sm);
 }
 
-.spotify-error[hidden] {
+.spotify-error[hidden],
+.spotify-empty[hidden],
+#section-spotify .year-selector[hidden] {
     display: none;
+}
+
+/* Nog geen luistergeschiedenis: de gedeelde lege staat, op de breedte van de inhoud */
+.spotify-empty {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: var(--space-3xl) 0;
 }
 
 .spotify-error p {
@@ -5886,6 +5902,24 @@ a.breadcrumb-item:hover {
     font-size: var(--fs-md);
     color: var(--on-media-muted);
     margin-bottom: var(--space-sm);
+}
+
+/* Laden: dezelfde vorm als de uitgelichte show en de collecties eronder */
+.shows-skeleton-hero {
+    height: clamp(300px, 46vh, 440px);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-2xl);
+}
+
+.shows-skeleton-title {
+    width: 120px;
+    height: 16px;
+    margin-bottom: var(--space-lg);
+}
+
+.show-card-skeleton {
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius-lg);
 }
 
 /* Collecties */
@@ -7731,6 +7765,33 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
+/* Plaatshouders terwijl de cijfers laden (zelfde maat als een echt cijfer) */
+.keurer-stat-skeleton {
+    row-gap: var(--space-xs);
+}
+
+.keurer-stat-skeleton .skeleton-line {
+    width: 64px;
+}
+
+.keurer-stat-skeleton .skeleton-line-short {
+    width: 40px;
+    height: 8px;
+}
+
+.keurer-stats-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    margin: 0;
+    padding: 0 var(--space-md);
+    color: var(--danger-text);
+    font-size: var(--fs-sm);
+    text-align: center;
+}
+
 .keurer-stat-divider {
     width: 1px;
     height: 32px;
@@ -7824,6 +7885,12 @@ button.otd-settings-icon:hover {
     flex: 1 1 0;
     min-height: 220px;
     position: relative;
+}
+
+/* Een melding (kies een map, klaar, mislukt) krimpt niet onder zijn eigen hoogte: met een open
+   takenpaneel op een laag venster schoof hij anders over de cijfers en de toetsen heen */
+.keurer-card-area:has(> .keurer-state-card) {
+    min-height: auto;
 }
 
 /* Lege, klare of mislukte stand */
@@ -9902,6 +9969,22 @@ button.otd-settings-icon:hover {
     color: var(--text-tertiary);
 }
 
+/* Zijbalk tijdens het laden: rijen van dezelfde hoogte als een album */
+.albums-side-skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    height: var(--control-h);
+    padding: 0 var(--space-sm);
+}
+
+.albums-side-skeleton-icon {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--radius-xs);
+}
+
 .albums-side-note {
     margin: 0;
     padding: var(--space-xs) var(--space-sm);
@@ -10955,6 +11038,17 @@ button.otd-settings-icon:hover {
     color: var(--text-primary);
     font-size: var(--fs-xs);
     word-break: break-all;
+}
+
+/* Een pad midden in een zin: mono en afbreekbaar op elke plek, zodat de regel niet midden in een woord knapt */
+.dg-inline-path {
+    padding: 0 var(--space-xs);
+    border-radius: var(--radius-xs);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    overflow-wrap: anywhere;
 }
 
 .dg-copy-row {
@@ -12593,7 +12687,7 @@ button.otd-settings-icon:hover {
 
 @media (max-width: 1100px) {
     .map-page {
-        padding: var(--space-lg) var(--space-xl);
+        padding: var(--space-lg) var(--page-gutter);
     }
 }
 
@@ -12905,6 +12999,11 @@ button.otd-settings-icon:hover {
     margin-top: 2px;
     color: var(--text-tertiary);
     font-size: var(--fs-2xs);
+}
+
+/* Op de groene achtergrond van het gekozen gesprek haalt tertiair in donker geen AA meer */
+.msg-item.active .msg-item-date {
+    color: var(--text-secondary);
 }
 
 .msg-thread > .empty-state {
@@ -13256,9 +13355,22 @@ button.otd-settings-icon:hover {
 }
 
 .chat-confirm-status {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
     font-size: var(--fs-sm);
     line-height: 1.5;
     color: var(--text-secondary);
+}
+
+.chat-confirm-status > i {
+    flex: none;
+    color: var(--accent-text);
+}
+
+.chat-confirm-status.is-error,
+.chat-confirm-status.is-error > i {
+    color: var(--danger-text);
 }
 
 .chat-confirm-status:empty {

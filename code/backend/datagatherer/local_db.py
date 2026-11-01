@@ -174,6 +174,7 @@ def access(config, source: str, app_name: str) -> Optional[Dict]:
             "text": f"DataVault vindt de database van {app_name} niet op {live_path(source)}. Staat de app op deze Mac "
                     "en heb je hem een keer geopend? Kopieerde de hulp hem, klik dan op Opnieuw controleren.",
             "settings_path": None, "settings_url": None, "command": helper_command(config, source),
+            "path": str(live_path(source)),   # the card and the window set it apart in mono
         }
     return {
         "code": "denied",

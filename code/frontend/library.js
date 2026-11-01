@@ -258,6 +258,13 @@
                 if (currentMainView() === 'albums' && state.mode === 'browse' && state.total) layout(true);
             }, 150));
             buildStaticControls();
+            // De keuzelijsten (Altijd, Elke maand, ...) staan er meteen, ook terwijl de rest nog laadt
+            renderFilters();
+        }
+        // De eerste keer: plaatshouders in zijbalk en raster tot de albums er zijn (geen valse 'Nog geen albums')
+        if (!state.albumsLoaded && state.mode === 'browse') {
+            $('albums-state').replaceChildren();
+            $('albums-loading').hidden = false;
         }
         renderSidebar();
         await loadAlbums();
@@ -397,6 +404,14 @@
         if (target) target.focus();
     }
 
+    // Regels in de vorm van een album (icoon, naam, aantal) zolang de lijst laadt
+    function sideSkeleton() {
+        return createEl('div', { class: 'albums-side-skeleton', role: 'status', 'aria-label': 'Albums laden…' },
+            ...[72, 56, 64, 48, 60].map(width => createEl('div', { class: 'albums-side-skeleton-row', 'aria-hidden': 'true' },
+                createEl('span', { class: 'skeleton albums-side-skeleton-icon' }),
+                createEl('span', { class: 'skeleton skeleton-line', style: `width: ${width}%` }))));
+    }
+
     function drawSidebar(library, list) {
         const browsing = state.mode === 'browse';
         library.replaceChildren(
@@ -411,6 +426,10 @@
                 onClick: () => albumsOpenOnThisDay(),
                 title: 'Foto\'s en video\'s van vandaag in eerdere jaren',
             }));
+        if (!state.albumsLoaded && !state.albumsError) {
+            list.replaceChildren(sideSkeleton());
+            return;
+        }
         if (state.albumsError) {
             const gone = state.albumsError.code === 'vault_unavailable';
             list.replaceChildren(createEl('p', { class: 'albums-side-note', text: gone ? 'Archief niet bereikbaar.' : 'Albums laden mislukt.' }),
@@ -996,6 +1015,7 @@
             box.replaceChildren(emptyState({
                 icon: 'fa-images', title: 'Het archief is nog leeg',
                 text: 'Zodra er foto\'s, video\'s of audio in het archief staan, zie je ze hier.',
+                action: { label: 'Naar Bestanden', primary: true, onClick: () => switchMainView('viewer') },
             }));
         }
     }

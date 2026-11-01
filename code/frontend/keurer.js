@@ -61,13 +61,38 @@ function keurerVaultReturned() {
 
 // ==================== STATISTIEKEN ====================
 
+let keurerStatsLoaded = false;
+
 async function keurerLoadStats() {
+    // Nog nooit cijfers gehad: plaatshouders in de vorm van de drie cijfers, geen lege balk
+    if (!keurerStatsLoaded) keurerRenderStatsPlaceholder();
     try {
         keurerStats = await fetchJSON(`${API_BASE}/api/keurer/stats`);
+        keurerStatsLoaded = true;
         keurerRenderStats();
     } catch (e) {
         console.warn('Keurer stats ophalen mislukt:', e);
+        if (!keurerStatsLoaded) keurerRenderStatsPlaceholder(e);
     }
+}
+
+// Laden (zonder fout) of mislukt (met fout): de balk is nooit een lege, omrande strook
+function keurerRenderStatsPlaceholder(error) {
+    const el = document.getElementById('keurer-stats-bar');
+    if (!el) return;
+    if (!error) {
+        el.replaceChildren(...[0, 1, 2].map(() => createEl('div', { class: 'keurer-stat keurer-stat-skeleton', 'aria-hidden': 'true' },
+            createEl('span', { class: 'skeleton keurer-stat-icon' }),
+            createEl('span', { class: 'skeleton skeleton-line' }),
+            createEl('span', { class: 'skeleton skeleton-line skeleton-line-short' }))));
+        el.setAttribute('aria-busy', 'true');
+        return;
+    }
+    el.removeAttribute('aria-busy');
+    el.replaceChildren(createEl('p', { class: 'keurer-stats-error', role: 'alert' },
+        createEl('i', { class: 'fas fa-triangle-exclamation', 'aria-hidden': 'true' }),
+        createEl('span', { text: `Je cijfers konden niet geladen worden: ${(error && error.message) || 'onbekende fout'}` }),
+        createEl('button', { type: 'button', class: 'btn btn-secondary btn-sm', text: 'Opnieuw proberen', onClick: () => keurerLoadStats() })));
 }
 
 // Statistieken altijd van de server overnemen (na beslissing of undo)
@@ -113,6 +138,7 @@ function keurerUpdateRemaining() {
 function keurerRenderStats() {
     const el = document.getElementById('keurer-stats-bar');
     if (!el) return;
+    el.removeAttribute('aria-busy');
 
     const streakIcon = keurerStats.streak > 0 ? 'fa-fire' : 'fa-snowflake';
     const todayPct = Math.min(100, (keurerStats.today / keurerStats.goal) * 100);

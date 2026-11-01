@@ -115,6 +115,13 @@ def forget_existing_cache() -> None:
         _existing_cache.clear()
 
 
+def _unread_until(connector: Connector, gctx: GatherContext) -> Optional[float]:
+    try:
+        return connector.unread_until(gctx)
+    except Exception:  # a hint on the card only: never let it break the page
+        return None
+
+
 def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) -> Dict[str, Any]:
     gctx = GatherContext(config, db, connector)
     st = state.get_state(db, connector.id)
@@ -292,6 +299,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         "tone": tone,
         "data_from": cov.first,
         "data_until": cov.last,
+        "unread_until": None if cov.records else _unread_until(connector, gctx),
         "gap_days": gap_days,
         "stale_days": connector.stale_days,
         "records": cov.records,

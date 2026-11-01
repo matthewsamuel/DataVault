@@ -93,6 +93,28 @@ function dgRender() {
             createEl('div', { class: 'dg-grid' }, ...sources.map(dgCard)));
     }));
     dgRestoreFocus(focused);
+    dgRevealSource();
+}
+
+// Vanaf een ander scherm (bijv. de lege Spotify-pagina) naar de kaart van één bron: DataGatherer
+// opent, de kaart schuift in beeld en de hoofdknop krijgt de focus
+function dgShowSource(id) {
+    dgState.showSource = id;
+    if (dgState.filter !== 'all') { dgState.filter = 'all'; if (dgState.data) dgRender(); }
+    switchMainView('datagatherer');
+    if (dgState.data) dgRevealSource();
+}
+
+function dgRevealSource() {
+    const id = dgState.showSource;
+    if (!id) return;
+    const card = document.querySelector(`.dg-card[data-source="${CSS.escape(id)}"]`);
+    if (!card) return;
+    dgState.showSource = null;
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    card.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+    const primary = card.querySelector('.dg-primary');
+    if (primary) primary.focus({ preventScroll: true });
 }
 
 // Welke knop op de pagina de focus heeft, als sleutel die na opnieuw tekenen dezelfde knop vindt
@@ -191,7 +213,7 @@ function dgCard(src) {
                     status),
                 createEl('p', { class: 'dg-card-desc', text: src.description }))),
         dgDataBlock(src),
-        createEl('p', { class: 'dg-next', text: src.next_step }),
+        createEl('p', { class: 'dg-next' }, ...dgTextWithPath(src.next_step, src.access && src.access.path)),
         src.last_error ? dgNote({ tone: 'danger', text: `Laatste keer bijwerken mislukt (${dgTime(src.last_sync_at)}): ${src.last_error}` }) : null,
         ...src.notes.map(dgNote),
         job ? dgProgress(job) : null,
@@ -199,6 +221,13 @@ function dgCard(src) {
         dgHelpPanel(src),
         dgFooter(src)]);
     return card;
+}
+
+// Een tekst met een pad erin: het pad als technische waarde (mono, mag overal afbreken)
+function dgTextWithPath(text, path) {
+    const at = path ? String(text).indexOf(path) : -1;
+    if (at < 0) return [String(text)];
+    return [text.slice(0, at), createEl('code', { class: 'dg-inline-path', text: path }), text.slice(at + path.length)];
 }
 
 function dgBadgeClass(tone) {
@@ -218,6 +247,11 @@ function dgDataBlock(src) {
                 text: src.gap_days === 0 ? ' · vandaag' : ` · ${dgDays(src.gap_days)} geleden`,
             }));
         }
+    } else if (src.unread_until) {
+        // Elders in de app al te zien (het Spotify-scherm leest de export zelf), maar nog niet ingelezen
+        line.append(createEl('span', { class: 'dg-until-label', text: 'Gegevens t/m ' }),
+            createEl('span', { class: 'mono dg-until-date', text: dgDate(src.unread_until) }),
+            createEl('span', { class: 'dg-gap', text: ' · nog niet ingelezen' }));
     } else {
         line.append(createEl('span', { class: 'dg-until-label', text: src.raw.count
             ? `${formatNumberNl(src.raw.count)} ${src.raw.count === 1 ? 'export' : 'exports'} in het archief`
@@ -234,11 +268,8 @@ function dgCoverageBar(src) {
     const cov = src.coverage || {};
     const track = createEl('div', { class: 'dg-coverage', role: 'img' });
     const segments = cov.segments || [];
-    if (!cov.first || !segments.length) {
-        track.classList.add('is-empty');
-        track.setAttribute('aria-label', 'Nog geen gegevens');
-        return createEl('div', { class: 'dg-coverage-wrap' }, track);
-    }
+    // Zonder periode geen lege grijze balk (die leek op een vastgelopen lader): de regel erboven zegt het al
+    if (!cov.first || !segments.length) return null;
     const start = cov.first;
     const end = Math.max(Date.now() / 1000, cov.last || 0);
     const span = Math.max(1, end - start);
@@ -634,7 +665,7 @@ async function dgOpenAccess(id) {
     const src = dgSource(id);
     const access = src && src.access;
     if (!access) return dgDoAction(src, 'sync');
-    const body = [createEl('p', { class: 'dg-modal-text', text: access.text })];
+    const body = [createEl('p', { class: 'dg-modal-text' }, ...dgTextWithPath(access.text, access.path))];
     if (access.settings_path) {
         body.push(createEl('h3', { class: 'dg-modal-section', text: 'Waar in macOS' }),
             createEl('p', { class: 'dg-access-path' },
@@ -683,7 +714,9 @@ async function dgOpenAccess(id) {
     footer.push(createEl('span', { class: 'dg-actions-spacer' }),
         createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Sluiten', onClick: () => dgCloseModal('dg-access') }),
         check);
-    dgModal('dg-access', `${access.title}: ${src.name}`, 'fa-lock-open', body, footer, true);
+    // 'WhatsApp voor Mac niet gevonden op deze Mac' noemt de app al; 'Toegang nodig' nog niet
+    const title = access.code === 'missing' || access.title.includes(src.name) ? access.title : `${access.title}: ${src.name}`;
+    dgModal('dg-access', title, 'fa-lock-open', body, footer, true);
 }
 
 // ---------- In Downloads zoeken ----------

@@ -310,6 +310,17 @@ function eloRenderEmpty(reason) {
     eloSetBody(state);
 }
 
+// Eén woordkeus overal: 'vergeleken' = duels hier, 'stem' = een stem in de slideshow. Beide
+// bewegen de score; een foto met alleen stemmen heeft dus wel een score, maar is niet vergeleken.
+function eloVotesText(votes) {
+    return votes === 1 ? '1 stem in de slideshow' : `${formatNumberNl(votes)} stemmen in de slideshow`;
+}
+
+function eloJudgedText(games, votes) {
+    if (games) return games === 1 ? '1 vergelijking' : `${formatNumberNl(games)} vergelijkingen`;
+    return votes ? `nog niet vergeleken, ${eloVotesText(votes)}` : 'nog niet vergeleken';
+}
+
 function eloChoice(photo, side) {
     const keys = side === 0 ? ['←', '1'] : ['→', '2'];
     const img = createEl('img', { class: 'elo-img', alt: photo.name, src: vaultFileUrl('file', photo.path), draggable: 'false' });
@@ -318,7 +329,7 @@ function eloChoice(photo, side) {
         if (!img.dataset.fallback) { img.dataset.fallback = '1'; img.src = vaultFileUrl('thumb', photo.path); }
     }, { once: false });
     img.addEventListener('load', () => img.classList.add('is-loaded'));
-    const games = photo.games === 1 ? '1 vergelijking' : `${formatNumberNl(photo.games)} vergelijkingen`;
+    const games = eloJudgedText(photo.games, photo.votes);
     return createEl('button', {
         type: 'button', class: 'elo-choice', dataset: { side: String(side) },
         'aria-label': `${side === 0 ? 'Links' : 'Rechts'} is mooier: ${photo.name}`,
@@ -353,6 +364,7 @@ function eloUpdateProgress() {
     if (elo.round) parts.push(`${formatNumberNl(elo.round)} vergeleken in deze ronde`);
     if (elo.stats) {
         const photos = elo.stats.photos === 1 ? 'foto' : 'foto\'s';
+        // 'vergeleken' = in een duel geweest; stemmen in de slideshow tellen hier niet mee (de ranglijst zegt 'met een score')
         parts.push(`${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} vergeleken`);
     }
     // Na Terugdraaien zegt de regel het zelf (een melding rechtsboven zou over de foto vallen)
@@ -513,8 +525,8 @@ function eloRenderBoard(data) {
     }
     const rows = data.items.map(item => {
         const thumb = createEl('img', { class: 'elo-board-img', src: vaultFileUrl('thumb', item.path), alt: '', loading: 'lazy' });
-        const won = item.games ? `${formatNumberNl(item.wins)} van ${formatNumberNl(item.games)} gewonnen` : 'Nog niet vergeleken';
-        const votes = item.votes ? ` · ${item.votes === 1 ? '1 stem' : `${formatNumberNl(item.votes)} stemmen`}` : '';
+        const won = item.games ? `${formatNumberNl(item.wins)} van ${formatNumberNl(item.games)} gewonnen` : eloJudgedText(0, item.votes);
+        const votes = item.games && item.votes ? ` · ${eloVotesText(item.votes)}` : '';
         return createEl('li', { class: `elo-board-row${item.rank <= 3 ? ' is-top' : ''}` },
             createEl('span', { class: 'elo-rank tabular', text: String(item.rank) }),
             createEl('span', { class: 'elo-board-thumb' }, thumb),
