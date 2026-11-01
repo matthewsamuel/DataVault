@@ -48,6 +48,9 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - **Pasha** leeft: hij ademt rustig na elk contact, houdt zijn kopje schuin als je typt, wiegt zachtjes terwijl hij nadenkt en knikt als zijn antwoord er is (of laat bij een fout even zijn kopje hangen). Berichten springen in vanuit hun eigen hoek, de drie puntjes golven, een antwoord dat binnenkomt heeft een zachte cursor, actiekaarten vouwen zich in ritme open en een uitgevoerde actie krijgt een groen vinkje.
 - Ook lange lijsten blijven vloeiend, zelfs met duizenden gesprekken. Alles volgt de instelling **Beweging** (Volledig, Rustig of Uit).
 
+### Beweging: reparaties na de controle
+- Spotify: de golven op de achtergrond staan stil bij Beweging Rustig of Uit, en beginnen of stoppen meteen als je de instelling wijzigt.
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.

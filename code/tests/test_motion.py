@@ -58,3 +58,11 @@ def test_motion_js_loads_first_and_knows_the_three_modes():
     for mode in ("volledig", "rustig", "uit"):
         assert f"'{mode}'" in js
     assert "prefers-reduced-motion" in js and "startViewTransition" in js
+
+
+def test_the_spotify_waves_only_move_in_volledig():
+    """The wave loop asks Motion (Rustig and Uit stand still) and follows a change live."""
+    js = (FRONTEND / "wave-background.js").read_text(encoding="utf-8")
+    should = js[js.index("shouldAnimate() {"):js.index("updateRunning() {")]
+    assert "Motion.full()" in should
+    assert "Motion.onChange(this.updateRunning)" in js and "this.offMotion()" in js
