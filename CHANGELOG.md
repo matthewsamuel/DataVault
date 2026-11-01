@@ -26,6 +26,19 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Lege en mislukte staten komen vriendelijk binnen en skeletten glanzen rustig. Instellingen en het Herstelcentrum komen in ritme binnen; in het Herstelcentrum glijden de acties naar hun nieuwe plek en licht een veranderde actie even op.
 - Rustig en Uit (Instellingen > Beweging) gelden ook hier. Niets houdt een klik of toets tegen.
 
+### Beweging: foto's en media
+- Een map, album, zoekresultaat of reeks komt binnen als een golf vanaf linksboven: alleen wat in beeld staat beweegt, de rest komt rij voor rij binnen zodra je ernaartoe scrolt. Ook mappen met duizenden foto's blijven vloeiend.
+- Fototegels komen bij hover een tikje omhoog met een zacht licht dat de muis volgt. Een gekozen foto krijgt zijn groene ring en het vinkje springt erin.
+- Sorteren, filteren tijdens het typen of een foto weghalen: de tegels glijden naar hun nieuwe plek en wat weggaat verdwijnt zichtbaar. Raster en lijst vloeien in elkaar over.
+- De viewer groeit nu ook vanuit de Tijdlijn, Albums en Slim zoeken uit de miniatuur. Volgende en vorige schuiven kort opzij (de pijltjes blijven meteen reageren), en je kunt met de muis of met twee vingers op het trackpad naar de volgende foto vegen.
+- Keurer: de kaart vliegt weg in de richting van je keuze terwijl de volgende foto er al staat; je hoeft nooit te wachten, ook niet als je snel achter elkaar beslist. Ongedaan maken haalt de foto terug uit de richting waar hij heen ging (en hij is dan ook echt weer de huidige foto). De knop van de toets geeft even mee en de dagbalk groeit mee.
+- Beste uit reeks: de foto's van een reeks waaieren uit vanaf de beste foto en komen daarop tot rust; de ster springt erop. Een afgehandelde reeks gaat zichtbaar weg en de volgende schuift op.
+- Duplicaten: de groepen komen in ritme binnen, na het opruimen schuift de rest op, en het label 'Blijft' springt naar de kopie die je kiest.
+- Tijdlijn en Albums: rijen zetten zich neer terwijl je scrolt en het label met de maand rolt mee. In de zijbalk van Albums glijdt de groene markering naar het album dat je kiest.
+- Shows: een collectie is nu een stapeltje foto's dat uitwaaiert als je erover gaat. De diavoorstelling vervaagt rustiger tussen de foto's, de Ken Burns begint telkens op een ander punt en drijft er zacht bij weg, als een camera die meebeweegt, en pauze zet alles stil waar het is (de voortgangslijn loopt daarna verder).
+- Exporteren: de selectiebalk komt omhoog en zakt weer weg, het aantal tikt mee, en weggelaten foto's bij 'Beste van een periode' verdwijnen zichtbaar.
+- In Rustig is dit alles een korte vervaging; in Uit staat alles meteen op zijn plek.
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.

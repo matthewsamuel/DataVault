@@ -292,7 +292,7 @@ function showScanResult(data, finishedAt) {
     fillPreferFolderOptions();
     document.getElementById('filter-bar').style.display = dupState.groups.length ? 'flex' : 'none';
     document.getElementById('dup-legend').style.display = dupState.groups.length ? 'block' : 'none';
-    filterDuplicates('all');
+    filterDuplicates('all', 'enter');
 }
 
 // ==================== WHICH COPY STAYS ====================
@@ -418,13 +418,22 @@ function resetOverrides() {
 
 // ==================== FILTER AND PROGRESSIVE RENDERING ====================
 
-function filterDuplicates(filter) {
+// motion: 'enter' (nieuwe scan: de groepen komen als een golf binnen) of 'flip' (standaard:
+// een ander filter of een opruimactie; wat blijft schuift naar zijn plek, wat weg is gaat zichtbaar)
+function filterDuplicates(filter, motion = 'flip') {
     dupState.filter = filter;
     document.querySelectorAll('#dup-filters .filter-chip').forEach(chip => {
         chip.classList.toggle('active', chip.dataset.filter === filter);
     });
     dupState.visible = filter === 'all' ? dupState.groups : dupState.groups.filter(g => g.type === filter);
-    renderDuplicates();
+    const grid = document.getElementById('duplicates-grid');
+    if (motion === 'flip') {
+        MediaMotion.flipByKey(grid.querySelectorAll('.dup-group'), el => el.dataset.id, renderDuplicates,
+            { after: () => grid.querySelectorAll('.dup-group') });
+    } else {
+        renderDuplicates();
+        MediaMotion.cascade(grid.querySelectorAll('.dup-group'), { revealRest: true, step: Motion.ms('--stagger-step', 28) * 1.5 });
+    }
 }
 
 function renderDuplicates() {
@@ -447,13 +456,16 @@ function renderDuplicates() {
 function renderMoreGroups() {
     const grid = document.getElementById('duplicates-grid');
     const end = Math.min(dupState.rendered + DUP_PAGE_SIZE, dupState.visible.length);
+    const cards = [];
     for (let i = dupState.rendered; i < end; i++) {
         const group = dupState.visible[i];
         const card = createGroupCard(group);
         dupState.cards.set(group.id, card);
         grid.appendChild(card);
+        cards.push(card);
     }
     dupState.rendered = end;
+    return cards;
 }
 
 function observeSentinel() {
@@ -465,7 +477,7 @@ function observeSentinel() {
     }
     dupObserver = new IntersectionObserver(entries => {
         if (entries.some(e => e.isIntersecting) && dupState.rendered < dupState.visible.length) {
-            renderMoreGroups();
+            MediaMotion.revealTiles(renderMoreGroups(), { root: document.getElementById('duplicates-container') });
             // Blijft de sentinel in beeld (groot scherm), dan meteen nog een stuk
             dupObserver.unobserve(sentinel);
             dupObserver.observe(sentinel);
@@ -589,6 +601,9 @@ function createGroupCard(group) {
 
 function updateGroupCard(card, group) {
     const keep = keeperIndex(group);
+    // Een andere kopie blijft: het label 'Blijft' springt naar zijn nieuwe rij
+    const changedKeep = card._keep !== undefined && card._keep !== keep;
+    card._keep = keep;
     card.querySelectorAll('.dup-copy').forEach(row => {
         const index = Number(row.dataset.index);
         const copy = group.copies[index];
@@ -613,6 +628,10 @@ function updateGroupCard(card, group) {
     ] : []));
     const moves = group.copies.length - 1;
     card.querySelector('.dup-group-clean').textContent = `Ruim op (${moves})`;
+    if (changedKeep) {
+        const row = card.querySelector(`.dup-copy[data-index="${keep}"]`);
+        if (row) MediaMotion.pop(row.querySelector('.dup-copy-badge'), { from: 0.7, fade: false });
+    }
 }
 
 // ==================== SIDE-BY-SIDE COMPARISON ====================

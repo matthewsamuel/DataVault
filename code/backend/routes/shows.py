@@ -158,6 +158,7 @@ def get_stories() -> Dict[str, Any]:
     all_paths: List[str] = []
     order: List[str] = []                  # folders in walk order (parents before children)
     preview: Dict[str, str] = {}
+    stack: Dict[str, List[str]] = {}       # a few more of a folder's own files: its cover stack
     seen: Dict[str, int] = {}              # media counted per folder for the reservoir
     own_media: set = set()                 # folders with photos or videos of their own
 
@@ -175,6 +176,8 @@ def get_stories() -> Dict[str, Any]:
         if folder != root:
             own_media.add(folder)
             preview[folder] = random.choice(media)
+            others = [path for path in media if path != preview[folder]]
+            stack[folder] = random.sample(others, min(2, len(others)))
         # Ancestors without media of their own take a random file from below them
         ancestor = os.path.dirname(folder)
         while len(ancestor) > len(root) and ancestor.startswith(root + os.sep):
@@ -190,6 +193,8 @@ def get_stories() -> Dict[str, Any]:
             "title": Path(folder).name,
             "path": folder,
             "preview": {"path": preview[folder], "name": Path(preview[folder]).name},
+            # Up to two more photos for the cover stack that fans out on hover (own files only)
+            "stack": [{"path": path, "name": Path(path).name} for path in stack.get(folder, [])],
             "type": "folder_show",
         }
         for folder in sorted(order, key=str.lower) if folder in preview

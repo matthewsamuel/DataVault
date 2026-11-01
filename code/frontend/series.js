@@ -423,6 +423,8 @@ function seriesRender() {
     }
     const cards = seriesState.items.map(series => seriesCard(series));
     list.replaceChildren(...cards);
+    // Elke reeks waaiert één keer uit en komt tot rust op de beste foto (zodra hij in beeld is)
+    MediaMotion.seriesWatch(cards);
     if (seriesState.nextOffset !== null) {
         const more = createEl('button', {
             class: 'btn btn-secondary', id: 'btn-series-more', text: 'Meer reeksen laden',
@@ -818,7 +820,10 @@ function seriesDone(series, gone) {
     }
     const next = seriesState.items[index] || seriesState.items[index - 1];
     if (next) seriesState.cursor = { key: next.key, id: next.best };
-    seriesRender();
+    // De afgehandelde reeks gaat zichtbaar weg en de reeksen eronder schuiven op
+    const list = document.getElementById('series-list');
+    MediaMotion.flipByKey(list.querySelectorAll('.series-card'), el => el.dataset.key, seriesRender,
+        { after: () => list.querySelectorAll('.series-card'), enter: false });
     if (seriesState.items.length < 5 && seriesState.nextOffset !== null && !seriesState.loading) seriesLoad(false);
     if (hadFocus) seriesFocusCursor();
 }
