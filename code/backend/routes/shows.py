@@ -4,12 +4,16 @@ from typing import List, Dict, Any, Optional, Tuple
 import heapq
 import os
 import random
+import sqlite3
 import stat
 import threading
 import time
-from backend import elo, media_index
+from backend import elo, media_index, recovery
 from backend.config import Config, is_photo, is_video
-from backend.paths import resolve_in_vault, vault_folder_or_none, walk_archive
+from backend.file_ops import (
+    move_no_overwrite, is_inside, ARCHIVE_LOCK, FileOperationError, CrossDeviceError, DestinationFolderError, ProtectedPathError,
+)
+from backend.paths import is_in_vault, resolve_in_vault, vault_folder_or_none, walk_archive
 
 router = APIRouter()
 
@@ -684,6 +688,50 @@ def compare_skip(payload: Dict[str, Any]) -> Dict[str, Any]:
     sc = _scope(payload.get("folder"), payload.get("scope"))
     elo.record_skip(db, str(a), str(b), sc.key)
     return {"status": "ok"}
+
+
+recovery.register_kind("elo_trash", "Uit 'Welke is mooier?'")
+
+
+@router.post("/compare/trash")
+def compare_trash(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    'Naar de prullenmand' in 'Welke is mooier?': { path }. The photo moves to the trash
+    folder (TRASH), never deleted, as one action in the recovery center (Herstelcentrum),
+    which puts it back. Its score and comparisons follow it there and back
+    (media_index.record_move). Answers { action_id, trash_path }.
+    """
+    _require_db()
+    source = resolve_in_vault(payload.get("path"), config)
+    trash = config.TRASH_FOLDER
+    # The recovery center only moves files back from inside the vault
+    if not is_in_vault(trash, config, allow_internal=True):
+        raise HTTPException(status_code=409, detail="De prullenmand staat buiten het archief; verwijderen kan hier niet")
+    try:
+        with ARCHIVE_LOCK:
+            if source.is_symlink() or not source.is_file():
+                raise HTTPException(status_code=404, detail="Foto niet gevonden")
+            if is_inside(source, trash):
+                raise HTTPException(status_code=400, detail="Deze foto staat al in de prullenmand")
+            target = move_no_overwrite(source, trash / source.name)
+            # If recording fails the file goes straight back and the move is refused
+            recorder = recovery.ActionRecorder(db, "elo_trash", "Naar de prullenmand", folder=str(source.parent))
+            try:
+                recorder.add(source, target)
+            except sqlite3.OperationalError:
+                raise   # database gone with the disk: 503 (errors.py)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Verwijderen niet vastgelegd, de foto is teruggezet: {e}")
+    except ProtectedPathError:
+        raise HTTPException(status_code=403, detail="Toegang geweigerd: cache-map van de app")
+    except CrossDeviceError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except DestinationFolderError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileOperationError as e:
+        raise HTTPException(status_code=500, detail=f"Naar de prullenmand verplaatsen mislukt: {e}")
+    forget_candidates()
+    return {"action_id": recorder.action_id, "trash_path": str(target)}
 
 
 def _stats_for_key(key: Optional[str]) -> Optional[Dict[str, Any]]:

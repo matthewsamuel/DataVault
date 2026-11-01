@@ -11757,6 +11757,109 @@ button.otd-settings-icon:hover {
     width: 40%;
 }
 
+/* ---------- Naar de prullenmand ---------- */
+
+.elo-side {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+
+.elo-side > .elo-choice {
+    flex: 1 1 0;
+}
+
+/* In de bovenhoek aan de kant van het midden (rechtsboven staat een melding nooit over de rechter):
+   met de muis erop of na Tab, op een aanraakscherm altijd. Hij gaat mee omhoog met de foto */
+.elo-trash {
+    position: absolute;
+    top: var(--space-md);
+    right: var(--space-md);
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-h);
+    height: var(--control-h);
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-full);
+    background-color: var(--media-scrim);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    color: var(--on-media);
+    font-size: var(--icon-sm);
+    cursor: pointer;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--elo-spring),
+        background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.elo-side[data-side="1"] .elo-trash {
+    right: auto;
+    left: var(--space-md);
+}
+
+.elo-side:hover .elo-trash {
+    opacity: 1;
+    transform: translateY(calc(-1 * var(--space-2xs)));
+}
+
+.elo-overlay.is-keyboard .elo-trash {
+    opacity: 1;
+    transform: none;
+}
+
+.elo-trash:hover,
+.elo-trash:focus-visible {
+    background-color: var(--danger);
+    color: var(--text-on-danger);
+}
+
+.elo-side .elo-trash:hover {
+    transform: translateY(calc(-1 * var(--space-2xs))) scale(1.08);
+}
+
+/* Het deksel wiebelt even: wat je aanwijst, gaat weg */
+.elo-trash:hover i {
+    animation: elo-trash-wiggle 420ms var(--ease-out);
+}
+
+@keyframes elo-trash-wiggle {
+    0% { transform: rotate(0deg); }
+    25% { transform: rotate(-14deg); }
+    55% { transform: rotate(10deg); }
+    80% { transform: rotate(-4deg); }
+    100% { transform: rotate(0deg); }
+}
+
+/* Wie de prullenmand aanwijst, ziet welke foto weggaat: een rode ring, de foto dooft wat */
+.elo-side:has(.elo-trash:hover) .elo-frame,
+.elo-choice.is-trashed .elo-frame {
+    transform: translateY(calc(-1 * var(--space-2xs)));
+    box-shadow: 0 0 0 2px var(--danger), var(--shadow-lg);
+}
+
+.elo-side:has(.elo-trash:hover) .elo-img.is-loaded,
+.elo-choice.is-trashed .elo-img.is-loaded {
+    opacity: 0.6;
+}
+
+.elo-stage.is-leaving .elo-trash {
+    opacity: 0;
+    transition: none;
+}
+
+@media (hover: none) {
+    .elo-trash {
+        opacity: 1;
+        transform: none;
+    }
+}
+
 /* ---------- Onderbalk: doel, reeks, zekerheid, acties ---------- */
 
 .elo-footer {
@@ -12348,13 +12451,25 @@ button.otd-settings-icon:hover {
         transform: none;
     }
 
-    .elo-img {
+    .elo-img,
+    .elo-trash,
+    .elo-side:hover .elo-trash,
+    .elo-side .elo-trash:hover,
+    .elo-side:has(.elo-trash:hover) .elo-frame {
         transform: none;
+    }
+
+    .elo-trash:hover i {
+        animation: none;
     }
 }
 
 :root[data-motion="reduce"] .elo-overlay * {
     transition: none !important;
+}
+
+:root[data-motion="reduce"] .elo-trash i {
+    animation: none !important;
 }
 
 /* ==================== INSTELLINGEN > BACK-UPS (backup-settings.js) ==================== */

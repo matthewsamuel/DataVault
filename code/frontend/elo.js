@@ -11,6 +11,10 @@
 // dankzij een client_token nooit dubbel. Wie tijdens het opslaan z drukt, draait terug wat er net
 // gekozen is (de keten wacht op elkaar).
 //
+// Een foto die weg moet (een schermafbeelding, een mislukte opname): de prullenmand in de bovenhoek
+// van de foto aan de kant van het midden (zichtbaar met de muis erop of na Tab). Hij gaat naar TRASH, nooit echt weg; terugzetten
+// kan meteen in de melding en later in het Herstelcentrum. Zijn score gaat mee, heen en terug.
+//
 // Toetsen (alleen zolang dit venster open is en je niet in een keuzelijst zit):
 //   ← of 1   linker foto        → of 2   rechter foto       spatie   gelijk
 //   s        overslaan          z        terugdraaien (vaker drukken: verder terug)   Esc   sluiten
@@ -610,16 +614,26 @@ function eloChoice(photo, side, img) {
                 : createEl('span', { class: 'elo-new-chip', title: 'Nog nooit vergeleken: deze foto beweegt nog veel', text: 'Nieuw' })));
 }
 
+// De foto met zijn prullenmand ernaast (niet erin: een knop in een knop kan niet)
+function eloSide(photo, side, img) {
+    return createEl('div', { class: 'elo-side', dataset: { side: String(side) } },
+        eloChoice(photo, side, img),
+        createEl('button', {
+            type: 'button', class: 'elo-trash', 'aria-label': `${photo.name} naar de prullenmand`,
+            title: 'Naar de prullenmand (terug te zetten in het Herstelcentrum)', onClick: () => eloTrash(side),
+        }, eloIcon('fa-trash-can')));
+}
+
 function eloStage(pair) {
     const imgs = pair._imgs || eloPreload(pair)._imgs;
     return createEl('div', { class: 'elo-stage' },
-        eloChoice(pair[0], 0, imgs[0]),
+        eloSide(pair[0], 0, imgs[0]),
         createEl('span', { class: 'elo-vs', 'aria-hidden': 'true', text: 'of' }),
-        eloChoice(pair[1], 1, imgs[1]));
+        eloSide(pair[1], 1, imgs[1]));
 }
 
-// Een paar in beeld zetten. direction: 'next' (na een keuze), 'skip', 'back' (terugdraaien) of
-// 'none'. Het oude paar blijft even als vertrekkend plaatje staan (niet klikbaar, niet voor de
+// Een paar in beeld zetten. direction: 'next' (na een keuze), 'skip', 'trash', 'back' (terugdraaien)
+// of 'none'. Het oude paar blijft even als vertrekkend plaatje staan (niet klikbaar, niet voor de
 // schermlezer) terwijl het nieuwe binnenkomt; dat nieuwe is meteen te kiezen.
 function eloShowPair(pair, direction = 'next') {
     const body = document.getElementById('elo-body');
@@ -657,7 +671,8 @@ function eloEnter(stage, direction) {
         eloAnimate(stage, [{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: ELO_GLIDE, fill: 'none' });
         return;
     }
-    const from = { next: 'translateY(18px) scale(0.98)', skip: 'translateX(32px)', back: 'translateX(-32px)' }[direction]
+    const from = { next: 'translateY(18px) scale(0.98)', trash: 'translateY(18px) scale(0.98)', skip: 'translateX(32px)',
+        back: 'translateX(-32px)' }[direction]
         || 'translateY(12px)';
     stage.querySelectorAll('.elo-choice').forEach((choice, i) => {
         eloAnimate(choice, [
@@ -673,12 +688,20 @@ function eloEnter(stage, direction) {
 
 // Het oude paar gaat weg. Na een keuze blijft de winnaar even staan (ring, vinkje, +N) en vliegt
 // dan als miniatuur naar de uitslag onderin; de ander verdwijnt snel. Bij overslaan en
-// terugdraaien schuift het paar kort opzij. Alles sneller weg dan het nieuwe paar binnenkomt.
+// terugdraaien schuift het paar kort opzij; een foto naar de prullenmand kantelt en valt naar
+// beneden weg. Alles sneller weg dan het nieuwe paar binnenkomt.
 function eloLeave(old, direction) {
     const animations = [];
     old.querySelectorAll('.elo-choice').forEach((choice, i) => {
         let a = null;
-        if (direction === 'skip') {
+        if (choice.classList.contains('is-trashed')) {
+            eloAnimate(choice.querySelector('.elo-meta'), [{ opacity: 1 }, { opacity: 0 }], { duration: 90, easing: 'linear' });
+            a = eloAnimate(choice, [
+                { offset: 0, opacity: 1, transform: 'none', easing: ELO_GLIDE },
+                { offset: 0.25, opacity: 1, transform: `translateY(-6px) rotate(${i ? 1 : -1}deg) scale(0.98)`, easing: ELO_SWOOP },
+                { offset: 1, opacity: 0, transform: `translateY(64px) rotate(${i ? 6 : -6}deg) scale(0.8)` }],
+            { duration: 360, easing: 'linear' });
+        } else if (direction === 'skip' || direction === 'trash') {
             a = eloAnimate(choice, [{ opacity: 1, transform: 'none' },
                 { opacity: 0, transform: `translateX(${i ? 24 : -24}px) rotate(${i ? 1.5 : -1.5}deg)` }],
             { duration: 160, easing: ELO_GLIDE });
@@ -893,6 +916,50 @@ function eloSkip() {
     elo.notice = '';
     eloPost('/api/shows/compare/skip', { a: a.path, b: b.path, ...eloScopeBody() }).catch(() => {});
     eloAdvance('skip');
+}
+
+// De foto aan deze kant naar de prullenmand: meteen het volgende paar (de ander komt later
+// gewoon terug), het verplaatsen loopt in de keten, zodat een nieuw paar hem nooit meer bevat
+function eloTrash(side) {
+    if (!elo.pair || elo.busy || elo.tab !== 'compare') return;
+    if (performance.now() - elo.shownAt < ELO_MIN_DWELL_MS) { eloNudge(side); return; }
+    const pair = elo.pair;
+    const photo = pair[side];
+    const seq = elo.seq;
+    const stage = document.querySelector('#elo-body .elo-stage:not(.is-leaving)');
+    const choice = stage && stage.querySelector(`.elo-choice[data-side="${side}"]`);
+    if (choice) choice.classList.add('is-trashed');
+    elo.notice = '';
+    elo.queue = elo.queue.filter(q => !q.some(p => p.path === photo.path));
+    elo.chain = elo.chain.then(async () => {
+        try {
+            const result = await eloPost('/api/shows/compare/trash', { path: photo.path });
+            showToast('Naar de prullenmand', `${photo.name} staat in de prullenmand. Terugzetten kan ook later, in het Herstelcentrum.`,
+                'success', { label: 'Terugzetten', onClick: () => eloRestore(result.action_id, photo.name) });
+        } catch (err) {
+            // Niet verplaatst: het paar komt meteen terug
+            toastFetchError('Niet naar de prullenmand', err);
+            if (seq === elo.seq && eloIsOpen() && elo.tab === 'compare') {
+                if (elo.pair) elo.queue.unshift(elo.pair);
+                eloShowPair(pair, 'back');
+            }
+        }
+    });
+    eloAdvance('trash');
+}
+
+async function eloRestore(actionId, name) {
+    try {
+        const data = await eloPost('/api/recovery/undo', { action_id: actionId });
+        if (data.restored) {
+            showToast('Teruggezet', `${name} staat weer op zijn plek, met zijn score.`, 'success');
+        } else {
+            const reason = (data.skipped && data.skipped[0] && data.skipped[0].reason) || 'Hij kon niet terug.';
+            showToast('Niet teruggezet', reason, 'warning');
+        }
+    } catch (err) {
+        toastFetchError('Terugzetten mislukt', err);
+    }
 }
 
 async function eloUndo() {

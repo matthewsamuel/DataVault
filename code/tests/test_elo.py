@@ -368,6 +368,30 @@ def test_ratings_and_history_follow_a_move_and_undo_still_works(client, app, vau
     assert _row(db, moved) is None and _row(db, venice) is None
 
 
+def test_trash_moves_a_photo_out_of_the_duel_and_the_recovery_center_brings_it_back(client, app, vault):
+    db = app.state.db
+    rome, venice = (vault / ROME).resolve(), (vault / VENICE).resolve()
+    client.post("/api/shows/compare", json={"a": str(rome), "b": str(venice), "winner": "a"})
+    r = client.post("/api/shows/compare/trash", json={"path": str(rome)})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    trashed = Path(body["trash_path"])
+    assert not rome.exists() and trashed.is_file() and trashed.parent.name == "TRASH"
+    # Nothing is deleted: the score goes along, and the photo is out of every new pair
+    assert tuple(_row(db, trashed)) == (1162, 1, 0)
+    pairs = client.get("/api/shows/compare/pair", params={"count": 4}).json()["pairs"]
+    assert str(rome) not in {p["path"] for pair in pairs for p in pair}
+    entry = next(e for e in client.get("/api/recovery").json()["entries"] if e.get("label") == "Uit 'Welke is mooier?'")
+    assert entry["undoable"] and entry["undo"]["body"] == {"action_id": body["action_id"]}
+    # A second time, or a photo already in the trash, is refused
+    assert client.post("/api/shows/compare/trash", json={"path": str(rome)}).status_code == 404
+    assert client.post("/api/shows/compare/trash", json={"path": str(trashed)}).status_code == 400
+    assert client.post("/api/shows/compare/trash", json={"path": 7}).status_code == 400
+    r = client.post("/api/recovery/undo", json={"action_id": body["action_id"]})
+    assert r.status_code == 200 and r.json()["restored"] == 1
+    assert rome.is_file() and not trashed.exists() and tuple(_row(db, rome)) == (1162, 1, 0)
+
+
 # ==================== PAIRS ====================
 
 def _cands(n, rating=1000, games=0, rd=None):
