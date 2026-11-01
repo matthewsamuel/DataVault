@@ -3562,6 +3562,9 @@ class CinematicPlayer {
             img.style.setProperty('--kb-x', `${Math.round(20 + Math.random() * 60)}%`);
             img.style.setProperty('--kb-y', `${Math.round(25 + Math.random() * 50)}%`);
             img.style.setProperty('--kb-dur', `${this.duration + 2000}ms`);
+            // Een kleine drift (hooguit 2% opzij en 1,5% op of neer): een camera die meebeweegt
+            img.style.setProperty('--kb-tx', `${(Math.random() * 4 - 2).toFixed(2)}%`);
+            img.style.setProperty('--kb-ty', `${(Math.random() * 3 - 1.5).toFixed(2)}%`);
             img.addEventListener('error', () => {
                 const thumb = vaultFileUrl('thumb', file.path);
                 if (!img.src.endsWith(thumb)) img.src = thumb;

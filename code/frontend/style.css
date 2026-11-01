@@ -14115,12 +14115,31 @@ html:not([data-motion="volledig"]) .mm-light {
 
 /* ---------- Shows: de diavoorstelling ---------- */
 
-/* Ken Burns (alleen hier, docs/MOTION.md): langzaam in- of uitzoomen vanuit een willekeurig punt */
+/* Ken Burns (alleen hier, docs/MOTION.md): langzaam in- of uitzoomen vanuit een willekeurig
+   punt, met een kleine drift (--kb-tx, --kb-ty) zodat het als een camerabeweging voelt */
 .cinematic-media.ken-burns-in,
 .cinematic-media.ken-burns-out {
     transform-origin: var(--kb-x, 50%) var(--kb-y, 50%);
-    animation-duration: var(--kb-dur, 10s);
-    animation-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+    animation-duration: var(--kb-dur, calc(var(--dur-6) * 16));
+    animation-timing-function: var(--ease-in-out);
+}
+
+.cinematic-media.ken-burns-in {
+    animation-name: mm-kb-in;
+}
+
+.cinematic-media.ken-burns-out {
+    animation-name: mm-kb-out;
+}
+
+@keyframes mm-kb-in {
+    from { transform: scale(1); }
+    to { transform: scale(1.1) translate3d(var(--kb-tx, 0%), var(--kb-ty, 0%), 0); }
+}
+
+@keyframes mm-kb-out {
+    from { transform: scale(1.1) translate3d(var(--kb-tx, 0%), var(--kb-ty, 0%), 0); }
+    to { transform: scale(1); }
 }
 
 html:not([data-motion="volledig"]) .cinematic-media.ken-burns-in,
