@@ -14005,6 +14005,14 @@ html[data-motion="rustig"] .job-running .job-bar::after {
     display: none;
 }
 
+.job-dock.tiny .job-dock-title i {
+    transition: color var(--dur-5) var(--ease-out);
+}
+
+.job-dock.tiny.is-celebrating .job-dock-title i {
+    color: var(--accent-text);
+}
+
 .job-item.is-celebrating .job-status::before {
     background: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-subtle);

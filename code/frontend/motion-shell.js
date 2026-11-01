@@ -419,6 +419,7 @@
                 { spring: 'smooth', key: 'dock' });
         }
         const now = performance.now();
+        let celebrated = false;
         dock.querySelectorAll('.job-item[data-id]').forEach(item => {
             const id = item.dataset.id;
             const bar = item.querySelector('.job-bar');
@@ -430,8 +431,10 @@
             const was = before.status.get(id);
             if (!was) {
                 if (!before.hidden && !first) M.enter(item, 'rise', { args: [M.px('--motion-distance-sm', 6)], key: 'job-in' });
-            } else if (JOB_ACTIVE_CLASSES.some(c => was.split(' ').includes(c)) && item.classList.contains('job-done')) {
+            } else if (JOB_ACTIVE_CLASSES.some(c => was.split(' ').includes(c)) && item.classList.contains('job-done')
+                && item.getClientRects().length) {      // (ingeklapt: dan het kleine icoon, hieronder)
                 jobCelebrate(item);
+                celebrated = true;
             }
             // De balk groeit van waar hij zichtbaar was naar de nieuwe stand
             const from = before.bars.get(id);
@@ -445,8 +448,25 @@
                 }
             }
         });
-        // Het getal op het kleine icoon (afgeronde taken) springt als het verandert
         const tiny = dock.classList.contains('tiny') && dock.querySelector('.job-dock-title');
+        // Klaar terwijl het paneel meteen inklapt tot het kleine icoon: het feestje daar
+        if (!celebrated && tiny && typeof jobDock !== 'undefined') {
+            const done = [...before.status].some(([id, cls]) => JOB_ACTIVE_CLASSES.some(c => cls.split(' ').includes(c))
+                && jobDock.jobs.some(j => String(j.id) === id && j.status === 'done'));
+            if (done) {
+                M.animate(dock, [{ opacity: 0.5, transform: 'scale(0.9)' }, { opacity: 1, transform: 'none' }],
+                    { spring: 'bouncy', key: 'dock' });
+                // Het vinkje kleurt even groen en vervaagt daarna terug naar rustig grijs
+                dock.classList.add('is-celebrating');
+                clearTimeout(dock._shellCelebrate);
+                dock._shellCelebrate = setTimeout(() => dock.classList.remove('is-celebrating'), M.ms('--dur-6', 640) * 4);
+                const icon = tiny.querySelector('i');
+                if (icon) M.animate(icon, M.presets.pop(), { spring: 'bouncy', key: 'celebrate', delay: M.ms('--dur-1', 90) });
+                burstAt(icon || tiny);
+                return;
+            }
+        }
+        // Het getal op het kleine icoon (afgeronde taken) springt als het verandert
         if (tiny && before.tiny !== null && before.tiny !== tiny.textContent) {
             M.animate(tiny, M.presets.pop(), { spring: 'bouncy', key: 'tiny' });
         }
@@ -459,11 +479,18 @@
         if (!M.full()) return;
         const status = item.querySelector('.job-status');
         if (status) M.animate(status, M.presets.pop(), { spring: 'bouncy', key: 'celebrate' });
-        const r = (status || item).getBoundingClientRect();
+        burstAt(status || item, 3);
+    }
+
+    // Een kring en acht vonkjes vanuit een punt (het bolletje van de status, of het icoon).
+    // Ze staan los boven alles: het paneel tekent zich elke seconde opnieuw.
+    function burstAt(el, left) {
+        if (!el || !M.full()) return;
+        const r = el.getBoundingClientRect();
         const burst = document.createElement('div');
         burst.className = 'job-burst';
         burst.setAttribute('aria-hidden', 'true');
-        burst.style.left = `${r.left + 3}px`;
+        burst.style.left = `${left !== undefined ? r.left + left : r.left + r.width / 2}px`;
         burst.style.top = `${r.top + r.height / 2}px`;
         const ring = document.createElement('span');
         ring.className = 'job-burst-ring';
@@ -511,6 +538,9 @@
                 if (!dragging) {
                     dragging = true;
                     toast.classList.add('is-dragging');
+                    // De binnenkomst (fill both) zou de vinger overschrijven; hij is toch al klaar
+                    toast.style.animationName = 'none';
+                    clearTimeout(toast._hideTimer);
                     try { toast.setPointerCapture(ev.pointerId); } catch (_) { /* al los */ }
                 }
                 // Naar links geeft hij nauwelijks mee (rubberband), naar rechts volgt hij de vinger
