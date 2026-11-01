@@ -53,6 +53,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Een venster of het themamenu dat aan het verdwijnen is, kan de toetsenbordfocus niet meer krijgen: Tab direct na Escape springt er niet meer in en een schermlezer leest het niet meer voor.
 - Berichten: een lange lijst gesprekken bouwt sneller op en de gesprekken stromen binnen zonder te haperen, ook met duizenden.
 - Rustig (en macOS 'minder beweging') is nu echt alleen vervagen: het icoon van een melding springt en draait niet meer, vensters en het themamenu krimpen niet bij het sluiten, skeletten en lege staten hebben geen glans of kring meer, en een foto in het raster zoomt bij het laden niet meer in (ook niet in Volledig).
+- Keurer: de weggevlogen kaart gaat onder de volgende foto door in plaats van erover, er vliegt er maar één tegelijk, en de volgende twee foto's staan al klaar, zodat de nieuwe kaart nooit even leeg is.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.

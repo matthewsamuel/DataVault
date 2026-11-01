@@ -14542,6 +14542,17 @@ html:not([data-motion="volledig"]) .mm-light {
     overflow: hidden;
 }
 
+/* Keurer: de laag staat vóór het kaartvak en zonder z-index, dus de vliegende kaart gaat onder
+   de volgende kaart door (die nooit bedekt wordt) */
+.mm-ghost-layer.mm-ghost-under {
+    z-index: auto;
+}
+
+/* (ook onder de tellers door: die worden zo een eigen laag na het spook) */
+.keurer-layout > .keurer-stats-bar {
+    position: relative;
+}
+
 .mm-ghost-holder {
     position: fixed;
     display: flex;

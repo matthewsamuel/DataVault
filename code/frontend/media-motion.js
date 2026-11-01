@@ -219,7 +219,7 @@
     function ghost(el, rect, opts = {}) {
         const r = rect || el.getBoundingClientRect();
         // In een venster of overlay blijft het spook in die laag (anders zou het eronder vallen)
-        const host = el.closest('.dv-overlay, .modal');
+        const host = opts.layer || el.closest('.dv-overlay, .modal');
         const copy = opts.move ? el : el.cloneNode(true);
         if (copy.id) copy.removeAttribute('id');
         copy.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
@@ -496,9 +496,25 @@
 
     const flying = [];
 
+    // Het spook vliegt ONDER de nieuwe kaart: een eigen laag vooraan in de Keurer-indeling, dus
+    // vóór het kaartvak getekend. De volgende foto wordt nooit bedekt; alleen wat buiten de
+    // nieuwe kaart uitsteekt is te zien.
+    function keurerLayer(card) {
+        const layout = card.closest('.keurer-layout');
+        if (!layout) return null;
+        let under = layout.querySelector(':scope > .mm-ghost-under');
+        if (!under) {
+            under = document.createElement('div');
+            under.className = 'mm-ghost-layer mm-ghost-under';
+            under.setAttribute('aria-hidden', 'true');
+            layout.prepend(under);
+        }
+        return under;
+    }
+
     // De kaart verlaat het vak als spook en vliegt in de richting van de beslissing (houden
-    // links, prullenmand rechts, verplaatsen omhoog). Het vak is daarna meteen vrij voor de
-    // volgende kaart. Meer dan drie tegelijk in de lucht (heel snel beslissen): de oudste is klaar.
+    // links, prullenmand rechts, verplaatsen omhoog), onder de volgende kaart door. Het vak is
+    // meteen vrij. Een nieuwe beslissing maakt het vorige spook meteen af: er vliegt er één.
     function keurerFly(card, decision) {
         if (!card || !card.isConnected) return settled();
         const stamp = { keep: '.overlay-keep', delete: '.overlay-delete', move: '.overlay-move', undo: '.overlay-undo' }[decision];
@@ -507,7 +523,7 @@
         card.style.transform = 'none';
         const r = card.getBoundingClientRect();
         card.style.transform = current;
-        const { holder, copy } = ghost(card, r, { move: true });
+        const { holder, copy } = ghost(card, r, { move: true, layer: keurerLayer(card) });
         copy.classList.add('mm-keurer-flying');
         const overlay = stamp && copy.querySelector(stamp);
         if (overlay) overlay.style.opacity = '1';
@@ -520,9 +536,10 @@
         else if (decision === 'delete') to = { transform: `translate3d(${Math.max(vw * 0.55, 420)}px, -40px, 0) rotate(16deg)`, opacity: 0 };
         else if (decision === 'move') to = { transform: `translate3d(0, ${-Math.max(window.innerHeight * 0.5, 360)}px, 0) scale(0.86)`, opacity: 0 };
         else to = { transform: `translate3d(0, ${Motion.px('--motion-distance-lg', 24) * 3}px, 0) scale(0.9)`, opacity: 0 };
-        const anim = Motion.animate(copy, Motion.calm() ? [{ opacity: 1 }, { opacity: 0 }] : [start, { opacity: 1, offset: 0.55 }, to], {
-            duration: Motion.calm() ? Motion.ms('--dur-2', 140) : Motion.ms('--dur-4', 280) + Motion.ms('--dur-1', 90),
-            easing: '--ease-exit', fill: 'forwards', key: 'fly',
+        // Vertrekt meteen (--ease-out) en is na --dur-4 weg; dekkend tot een vijfde van de vlucht
+        const anim = Motion.animate(copy, Motion.calm() ? [{ opacity: 1 }, { opacity: 0 }] : [start, { opacity: 1, offset: 0.2 }, to], {
+            duration: Motion.calm() ? Motion.ms('--dur-2', 140) : Motion.ms('--dur-4', 280),
+            easing: '--ease-out', fill: 'forwards', key: 'fly',
         });
         if (overlay && full()) {
             const badge = overlay.querySelector('.overlay-badge');
@@ -530,7 +547,7 @@
         }
         const entry = { holder, anim };
         flying.push(entry);
-        while (flying.length > 3) {
+        while (flying.length > 1) {
             const old = flying.shift();
             try { old.anim.finish(); } catch (_) { old.holder.remove(); }
         }
@@ -558,9 +575,10 @@
                 { opacity: 1, transform: 'none' },
             ], { spring: 'smooth', key: 'arrive' });
         }
+        // Meteen dekkend (het spook eronder schijnt nooit door), alleen een klein zetje naar voren
         return Motion.animate(card, [
-            { opacity: 0.55, transform: 'translate3d(0, 10px, 0) scale(0.955)' },
-            { opacity: 1, transform: 'none' },
+            { transform: `translate3d(0, ${Motion.px('--motion-distance-sm', 6)}px, 0) scale(${parseFloat(Motion.token('--motion-scale-in')) || 0.96})` },
+            { transform: 'none' },
         ], { spring: 'snappy', key: 'arrive' });
     }
 

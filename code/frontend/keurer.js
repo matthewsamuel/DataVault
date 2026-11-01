@@ -357,6 +357,26 @@ function keurerShowCard(opts = {}) {
     const card = document.getElementById('keurer-card');
     keurerSetupDrag(card);
     if (opts.from || opts.arrive) MediaMotion.keurerArrive(card, opts.from || null);
+    keurerPreloadNext();
+}
+
+// De volgende twee foto's staan al gedecodeerd klaar, zodat de nieuwe kaart na een beslissing
+// in hetzelfde beeld zijn foto heeft (nooit een lege kaart)
+const keurerPreloaded = new Map();
+
+function keurerPreloadNext() {
+    const wanted = keurerFileQueue.slice(keurerIndex + 1, keurerIndex + 3)
+        .filter(f => !f.is_video)
+        .map(f => `${API_BASE}/api/thumb?path=${encodeURIComponent(f.path)}`);
+    for (const url of keurerPreloaded.keys()) if (!wanted.includes(url)) keurerPreloaded.delete(url);
+    for (const url of wanted) {
+        if (keurerPreloaded.has(url)) continue;
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = url;
+        if (img.decode) img.decode().catch(() => {});
+        keurerPreloaded.set(url, img);
+    }
 }
 
 function keurerHandleThumbError(el) {

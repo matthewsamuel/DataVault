@@ -47,3 +47,15 @@ def test_media_motion_css_uses_tokens_and_stays_still_in_rustig_and_uit():
     assert 'html[data-motion="volledig"] .tl-photo-row' in section
     assert 'html:not([data-motion="volledig"]) .mm-light' in section
     assert 'html:not([data-motion="volledig"]) .cinematic-media.ken-burns-in' in section
+
+
+def test_the_keurer_ghost_flies_under_the_next_card_and_the_next_photos_are_ready():
+    js = (FRONTEND / "media-motion.js").read_text(encoding="utf-8")
+    fly = js[js.index("function keurerFly"):js.index("function keurerArrive")]
+    assert "layer: keurerLayer(card)" in fly and "flying.length > 1" in fly and "'--ease-out'" in fly
+    arrive = js[js.index("function keurerArrive"):js.index("// ---------- 9.")]
+    assert "opacity: 0.55" not in arrive   # the new card is opaque from its first frame
+    css = (FRONTEND / "style.css").read_text(encoding="utf-8")
+    assert re.search(r"\.mm-ghost-layer\.mm-ghost-under \{\s*z-index: auto;", css)
+    keurer = (FRONTEND / "keurer.js").read_text(encoding="utf-8")
+    assert "keurerPreloadNext();" in keurer and ".decode()" in keurer
