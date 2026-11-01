@@ -115,6 +115,24 @@ def test_the_rating_scale_keeps_its_floor_and_outcomes_are_checked():
     assert elo.RD_MIN <= state[1] < 100
 
 
+def test_ratings_far_apart_never_divide_by_zero_or_overflow():
+    """Votes have no upper cap, so two photos can end up thousands of points apart."""
+    import math
+    for gap in (6_500, 10_000, 200_000):
+        for outcome in elo.OUTCOMES:
+            for one, two in (((1000.0 + gap, 30.0, 0.06), (1000.0, 30.0, 0.06)),
+                             ((1000.0, 30.0, 0.06), (1000.0 + gap, 30.0, 0.06))):
+                states = elo.glicko_pair(one, two, outcome)
+                assert all(math.isfinite(x) for st in states for x in st)
+        far, near = {"mu": 1000.0 + gap, "rd": 30.0}, {"mu": 1000.0, "rd": 30.0}
+        assert 0 <= elo.information(far, near) < 1e-6 and 0 <= elo.information(near, far) < 1e-6
+        assert 0 < elo.win_probability(near, far) < 1e-9 and 0 < 1 - elo.win_probability(far, near) < 1e-9
+        assert 0 < elo.expected_score(1000, 1000 + gap) < 1e-9
+    # An upset between photos 10,000 points apart still moves both the right way
+    (a, _, _), (b, _, _) = elo.glicko_pair((1000.0, 30.0, 0.06), (11_000.0, 30.0, 0.06), "a")
+    assert a > 1000 and b < 11_000
+
+
 def test_information_is_largest_for_uncertain_close_pairs():
     c = lambda mu, rd: {"mu": mu, "rd": rd}
     assert elo.information(c(1000, 350), c(1000, 350)) > elo.information(c(1000, 350), c(1400, 350))
@@ -963,6 +981,36 @@ def test_migration_160_replays_the_old_history_and_keeps_every_user_row(tmp_path
     # A new comparison gets an id above the old counter, and a draw is allowed now
     result = elo.record_comparison(db, paths[1], paths[2], "draw")
     assert result["id"] == old_seq + 1
+    db.close_all()
+
+
+def test_migration_160_replays_an_old_comparison_between_far_apart_ratings(tmp_path, monkeypatch):
+    """A photo voted up 200 times (no cap) against a fresh one: the replay must not crash,
+    or the app would not start."""
+    from backend import migrations
+    from test_duplicates_runs import _migrate_to
+    from test_foundation import _make_legacy_db
+    db_path = tmp_path / "datavault.db"
+    _make_legacy_db(db_path)
+    _migrate_to(db_path, 159, monkeypatch)
+    high, low = "/v/library/oud/top.jpg", "/v/library/oud/nieuw.jpg"
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("INSERT INTO file_ratings (path, rating, votes) VALUES (?, 11000, 200)", (high,))
+        conn.execute("INSERT INTO file_ratings (path, rating, votes) VALUES (?, 1000, 0)", (low,))
+        for i, winner in enumerate("ab"):
+            conn.execute("""INSERT INTO elo_comparisons (path_a, path_b, winner, rating_a_before, rating_a_after,
+                rating_b_before, rating_b_after, games_a_before, games_b_before, existed_a, existed_b, k_a, k_b,
+                scope, created_at) VALUES (?, ?, ?, 11000, 11000, 1000, 1000, ?, ?, 1, 1, 32, 32, '/v/library', ?)""",
+                         (high, low, winner, i, i, 1_700_000_000.0 + i))
+    db = Database(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION
+        assert conn.execute("SELECT COUNT(*) FROM elo_comparisons WHERE model = 'glicko2'").fetchone()[0] == 2
+        assert conn.execute("SELECT votes FROM file_ratings WHERE path = ?", (high,)).fetchone()[0] == 200
+    assert db.get_rating(high) > 10_000 and elo.RATING_FLOOR <= db.get_rating(low) < db.get_rating(high)
+    # And a new comparison between them is saved, not a server error
+    result = elo.record_comparison(db, low, high, "a")
+    assert result["a"]["rating"] >= result["a"]["before"]
     db.close_all()
 
 

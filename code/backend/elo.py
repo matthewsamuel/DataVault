@@ -107,17 +107,26 @@ def _g(phi: float) -> float:
     return 1.0 / math.sqrt(1.0 + 3.0 * phi * phi / (math.pi * math.pi))
 
 
+LOGISTIC_LIMIT = 30.0      # exp(30): an expectation never rounds to exactly 0 or 1
+
+
+def _logistic(x: float) -> float:
+    """1 / (1 + e^-x), with x clamped so that the result stays strictly between 0 and 1 (two
+    photos thousands of points apart would otherwise divide by zero or overflow)."""
+    return 1.0 / (1.0 + math.exp(-max(-LOGISTIC_LIMIT, min(LOGISTIC_LIMIT, x))))
+
+
 def expected_score(rating: float, other: float, rd_other: float = 0.0) -> float:
     """The chance (0..1) that a photo with this rating wins against the other (with the
     other's deviation taken into account; rd_other 0 gives the classic Elo curve)."""
     g = _g(rd_other / GLICKO_SCALE)
-    return 1.0 / (1.0 + math.exp(-g * (rating - other) / GLICKO_SCALE))
+    return _logistic(g * (rating - other) / GLICKO_SCALE)
 
 
 def win_probability(a: Dict[str, Any], b: Dict[str, Any]) -> float:
     """P(a beats b) with both uncertainties."""
     phi = math.hypot(a["rd"], b["rd"]) / GLICKO_SCALE
-    return 1.0 / (1.0 + math.exp(-_g(phi) * (a["mu"] - b["mu"]) / GLICKO_SCALE))
+    return _logistic(_g(phi) * (a["mu"] - b["mu"]) / GLICKO_SCALE)
 
 
 def _new_volatility(phi: float, sigma: float, delta: float, v: float) -> float:
@@ -161,7 +170,7 @@ def glicko_update(state: Tuple[float, float, float], other: Tuple[float, float, 
     mu2, phi2 = (other[0] - RATING_START) / GLICKO_SCALE, other[1] / GLICKO_SCALE
     m, phi = (mu - RATING_START) / GLICKO_SCALE, rd / GLICKO_SCALE
     g = _g(phi2)
-    e = 1.0 / (1.0 + math.exp(-g * (m - mu2)))
+    e = _logistic(g * (m - mu2))
     v = 1.0 / (g * g * e * (1.0 - e))
     delta = v * g * (score - e)
     sigma = _new_volatility(phi, vol, delta, v)
@@ -194,8 +203,8 @@ def information(a: Dict[str, Any], b: Dict[str, Any]) -> float:
     """
     pa, pb = a["rd"] / GLICKO_SCALE, b["rd"] / GLICKO_SCALE
     diff = (a["mu"] - b["mu"]) / GLICKO_SCALE
-    ea = 1.0 / (1.0 + math.exp(-_g(pb) * diff))
-    eb = 1.0 / (1.0 + math.exp(_g(pa) * diff))
+    ea = _logistic(_g(pb) * diff)
+    eb = _logistic(-_g(pa) * diff)
     return (math.log1p(pa * pa * _g(pb) ** 2 * ea * (1.0 - ea))
             + math.log1p(pb * pb * _g(pa) ** 2 * eb * (1.0 - eb)))
 
