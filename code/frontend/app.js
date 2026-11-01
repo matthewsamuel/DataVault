@@ -1777,9 +1777,28 @@ function openMoveFileModal(fileData = null) {
             if (path) selectMoveDestination(path);
         },
         onHighlight: (item) => { if (item.dataset.path) previewMoveDestination(item.dataset.path, true); },
-        onConfirm: () => { if (selectedMoveFolder) confirmMoveFile(); },
+        // Niet naar de map waar het bestand al staat (de knop staat dan uit)
+        onConfirm: () => { if (selectedMoveFolder && !document.getElementById('btn-confirm-move').disabled) confirmMoveFile(); },
         onClose: closeMoveFileModal,
+        typeahead: true,
+        enterOpens: true,
+        onQuery: showMoveQuery,
     }).nav;
+    showMoveQuery('');
+    // Beginnen bij de map waar het bestand nu staat: de buurmappen zijn meestal het doel
+    const here = [...document.querySelectorAll('#move-folder-tree .move-folder-node')]
+        .find(node => node.dataset.path === sourceFolder);
+    if (here) moveNav.highlightItem(here, false);
+}
+
+// De getypte zoekterm boven de boom; rood omrand als geen map zo heet
+function showMoveQuery(query, found = true) {
+    const pill = document.getElementById('move-tree-query');
+    if (!pill) return;
+    pill.hidden = !query;
+    pill.classList.toggle('no-match', !!query && !found);
+    pill.querySelector('span').textContent = query;
+    pill.title = found ? '' : 'Geen map met deze naam';
 }
 
 function isMoveModalOpen() {
@@ -1814,16 +1833,17 @@ function renderMoveFolderTreeUI() {
         iconMode: 'fontawesome',
         selectedPath: selectedMoveFolder,
         chevronHtml: html`<i class="fas fa-chevron-right"></i>`,
-        onSelect: (path) => selectMoveDestination(path),
+        onSelect: (path, row) => selectMoveDestination(path, row),
     });
     container.scrollTop = 0;
 }
 
-function selectMoveDestination(path) {
+// Een klik (of Enter) kiest de map; de boom blijft staan zoals hij is (niet opnieuw tekenen,
+// anders klapt alles dicht) en de pijltjes gaan verder vanaf de aangeklikte map
+function selectMoveDestination(path, row = null) {
     if (moveInFlight || !fileToMove) return;
+    if (row && moveNav) moveNav.highlightItem(row, false);
     previewMoveDestination(path, false);
-    // Re-render to show selection highlight
-    renderMoveFolderTreeUI();
 }
 
 // De gekozen doelmap tonen (links 'Naar', de knop aan) zonder de boom opnieuw te tekenen: ook
@@ -1844,16 +1864,23 @@ function previewMoveDestination(path, quiet) {
         btn.disabled = false;
     }
 
-    // Show destination in left panel
+    // Links 'Naar' tonen, behalve voor de map waar het bestand al staat
     const destDisplay = document.getElementById('move-dest-display');
     const destPath = document.getElementById('move-dest-path');
     if (destDisplay && destPath) {
         destPath.querySelector('span').replaceChildren(...pathNodes(archivePath(path)));
         destPath.title = path;
-        destDisplay.style.display = '';
+        destDisplay.style.display = path === currentDir ? 'none' : '';
     }
-    document.querySelectorAll('#move-folder-tree .move-folder-node').forEach(node =>
-        node.classList.toggle('selected', node.dataset.path === path));
+    document.querySelectorAll('#move-folder-tree .move-folder-node').forEach(node => {
+        const on = node.dataset.path === path;
+        node.classList.toggle('selected', on);
+        const icon = node.querySelector('.folder-icon i');
+        if (icon) {
+            icon.classList.toggle('fa-folder-open', on);
+            icon.classList.toggle('fa-folder', !on);
+        }
+    });
 }
 
 async function confirmMoveFile() {

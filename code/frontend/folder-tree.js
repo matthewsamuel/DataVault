@@ -252,9 +252,16 @@ function initFolderTreeKeyNav(config) {
         invertCollapse = false,
         expandedClass = 'expanded',
         collapsedClass = 'collapsed',
+        typeahead = false,          // letters typen: naar de eerste map die zo heet, ook dichtgeklapt
+        enterOpens = false,         // Enter gaat een map met submappen in; ⌘/Shift+Enter bevestigt
+        onQuery,                    // (query, found) => void: de getypte zoekterm tonen ('' = weg)
     } = config;
 
     let highlightIndex = -1;
+    let query = '';
+    let queryTimer = null;
+    let autoOpened = [];            // mappen die het zoeken zelf openklapte (gaan weer dicht)
+    const QUERY_MS = 1500;          // zo lang na de laatste letter telt de volgende mee
 
     function getContainer() {
         return document.getElementById(containerId);
@@ -306,13 +313,11 @@ function initFolderTreeKeyNav(config) {
         }
     }
 
+    // Elke rij staat in een eigen wrapper (rij + eventueel de submappen). Niet verder omhoog
+    // zoeken: dan vond een map zonder submappen de wrapper van zijn ouder, en klapte ← die dicht
     function findWrapper(item) {
-        let el = item.parentElement;
-        while (el && el.id !== containerId) {
-            if (el.querySelector(':scope > ' + childrenSelector)) return el;
-            el = el.parentElement;
-        }
-        return null;
+        const wrapper = item.parentElement;
+        return wrapper && wrapper.id !== containerId ? wrapper : null;
     }
 
     function getItemChildDiv(item) {
@@ -351,9 +356,136 @@ function initFolderTreeKeyNav(config) {
         return null;
     }
 
+    // ---------- typen om te zoeken ----------
+
+    // 'Reis Italië' vindt ook 'reis italie'
+    function fold(text) {
+        return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    }
+
+    function nameEl(item) {
+        return item.querySelector('.folder-name');
+    }
+
+    function clearMatchMarks() {
+        const container = getContainer();
+        if (!container) return;
+        container.querySelectorAll('.folder-name[data-plain]').forEach(el => {
+            el.textContent = el.dataset.plain;
+            delete el.dataset.plain;
+        });
+    }
+
+    // Het getypte stuk van de naam oplichten (zelfde lengte na fold: alleen accenten vallen weg)
+    function markMatch(item, at, length) {
+        const el = nameEl(item);
+        if (!el) return;
+        const plain = el.dataset.plain || el.textContent;
+        el.dataset.plain = plain;
+        el.replaceChildren(plain.slice(0, at),
+            createEl('mark', { class: 'tree-match', text: plain.slice(at, at + length) }),
+            plain.slice(at + length));
+    }
+
+    function setQuery(next, found = true) {
+        query = next;
+        clearTimeout(queryTimer);
+        if (query) queryTimer = setTimeout(() => setQuery(''), QUERY_MS);
+        else {
+            clearMatchMarks();
+            autoOpened = [];        // wat bij de laatste treffer openging, blijft open
+        }
+        if (onQuery) onQuery(query, found);
+    }
+
+    // Eerst de zichtbare mappen vanaf de gemarkeerde, dan de hele boom (ook dichtgeklapt);
+    // eerst 'begint met', dan 'bevat'. Dezelfde letter herhalen gaat naar de volgende.
+    function findMatch(q, items) {
+        const all = Array.from(getContainer().querySelectorAll(itemSelector));
+        const repeat = q.length > 1 && [...q].every(ch => ch === q[0]);
+        const needle = fold(repeat ? q[0] : q);
+        const start = Math.max(0, highlightIndex + (repeat || q.length === 1 ? 1 : 0));
+        const rotated = items.slice(start).concat(items.slice(0, start));
+        const name = item => fold((nameEl(item) || item).textContent);
+        for (const list of [rotated, all]) {
+            const hit = list.find(item => name(item).startsWith(needle));
+            if (hit) return { item: hit, at: 0, length: needle.length };
+        }
+        for (const list of [rotated, all]) {
+            const hit = list.find(item => name(item).includes(needle));
+            if (hit) return { item: hit, at: name(hit).indexOf(needle), length: needle.length };
+        }
+        return null;
+    }
+
+    function revealItem(item, track = false) {
+        for (let parent = findParentItem(item); parent; parent = findParentItem(parent)) {
+            if (track && !isItemExpanded(parent)) autoOpened.push(parent);
+            expandItem(parent);
+        }
+    }
+
+    function jumpToQuery(items) {
+        const match = findMatch(query, items);
+        clearMatchMarks();
+        if (!match) {
+            if (onQuery) onQuery(query, false);
+            return;
+        }
+        // Wat een vorige treffer openklapte en niet boven deze treffer ligt: weer dicht
+        const keep = autoOpened.filter(parent => {
+            const wrapper = findWrapper(parent);
+            return wrapper && wrapper.contains(match.item);
+        });
+        autoOpened.filter(parent => !keep.includes(parent)).reverse().forEach(collapseItem);
+        autoOpened = keep;
+        revealItem(match.item, true);
+        highlightItem(match.item);
+        markMatch(match.item, match.at, match.length);
+        if (onQuery) onQuery(query, true);
+    }
+
+    // Een map markeren (ook van buitenaf: een muisklik, de huidige map bij openen)
+    function highlightItem(item, notify = true) {
+        if (!item) return;
+        revealItem(item);
+        const items = getVisibleItems();
+        const index = items.indexOf(item);
+        if (index < 0) return;
+        highlightIndex = index;
+        if (notify) applyHighlight(items);
+        else {
+            clearHighlight();
+            item.classList.add('keyboard-focus');
+            item.scrollIntoView({ block: 'nearest' });
+        }
+    }
+
     function handleKeydown(e) {
         const container = getContainer();
         if (!container || container.offsetParent === null) return;
+
+        if (typeahead && !e.metaKey && !e.ctrlKey && !e.altKey) {
+            const items = getVisibleItems();
+            if (e.key.length === 1 && (e.key !== ' ' || query)) {
+                e.preventDefault(); e.stopPropagation();
+                setQuery(query + e.key);
+                jumpToQuery(items);
+                return;
+            }
+            if (e.key === 'Backspace' && query) {
+                e.preventDefault(); e.stopPropagation();
+                setQuery(query.slice(0, -1));
+                if (query) jumpToQuery(items);
+                return;
+            }
+            if (e.key === 'Escape' && query) {
+                // Eerst de zoekterm weg, pas daarna sluit Escape het venster
+                e.preventDefault(); e.stopPropagation();
+                setQuery('');
+                return;
+            }
+        }
 
         // Enter op een knop of veld in het venster (Annuleren, ×, zoekveld) is voor die knop:
         // niet de gemarkeerde map bevestigen. Anders verplaatst 'Annuleren' het bestand.
@@ -364,6 +496,7 @@ function initFolderTreeKeyNav(config) {
 
         const items = getVisibleItems();
         if (items.length === 0 && e.key !== 'Escape') return;
+        if (query && e.key.startsWith('Arrow')) setQuery('');
 
         switch (e.key) {
             case 'ArrowDown':
@@ -410,7 +543,18 @@ function initFolderTreeKeyNav(config) {
             case 'Enter':
                 e.preventDefault(); e.stopPropagation();
                 if (highlightIndex >= 0 && highlightIndex < items.length) {
-                    if (onSelect) onSelect(items[highlightIndex]);
+                    const item = items[highlightIndex];
+                    if (enterOpens && !e.metaKey && !e.ctrlKey && !e.shiftKey && hasChildren(item)) {
+                        // De map in: open hem en markeer de eerste submap
+                        setQuery('');
+                        expandItem(item);
+                        const ni = getVisibleItems();
+                        highlightIndex = ni.indexOf(item) + 1;
+                        applyHighlight(ni);
+                        break;
+                    }
+                    setQuery('');
+                    if (onSelect) onSelect(item);
                     if (onConfirm) onConfirm();
                 }
                 break;
@@ -424,9 +568,10 @@ function initFolderTreeKeyNav(config) {
     function resetIndex() {
         highlightIndex = -1;
         clearHighlight();
+        if (query) setQuery('');
     }
 
-    return { resetIndex, handleKeydown };
+    return { resetIndex, handleKeydown, highlightItem };
 }
 
 
@@ -441,12 +586,14 @@ function activateFolderTreeModal(opts) {
         childrenSelector = '.folder-children',
         invertCollapse = false,
         onSelect, onHighlight, onConfirm, onClose,
+        typeahead, enterOpens, onQuery,
         focusSelector,
     } = opts;
 
     const nav = initFolderTreeKeyNav({
         containerId, itemSelector, childrenSelector, invertCollapse,
         onSelect, onHighlight, onConfirm, onClose,
+        typeahead, enterOpens, onQuery,
     });
 
     const modal = document.getElementById(modalId);
