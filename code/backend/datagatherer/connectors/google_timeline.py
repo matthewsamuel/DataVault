@@ -16,7 +16,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from backend.datagatherer import export_kit, geotag, location_store
+from backend.datagatherer import export_kit, geotag, location_store, raw_store
 from backend.datagatherer.base import Connector, ConnectorError, Coverage, ExportKind, GatherContext, HelpOption
 
 HELP_URL = "https://support.google.com/maps/answer/14169818"
@@ -98,10 +98,15 @@ class GoogleTimeline(Connector):
             ctx.check()
             ctx.progress(message=f"Inlezen: {name.rsplit('/', 1)[-1]}")
             try:
-                fmt, points, visits = location_store.parse_bytes(read())
+                fmt, points, visits = location_store.parse_export_file(read)
             except location_store.NotLocationHistory:
                 continue
-            stats = location_store.insert(ctx.db, self.id, raw["id"], fmt, points, visits, check=ctx.check)
+            except raw_store.RawStoreError as e:
+                raise ConnectorError(str(e)) from e
+            try:          # a streamed Records.json is only read here
+                stats = location_store.insert(ctx.db, self.id, raw["id"], fmt, points, visits, check=ctx.check)
+            except (location_store.NotLocationHistory, raw_store.RawStoreError) as e:
+                raise ConnectorError(f"{name.rsplit('/', 1)[-1]}: {e}") from e
             formats.add(fmt)
             totals["visits_added"] += stats["visits_added"]
             export_kit.merge_stats(totals, stats)

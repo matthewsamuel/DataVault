@@ -22,6 +22,7 @@ class FakeOllama:
     def __init__(self):
         self.down = False
         self.models = ["qwen2.5:3b"]
+        self.remote = set()         # names that /api/tags lists with a remote_host (Ollama cloud)
         self.chat_status = 200
         self.chat_lines = None      # list of dicts streamed as JSON lines
         self.chat_error = None      # an httpx exception raised for /api/chat
@@ -35,7 +36,9 @@ class FakeOllama:
             raise httpx.ConnectError("Connection refused", request=request)
         if request.url.path == "/api/tags":
             return httpx.Response(200, json={"models": [
-                {"name": m, "size": 1929912432, "details": {"parameter_size": "3.1B"}} for m in self.models]})
+                {"name": m, "size": 1929912432, "details": {"parameter_size": "3.1B"},
+                 **({"remote_host": "https://ollama.com:443", "remote_model": m} if m in self.remote else {})}
+                for m in self.models]})
         if request.url.path == "/api/chat":
             if self.chat_error is not None:
                 raise self.chat_error

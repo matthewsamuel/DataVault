@@ -147,7 +147,12 @@ def local_day_bounds(day: str) -> Tuple[int, int]:
 
 def days(db, sources=None, kinds=None, q=None, date_from: Optional[str] = None,
          date_to: Optional[str] = None, limit: int = 400) -> List[Dict[str, Any]]:
-    """[{day, count, kinds: {kind: n}}], newest day first, local calendar days."""
+    """[{day, count, kinds: {kind: n}}], newest day first, local calendar days (cached until the data changes)."""
+    key = (tuple(sources or ()), tuple(kinds or ()), q, date_from, date_to, limit)
+    return state.cached(db, "activity_days", lambda: _days(db, sources, kinds, q, date_from, date_to, limit), *key)
+
+
+def _days(db, sources, kinds, q, date_from, date_to, limit) -> List[Dict[str, Any]]:
     where, args = _filters(sources, kinds, q)
     if date_from:
         where += " AND ts_ms >= ?"

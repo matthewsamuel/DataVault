@@ -57,6 +57,38 @@ def _async_http_client(**kwargs) -> httpx.AsyncClient:
     return httpx.AsyncClient(**kwargs)
 
 
+# Ollama can also run a model on ollama.com ("gpt-oss:120b-cloud"): the prompt, with the
+# archive context Pasha builds, then leaves the Mac. Such a model is marked in the list and
+# only used after the user chose it with an explicit confirmation (allow_cloud).
+CLOUD_OK_SETTING = "chat_model_cloud_ok"
+_CLOUD_NAME = re.compile(r"[:-]cloud$", re.IGNORECASE)
+CLOUD_REFUSED = ("Het model '{model}' draait niet op deze Mac maar bij ollama.com: je vraag en wat Pasha uit je "
+                 "archief meestuurt gaan dan naar internet. Kies het in Instellingen > Taalmodel van Pasha en "
+                 "bevestig dat, of kies een lokaal model.")
+
+
+def is_cloud_model(model: Any) -> bool:
+    """True for an Ollama cloud model: by its name, or by the remote_host/remote_model in /api/tags."""
+    if isinstance(model, dict):
+        return bool(model.get("remote_host") or model.get("remote_model")) or is_cloud_model(model.get("name"))
+    return isinstance(model, str) and bool(_CLOUD_NAME.search(model))
+
+
+def _cloud_allowed(model: str) -> bool:
+    if db is None:
+        return False
+    try:
+        return db.get_setting(CLOUD_OK_SETTING) == model
+    except Exception:
+        return False
+
+
+def _runs_in_cloud(model: str) -> bool:
+    if is_cloud_model(model):
+        return True
+    return any(m["name"] == model and m.get("cloud") for m in ollama_status()["models"])
+
+
 def model_missing(model: str) -> str:
     return (f"Het model '{model}' is niet geïnstalleerd in Ollama. Kies een ander model bovenin "
             f"de chat, of installeer het in de Terminal met: ollama pull {model}")
@@ -120,6 +152,7 @@ def ollama_status(max_age: float = STATUS_MAX_AGE) -> Dict[str, Any]:
                     "name": m.get("name"),
                     "size": m.get("size"),
                     "parameter_size": (m.get("details") or {}).get("parameter_size"),
+                    "cloud": is_cloud_model(m),
                 }
                 for m in response.json().get("models", [])
                 if isinstance(m, dict) and isinstance(m.get("name"), str)
@@ -153,6 +186,7 @@ def chat_capability() -> Dict[str, Any]:
         "models": names,
         "model": model,
         "model_installed": status["reachable"] and installed,
+        "model_cloud": _runs_in_cloud(model),
         "message": message,
     }
 
@@ -181,10 +215,15 @@ def set_chat_model(body: Dict[str, Any]):
     names = [m["name"] for m in status["models"]]
     if status["reachable"] and model not in names:
         raise HTTPException(status_code=400, detail=model_missing(model))
+    cloud = is_cloud_model(model) or any(m["name"] == model and m.get("cloud") for m in status["models"])
+    if cloud and body.get("allow_cloud") is not True:
+        raise HTTPException(status_code=409, detail=CLOUD_REFUSED.format(model=model))
     if db is None:
         raise HTTPException(status_code=503, detail="Instelling kan niet bewaard worden: geen database")
     db.set_setting(MODEL_SETTING, model)
-    return {"current": model}
+    # The confirmation is for this one model; choosing a local model withdraws it
+    db.set_setting(CLOUD_OK_SETTING, model if cloud else "")
+    return {"current": model, "cloud": cloud}
 
 
 # Characters a name in the prompt may not contain: control characters (no fake new
@@ -469,11 +508,13 @@ async def stream_ollama(ollama_messages: list, model: str) -> AsyncGenerator[str
 
 
 def _chosen_model(request: "ChatRequest") -> str:
-    if request.model is None:
-        return current_model()
-    if not valid_model_name(request.model):
+    """The model for this request; a cloud model only when the user confirmed exactly that one."""
+    model = current_model() if request.model is None else request.model
+    if not valid_model_name(model):
         raise HTTPException(status_code=400, detail="Ongeldige modelnaam")
-    return request.model
+    if _runs_in_cloud(model) and not _cloud_allowed(model):
+        raise HTTPException(status_code=403, detail=CLOUD_REFUSED.format(model=model))
+    return model
 
 
 async def stream_with_tools(ollama_messages: list, model: str) -> AsyncGenerator[str, None]:
@@ -494,10 +535,18 @@ async def stream_with_tools(ollama_messages: list, model: str) -> AsyncGenerator
             text += event.get("token") or ""
             if event.get("done"):
                 ctx = assistant.Context(config, db, manager)
-                actions = assistant.parse_actions(text)
-                if actions:
-                    # The model wrote the action in its own spelling: the chat shows the answer without it
-                    yield _sse({"replace": assistant.strip_actions(text)})
+                actions, page_actions, tried = assistant.resolve_actions(text)
+                if actions or page_actions:
+                    # The model wrote the action in its own spelling: the chat shows the answer without it,
+                    # plus the one action the page runs itself, in the spelling the page reads
+                    shown = assistant.strip_actions(text)
+                    for page_action in page_actions:
+                        shown += f"\n<<ACTION: {json.dumps(page_action, ensure_ascii=False)}>>"
+                    yield _sse({"replace": shown})
+                elif tried:
+                    # An action Pasha cannot run: never leave 'Hier zijn ze.' with nothing under it
+                    yield _sse({"replace": ""})
+                    yield _sse({"tool": "unknown", "error": assistant.NOT_RUN})
                 for action in actions:
                     yield _sse(await run_in_threadpool(assistant.run_action, ctx, action))
         yield chunk
@@ -519,6 +568,7 @@ def cancel_action(action_id: str):
 @router.post("/api/chat/stream")
 async def chat_stream(request: ChatRequest):
     """Streaming chat endpoint — tokens worden direct verstuurd zodra ze beschikbaar zijn."""
+    model = _chosen_model(request)  # before the prompt (with archive context) is even built
     # De prompt leest mappen en Spotify-data van schijf: in de threadpool, nooit op de event loop
     # (alleen het wachten op Ollama is echt async)
     system_prompt = await run_in_threadpool(build_system_prompt, _last_question(request.messages))
@@ -528,7 +578,7 @@ async def chat_stream(request: ChatRequest):
         ollama_messages.append({"role": msg.role, "content": msg.content})
 
     return StreamingResponse(
-        stream_with_tools(ollama_messages, _chosen_model(request)),
+        stream_with_tools(ollama_messages, model),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

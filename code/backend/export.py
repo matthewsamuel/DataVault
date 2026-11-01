@@ -29,6 +29,7 @@ import json
 import math
 import os
 import shutil
+import stat
 import threading
 import time
 from dataclasses import dataclass
@@ -84,6 +85,32 @@ def _existing_ancestor(path: Path) -> Path:
     return Path("/")
 
 
+def refuse_protected(real: Path, config: Config) -> None:
+    """ExportError when real lies in the archive or in one of DataVault's own folders."""
+    protected = {"de bibliotheek (het archief)": config.VAULT_ROOT, "de RAW-map": config.RAW_FOLDER,
+                 "RAW_DUPLICATES": config.DUPLICATES_FOLDER, "TRASH": config.TRASH_FOLDER,
+                 "de cache van DataVault": config.CACHE_FOLDER}
+    for label, folder in protected.items():
+        if is_inside(real, folder):
+            raise ExportError(f"Exporteren naar {label} kan niet: kies een map buiten het archief")
+    if internal_folder_for(real, config) is not None:
+        raise ExportError("Exporteren naar een map van DataVault zelf kan niet")
+
+
+def _output_folder(dest: Path, parts: List[str], config: Config) -> Path:
+    """
+    The folder for one exported file, created, or ExportError. check_destination only sees
+    the root: a subfolder named like the archive (dest is the vault's parent and structure is
+    'folders') or a month folder that is a symlink into the vault would land inside it. So
+    the real path is checked before mkdir (nothing is created there) and again after.
+    """
+    folder = dest.joinpath(*parts)
+    refuse_protected(Path(os.path.realpath(folder)), config)
+    folder.mkdir(parents=True, exist_ok=True)
+    refuse_protected(Path(os.path.realpath(folder)), config)
+    return folder
+
+
 def check_destination(raw: Any, config: Config) -> Path:
     """The destination as an absolute real path, or ExportError. The folder need not exist yet."""
     if not isinstance(raw, str) or not raw.strip():
@@ -102,14 +129,7 @@ def check_destination(raw: Any, config: Config) -> Path:
     if real in folders or any(real == Path(t) or real.is_relative_to(t) for t in SYSTEM_TREES) \
             or real.is_relative_to(home / "Library"):
         raise ExportError("Dit is een systeemmap; kies een eigen map, bijvoorbeeld in Afbeeldingen")
-    protected = {"de bibliotheek (het archief)": config.VAULT_ROOT, "de RAW-map": config.RAW_FOLDER,
-                 "RAW_DUPLICATES": config.DUPLICATES_FOLDER, "TRASH": config.TRASH_FOLDER,
-                 "de cache van DataVault": config.CACHE_FOLDER}
-    for label, folder in protected.items():
-        if is_inside(real, folder):
-            raise ExportError(f"Exporteren naar {label} kan niet: kies een map buiten het archief")
-    if internal_folder_for(real, config) is not None:
-        raise ExportError("Exporteren naar een map van DataVault zelf kan niet")
+    refuse_protected(real, config)
     if real.exists() and not real.is_dir():
         raise ExportError("Op die plek staat een bestand, geen map")
     anchor = _existing_ancestor(real)
@@ -183,19 +203,41 @@ def load_items(db, config: Config, paths: Any) -> Tuple[List[Item], int]:
         raise ExportError("Kies eerst bestanden om te exporteren")
     if len(paths) > MAX_ITEMS:
         raise ExportError(f"Te veel bestanden in één export (hoogstens {MAX_ITEMS})")
+    # A path exactly as the media index has it (present, not missing) is already a regular
+    # file inside the vault, outside the app's own folders and never a symlink (the index is
+    # built by the one archive walk, paths.ArchiveFilter): one lstat instead of resolving
+    # every folder above it and comparing each with the protected folders by inode (~0.3 ms
+    # a path, 16 s for 50,000). Every other path takes the full check (locate).
+    rows: Dict[str, Tuple] = {}
+    asked = list(dict.fromkeys(raw for raw in paths if isinstance(raw, str)))
+    with db._connect() as conn:
+        for chunk in _chunks(asked):
+            for row in conn.execute(
+                    f"SELECT path, kind, ext, size, taken, width, height FROM media "
+                    f"WHERE missing = 0 AND path IN ({', '.join('?' * len(chunk))})", chunk):
+                rows[row[0]] = row
     located: Dict[str, Path] = {}
     skipped = 0
     for raw in paths:
+        if isinstance(raw, str) and raw in rows:
+            try:
+                fast = stat.S_ISREG(os.lstat(raw).st_mode)
+            except OSError:
+                fast = False
+            if fast:
+                if raw not in located:
+                    located[raw] = Path(raw)
+                continue
         file = locate(raw, config) if isinstance(raw, str) else None
         if file is None or internal_folder_for(file, config) is not None or not file.is_file() \
                 or not (is_photo(file) or is_video(file) or is_audio(file)):
             skipped += 1
         elif str(file) not in located:
             located[str(file)] = file
-    rows: Dict[str, Tuple] = {}
     keys = list(located)
+    missing_rows = [k for k in keys if k not in rows]
     with db._connect() as conn:
-        for chunk in _chunks(keys):
+        for chunk in _chunks(missing_rows):
             for row in conn.execute(
                     f"SELECT path, kind, ext, size, taken, width, height FROM media "
                     f"WHERE path IN ({', '.join('?' * len(chunk))})", chunk):
@@ -428,8 +470,7 @@ def run_export(ctx: JobContext, config: Config, db) -> Dict[str, Any]:
             try:
                 src = Path(item.path)
                 st = src.stat()
-                folder = dest.joinpath(*_safe_parts(_subfolder(item, structure)))
-                folder.mkdir(parents=True, exist_ok=True)
+                folder = _output_folder(dest, _safe_parts(_subfolder(item, structure)), config)
                 tmp = folder / f"{LOG_PREFIX}{ctx.job_id}-{index}.part"
                 if os.path.lexists(tmp):
                     os.unlink(tmp)          # a leftover of this job's own interrupted run
@@ -464,6 +505,8 @@ def run_export(ctx: JobContext, config: Config, db) -> Dict[str, Any]:
                 copied += 1
                 bytes_out += size
                 converted += 1 if was_converted else 0
+            except ExportError as e:
+                errors.add(item.name, e)        # a subfolder that would end up in the archive
             except OSError as e:
                 if e.errno == errno.ENOSPC:
                     raise HTTPException(status_code=507, detail="De schijf is vol; er is niets overschreven. "
@@ -521,10 +564,16 @@ def export_type(config: Config, db) -> JobType:
     def describe(params: Dict[str, Any]) -> str:
         return f"{len(params.get('paths') or [])} bestanden"
 
+    def public_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        # The dock polls the job list every second: the count, not 50,000 paths (4.5 MB a poll)
+        out = {k: v for k, v in params.items() if k != "paths"}
+        out["count"] = len(params.get("paths") or [])
+        return out
+
     keys = ("destination", "copied", "bytes", "skipped", "converted", "errors", "manifest", "complete")
     return JobType(EXPORT_JOB, "Exporteren", prepare, lambda ctx: run_export(ctx, config, db),
                    summarize=lambda r: {k: r.get(k) for k in keys}, results_to_keep=5, jobs_to_keep=10,
-                   describe=describe)
+                   describe=describe, public_params=public_params)
 
 
 # ---------- the best of a period ----------

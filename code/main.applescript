@@ -33,10 +33,13 @@ on run
 	display notification "Server wordt gestart..." with title "DataVault"
 
 	try
-		set logFile to "/tmp/datavault_server.log"
+		-- Not in /tmp (readable by every user): the user's own Logs folder, readable only by the user
+		set logDir to (POSIX path of (path to home folder)) & "Library/Logs/DataVault"
+		set logFile to logDir & "/server.log"
 
 		-- Explicit interpreter path: no dependency on shell activation or PATH
 		set shellScript to "export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\" && "
+		set shellScript to shellScript & "mkdir -p " & quoted form of logDir & " && chmod 700 " & quoted form of logDir & " && umask 077 && "
 		set shellScript to shellScript & "cd " & quoted form of codeDir & " && "
 		set shellScript to shellScript & "nohup ./venv/bin/python -m uvicorn --factory backend.main:create_app --host 127.0.0.1 --port 8000 > " & quoted form of logFile & " 2>&1 & "
 		set shellScript to shellScript & "echo $! > /tmp/datavault_server.pid"

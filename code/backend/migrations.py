@@ -6,10 +6,14 @@ transaction. Before any pending migration runs on an existing database, a full
 copy is written to <cache>/db_backups/, so ratings, streaks and undo data can
 always be recovered. Migrations only add; they never drop user data.
 """
+import logging
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Tuple
+from typing import Callable, List, Set, Tuple
+
+log = logging.getLogger(__name__)
 
 BACKUP_DIR_NAME = "db_backups"
 BACKUPS_TO_KEEP = 10
@@ -960,6 +964,153 @@ def _m110_activity_and_location(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_location_inferred_latlon ON media_location_inferred(lat, lon)")
 
 
+def _m160_elo_glicko(conn: sqlite3.Connection):
+    """
+    'Welke is mooier?' gets an uncertainty-aware model (Glicko-2, backend/elo.py), draws
+    ('gelijk'), remembered skips ('overslaan') and protection against a double POST.
+
+    - elo_comparisons is rebuilt (SQLite cannot change a CHECK): winner may now be 'draw';
+      new columns keep both photos' model state before and after (mu, rd, vol), the model
+      name, and a client_token (unique when given). k_a/k_b are kept for the old rows and
+      are NULL from now on. Every row keeps its id, paths, winner, scope and time, and the
+      AUTOINCREMENT counter is carried over, so an id is never handed out twice.
+    - elo_ratings: the model state per photo (mu, rd, vol, the public rating it wrote last,
+      games). Paths follow moves like file_ratings (media_index._carry_user_data).
+    - elo_skips: skipped pairs (kept out of the pair choice for a while).
+    - The history is then played again with the new model (elo.replay_history): the
+      before/after values of every comparison and the rating of every compared photo are
+      recomputed from the same choices; votes cast between comparisons are carried over
+      exactly. Files that were never compared keep their rating untouched.
+    Version 160: numbers 160-169 belong to this feature.
+    """
+    from backend import elo
+
+    seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'elo_comparisons'").fetchone()
+    conn.execute("""
+        CREATE TABLE elo_comparisons_v160 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_a TEXT NOT NULL,
+            path_b TEXT NOT NULL,
+            winner TEXT NOT NULL CHECK (winner IN ('a', 'b', 'draw')),
+            rating_a_before INTEGER NOT NULL,
+            rating_a_after INTEGER NOT NULL,
+            rating_b_before INTEGER NOT NULL,
+            rating_b_after INTEGER NOT NULL,
+            games_a_before INTEGER NOT NULL,
+            games_b_before INTEGER NOT NULL,
+            existed_a INTEGER NOT NULL,
+            existed_b INTEGER NOT NULL,
+            k_a INTEGER,
+            k_b INTEGER,
+            scope TEXT,
+            created_at REAL NOT NULL,
+            mu_a_before REAL, rd_a_before REAL, vol_a_before REAL,
+            mu_a_after REAL, rd_a_after REAL, vol_a_after REAL,
+            mu_b_before REAL, rd_b_before REAL, vol_b_before REAL,
+            mu_b_after REAL, rd_b_after REAL, vol_b_after REAL,
+            model TEXT,
+            client_token TEXT
+        )
+    """)
+    columns = ("id, path_a, path_b, winner, rating_a_before, rating_a_after, rating_b_before, rating_b_after, "
+               "games_a_before, games_b_before, existed_a, existed_b, k_a, k_b, scope, created_at")
+    conn.execute(f"INSERT INTO elo_comparisons_v160 ({columns}) SELECT {columns} FROM elo_comparisons ORDER BY id")
+    conn.execute("DROP TABLE elo_comparisons")
+    conn.execute("ALTER TABLE elo_comparisons_v160 RENAME TO elo_comparisons")
+    if seq:
+        conn.execute("INSERT INTO sqlite_sequence (name, seq) SELECT 'elo_comparisons', 0 WHERE NOT EXISTS "
+                     "(SELECT 1 FROM sqlite_sequence WHERE name = 'elo_comparisons')")
+        conn.execute("UPDATE sqlite_sequence SET seq = max(seq, ?) WHERE name = 'elo_comparisons'", (seq[0],))
+    else:
+        # The copy of an empty table leaves a counter at 0 that was not there before
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'elo_comparisons' AND seq = 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_a ON elo_comparisons(path_a)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_b ON elo_comparisons(path_b)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_scope ON elo_comparisons(scope, id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_created ON elo_comparisons(created_at)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_elo_token ON elo_comparisons(client_token) "
+                 "WHERE client_token IS NOT NULL")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elo_ratings (
+            path TEXT PRIMARY KEY,
+            mu REAL NOT NULL,
+            rd REAL NOT NULL,
+            vol REAL NOT NULL,
+            public INTEGER NOT NULL,
+            games INTEGER NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elo_skips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_a TEXT NOT NULL,
+            path_b TEXT NOT NULL,
+            scope TEXT,
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_skips_time ON elo_skips(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_skips_a ON elo_skips(path_a)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_skips_b ON elo_skips(path_b)")
+    elo.replay_history(conn)
+
+
+
+def _m161_elo_state_indexes(conn: sqlite3.Connection):
+    """
+    Covering indexes for reading the ratings and model states of every photo below a folder
+    (elo.states_below, once per pair request): a range scan reads them from the index
+    instead of looking up each row (10,000 rated photos: about 14 to 9 ms). Only indexes
+    are added; no row changes.
+    """
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_file_ratings_state ON file_ratings(path, rating, votes)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_ratings_state ON elo_ratings(path, mu, rd, vol, public, games)")
+
+
+# The kinds google_formats.activity_item makes (My Activity and YouTube's own history)
+_ACTIVITY_ITEM_KINDS = ("youtube_watch", "youtube_search", "search", "maps", "web_visit", "activity")
+
+
+def _m135_activity_keys_per_second(conn: sqlite3.Connection):
+    """
+    DataGatherer verification round: a My Activity entry is keyed on its time in whole
+    seconds. Takeout's HTML (the default) has seconds, its JSON has milliseconds, so the same
+    video read from both was stored twice. Every My Activity row of google_takeout gets the
+    new key (kind, second, url or title); where two rows now share it, the copy with the
+    less precise time is removed: it is the same entry, and the raw exports stay in the archive.
+    Chrome's own BrowserHistory rows ('bron': 'Takeout') keep their key.
+    """
+    import hashlib
+    import json
+
+    def key(*parts):
+        text = "\x1f".join("" if p is None else str(p) for p in parts)
+        return hashlib.sha1(text.encode("utf-8", "surrogatepass")).hexdigest()[:24]
+
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'activity_events'").fetchone():
+        return
+    rows = conn.execute(
+        f"SELECT id, kind, ts_ms, url, title, details, event_key FROM activity_events WHERE source = 'google_takeout' "
+        f"AND kind IN ({', '.join('?' * len(_ACTIVITY_ITEM_KINDS))}) ORDER BY id", _ACTIVITY_ITEM_KINDS).fetchall()
+    groups = {}
+    for row_id, kind, ts_ms, url, title, details, old_key in rows:
+        try:
+            info = json.loads(details) if details else {}
+        except ValueError:
+            info = {}
+        if kind == "web_visit" and isinstance(info, dict) and info.get("bron") == "Takeout":
+            continue
+        groups.setdefault(key(kind, ts_ms // 1000, url or title), []).append((row_id, ts_ms, old_key))
+    for new_key, members in groups.items():
+        # keep the millisecond time when there is one (JSON), else the oldest row
+        members.sort(key=lambda m: (m[1] % 1000 == 0, m[0]))
+        keep = members[0]
+        for row_id, _, _ in members[1:]:
+            conn.execute("DELETE FROM activity_events WHERE id = ?", (row_id,))
+        if keep[2] != new_key:
+            conn.execute("UPDATE activity_events SET event_key = ? WHERE id = ?", (new_key, keep[0]))
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -990,6 +1141,11 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (91, "social_items", _m091_social_items),
     # 110-119: DataGatherer Google, location, browser and extras (step 3.9c)
     (110, "activity_and_location", _m110_activity_and_location),
+    # 135-139: DataGatherer verification round
+    (135, "activity_keys_per_second", _m135_activity_keys_per_second),
+    # 160-169: Elo with uncertainty (Glicko-2), draws, skips (step p3x-elo)
+    (160, "elo_glicko", _m160_elo_glicko),
+    (161, "elo_state_indexes", _m161_elo_state_indexes),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
@@ -1008,12 +1164,33 @@ def get_schema_version(conn: sqlite3.Connection) -> int:
     return row[0] or 0
 
 
+def get_applied_versions(conn: sqlite3.Connection) -> Set[int]:
+    """Every version recorded in schema_version. migrate() runs what is missing from this
+    set, not only what lies above the highest number: phase 3 merged migrations out of
+    order (40 and 50 landed after 60 and 61), so a database migrated in between has a
+    gap below its highest version that must still be filled."""
+    get_schema_version(conn)  # creates the table when it is missing
+    return {r[0] for r in conn.execute("SELECT version FROM schema_version")}
+
+
 def _has_user_tables(conn: sqlite3.Connection) -> bool:
     row = conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
         "AND name NOT IN ('schema_version', 'sqlite_sequence')"
     ).fetchone()
     return row[0] > 0
+
+
+def _backup_sort_key(path: Path):
+    """(stamp, mtime) for '<stem>-v<version>-<YYYYmmdd-HHMMSS-ffffff>.db'; a name that does
+    not match that pattern falls back to its mtime with an empty stamp, so it counts as
+    oldest."""
+    m = re.match(r".*-v\d+-(\d{8}-\d{6}-\d{6})\.db$", path.name)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (m.group(1) if m else "", mtime)
 
 
 def backup_database(conn: sqlite3.Connection, db_path: Path, from_version: int) -> Path:
@@ -1028,21 +1205,29 @@ def backup_database(conn: sqlite3.Connection, db_path: Path, from_version: int) 
     finally:
         target.close()
 
-    backups = sorted(backup_dir.glob(f"{db_path.stem}-v*.db"))
+    # Oldest first by the fixed-width stamp, not by the whole name: by name 'v110-' sorts
+    # before 'v12-' and 'v10-' before 'v9-', which would delete the copy just made.
+    backups = sorted(backup_dir.glob(f"{db_path.stem}-v*.db"), key=_backup_sort_key)
     for old in backups[:-BACKUPS_TO_KEEP]:
         old.unlink()  # only our own backup copies, never archive files
     return backup_path
 
 
 def migrate(db_path: Path) -> List[int]:
-    """Bring the database at db_path up to LATEST_VERSION. Returns applied versions."""
+    """Bring the database at db_path up to LATEST_VERSION: run, in list order, every
+    migration whose version is not yet in schema_version. Returns applied versions."""
     conn = sqlite3.connect(str(db_path), isolation_level=None)
     applied: List[int] = []
     try:
         current = get_schema_version(conn)
-        pending = [m for m in MIGRATIONS if m[0] > current]
+        done = get_applied_versions(conn)
+        pending = [m for m in MIGRATIONS if m[0] not in done]
         if not pending:
             return applied
+        gaps = [m[0] for m in pending if m[0] < current]
+        if gaps:
+            log.warning("Schema version %s is missing migrations %s (merged out of order); "
+                        "applying them now", current, gaps)
 
         if _has_user_tables(conn):
             backup_database(conn, db_path, current)

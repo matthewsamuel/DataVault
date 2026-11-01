@@ -186,7 +186,11 @@ function seriesRenderStatus(job) {
         return;
     }
     const parts = [`${formatNumberNl(status.analysed)} van ${formatNumberNl(status.photos)} foto's vergeleken`];
-    if (status.pending) parts.push(`${formatNumberNl(status.pending)} nog te doen`);
+    // 'Nog te doen' telt alleen de foto's die nog bekeken moeten worden (zo klopt de som); het
+    // zoeken naar reeksen tussen al bekeken foto's is een aparte, korte stap
+    const toAnalyse = status.to_analyse ?? status.pending;
+    if (toAnalyse) parts.push(`${formatNumberNl(toAnalyse)} nog te doen`);
+    else if (status.pending) parts.push('reeksen zoeken volgt');
     if (status.undecodable) parts.push(`${formatNumberNl(status.undecodable)} niet te openen`);
     if (status.errors) parts.push(`${formatNumberNl(status.errors)} leesfout${status.errors === 1 ? '' : 'en'}`);
     text.textContent = parts.join(' · ');
@@ -548,7 +552,7 @@ function seriesCard(series) {
                 createEl('button', {
                     class: 'btn btn-primary series-confirm-btn', title: 'Bevestigen (Enter)',
                     onClick: () => seriesConfirm(series),
-                }, `Verplaats ${moving.length}`))),
+                }, `Verplaats ${seriesMoveCount(series, keep).files}`))),
         createEl('div', { class: 'series-photos', role: 'group', 'aria-label': `Foto's: ${seriesTitle(series)}` },
             ...series.members.map(member => seriesPhoto(series, member, keep.has(member.id)))),
         createEl('div', { class: 'series-detail', 'aria-live': 'polite' }));
@@ -558,17 +562,33 @@ function seriesCard(series) {
         card.style.setProperty('--series-count', String(series.members.length));
     }
     card.classList.toggle('is-small', !!tile);
-    seriesSyncActions(card, moving.length);
+    seriesSyncActions(card, series, keep);
     return card;
 }
 
 // Niets te verplaatsen: dan is 'Alles behouden' de hoofdactie, en er staat geen tweede knop
 // met dezelfde naam naast
-function seriesSyncActions(card, moving) {
+// Wat er verhuist als je bevestigt: de foto's die weggaan plus hun exacte kopieën (zoals het venster telt)
+function seriesMoveCount(series, keep) {
+    const move = series.members.filter(m => !keep.has(m.id));
+    const copies = move.reduce((n, m) => n + (m.copies ? m.copies.length : 0), 0);
+    return { photos: move.length, copies, files: move.length + copies };
+}
+
+function seriesMoveTitle(count) {
+    return count.copies
+        ? `${count.photos} ${count.photos === 1 ? 'foto' : 'foto\'s'} en ${count.copies} exacte ${count.copies === 1 ? 'kopie' : 'kopieën'} verplaatsen (Enter)`
+        : 'Bevestigen (Enter)';
+}
+
+function seriesSyncActions(card, series, keep) {
     const confirm = card.querySelector('.series-confirm-btn');
     const keepAll = card.querySelector('.series-keepall-btn');
+    const count = seriesMoveCount(series, keep);
+    const moving = count.photos;
     confirm.hidden = !moving;
-    confirm.textContent = `Verplaats ${moving}`;
+    confirm.textContent = `Verplaats ${count.files}`;
+    confirm.title = seriesMoveTitle(count);
     keepAll.classList.toggle('btn-primary', !moving);
     keepAll.classList.toggle('btn-secondary', !!moving);
 }
@@ -648,7 +668,7 @@ function seriesUpdateCard(series) {
         tile.setAttribute('aria-label', seriesPhotoLabel(member, kept));
         tile.querySelector('.series-photo-state').textContent = kept ? '' : 'Gaat weg';
     });
-    seriesSyncActions(card, series.members.length - keep.size);
+    seriesSyncActions(card, series, keep);
     seriesRenderDetail(series);
     if (seriesCompareState.series === series) seriesRenderCompare();
 }
@@ -1027,9 +1047,9 @@ function seriesRenderCompare() {
         button.replaceChildren(createEl('i', { class: `fas ${kept ? 'fa-check' : 'fa-plus'}`, 'aria-hidden': 'true' }),
             kept ? 'Blijft' : 'Houden');
     });
-    const moving = series.members.length - keep.size;
+    const count = seriesMoveCount(series, keep);
     const go = document.getElementById('btn-series-compare-go');
-    go.textContent = moving ? `Verplaats ${moving}` : 'Alles behouden';
+    go.textContent = count.photos ? `Verplaats ${count.files}` : 'Alles behouden';
 }
 
 function seriesCompareSetCurrent(id) {

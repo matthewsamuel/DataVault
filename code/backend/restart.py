@@ -74,7 +74,7 @@ def open_log():
                 os.rename(log_file, log_file + ".1")  # the app's own log, never an archive file
         except FileNotFoundError:
             pass
-        return os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o644)
+        return os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
     except OSError:
         return os.open(os.devnull, os.O_WRONLY)
 

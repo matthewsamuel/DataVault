@@ -1500,6 +1500,49 @@ textarea.input {
     gap: var(--space-sm);
 }
 
+/* Een vraag vóór een actie (dvConfirm in ui.js): smal, rustig, boven een ander venster */
+.modal.dv-confirm {
+    z-index: 10050;
+}
+
+.dv-confirm-container {
+    max-width: 480px;
+}
+
+.dv-confirm-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: var(--space-sm);
+    padding: var(--space-lg) var(--space-xl) var(--space-xl);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.dv-confirm-body p {
+    margin: 0;
+}
+
+.dv-confirm-list {
+    margin: 0;
+    padding-left: var(--space-xl);
+}
+
+.dv-confirm-body .mono {
+    font-size: var(--fs-xs);
+    color: var(--text-primary);
+}
+
+/* Een korte uitleg links in de voettekst, de knoppen rechts */
+.modal-footer-note {
+    margin-right: auto;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+}
+
 /* Vensters zoals het sneltoetsenoverzicht (ui.js) */
 .dv-overlay {
     position: fixed;
@@ -5236,8 +5279,17 @@ a.breadcrumb-item:hover {
     font-size: var(--fs-sm);
 }
 
-.spotify-error[hidden] {
+.spotify-error[hidden],
+.spotify-empty[hidden],
+#section-spotify .year-selector[hidden] {
     display: none;
+}
+
+/* Nog geen luistergeschiedenis: de gedeelde lege staat, op de breedte van de inhoud */
+.spotify-empty {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: var(--space-3xl) 0;
 }
 
 .spotify-error p {
@@ -6036,6 +6088,24 @@ a.breadcrumb-item:hover {
     font-size: var(--fs-md);
     color: var(--on-media-muted);
     margin-bottom: var(--space-sm);
+}
+
+/* Laden: dezelfde vorm als de uitgelichte show en de collecties eronder */
+.shows-skeleton-hero {
+    height: clamp(300px, 46vh, 440px);
+    border-radius: var(--radius-xl);
+    margin-bottom: var(--space-2xl);
+}
+
+.shows-skeleton-title {
+    width: 120px;
+    height: 16px;
+    margin-bottom: var(--space-lg);
+}
+
+.show-card-skeleton {
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius-lg);
 }
 
 /* Collecties */
@@ -7228,6 +7298,11 @@ button.otd-settings-icon:hover {
     opacity: 0.6;
 }
 
+/* In Instellingen is er ruimte: de hele naam (en 'niet lokaal' bij een cloudmodel) blijft leesbaar */
+.settings-row .chat-model-select {
+    max-width: min(360px, 100%);
+}
+
 .chat-error-text {
     color: var(--danger-text);
     white-space: pre-wrap;
@@ -7876,6 +7951,33 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
+/* Plaatshouders terwijl de cijfers laden (zelfde maat als een echt cijfer) */
+.keurer-stat-skeleton {
+    row-gap: var(--space-xs);
+}
+
+.keurer-stat-skeleton .skeleton-line {
+    width: 64px;
+}
+
+.keurer-stat-skeleton .skeleton-line-short {
+    width: 40px;
+    height: 8px;
+}
+
+.keurer-stats-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    margin: 0;
+    padding: 0 var(--space-md);
+    color: var(--danger-text);
+    font-size: var(--fs-sm);
+    text-align: center;
+}
+
 .keurer-stat-divider {
     width: 1px;
     height: 32px;
@@ -7969,6 +8071,12 @@ button.otd-settings-icon:hover {
     flex: 1 1 0;
     min-height: 220px;
     position: relative;
+}
+
+/* Een melding (kies een map, klaar, mislukt) krimpt niet onder zijn eigen hoogte: met een open
+   takenpaneel op een laag venster schoof hij anders over de cijfers en de toetsen heen */
+.keurer-card-area:has(> .keurer-state-card) {
+    min-height: auto;
 }
 
 /* Lege, klare of mislukte stand */
@@ -9412,8 +9520,14 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
-/* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar") */
-.job-dock.collapsed:not(.compact) {
+/* Klein icoon: precies zo breed als icoon en aantal, met gelijke ruimte links en rechts */
+.job-dock.tiny .job-dock-header {
+    height: 36px;
+    padding: 0 var(--space-md);
+}
+
+/* Ingeklapt paneel: niet breder dan de kop ("2 taken klaar"); het kleine icoon nog smaller */
+.job-dock.collapsed:not(.compact):not(.tiny) {
     width: max-content;
     min-width: 200px;
 }
@@ -9421,6 +9535,13 @@ button.otd-settings-icon:hover {
 /* Ingeklapt paneel: de bibliotheekregel klapt mee in */
 .job-dock.collapsed:not(.compact) .job-library {
     display: none;
+}
+
+/* Klein of laag venster: het open paneel blijft laag (de lijst scrolt erin) */
+@media (max-width: 1279px), (max-height: 820px) {
+    .job-dock {
+        max-height: min(30vh, 240px);
+    }
 }
 
 @media (max-width: 600px) {
@@ -10032,6 +10153,22 @@ button.otd-settings-icon:hover {
 .albums-side-flag {
     font-size: var(--icon-xs);
     color: var(--text-tertiary);
+}
+
+/* Zijbalk tijdens het laden: rijen van dezelfde hoogte als een album */
+.albums-side-skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    height: var(--control-h);
+    padding: 0 var(--space-sm);
+}
+
+.albums-side-skeleton-icon {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--radius-xs);
 }
 
 .albums-side-note {
@@ -11089,6 +11226,17 @@ button.otd-settings-icon:hover {
     word-break: break-all;
 }
 
+/* Een pad midden in een zin: mono en afbreekbaar op elke plek, zodat de regel niet midden in een woord knapt */
+.dg-inline-path {
+    padding: 0 var(--space-xs);
+    border-radius: var(--radius-xs);
+    background: var(--surface-sunken);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    overflow-wrap: anywhere;
+}
+
 .dg-copy-row {
     display: flex;
     align-items: center;
@@ -11134,6 +11282,39 @@ button.otd-settings-icon:hover {
 
 .dg-field .input.mono {
     font-family: var(--font-mono);
+}
+
+/* Sleutelveld: een gewoon tekstveld (geen wachtwoordveld, dus geen 'wachtwoord bewaren'),
+   gemaskeerd met CSS; de knop rechts erin toont of verbergt de sleutel */
+.dg-secret {
+    position: relative;
+}
+
+.dg-field .dg-secret .input {
+    padding-right: calc(var(--control-h-sm) + var(--space-sm));
+}
+
+.dg-secret-input.is-masked {
+    -webkit-text-security: disc;
+}
+
+.dg-secret-input.is-masked:placeholder-shown {
+    -webkit-text-security: none;
+}
+
+.dg-secret-toggle {
+    position: absolute;
+    top: 50%;
+    right: var(--space-xs);
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+}
+
+/* Binnen het veld: de ring aan de binnenkant, zoals bij een menu-item */
+.dg-secret-toggle:focus-visible {
+    box-shadow: none;
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 .dg-field-help {
@@ -11361,9 +11542,16 @@ button.otd-settings-icon:hover {
 
 /* ==================== WELKE IS MOOIER? (elo.js) ==================== */
 /* Een groot venster: kop met collectie en tabbladen, twee foto's op een donker vlak, onderaan
-   de voortgang en Terugdraaien / Overslaan. De ranglijst gebruikt hetzelfde venster. */
+   het sessiedoel, de reeks, hoe zeker de ranglijst is en Terugdraaien / Gelijk / Overslaan. De
+   ranglijst gebruikt hetzelfde venster.
+   Beweging (alles in deze sectie, los van de rest van de app): de winnaar krijgt een groene ring
+   en een vinkje dat opveert en vliegt naar de uitslag onderin (.elo-result); het oude paar ligt
+   dan als .is-leaving absoluut over het nieuwe heen (niet klikbaar) en het nieuwe komt omhoog. De choreografie zelf zit in elo.js (Web Animations
+   API); hier staan de toestanden en de overgangen. Alleen transform en opacity bewegen. */
 
 .elo-overlay {
+    --elo-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
+    --elo-ring-size: var(--control-h);
     padding: var(--space-lg);
 }
 
@@ -11394,8 +11582,12 @@ button.otd-settings-icon:hover {
     margin: 0;
 }
 
+/* Eén regel: op een smal scherm eindigt de zin op '…' (de hele zin staat in de title) */
 .elo-subtitle {
     margin: var(--space-xs) 0 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-secondary);
     font-size: var(--fs-sm);
     line-height: var(--lh-snug);
@@ -11416,6 +11608,7 @@ button.otd-settings-icon:hover {
 }
 
 .elo-body {
+    position: relative;
     flex: 1 1 0;
     min-height: 0;
     display: flex;
@@ -11437,6 +11630,14 @@ button.otd-settings-icon:hover {
     gap: var(--space-lg);
 }
 
+/* Het vorige paar, op weg naar buiten: over het nieuwe heen, maar nooit in de weg */
+.elo-stage.is-leaving {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+}
+
 .elo-choice {
     display: flex;
     flex-direction: column;
@@ -11449,6 +11650,7 @@ button.otd-settings-icon:hover {
     font: inherit;
     text-align: left;
     cursor: pointer;
+    will-change: transform, opacity;
 }
 
 .elo-frame {
@@ -11462,8 +11664,7 @@ button.otd-settings-icon:hover {
     border-radius: var(--radius-lg);
     background-color: var(--media-bg);
     border: 1px solid var(--media-border);
-    transition: box-shadow var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out),
-        opacity var(--duration-base) var(--ease-out);
+    transition: box-shadow var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--elo-spring);
 }
 
 .elo-img {
@@ -11471,18 +11672,26 @@ button.otd-settings-icon:hover {
     max-height: 100%;
     object-fit: contain;
     opacity: 0;
-    transition: opacity var(--duration-base) var(--ease-out);
+    transform: scale(1.015);
+    transition: opacity var(--duration-slow) var(--ease-out), transform var(--duration-slow) var(--ease-out);
     user-select: none;
 }
 
 .elo-img.is-loaded {
     opacity: 1;
+    transform: none;
 }
 
 .elo-choice:hover .elo-frame {
-    box-shadow: 0 0 0 2px var(--accent-border), var(--shadow-md);
+    transform: translateY(calc(-1 * var(--space-2xs)));
+    box-shadow: 0 0 0 2px var(--accent-border), var(--shadow-lg);
 }
 
+.elo-choice:active .elo-frame {
+    transform: scale(0.99);
+}
+
+.elo-choice:focus,
 .elo-choice:focus-visible {
     outline: none;
 }
@@ -11490,10 +11699,6 @@ button.otd-settings-icon:hover {
 .elo-choice:focus-visible .elo-frame,
 .elo-overlay.is-keyboard .elo-choice:focus .elo-frame {
     box-shadow: 0 0 0 2px var(--focus-ring), var(--shadow-md);
-}
-
-.elo-choice:focus {
-    outline: none;
 }
 
 /* WebKit geeft :focus-visible hier niet altijd (de focus wordt met de hand verplaatst); na Tab of
@@ -11509,13 +11714,18 @@ button.otd-settings-icon:hover {
     outline-offset: 2px;
 }
 
+/* De keuze: een groene ring met een zachte gloed en een vinkje dat opveert */
 .elo-choice.is-chosen .elo-frame {
-    box-shadow: 0 0 0 3px var(--accent), var(--shadow-lg);
+    box-shadow: 0 0 0 3px var(--accent), 0 0 var(--space-2xl) var(--accent-glow), var(--shadow-lg);
+}
+
+.elo-choice.is-draw .elo-frame {
+    box-shadow: 0 0 0 2px var(--border-strong), var(--shadow-md);
 }
 
 /* Alleen de foto zelf dooft uit: het donkere vlak eromheen en de −N blijven goed leesbaar */
 .elo-choice.is-passed .elo-img.is-loaded {
-    opacity: 0.4;
+    opacity: 0.45;
 }
 
 .elo-check {
@@ -11534,9 +11744,14 @@ button.otd-settings-icon:hover {
     box-shadow: var(--shadow-md);
 }
 
-.elo-choice.is-chosen .elo-check {
+.elo-choice.is-chosen .elo-check,
+.elo-choice.is-draw .elo-check {
     display: inline-flex;
-    animation: dv-pop-in var(--duration-base) var(--ease-out);
+}
+
+.elo-choice.is-draw .elo-check {
+    background-color: var(--media-control);
+    color: var(--on-media);
 }
 
 /* Hoeveel de score veranderde, kort op de foto */
@@ -11555,9 +11770,9 @@ button.otd-settings-icon:hover {
 }
 
 .elo-delta.is-up,
-.elo-delta.is-down {
+.elo-delta.is-down,
+.elo-delta.is-even {
     display: inline-block;
-    animation: dv-fade-in var(--duration-base) var(--ease-out);
 }
 
 /* De winnaar in het groen van het vinkje; de ander blijft rustig op het donkere vlak */
@@ -11612,16 +11827,32 @@ button.otd-settings-icon:hover {
 
 .elo-score {
     flex: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-xs);
+}
+
+.elo-score-value {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    font-weight: var(--fw-semibold);
+}
+
+.elo-score-band {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
     color: var(--text-secondary);
 }
 
-.elo-score .tabular {
-    font-family: var(--font-mono);
-    color: var(--text-primary);
-}
-
-.elo-games {
-    color: var(--text-tertiary);
+.elo-new-chip {
+    flex: none;
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background-color: var(--accent-subtle);
+    color: var(--accent-text);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    line-height: var(--control-h-sm);
 }
 
 .elo-choice.is-loading {
@@ -11636,13 +11867,13 @@ button.otd-settings-icon:hover {
     width: 40%;
 }
 
-/* ---------- Onderbalk ---------- */
+/* ---------- Onderbalk: doel, reeks, zekerheid, acties ---------- */
 
 .elo-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-lg);
+    gap: var(--space-md) var(--space-lg);
     flex-wrap: wrap;
     margin-top: var(--space-md);
     padding-top: var(--space-md);
@@ -11653,14 +11884,230 @@ button.otd-settings-icon:hover {
     display: none;
 }
 
-.elo-progress {
+.elo-meters {
+    flex: 1 1 420px;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+}
+
+.elo-goal {
+    position: relative;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 0 var(--space-sm) 0 0;
+    border: none;
+    border-radius: var(--radius-full);
+    background: none;
+    color: var(--text-primary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.elo-goal:hover .elo-ring-track {
+    stroke: var(--border-strong);
+}
+
+.elo-ring {
+    width: var(--elo-ring-size);
+    height: var(--elo-ring-size);
+    transform: rotate(-90deg);
+}
+
+.elo-ring circle {
+    fill: none;
+    stroke-width: 3.5;
+}
+
+.elo-ring-track {
+    stroke: var(--border-default);
+    transition: stroke var(--duration-fast) var(--ease-out);
+}
+
+.elo-goal.is-lapped .elo-ring-track {
+    stroke: var(--accent-border);
+}
+
+.elo-ring-fill {
+    stroke: var(--accent);
+    stroke-linecap: round;
+    stroke-dasharray: 100 100;
+    stroke-dashoffset: 100;
+    transition: stroke-dashoffset var(--duration-slow) var(--elo-spring);
+}
+
+.elo-goal.is-done .elo-ring {
+    filter: drop-shadow(0 0 var(--space-xs) var(--accent-glow));
+}
+
+.elo-goal-text {
+    display: flex;
+    flex-direction: column;
+    line-height: var(--lh-tight);
+    text-align: left;
+}
+
+.elo-goal-count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-semibold);
+}
+
+.elo-goal-of {
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+}
+
+.elo-spark {
+    position: absolute;
+    left: calc(var(--elo-ring-size) / 2);
+    top: 50%;
+    width: var(--space-xs);
+    height: var(--space-xs);
+    border-radius: var(--radius-full);
+    background-color: var(--accent);
+    pointer-events: none;
+}
+
+.elo-streak {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+}
+
+.elo-streak[hidden] {
+    display: none;
+}
+
+.elo-streak i {
+    color: var(--warning);
+}
+
+.elo-settled {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+}
+
+.elo-settled-track {
+    width: var(--space-4xl);
+    height: var(--space-xs);
+    border-radius: var(--radius-full);
+    background-color: var(--border-default);
+    overflow: hidden;
+}
+
+.elo-settled-fill {
+    height: 100%;
+    border-radius: inherit;
+    background-color: var(--accent);
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform var(--duration-slow) var(--elo-spring);
+}
+
+.elo-settled-text {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* De voortgang en, na een keuze, even de uitslag: op dezelfde plek, ze wisselen elkaar af */
+.elo-status {
     flex: 1 1 0;
     min-width: 0;
+    display: grid;
+    align-items: center;
+}
+
+.elo-status > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--elo-spring);
+}
+
+.elo-progress {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-secondary);
     font-size: var(--fs-sm);
+}
+
+.elo-status.has-result .elo-progress {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--space-xs)));
+}
+
+.elo-result {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    opacity: 0;
+    transform: translateY(var(--space-xs));
+    pointer-events: none;
+}
+
+.elo-status.has-result .elo-result {
+    opacity: 1;
+    transform: none;
+}
+
+.elo-result-side {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.elo-result-thumb {
+    flex: none;
+    width: var(--control-h);
+    height: var(--control-h);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background-color: var(--media-bg);
+    box-shadow: 0 0 0 1px var(--border-hairline);
+}
+
+.elo-result-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Gekozen: dezelfde groene ring als op de grote foto */
+.elo-result-thumb.is-win {
+    box-shadow: 0 0 0 2px var(--accent), 0 0 var(--space-md) var(--accent-glow);
+}
+
+.elo-result-thumb.is-draw {
+    box-shadow: 0 0 0 2px var(--border-strong);
+}
+
+.elo-result-side:not(:has(.is-win)):not(:has(.is-draw)) .elo-result-thumb img {
+    opacity: 0.6;
+}
+
+.elo-result-delta {
+    min-width: var(--space-2xl);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    color: var(--text-secondary);
+}
+
+.elo-result-delta.is-up {
+    color: var(--accent-text);
 }
 
 .elo-scope-name {
@@ -11703,24 +12150,59 @@ button.otd-settings-icon:hover {
 /* ---------- Ranglijst ---------- */
 
 .elo-board {
+    --elo-col-move: calc(var(--space-4xl) + var(--space-xl));
     flex: 1 1 0;
     min-height: 0;
     overflow-y: auto;
     padding-right: var(--space-xs);
 }
 
+.elo-board > .empty-state {
+    margin-top: var(--space-3xl);
+}
+
+.elo-board-tools {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-md) var(--space-lg);
+    padding-bottom: var(--space-md);
+    margin-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-hairline);
+    background-color: var(--surface-overlay);
+}
+
+.elo-board-heading {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.elo-board-title {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    letter-spacing: var(--tracking-tight);
+    color: var(--text-primary);
+}
+
 .elo-board-caption {
-    margin: 0 0 var(--space-md);
+    margin: var(--space-2xs) 0 0;
     color: var(--text-secondary);
     font-size: var(--fs-sm);
 }
 
-.elo-board-caption strong {
-    color: var(--text-primary);
-    font-weight: var(--fw-semibold);
+.elo-board-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
 }
 
 .elo-board-list {
+    outline: none;
     list-style: none;
     margin: 0;
     padding: 0;
@@ -11732,8 +12214,9 @@ button.otd-settings-icon:hover {
     display: flex;
     align-items: center;
     gap: var(--space-md);
-    padding: var(--space-sm) var(--space-sm);
+    padding: var(--space-sm);
     border-radius: var(--radius-md);
+    transition: background-color var(--duration-fast) var(--ease-out);
 }
 
 .elo-board-row + .elo-board-row {
@@ -11763,6 +12246,12 @@ button.otd-settings-icon:hover {
     font-weight: var(--fw-semibold);
 }
 
+.elo-board-row[data-rank="1"] .elo-rank {
+    background-color: var(--accent);
+    color: var(--text-on-accent);
+    box-shadow: 0 0 var(--space-md) var(--accent-glow);
+}
+
 .elo-board-thumb {
     flex: none;
     width: var(--thumb-sm);
@@ -11777,6 +12266,11 @@ button.otd-settings-icon:hover {
     height: 100%;
     object-fit: cover;
     display: block;
+    transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.elo-board-row:hover .elo-board-img {
+    transform: scale(1.06);
 }
 
 .elo-board-text {
@@ -11804,6 +12298,117 @@ button.otd-settings-icon:hover {
     font-size: var(--fs-xs);
 }
 
+/* De marge van de score (95%): een balkje met een punt op dezelfde schaal voor de hele lijst */
+.elo-board-band {
+    flex: none;
+    width: calc(var(--space-4xl) * 2);
+}
+
+.elo-band {
+    position: relative;
+    display: block;
+    height: var(--space-sm);
+    border-radius: var(--radius-full);
+    background-color: var(--border-default);
+}
+
+.elo-band.is-unknown {
+    opacity: 0.5;
+}
+
+.elo-band-range {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: var(--radius-full);
+    background-color: var(--accent-border);
+}
+
+.elo-band-dot {
+    position: absolute;
+    top: 50%;
+    width: var(--space-sm);
+    height: var(--space-sm);
+    border-radius: var(--radius-full);
+    background-color: var(--accent);
+    transform: translate(-50%, -50%);
+}
+
+/* Kopjes boven de kolommen, op dezelfde maten als de rijen */
+.elo-board-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: 0 var(--space-sm) var(--space-xs);
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+}
+
+.elo-board-head-photo {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-left: calc(var(--control-h-sm) + var(--space-md));
+}
+
+.elo-board-head .elo-board-band {
+    text-align: center;
+    white-space: nowrap;
+}
+
+.elo-board-head-move {
+    flex: none;
+    width: var(--elo-col-move);
+    text-align: center;
+    white-space: nowrap;
+}
+
+.elo-board-head-score {
+    flex: none;
+    min-width: var(--space-4xl);
+    text-align: right;
+}
+
+/* Beweging sinds de vorige sessie */
+.elo-move {
+    flex: none;
+    width: var(--elo-col-move);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2xs);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    color: var(--text-tertiary);
+}
+
+.elo-move.is-up {
+    color: var(--accent-text);
+}
+
+.elo-move.is-down {
+    color: var(--text-secondary);
+}
+
+.elo-move-chip {
+    height: var(--space-lg);
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background-color: var(--accent-subtle);
+    color: var(--accent-text);
+}
+
+/* 'Als album' gelukt: de knop zegt het zelf, met een groen vinkje (en doet even niets) */
+.elo-board-actions .btn.is-done {
+    pointer-events: none;
+}
+
+.elo-board-actions .btn.is-done i {
+    color: var(--accent-text);
+}
+
 .elo-board-score {
     flex: none;
     min-width: var(--space-4xl);
@@ -11814,23 +12419,52 @@ button.otd-settings-icon:hover {
     color: var(--text-primary);
 }
 
+@media (max-width: 1180px) {
+    .elo-board-band {
+        width: var(--space-4xl);
+    }
+
+    .elo-board-head-extra {
+        display: none;
+    }
+
+    .elo-settled-track {
+        width: var(--space-3xl);
+    }
+}
+
 @media (max-width: 900px) {
     .elo-panel {
         padding: var(--space-md) var(--space-lg);
     }
 
     .elo-subtitle,
-    .elo-keys {
+    .elo-keys,
+    .elo-board-band,
+    .elo-actions kbd {
         display: none;
     }
 
     .elo-stage {
         gap: var(--space-md);
     }
+}
 
-    .elo-games {
-        display: none;
+/* Minder beweging: geen zweven, geen gloed die aanzwelt; de toestanden blijven */
+@media (prefers-reduced-motion: reduce) {
+    .elo-choice:hover .elo-frame,
+    .elo-choice:active .elo-frame,
+    .elo-board-row:hover .elo-board-img {
+        transform: none;
     }
+
+    .elo-img {
+        transform: none;
+    }
+}
+
+:root[data-motion="reduce"] .elo-overlay * {
+    transition: none !important;
 }
 
 /* ==================== INSTELLINGEN > BACK-UPS (backup-settings.js) ==================== */
@@ -11853,6 +12487,14 @@ button.otd-settings-icon:hover {
 .backup-none,
 .backup-muted {
     color: var(--text-tertiary);
+}
+
+.backup-actions {
+    align-items: center;
+}
+
+.backup-step {
+    font-size: var(--fs-sm);
 }
 
 .backup-note {
@@ -12127,6 +12769,82 @@ button.otd-settings-icon:hover {
     pointer-events: none;
 }
 
+/* The same picture in more places: one tile, the number of other copies top right */
+.search-result-copies {
+    position: absolute;
+    top: var(--space-sm);
+    right: var(--space-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    height: var(--icon-xl);
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background: var(--media-scrim);
+    color: var(--on-media);
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-semibold);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+}
+
+.search-result-copies .fas {
+    font-size: var(--icon-xs);
+}
+
+/* Nothing fits well: a quiet note above what looks most like it */
+.search-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
+    padding: var(--space-md) var(--space-lg);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-card);
+    background: var(--surface-raised);
+}
+
+.search-notice-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: var(--space-2xl);
+    height: var(--space-2xl);
+    border-radius: var(--radius-full);
+    background: var(--surface-sunken);
+    color: var(--text-tertiary);
+    font-size: var(--icon-sm);
+}
+
+.search-notice-title {
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    line-height: var(--lh-normal);
+}
+
+.search-notice-text {
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.search-hint {
+    max-width: 520px;
+    margin: var(--space-lg) 0 0;
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal);
+    text-wrap: balance;
+}
+
+.search-hint .fas {
+    margin-right: var(--space-xs);
+}
+
 .search-more {
     display: flex;
     justify-content: center;
@@ -12228,8 +12946,9 @@ button.otd-settings-icon:hover {
 }
 
 .map-header,
-.map-filters {
-    /* Kop en filters op dezelfde plek als op de andere pagina's; de kaart zelf blijft breed */
+.map-filters,
+.map-layers {
+    /* Kop, filters en de Tijdlijn-rij op dezelfde plek als op de andere pagina's; de kaart zelf blijft breed */
     width: 100%;
     max-width: calc(var(--page-max) - 2 * var(--page-gutter));
     margin-inline: auto;
@@ -12281,6 +13000,18 @@ button.otd-settings-icon:hover {
     min-width: 120px;
 }
 
+/* Een lange albumnaam (tot 80 tekens) mag de rij niet oprekken: afgekapt met … */
+.map-filters .select-sm {
+    max-width: 200px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.map-date-field .input[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+
 .map-date-field {
     display: inline-flex;
     align-items: center;
@@ -12293,8 +13024,13 @@ button.otd-settings-icon:hover {
     display: none;
 }
 
-.map-filter-spacer {
-    flex: 1;
+/* Aantal en 'Zonder locatie' blijven samen, rechts; past het niet, dan samen op de volgende regel */
+.map-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-left: auto;
+    white-space: nowrap;
 }
 
 .map-count {
@@ -12674,7 +13410,7 @@ button.otd-settings-icon:hover {
 
 @media (max-width: 1100px) {
     .map-page {
-        padding: var(--space-lg) var(--space-xl);
+        padding: var(--space-lg) var(--page-gutter);
     }
 }
 
@@ -12987,6 +13723,11 @@ button.otd-settings-icon:hover {
     margin-top: 2px;
     color: var(--text-tertiary);
     font-size: var(--fs-2xs);
+}
+
+/* Op de groene achtergrond van het gekozen gesprek haalt tertiair in donker geen AA meer */
+.msg-item.active .msg-item-date {
+    color: var(--text-secondary);
 }
 
 .msg-thread > .empty-state {
@@ -13338,9 +14079,22 @@ button.otd-settings-icon:hover {
 }
 
 .chat-confirm-status {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
     font-size: var(--fs-sm);
     line-height: 1.5;
     color: var(--text-secondary);
+}
+
+.chat-confirm-status > i {
+    flex: none;
+    color: var(--accent-text);
+}
+
+.chat-confirm-status.is-error,
+.chat-confirm-status.is-error > i {
+    color: var(--danger-text);
 }
 
 .chat-confirm-status:empty {
@@ -13588,6 +14342,13 @@ button.otd-settings-icon:hover {
     text-align: right;
 }
 
+/* Alleen een datum bekend: woorden in plaats van een uur, in de gewone letter */
+.act-time-day {
+    padding-top: var(--space-xs);
+    color: var(--text-tertiary);
+    line-height: var(--lh-tight);
+}
+
 .act-icon {
     display: inline-flex;
     align-items: center;
@@ -13677,7 +14438,11 @@ a.act-title:focus-visible {
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-sm);
-    margin-bottom: var(--space-md);
+}
+
+.map-layers[hidden],
+.map-layers [hidden] {
+    display: none;
 }
 
 .map-layers-title {

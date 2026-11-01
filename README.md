@@ -254,6 +254,7 @@ Measured on an Apple M3 Pro, internal SSD, on synthetic vaults (not the real arc
 - Video has no near-duplicate detection, and capture dates for avi, mkv and mts fall back to the file date.
 - RAW thumbnails go through macOS `sips` and are not tested with real camera RAW files.
 - The semantic model needs about 1.7 GB of RAM while loaded and a 970 MB download; the first query after a reboot reads it from disk (10 to 20 s from an external disk).
+- Semantic search does not understand negation: "a beach without people" finds beaches with people. The search window says so.
 - The small local chat model (`qwen2.5:3b`) follows the strict action format in 85 to 90 percent of tests, so Pasha sometimes asks you to rephrase.
 - The map labels cities, not countries (countries appear as tooltips).
 - The test suite and the measurements ran on generated archives, never on the real one.

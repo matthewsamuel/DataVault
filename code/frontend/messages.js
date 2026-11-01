@@ -27,6 +27,16 @@ const MSG_DAY = new Intl.DateTimeFormat('nl-BE', { weekday: 'long', day: 'numeri
 const MSG_SHORT = new Intl.DateTimeFormat('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
 const MSG_TIME = new Intl.DateTimeFormat('nl-BE', { hour: '2-digit', minute: '2-digit' });
 
+// Zoekveld leeg en terug naar alle gesprekken; de focus gaat terug naar het zoekveld
+function msgClearSearch() {
+    const search = document.getElementById('msg-search');
+    clearTimeout(msgState.searchTimer);
+    search.value = '';
+    msgState.q = '';
+    msgLoadList();
+    search.focus();
+}
+
 function msgInit() {
     if (!msgState.built) {
         msgState.built = true;
@@ -39,9 +49,7 @@ function msgInit() {
             if (e.key === 'Escape' && search.value) {
                 e.preventDefault();
                 e.stopPropagation();
-                search.value = '';
-                msgState.q = '';
-                msgLoadList();
+                msgClearSearch();
             } else if (e.key === 'ArrowDown') {
                 const first = document.querySelector('#msg-list .msg-item');
                 if (first) { e.preventDefault(); first.focus(); }
@@ -155,7 +163,8 @@ function msgRenderList() {
         }
         if (!items.length) {
             items.push(emptyState({ icon: 'fa-magnifying-glass', title: 'Niets gevonden',
-                text: `Geen gesprek of bericht met '${msgState.q}'. Probeer een kortere zoekterm.` }));
+                text: `Geen gesprek of bericht met '${msgState.q}'. Probeer een kortere zoekterm.`,
+                action: { label: 'Zoekterm wissen', onClick: msgClearSearch } }));
             items[0].classList.add('empty-state-compact');
         }
     } else if (!msgState.convs.length) {

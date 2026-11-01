@@ -7,8 +7,10 @@ commit on success), like the rest of the app. Nothing here is a secret: those ar
 Keychain (keychain.py).
 """
 import json
+import threading
 import time
-from typing import Any, Dict, List, Optional
+from collections import OrderedDict
+from typing import Any, Callable, Dict, List, Optional
 
 STATE_FIELDS = ("schedule_enabled", "schedule_minutes", "connected_at", "needs_reconnect", "status_note",
                 "retry_after", "last_sync_at", "last_success_at", "last_error")
@@ -73,6 +75,49 @@ def versions(db, source_ids) -> tuple:
             f"SELECT source_id, data_version FROM dg_connectors WHERE source_id IN ({','.join('?' * len(ids))})",
             ids).fetchall())
     return tuple(rows.get(i, 0) for i in ids)
+
+
+def data_signature(db) -> tuple:
+    """
+    Changes whenever the data of any source changes: every write of new or changed records
+    bumps that source's data_version (bump_version, inside the same transaction), and a raw
+    import that is registered, read or fails changes dg_raw_imports. Two small queries, so a
+    card, a coverage chip or a day list can be cached on it instead of counting whole tables.
+    """
+    with db._connect() as conn:
+        versions = conn.execute("SELECT COUNT(*), TOTAL(data_version) FROM dg_connectors").fetchone()
+        raws = conn.execute("SELECT COUNT(*), MAX(id), TOTAL(imported_at), TOTAL(covers_from), TOTAL(covers_until), "
+                            "SUM(status = 'imported') FROM dg_raw_imports").fetchone()
+    return (str(getattr(db, "db_path", id(db))), *versions, *raws, time.tzname)
+
+
+_memo_lock = threading.Lock()
+_memo: "OrderedDict[tuple, Any]" = OrderedDict()
+MEMO_SIZE = 128
+
+
+def cached(db, name: str, compute: Callable[[], Any], *args) -> Any:
+    """
+    compute() cached until the DataGatherer data changes (data_signature). For the counts,
+    spans and day lists that scan whole tables (millions of plays, messages or points): the
+    tab then answers from memory on every later visit. The caller must not change the result.
+    """
+    key = (name, args, data_signature(db))
+    with _memo_lock:
+        if key in _memo:
+            _memo.move_to_end(key)
+            return _memo[key]
+    value = compute()
+    with _memo_lock:
+        _memo[key] = value
+        while len(_memo) > MEMO_SIZE:
+            _memo.popitem(last=False)
+    return value
+
+
+def forget_cached() -> None:
+    with _memo_lock:
+        _memo.clear()
 
 
 def scheduled(db) -> List[Dict[str, Any]]:
@@ -240,11 +285,16 @@ def last_request(db, source_id: str) -> Optional[Dict[str, Any]]:
 
 # ---------- network log ----------
 
+# Network log rows that do not come from a connector: the source id and its name in the Netwerklog
+SEARCH_MODEL_SOURCE = "slim_zoeken"
+OTHER_SOURCES = {SEARCH_MODEL_SOURCE: "Slim zoeken (zoekmodel)"}
+
 LOG_COLUMNS = ("id", "at", "source_id", "trigger", "method", "host", "path", "status", "outcome", "bytes", "ms",
                "job_id", "note")
 
 
-def log_request(db, **values) -> None:
+def log_request(db, **values) -> int:
+    """Write one dg_network_log row; returns its id (finish_request fills in a 'pending' row)."""
     values.setdefault("at", time.time())
     names = list(values)
     with db._connect() as conn:
@@ -252,6 +302,20 @@ def log_request(db, **values) -> None:
                            [values[n] for n in names])
         if cur.lastrowid and cur.lastrowid % 500 == 0:
             conn.execute("DELETE FROM dg_network_log WHERE id <= ?", (cur.lastrowid - NETWORK_LOG_KEEP,))
+        return cur.lastrowid
+
+
+FINISH_COLUMNS = ("status", "outcome", "bytes", "ms", "note")
+
+
+def finish_request(db, row_id: int, **values) -> None:
+    """The outcome of a request whose 'pending' row log_request wrote before it went out."""
+    names = [n for n in values if n in FINISH_COLUMNS]
+    if not names:
+        return
+    with db._connect() as conn:
+        conn.execute(f"UPDATE dg_network_log SET {', '.join(f'{n} = ?' for n in names)} WHERE id = ?",
+                     [values[n] for n in names] + [row_id])
 
 
 def network_log(db, source_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:

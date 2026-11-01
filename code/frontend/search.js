@@ -15,6 +15,10 @@
 const SEARCH_PAGE = 60;
 const SEARCH_DEBOUNCE = 350;
 const SEARCH_EXAMPLES = ['hond op het strand', 'verjaardagstaart', 'zonsondergang boven zee', 'sneeuw in de bergen'];
+const SEARCH_WEAK_PREVIEW = 8;       // past niets echt goed: zoveel van wat er het meest op lijkt meteen tonen
+// Slim zoeken begrijpt geen ontkenning ('strand zonder mensen' geeft juist mensen op het strand)
+const SEARCH_NEGATION = /(^|\s)(zonder|niet|geen|without|not|no)(\s|$)/i;
+const SEARCH_NEGATION_HINT = 'Woorden als ‘zonder’ en ‘niet’ begrijpt Slim zoeken niet: beschrijf wat er wél op staat.';
 
 const searchState = {
     mode: 'semantic',      // 'semantic' | 'filename' | 'similar'
@@ -29,6 +33,7 @@ const searchState = {
     ranked: 0,
     nextOffset: null,
     includeWeak: false,
+    weakPreview: false,    // niets past echt goed: de eerste foto's die er het meest op lijken staan er al
     loading: false,
     seq: 0,
     timer: null,
@@ -117,6 +122,7 @@ function buildSearchOverlay() {
                     }, 'Periode wissen'))),
             createEl('div', { class: 'search-status', id: 'search-status', role: 'status', 'aria-live': 'polite' }),
             createEl('div', { class: 'search-scroll', id: 'search-scroll' },
+                createEl('div', { id: 'search-notice' }),
                 createEl('div', { class: 'search-results', id: 'search-results', role: 'list', 'aria-label': 'Resultaten' }),
                 createEl('div', { class: 'search-more', id: 'search-more' }),
                 createEl('div', { id: 'search-sentinel', 'aria-hidden': 'true' }))));
@@ -294,6 +300,7 @@ async function searchRun() {
     const overlay = searchOverlay();
     searchState.query = overlay.querySelector('#search-input').value.trim();
     searchState.includeWeak = false;
+    searchState.weakPreview = false;
     searchState.items = [];
     searchState.nextOffset = null;
     searchState.focusIndex = 0;
@@ -311,11 +318,27 @@ async function searchRun() {
         return;
     }
     results.replaceChildren(...skeletonCards(18, 'search-skeleton').children);
-    searchSetStatus('Zoeken…');
+    // Het zoekmodel wordt nog ingelezen (na het opstarten, of na een kwartier niet zoeken)
+    const modelLoading = searchState.mode === 'semantic' && status && status.text_loaded === false;
+    searchSetStatus(modelLoading ? 'Zoekmodel laden… De eerste zoekopdracht duurt even.' : 'Zoeken…');
     searchState.loading = true;
     try {
-        const data = await fetchJSON(`${API_BASE}/api/search/${searchEndpoint()}?${searchParams(0)}`);
+        let data = await fetchJSON(`${API_BASE}/api/search/${searchEndpoint()}?${searchParams(0)}`);
         if (seq !== searchState.seq) return;
+        if (status && searchState.mode === 'semantic') status.text_loaded = true;
+        if (!data.items.length && data.ranked > 0 && searchState.mode !== 'filename') {
+            // Niets past echt goed: meteen tonen wat er het meest op lijkt, niet achter een knop
+            const params = searchParams(0);
+            params.set('include_weak', 'true');
+            params.set('limit', String(SEARCH_WEAK_PREVIEW));
+            const weak = await fetchJSON(`${API_BASE}/api/search/${searchEndpoint()}?${params}`);
+            if (seq !== searchState.seq) return;
+            if (weak.items.length) {
+                searchState.includeWeak = true;
+                searchState.weakPreview = true;
+                data = { ...weak, total: 0 };
+            }
+        }
         searchState.items = data.items;
         searchState.total = data.total;
         searchState.ranked = data.ranked;
@@ -338,7 +361,7 @@ async function searchRun() {
 }
 
 async function searchLoadMore() {
-    if (!searchIsOpen() || searchState.loading || searchState.nextOffset === null) return;
+    if (!searchIsOpen() || searchState.loading || searchState.nextOffset === null || searchState.weakPreview) return;
     const seq = searchState.seq;
     searchState.loading = true;
     try {
@@ -358,6 +381,7 @@ async function searchLoadMore() {
 async function searchShowWeak() {
     const first = searchState.items.length;
     searchState.includeWeak = true;
+    searchState.weakPreview = false;
     searchState.nextOffset = first;
     searchOverlay().querySelector('#search-more').replaceChildren();
     await searchLoadMore();
@@ -376,6 +400,7 @@ function searchClearFilters() {
 
 function searchShowState(node) {
     const overlay = searchOverlay();
+    overlay.querySelector('#search-notice').replaceChildren();
     overlay.querySelector('#search-results').replaceChildren();
     overlay.querySelector('#search-more').replaceChildren(node);
     searchSetStatus('');
@@ -398,7 +423,8 @@ function searchStartState() {
             document.getElementById('search-input').value = example;
             searchRun();
         },
-    }, example))));
+    }, example))), createEl('p', { class: 'search-hint' },
+        createEl('i', { class: 'fas fa-circle-info', 'aria-hidden': 'true' }), createEl('span', { text: SEARCH_NEGATION_HINT })));
     return state;
 }
 
@@ -436,14 +462,23 @@ function searchResultCard(item, index) {
     img.addEventListener('load', () => img.classList.remove('loading'));
     img.addEventListener('error', () => img.classList.remove('loading'));
     img.src = vaultFileUrl('thumb', item.path);
+    // Dezelfde foto op meer plekken (kopieën) is één tegel met een teller
+    const copies = item.copies || 0;
+    const copiesText = copies ? `nog ${copies} ${copies === 1 ? 'kopie' : 'kopieën'}` : '';
+    const where = copies ? `\nOok in: ${(item.copy_paths || []).map(p => displayPath(p.slice(0, p.lastIndexOf('/')))).join(', ')}` : '';
     const card = createEl('div', {
         class: 'search-result thumb-tile', role: 'listitem', tabindex: index === searchState.focusIndex ? '0' : '-1',
-        dataset: { index: String(index), motionKey: item.path }, 'aria-label': item.name, title: item.name,
+        dataset: { index: String(index), motionKey: item.path }, 'aria-label': copies ? `${item.name}, ${copiesText}` : item.name,
+        title: item.name + where,
         onClick: () => searchOpen(index),
     }, img, createEl('div', { class: 'thumb-caption', text: item.name }));
     if (item.kind === 'video') {
         card.append(createEl('span', { class: 'search-result-badge', 'aria-hidden': 'true' },
             createEl('i', { class: 'fas fa-play' })));
+    }
+    if (copies) {
+        card.append(createEl('span', { class: 'search-result-copies', 'aria-hidden': 'true' },
+            createEl('i', { class: 'fas fa-clone' }), createEl('span', { text: `+${formatNumberNl(copies)}` })));
     }
     return card;
 }
@@ -469,8 +504,23 @@ function searchRenderResults(data, fresh) {
     }
     const more = overlay.querySelector('#search-more');
     more.replaceChildren();
+    const notice = overlay.querySelector('#search-notice');
+    if (fresh) notice.replaceChildren();
+    if (fresh && searchState.weakPreview) {
+        notice.append(createEl('div', { class: 'search-notice', role: 'status' },
+            createEl('i', { class: 'fas fa-magnifying-glass search-notice-icon', 'aria-hidden': 'true' }),
+            createEl('div', {},
+                createEl('div', { class: 'search-notice-title', text: 'Niets past echt goed' }),
+                createEl('div', { class: 'search-notice-text', text: SEARCH_NEGATION.test(searchState.query)
+                    ? SEARCH_NEGATION_HINT : 'Dit is wat er het meest op lijkt. Andere woorden geven misschien betere resultaten.' }))));
+    }
     const count = data.total;
-    if (fresh && !data.items.length) {
+    if (searchState.weakPreview) {
+        if (data.next_offset !== null) {
+            more.append(createEl('button', { type: 'button', class: 'btn btn-secondary', id: 'search-show-weak', onClick: searchShowWeak },
+                createEl('i', { class: 'fas fa-angles-down', 'aria-hidden': 'true' }), ' Meer foto’s die minder goed passen'));
+        }
+    } else if (fresh && !data.items.length) {
         const weak = searchState.mode !== 'filename' && data.ranked > 0;
         const filtered = !!(searchState.kind || searchState.dateFrom || searchState.dateTo);
         const noun = searchState.kind === 'video' ? 'video' : searchState.kind === 'photo' ? 'foto' : 'foto of video';
@@ -493,6 +543,8 @@ function searchRenderResults(data, fresh) {
     const nothing = fresh && !data.items.length;
     if (nothing) {
         // geen telling boven een leeg scherm
+    } else if (searchState.weakPreview) {
+        parts.push(`${formatNumberNl(searchState.items.length)} die er het meest op lijken`);
     } else if (searchState.mode === 'filename') {
         parts.push(`${formatNumberNl(count)} ${count === 1 ? 'bestand' : 'bestanden'}`);
     } else {
@@ -510,6 +562,9 @@ function searchRenderResults(data, fresh) {
     }
     if (data.library_ready === false) {
         extra.push(createEl('span', { class: 'badge badge-warning', text: 'De bibliotheek wordt nog opgebouwd' }));
+    }
+    if (fresh && searchState.mode === 'semantic' && !searchState.weakPreview && SEARCH_NEGATION.test(searchState.query)) {
+        extra.push(createEl('span', { class: 'badge badge-info', text: 'Tip: ‘zonder’ en ‘niet’ werken niet bij Slim zoeken' }));
     }
     searchSetStatus(parts.join(' · '), ...extra);
 }
@@ -702,9 +757,12 @@ registerSettingsSection({
 });
 
 async function searchInstallModel(model) {
-    const sources = model.sources.join('\n');
-    const ok = confirm(`Het zoekmodel (ongeveer ${formatBytes(model.size)}) wordt nu eenmalig gedownload van:\n\n`
-        + `${sources}\n\nnaar ${model.folder}.\n\nDaarna werkt Slim zoeken helemaal op deze Mac. Doorgaan?`);
+    const ok = await dvConfirm({
+        title: 'Zoekmodel downloaden?', icon: 'fa-cloud-arrow-down', confirmLabel: 'Downloaden',
+        body: [`Het zoekmodel (ongeveer ${formatBytes(model.size)}) wordt eenmalig gedownload van:`,
+               createEl('ul', { class: 'dv-confirm-list' }, ...model.sources.map(url => createEl('li', { class: 'mono', text: url }))),
+               createEl('p', {}, 'naar ', createEl('span', { class: 'mono', text: model.folder }), '.'), 'Daarna werkt Slim zoeken helemaal op deze Mac.'],
+    });
     if (!ok) return;
     try {
         await jobsStart('model_download', {});

@@ -43,7 +43,7 @@ def test_docs_ask_for_python_3_12():
 
 def test_install_steps_use_the_files_in_code():
     text = _text(REPO / "README.md")
-    install = text[text.index("### Installation"):text.index("### Configuration")]
+    install = text[text.index("## Install"):text.index("## Running the tests")]
     assert "cd code" in install
     assert (CODE / "requirements.txt").exists() and (CODE / "config.example.json").exists()
     assert "cp config.example.json config.json" in install

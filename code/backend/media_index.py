@@ -162,6 +162,24 @@ def request_update() -> None:
             pass
 
 
+# Set by main.create_app: told after a pass that found new or changed photos and videos
+# (Slim zoeken recognises them right away instead of at its next poll)
+_on_new_files: Optional[Callable[[], None]] = None
+
+
+def set_new_files_listener(fn: Optional[Callable[[], None]]) -> None:
+    global _on_new_files
+    _on_new_files = fn
+
+
+def _tell_new_files() -> None:
+    if _on_new_files is not None:
+        try:
+            _on_new_files()
+        except Exception:
+            pass
+
+
 # ---------- which files belong in the index ----------
 
 def indexable(path: Path, config) -> bool:
@@ -514,6 +532,8 @@ def run_pass(ctx, config, db, full: bool, errors, read_errors, vault_unavailable
         info["last_full_at"] = now
     db.set_setting(STATE_KEY, info)
     counts = run.counts
+    if counts["new"] or counts["changed"]:
+        _tell_new_files()
     return {
         "full": full,
         "files": files,
@@ -575,8 +595,17 @@ def _carry_user_data(conn, src: str, dst: str, carry_keep: bool = True, keurer_d
         conn.execute("DELETE FROM file_ratings WHERE path = ?", (dst,))
         conn.execute("UPDATE file_ratings SET path = ? WHERE path = ?", (dst, src))
     # The comparison history goes along, so a comparison can still be undone exactly (elo.py)
-    conn.execute("UPDATE elo_comparisons SET path_a = ? WHERE path_a = ?", (dst, src))
-    conn.execute("UPDATE elo_comparisons SET path_b = ? WHERE path_b = ?", (dst, src))
+    moved = conn.execute("UPDATE elo_comparisons SET path_a = ? WHERE path_a = ?", (dst, src)).rowcount
+    moved += conn.execute("UPDATE elo_comparisons SET path_b = ? WHERE path_b = ?", (dst, src)).rowcount
+    if moved:
+        from backend import elo
+        elo.forget_history()        # its in-memory pair counts name the old path
+    # ... and so do its model state (uncertainty) and its skipped pairs
+    if conn.execute("SELECT 1 FROM elo_ratings WHERE path = ?", (src,)).fetchone():
+        conn.execute("DELETE FROM elo_ratings WHERE path = ?", (dst,))
+        conn.execute("UPDATE elo_ratings SET path = ? WHERE path = ?", (dst, src))
+    conn.execute("UPDATE elo_skips SET path_a = ? WHERE path_a = ?", (dst, src))
+    conn.execute("UPDATE elo_skips SET path_b = ? WHERE path_b = ?", (dst, src))
     folder = os.path.dirname(dst)
     if carry_keep and not conn.execute("SELECT 1 FROM keurer_decisions WHERE path = ? AND folder = ? AND decision = 'keep'",
                         (dst, folder)).fetchone():
@@ -839,8 +868,10 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
             args.append(filters[key])
     if filters.get("camera_contains"):
         pattern = "%" + "".join("\\" + c if c in "%_\\" else c for c in str(filters["camera_contains"])) + "%"
-        clauses.append("(m.camera_model LIKE ? ESCAPE '\\' OR m.camera_make LIKE ? ESCAPE '\\')")
-        args.extend([pattern, pattern])
+        # also the full name the screens show ('Sony A7 IV' = make 'Sony' + model 'A7 IV')
+        clauses.append("(m.camera_model LIKE ? ESCAPE '\\' OR m.camera_make LIKE ? ESCAPE '\\' OR "
+                       "(COALESCE(m.camera_make, '') || ' ' || COALESCE(m.camera_model, '')) LIKE ? ESCAPE '\\')")
+        args.extend([pattern, pattern, pattern])
     if filters.get("has_gps") is True:
         clauses.append("m.lat IS NOT NULL")
     elif filters.get("has_gps") is False:

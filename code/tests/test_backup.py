@@ -44,6 +44,24 @@ def _fill(db):
         conn.execute("INSERT INTO media_folders VALUES ('/v/library', '/v', 1, 1.0)")
 
 
+def _run(client, timeout=60):
+    """'Nu back-uppen': POST /api/backup/run starts the backup job (202); wait for it. Returns
+    (status, body): 200 and {"backup": result} when it is done, the job's error as
+    {"error": {"message": ...}} with 500 when it failed, else the immediate refusal."""
+    r = client.post("/api/backup/run")
+    if r.status_code != 202:
+        return r.status_code, r.json()
+    job = r.json()["job"]
+    assert job["type"] == "backup" and r.json()["status"]["folder"]
+    deadline = time.time() + timeout
+    while job["status"] in ("queued", "running") and time.time() < deadline:
+        time.sleep(0.05)
+        job = client.get(f"/api/jobs/{job['id']}").json()
+    if job["status"] == "done":
+        return 200, {"backup": client.get(f"/api/jobs/{job['id']}/result").json()["result"], "job": job}
+    return 500, {"error": {"message": job["error"]}, "job": job}
+
+
 class _open:
     """A backup (gzip or plain) opened read-only: with _open(path) as conn."""
 
@@ -63,9 +81,10 @@ class _open:
 def test_a_backup_is_compact_checked_and_keeps_every_user_row(client, app, config):
     db = app.state.db
     _fill(db)
-    r = client.post("/api/backup/run")
-    assert r.status_code == 200, r.text
-    made = r.json()["backup"]
+    code, body = _run(client)
+    assert code == 200, body
+    made = body["backup"]
+    assert body["job"]["summary"]["size"] == made["size"] and body["job"]["processed"] == backup.STEPS
     path = Path(made["path"])
     assert path.parent == config.BACKUP_FOLDER and path.name.endswith("-handmatig.db.gz")
     assert made["integrity"] == "ok" and made["kind"] == "handmatig"
@@ -217,16 +236,16 @@ def test_failures_leave_nothing_behind_and_are_reported(client, app, config, mon
     first = {p.name for p in config.BACKUP_FOLDER.iterdir()}
     time.sleep(1.05)
     monkeypatch.setattr(backup, "_integrity", lambda path: "*** in database main *** Page 3: corrupt")
-    r = client.post("/api/backup/run")
-    assert r.status_code == 500 and "niet bewaard" in r.json()["error"]["message"]
+    code, body = _run(client)
+    assert code == 500 and "niet bewaard" in body["error"]["message"]
     monkeypatch.undo()
     monkeypatch.setattr(backup, "running_servers", lambda: [])
 
     class Usage:
         free = 10 * 1024 * 1024
     monkeypatch.setattr(backup.shutil, "disk_usage", lambda path: Usage)
-    r = client.post("/api/backup/run")
-    assert r.status_code == 507 and "Te weinig vrije ruimte" in r.json()["error"]["message"]
+    code, body = _run(client)
+    assert code == 507 and "Te weinig vrije ruimte" in body["error"]["message"]
     assert {p.name for p in config.BACKUP_FOLDER.iterdir()} == first
     status = client.get("/api/backup/status").json()
     assert "Te weinig vrije ruimte" in status["last_error"]["message"]
@@ -273,9 +292,9 @@ def test_backups_made_by_hand_are_kept_apart_from_the_daily_rotation(client, app
     # pushes it out
     assert {p.name for p in folder.iterdir()} == set(manual[2:]) | {auto}
     # Through the API: two backups by hand on one day both stay
-    first = client.post("/api/backup/run").json()["backup"]["name"]
+    first = _run(client)[1]["backup"]["name"]
     time.sleep(1.05)
-    second = client.post("/api/backup/run").json()["backup"]["name"]
+    second = _run(client)[1]["backup"]["name"]
     assert {b["name"] for b in backup.list_backups(config.BACKUP_FOLDER)} == {first, second}
     assert client.get("/api/backup/status").json()["keep_manual"] == backup.KEEP_MANUAL
 
@@ -286,11 +305,11 @@ def test_a_backup_by_hand_keeps_the_automatic_one_of_that_day(client, app, confi
     morning = backup.make_backup(config)
     assert morning["kind"] == "auto"
     time.sleep(1.05)   # one name per second
-    r = client.post("/api/backup/run")
-    assert r.status_code == 200, r.text
-    assert r.json()["backup"]["removed"] == []
+    code, body = _run(client)
+    assert code == 200, body
+    assert body["backup"]["removed"] == []
     names = {b["name"] for b in backup.list_backups(config.BACKUP_FOLDER)}
-    assert names == {morning["name"], r.json()["backup"]["name"]}
+    assert names == {morning["name"], body["backup"]["name"]}
     # A day with only backups made by hand still has one in its day slot (beyond the 5 kept
     # apart), and an older day keeps its automatic one over a later one by hand
     folder = config.BACKUP_FOLDER
@@ -310,11 +329,11 @@ def test_a_backup_folder_that_cannot_be_written_says_so_in_dutch(client, app, co
     config.BACKUP_FOLDER.mkdir(parents=True, exist_ok=True)
     os.chmod(config.BACKUP_FOLDER, 0o555)
     try:
-        r = client.post("/api/backup/run")
+        code, body = _run(client)
     finally:
         os.chmod(config.BACKUP_FOLDER, 0o755)
-    message = r.json()["error"]["message"]
-    assert r.status_code == 500
+    message = body["error"]["message"]
+    assert code == 500
     assert message.startswith(f"De back-upmap {config.BACKUP_FOLDER} is niet schrijfbaar")
     assert "backup_folder" in message and "mislukt" not in message and "unable" not in message
     assert client.get("/api/backup/status").json()["last_error"]["message"] == message
@@ -488,3 +507,63 @@ def test_the_restore_script_lists_the_backups(app, config, capsys):
     assert restore_backup.main(["--config", str(config.config_path)]) == 0
     out = capsys.readouterr().out
     assert str(config.BACKUP_FOLDER) in out and "datavault-" in out and "auto" in out
+
+
+@pytest.mark.parametrize("folder", ["back-ups #2", "back-ups? 2", "back-ups %41"])
+def test_checks_read_the_real_file_when_the_path_has_hash_question_mark_or_percent(tmp_path, folder):
+    """Unquoted, a '#' or '?' cuts the SQLite URI short: the check would open (and create)
+    an empty database at the shortened path and always say 'ok'."""
+    where = tmp_path / folder
+    where.mkdir()
+    good = where / "goed #1.db"
+    conn = sqlite3.connect(str(good))
+    conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("INSERT INTO schema_version VALUES (42, 'x')")
+    conn.commit()
+    conn.close()
+    bad = where / "kapot #1.db"
+    bad.write_bytes(good.read_bytes()[:100] + b"\xff" * (len(good.read_bytes()) - 100))
+    before = sorted(p.name for p in tmp_path.rglob("*"))
+    assert backup._integrity(good) == "ok"
+    assert backup._schema_version(good) == 42
+    try:
+        verdict = backup._integrity(bad)
+    except sqlite3.DatabaseError as e:
+        verdict = str(e)
+    assert verdict != "ok"
+    assert sorted(p.name for p in tmp_path.rglob("*")) == before        # nothing created
+    with pytest.raises(backup.BackupError):
+        backup.check_backup_file(bad)
+
+
+def test_a_backup_by_hand_runs_as_a_job_that_can_be_cancelled(client, app, config, monkeypatch):
+    """PERF-4: 'Nu back-uppen' answers at once (202) with a job; its steps show in the dock and
+    cancelling it leaves no backup and no temporary copy behind."""
+    gate, reached = threading.Event(), threading.Event()
+    real = backup._compress
+
+    def slow(plain, packed):
+        reached.set()
+        gate.wait(10)
+        return real(plain, packed)
+    monkeypatch.setattr(backup, "_compress", slow)
+    started = time.monotonic()
+    r = client.post("/api/backup/run")
+    assert r.status_code == 202 and time.monotonic() - started < 2
+    job_id = r.json()["job"]["id"]
+    assert reached.wait(10)
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "running" and job["label"] == "Back-up maken"
+    assert job["processed"] == 3 and job["total"] == backup.STEPS and job["message"].startswith("Comprimeren")
+    # A second click while it runs: refused, not a second backup
+    assert client.post("/api/backup/run").status_code == 409
+    assert client.post(f"/api/jobs/{job_id}/cancel").status_code == 200
+    gate.set()
+    deadline = time.time() + 20
+    while time.time() < deadline and job["status"] not in ("cancelled", "done", "failed"):
+        time.sleep(0.05)
+        job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "cancelled", job
+    assert not backup.running()
+    assert backup.list_backups(config.BACKUP_FOLDER) == []
+    assert not [p for p in config.BACKUP_FOLDER.iterdir() if p.name.startswith(".")]

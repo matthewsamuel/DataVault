@@ -56,6 +56,71 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Keurer: de weggevlogen kaart gaat onder de volgende foto door in plaats van erover, er vliegt er maar één tegelijk, en de volgende twee foto's staan al klaar, zodat de nieuwe kaart nooit even leeg is.
 - Viewer: de foto die opent landt precies op zijn plek (geen sprongetje meer als hij geladen is), sluiten gaat sneller dan openen, en bij volgende en vorige liggen nooit twee halfdoorzichtige foto's over elkaar: de oude is weg voor de nieuwe opkomt.
 
+### Verificatieronde
+- Database-updates die later zijn toegevoegd maar een lager nummer hebben (Slim zoeken en 'Welke is mooier?') worden nu altijd uitgevoerd, ook op een database die al verder was bijgewerkt. Ontbrak er zo een, dan vult de app hem bij de volgende start alsnog aan en blijven alle gegevens staan.
+- De veiligheidskopie die vlak voor een database-update wordt gemaakt, blijft nu bewaard; bij het opruimen gaan de oudste kopieën (op datum) weg in plaats van de kopie die net gemaakt is.
+- Drie tests die op een drukke computer soms faalden, zijn betrouwbaar gemaakt.
+- WhatsApp-exports en back-ups met een #, ? of % in de map- of bestandsnaam worden gewoon gelezen; er verschijnt geen leeg bestand meer naast de export, en de controle van een back-up kijkt echt naar het bestand.
+- Exporteren met de originele mappen of per maand schrijft nooit meer in het archief, ook niet als je de map boven het archief kiest of als een maandmap een snelkoppeling naar het archief is; zo'n bestand telt als mislukt.
+- Pasha's kaart voor 'beste uit reeks houden' toont ook de exacte kopieën die mee verhuizen, en het aantal op de kaart is precies wat er na Uitvoeren verplaatst wordt.
+- Een half gekopieerde export die achterbleef na een crash, stroomuitval of een losgekoppelde schijf (een verborgen bestand '.…datavault-partial-…') wordt bij de volgende kopie van die bron en bij het starten van de app opgeruimd; echte exports blijven altijd staan.
+- Het downloaden van het zoekmodel (Slim zoeken) staat nu ook in het Netwerklog, per bestand; een testserver downloadt het nooit echt.
+- Een verbinding van DataGatherer staat in het Netwerklog vóórdat hij vertrekt; lukt dat schrijven niet, dan gaat de verbinding niet door.
+- De browser mag alleen nog met DataVault zelf praten (en, als je die aanzet, met de OpenStreetMap-kaart): een webadres naar buiten wordt geweigerd, en de controle op externe adressen in de code is strenger.
+- In het serverlog staat het deel van een webadres na het vraagteken niet meer (zoals een inlogcode van Spotify), en de DataVault-app schrijft dat log in `~/Library/Logs/DataVault`, alleen leesbaar voor jou, in plaats van in `/tmp`.
+- Pasha: een cloudmodel van Ollama (draait bij ollama.com) is in de lijst gemarkeerd met 'cloud, niet lokaal' en wordt pas gebruikt nadat je bevestigt dat je vragen dan naar internet gaan.
+- Sleutelvelden (Spotify Client ID, Last.fm API-sleutel) zijn geen wachtwoordvelden meer: ze zijn gemaskeerd, met een knop om de sleutel te tonen, en Safari biedt niet meer aan ze als wachtwoord te bewaren.
+- Facebook en Instagram: een nieuwere export van een groep waaruit iemand vertrok of die een nieuwe naam kreeg, komt in hetzelfde gesprek, zonder dubbele berichten.
+- Facebook en Instagram: verschillende chats met dezelfde mensen (twee groepen, of chats met 'Facebook-gebruiker') blijven aparte gesprekken; chats die eerder samengevoegd waren, worden bij de volgende import weer gesplitst.
+- Bestand kiezen laat in Safari ook NetflixViewingHistory.csv en Safari's History.db kiezen.
+- Een Facebook-export wordt herkend, ook als er 'instagram' in een chatnaam staat.
+- Google Mijn activiteit als HTML én als JSON geeft geen dubbele items meer; dubbels die er al waren, worden opgeruimd.
+- WhatsApp: een nieuwere chat-export met dezelfde bestandsnaam op dezelfde dag wordt geen tweede gesprek ('Anna 2') meer.
+- WhatsApp-exports van een Franse Android ('01/06/2024 à 21:34') worden herkend.
+- Een grote locatiegeschiedenis (Records.json van 1 GB of meer) wordt stukje voor stukje ingelezen in plaats van overgeslagen; een bestand dat niet gelezen kon worden, staat als waarschuwing op de kaart van de bron.
+- Een grote Gezondheid-export gebruikt veel minder geheugen.
+- iMessage: reacties met een emoji of sticker (iOS 18) staan bij het bericht, en een ingetrokken bericht toont 'Bericht ingetrokken'.
+- Activiteit toont 'Hele dag' bij items zonder tijdstip (Netflix, agendapunten voor de hele dag, stappen) in plaats van een verzonnen uur.
+- Kaart: de rij 'Uit je Tijdlijn' staat in dezelfde kolom als de kop en de filters, en is weg als er geen locatiegeschiedenis is.
+- Kan Pasha een gevraagde actie niet uitvoeren, dan zegt ze dat nu duidelijk in plaats van 'Hier zijn ze.' zonder foto's eronder. Bijna-goede verzoeken (foto's van een datum, een jaar of een maand) worden omgezet naar de juiste zoekopdracht. Ook een kaal 'Dit vond ik.' zonder actie krijgt die melding, en Pasha onthoudt in het gesprek hoe ze een actie schreef, zodat ze het bij de volgende vraag niet vergeet.
+- Pasha noemt een plaats zoals jij hem schrijft: 'Parijs', niet 'Paris'.
+- Zoeken op camera vindt ook de volledige naam die het scherm toont, zoals 'Sony A7 IV' of 'Apple iPhone 14' (merk en model samen); ook bij Pasha.
+- Keurer: na Ongedaan maken (↓) komt de foto meteen terug als volgende kaart en telt hij weer mee bij 'nog te beoordelen'. De meldingen heten 'Ongedaan maken' in plaats van 'Undo'.
+- Het takenpaneel is in rust echt een klein rondje met een vinkje en het aantal, zonder lege balk ernaast.
+- Op een klein scherm (zoals 1024 × 768) begint het takenpaneel ingeklapt en blijft het laag als je het opent, zodat het geen knoppen meer bedekt.
+- Kaart: een begindatum na de einddatum geeft een korte melding naast de datums (zoals in Albums); de kaart en de aantallen blijven bij het laatste geldige filter in plaats van een rode foutmelding.
+- Kaart: een lange albumnaam rekt de filterbalk niet meer op, en het aantal en 'Zonder locatie' blijven samen rechts staan. Die knop telt alle bestanden zonder locatie en heet daarom 'Zonder locatie'.
+- Terugzetten in het Herstelcentrum en bij Duplicaten, miniaturen maken voor het hele archief, het zoekmodel downloaden, de server herstarten en sleutels vergeten vragen het nu in hetzelfde nette venster als de rest van de app, met de focus eerst op Annuleren, in plaats van een kaal venster van de browser.
+- Terug en Vooruit van de browser (⌘[ en ⌘], of vegen in Safari) gaan nu naar het vorige of volgende scherm in DataVault, ook tussen albums en Op deze dag, in plaats van de app te verlaten. Albums houdt daarbij zijn filters.
+- Albums: de aantallen achter jaren, camera's en bestandstypes staan er alleen als ze kloppen; staat er een ander filter aan, dan zie je alleen de namen, zodat een keuze niet onverwacht 0 bestanden geeft.
+- Beste uit reeks: 'nog te doen' telt alleen de foto's die nog vergeleken moeten worden, zodat de getallen optellen; daarna staat er 'reeksen zoeken volgt'. De knop op een reekskaart noemt hetzelfde aantal als het bevestigvenster, inclusief de exacte kopieën die meegaan.
+- Welke is mooier?: Vergelijken telt wat je 'vergeleken' hebt en de Ranglijst telt de foto's 'met een score'; het woord 'beoordeeld' betekende eerst twee dingen.
+- Kaart: op een smal venster heeft de kop dezelfde marge als de andere pagina's.
+- Spotify zonder luistergeschiedenis toont geen nullen en verzonnen luisterprofiel meer, maar één melding met een knop die je naar de Spotify-kaart in DataGatherer brengt.
+- Albums laat tijdens het laden grijze plaatshouders zien in de zijbalk en het raster, in plaats van 'Nog geen albums' met een knop om albums terug te zetten.
+- Shows houdt zijn titel en knoppen tijdens het laden en na een fout; de plaatshouders hebben de vorm van de pagina.
+- Activiteit en Keurer tonen geen lege omrande vakjes meer: zonder dagen krijgt de melding de hele breedte, de cijfers van de Keurer laden met plaatshouders en melden een fout met 'Opnieuw proberen', en 'Kies een map' schuift op een laag venster met open takenpaneel niet meer over de cijfers.
+- DataGatherer: het WhatsApp-venster noemt de app één keer in de titel, en lange paden staan in een eigen lettertype dat netjes afbreekt.
+- 'Welke is mooier?': in de Ranglijst staat bij een foto zonder duels 'nog niet vergeleken' met het aantal stemmen in de slideshow.
+- Pasha's bevestigingskaart: Annuleren is een gewone knop naast Uitvoeren, en een verlopen of mislukte actie staat er als duidelijke foutmelding met icoon.
+- Berichten: de datum bij het gekozen gesprek is ook in het donkere thema goed leesbaar.
+- DataGatherer: de Spotify-kaart zegt tot wanneer je export gaat en dat hij nog niet is ingelezen, in plaats van 'Nog geen gegevens'; een kaart zonder gegevens toont geen lege grijze balk meer.
+- Kleine afwerking: een leeg archief in Albums heeft een knop 'Naar Bestanden', zoeken zonder treffers in Berichten heeft 'Zoekterm wissen', 'Bronnen beheren' bij Shows heeft een voettekst met Sluiten, en het opslagvenster zegt bovenaan 'van het totaal'.
+- Slim zoeken laat veel meer van de juiste foto's meteen zien, vooral bij Nederlandse zoekopdrachten: van de foto's die echt passen staat nu 86% (Nederlands) en 87% (Engels) bij de goede resultaten, was 77% en 80%, en er glipt minder onzin tussen.
+- Past niets echt goed, dan zie je meteen de foto's die er het meest op lijken, met een korte uitleg erboven, in plaats van alleen 'Niets gevonden' en een knop.
+- Foto's die je buiten de app toevoegt, verplaatst of verwijdert, kloppen in de zoekresultaten zodra je het zoekvenster opent: een verdwenen bestand verschijnt niet meer en nieuwe foto's worden meteen herkend.
+- Na het starten (of na een kwartier niet zoeken) zegt het zoekvenster 'Zoekmodel laden…' zolang het zoekmodel nog wordt ingelezen, en een zoekopdracht kan niet meer mislukken doordat het model net op dat moment werd vrijgegeven.
+- Dezelfde foto op meer plekken (bijvoorbeeld in je bibliotheek en in een back-upmap) staat één keer in de resultaten, met een teller voor de kopieën; als je de muis erop houdt, zie je waar ze staan.
+- Het zoekvenster legt uit dat woorden als 'zonder' en 'niet' niet werken bij Slim zoeken, en geeft een tip als je ze gebruikt.
+- Beste uit reeks: zoeken naar reeksen gaat bij veel op elkaar lijkende foto's (scans, screenshots, effen afbeeldingen) in seconden in plaats van minuten, met een fractie van het geheugen, en de app blijft er soepel bij reageren; nieuwe foto's worden alleen met de rest vergeleken in plaats van alles opnieuw.
+- DataGatherer: het tabblad opent direct, ook met miljoenen nummers, berichten en locatiepunten; de tellingen op de kaarten worden bewaard tot er nieuwe gegevens binnenkomen, en na het starten alvast klaargezet.
+- Spotify: 'Bijgewerkt t/m' staat er direct, en de eerste statistieken na het starten zijn er twee tot drie keer sneller.
+- Kaart en Activiteit: de lijst met dagen staat er direct, ook bij miljoenen locatiepunten.
+- Instellingen > Back-ups: 'Nu back-uppen' loopt als taak in het takenpaneel, met de stappen, een knop om te stoppen en een melding als hij klaar is, ook als je intussen naar een ander scherm gaat.
+- Exporteren: een grote selectie (50.000 bestanden) is in een paar seconden klaar om te starten in plaats van een halve minuut, en het takenpaneel blijft daarna licht.
+- Grootste bestanden staat er in een fractie van een seconde in plaats van enkele seconden.
+- Kaart: met heel veel foto's zoom je vloeiender; de groepen springen dan zonder animatie naar hun nieuwe plek (en ook bij 'minder beweging' van je Mac).
+
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
 - Audiobestanden hebben in het raster een rustig vlak met een muziekicoon in plaats van een tekening.
@@ -584,16 +649,16 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
 ### Shows: "Welke is mooier?"
 - Nieuw bij Shows: **Welke is mooier?** Twee foto's naast elkaar, jij kiest de mooiste. Kies met
-  **←** of **1** (links) en **→** of **2** (rechts), sla over met **spatie** of **s**, en draai de
-  laatste keuze terug met **z** (dan staat datzelfde paar weer in beeld). Je kiest bovenin uit welke
+  **←** of **1** (links) en **→** of **2** (rechts), sla over met **s** (**spatie** is sinds de
+  nieuwe versie "gelijk"), en draai de laatste keuze terug met **z** (dan staat datzelfde paar weer
+  in beeld). Je kiest bovenin uit welke
   collectie de foto's komen: de hele bibliotheek of één show.
 - De score is dezelfde als die van de duimpjes in de slideshow (1000 om te beginnen; een duim blijft
   +50 of −50), dus hoe vaker je een foto kiest, hoe vaker hij in Shows en "Verras me" komt. Na een
   keuze zie je kort hoeveel beide scores veranderden.
-- Hoe de score verandert (Elo, zoals bij schaken): wint een foto van een hoger gewaardeerde, dan
-  stijgt hij veel; wint hij van een lagere, dan weinig. Een foto met minder dan 30 vergelijkingen
-  beweegt maximaal 32 punten per keuze, daarna 16, zodat één verrassende keuze niet alles omgooit.
-  Geen score zakt onder de 100.
+- Hoe de score verandert (eerst Elo, zoals bij schaken; nu Glicko-2, zie "Welke is mooier?: slimmer,
+  sneller en met zekerheid"): wint een foto van een hoger gewaardeerde, dan stijgt hij veel; wint
+  hij van een lagere, dan weinig. Geen score zakt onder de 100.
 - De paren zijn gekozen om snel een goede volgorde te krijgen: eerst foto's die nog weinig
   vergeleken zijn, tegen foto's met een vergelijkbare score, uit de hele collectie (ook in een
   nieuwe bibliotheek, waar alle scores nog gelijk zijn). Nooit twee keer achter elkaar hetzelfde
@@ -705,6 +770,59 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
   Wenen, Parijs, Lissabon, Tokio, ...). In het sneltoetsenoverzicht heet de spatiebalk overal 'spatie'.
 - **Schermafbeeldingen**: de README toont acht schermen in licht en donker (docs/screenshots), gemaakt
   van een gegenereerd voorbeeldarchief zonder echte foto's of persoonlijke gegevens.
+
+### Welke is mooier?: slimmer, sneller en met zekerheid
+- **Sneller een goede ranglijst.** Elke foto heeft nu naast zijn score ook een *onzekerheid*
+  (Glicko-2). Een nieuwe foto beweegt bij zijn eerste keuzes veel en vindt zo snel zijn plek; een
+  foto die al vaak vergeleken is, beweegt nog maar weinig. In een simulatie met 100 foto's bereikt
+  de ranglijst dezelfde kwaliteit als voorheen met 15 tot 45% minder keuzes (zie docs/ELO.md).
+- **Slimmere paren.** De app kiest het paar waar het meest van te leren valt: twee foto's die dicht
+  bij elkaar liggen en waarover nog twijfel is, met af en toe een nieuwe of weinig vergeleken foto
+  ertussen, en wat meer aandacht voor foto's die bij de top kunnen horen. Een foto komt niet in twee
+  paren vlak na elkaar, een paar dat je al vergeleek komt zelden terug, en bijna-duplicaten uit
+  "Beste uit reeks" staan nooit naast elkaar.
+- **Gelijk en overslaan.** Zijn ze even mooi? Druk **spatie** of kies **Gelijk**. **s** (of
+  Overslaan) slaat een paar over; dat paar komt een maand niet terug.
+- **Meteen het volgende paar.** De volgende paren staan al klaar, foto's al geladen: na een keuze
+  staat het nieuwe paar er direct, ook als je snel achter elkaar kiest. Het opslaan loopt op de
+  achtergrond, in de goede volgorde, en een dubbelklik of een stuiterende toets telt niet dubbel.
+- **Terugdraaien in stappen.** Druk vaker op **z** om verder terug te gaan; elk paar komt weer in
+  beeld met de scores van daarvoor.
+- **Ranglijst met zekerheid.** Bij elke foto een balkje dat laat zien tussen welke scores hij met 95%
+  zekerheid ligt, pijltjes voor hoeveel plekken hij steeg of daalde sinds je vorige sessie (of
+  "Nieuw"), en hoeveel hij won, gelijk speelde en verloor. Filter op jaar, kies een show of een
+  **album** als collectie, en maak van de **top 10, 25 of 50** in één klik een album of exporteer ze.
+- **Voortgang en motivatie.** Onderin een ring die volloopt naar je sessiedoel (10, 20, 50 of 100;
+  klik om te wisselen), je reeks dagen op rij, en hoe zeker de ranglijst van deze collectie al is.
+  Haal je je doel, dan licht de ring op.
+- **Mooi in beweging.** De gekozen foto licht op met een groene ring en een vinkje, zweeft weg, en
+  het volgende paar komt zacht omhoog; overslaan en terugdraaien schuiven opzij. Het nieuwe paar is
+  altijd meteen te kiezen, en met "minder beweging" in macOS wisselt alles zonder animatie.
+- **Je bestaande keuzes blijven.** Alle eerdere vergelijkingen blijven bewaard; de scores worden
+  eenmalig opnieuw uitgerekend met het nieuwe model uit precies dezelfde keuzes, en je duimpjes uit
+  de slideshow tellen mee zoals altijd.
+- **Een net gekozen paar komt niet meer terug.** Koos je snel achter elkaar, dan kon het paar dat je
+  net beoordeelde drie keuzes later opnieuw verschijnen, vooral in een klein album. Nu onthoudt het
+  scherm de laatste acht paren, ook als de keuze nog wordt opgeslagen, en gaat een klein album alle
+  paren langs in plaats van steeds hetzelfde dozijn.
+- **Je ziet wat je koos.** De gekozen foto blijft even staan met zijn groene ring, vinkje en +punten,
+  en vliegt dan als miniatuur naar onderin, waar de uitslag (+35 · −24) even staat. Het nieuwe paar
+  is er meteen en vrijwel direct helemaal zichtbaar: geen witte flits meer tussen twee paren. Een
+  keuze die te snel komt (binnen een kwart seconde) telt nog steeds niet, maar de foto schudt dan
+  even nee.
+- **Sessiedoel voorbij.** Haal je je doel, dan staat er "doel gehaald" en begint de ring aan een
+  nieuwe ronde, in plaats van "127 van 20". De dubbele teller "in deze ronde" is weg.
+- **Ranglijst met uitleg.** Boven de kolommen staat nu wat ze zijn: Marge (95%), Laatste sessie en
+  Score, en de meter heet "Ranglijst 81% zeker". De balkjes zijn in het lichte thema beter te zien.
+  Een lege ranglijst toont geen "0% zeker" meer. "Als album" bevestigt op de knop zelf, met
+  Bekijken ernaast (een melding bedekte de knoppen), en het nieuwe album staat meteen in de
+  keuzelijst.
+- **Albums met alleen video's** doen niet meer mee als collectie: het album Video's rangschikte
+  foto's.
+- **Sneller bij een grote geschiedenis.** Met 10.000 foto's en 75.000 vergelijkingen duurt het
+  volgende paar 40 ms in plaats van 159 ms, en opslaan 31 in plaats van 88 ms.
+- Twee foto's die duizenden punten uit elkaar liggen (door veel duimpjes) gaven een fout bij
+  vergelijken, en konden de app bij het bijwerken van de database laten vastlopen. Opgelost.
 
 ## Fase 2 – Stabiliseren
 

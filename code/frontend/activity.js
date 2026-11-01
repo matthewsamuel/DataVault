@@ -46,6 +46,7 @@ async function actLoad() {
     if (!days) return;
     const seq = ++actState.seq;
     if (!actState.facets) {
+        actShowDays(true);
         days.replaceChildren(skeletonRows(6));
         events.replaceChildren(skeletonRows(5));
     }
@@ -57,8 +58,7 @@ async function actLoad() {
         // Zonder gegevens hebben de filters geen zin: alleen de lege staat
         document.querySelector('.act-toolbar').hidden = !facets.sources.length;
         if (!facets.sources.length) {
-            document.getElementById('act-layout').classList.add('act-empty');
-            days.replaceChildren();
+            actShowDays(false);
             events.replaceChildren(emptyState({
                 icon: 'fa-wave-square', title: 'Nog geen activiteit',
                 text: 'Lees in DataGatherer een export of je browsergeschiedenis in; '
@@ -68,17 +68,24 @@ async function actLoad() {
             actSummary('');
             return;
         }
-        document.getElementById('act-layout').classList.remove('act-empty');
         await actLoadDays(seq);
     } catch (err) {
         if (seq !== actState.seq) return;
-        days.replaceChildren();
+        actShowDays(false);
+        // Zonder bronnen (de eerste aanvraag mislukte) hebben lege filters geen zin
+        if (!actState.facets) document.querySelector('.act-toolbar').hidden = true;
         events.replaceChildren(errorState('De activiteit kon niet geladen worden', err, actLoad));
     }
 }
 
+// Zonder dagen (geen treffers, een fout) geen lege, omrande kolom: de melding krijgt de hele breedte
+function actShowDays(show) {
+    const layout = document.getElementById('act-layout');
+    if (layout) layout.classList.toggle('act-empty', !show);
+    if (!show) document.getElementById('act-days').replaceChildren();
+}
+
 async function actLoadDays(seq = ++actState.seq) {
-    const box = document.getElementById('act-days');
     const data = await fetchJSON(`${API_BASE}/api/activity/days?${actParams({ limit: ACT_DAYS_LIMIT })}`);
     if (seq !== actState.seq) return;
     actState.days = data.days;
@@ -87,7 +94,7 @@ async function actLoadDays(seq = ++actState.seq) {
         ? `${total.toLocaleString('nl-BE')} ${total === 1 ? 'gebeurtenis' : 'gebeurtenissen'} op ${data.days.length.toLocaleString('nl-BE')} ${data.days.length === 1 ? 'dag' : 'dagen'}`
         : '');
     if (!data.days.length) {
-        box.replaceChildren();
+        actShowDays(false);
         actState.day = null;
         document.getElementById('act-events').replaceChildren(emptyState({
             icon: 'fa-filter', title: 'Niets gevonden', text: 'Geen activiteit met deze filters.',
@@ -96,6 +103,7 @@ async function actLoadDays(seq = ++actState.seq) {
         return;
     }
     if (!actState.day || !data.days.some(d => d.day === actState.day)) actState.day = data.days[0].day;
+    actShowDays(true);
     actRenderDays();
     actLoadEvents();
 }
@@ -133,8 +141,10 @@ function actFiltersChanged() {
         const again = document.querySelectorAll('.act-source')[focusKey];
         if (again) again.focus();
     }
-    actLoadDays().catch(err => document.getElementById('act-events').replaceChildren(
-        errorState('De activiteit kon niet geladen worden', err, actLoad)));
+    actLoadDays().catch(err => {
+        actShowDays(false);
+        document.getElementById('act-events').replaceChildren(errorState('De activiteit kon niet geladen worden', err, actLoad));
+    });
 }
 
 function actResetFilters() {
@@ -212,8 +222,16 @@ function actDetailText(key, value) {
     return String(value);
 }
 
+// Alleen een datum (Netflix 'Title,Date', een agendapunt voor de hele dag, stappen per dag): geen verzonnen uur
+function actWholeDay(ev) {
+    const d = ev.details || {};
+    return Boolean(d.alleen_datum || d.hele_dag || ev.kind === 'steps');
+}
+
 function actEvent(ev) {
-    const time = new Date(ev.ts * 1000).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+    const wholeDay = actWholeDay(ev);
+    const time = wholeDay ? 'Hele dag'
+        : new Date(ev.ts * 1000).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
     const meta = [ev.kind_label, ev.source_name];
     Object.entries(ev.details || {}).forEach(([k, v]) => {
         if (ACT_DETAIL_LABELS[k] && v !== null && v !== '' && meta.length < 5) meta.push(`${ACT_DETAIL_LABELS[k]}: ${actDetailText(k, v)}`);
@@ -226,7 +244,9 @@ function actEvent(ev) {
     const text = ev.details && typeof ev.details.tekst === 'string' && ev.details.tekst.trim()
         ? createEl('p', { class: 'act-text', text: ev.details.tekst }) : null;
     return createEl('li', { class: 'act-event' },
-        createEl('time', { class: 'act-time mono', datetime: new Date(ev.ts * 1000).toISOString(), text: time }),
+        createEl('time', { class: wholeDay ? 'act-time act-time-day' : 'act-time mono',
+            datetime: wholeDay ? new Date(ev.ts * 1000).toISOString().slice(0, 10) : new Date(ev.ts * 1000).toISOString(),
+            title: wholeDay ? 'Geen tijdstip bekend, alleen de dag' : undefined, text: time }),
         createEl('span', { class: 'act-icon', 'aria-hidden': 'true' }, createEl('i', { class: `fas ${kind}` })),
         createEl('div', { class: 'act-body' }, title, text,
             createEl('div', { class: 'act-meta' }, createEl('i', { class: ev.source_icon, 'aria-hidden': 'true' }), ` ${meta.join(' · ')}`)));

@@ -341,6 +341,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             problems[seen:] = [p for p in problems[seen:] if "404" not in p]
             expect("verlopen" in page.inner_text("#chat-messages .chat-confirm-status"),
                    "chat tools: a forged id did not give the expired message")
+            # ... as an inline error (icon, danger colour), like every other inline error
+            expect(page.evaluate("""(() => { const s = document.querySelector('#chat-messages .chat-confirm-status');
+                return s.classList.contains('is-error') && !!s.querySelector('.fa-triangle-exclamation'); })()"""),
+                   "chat tools: the expired message is not shown as an inline error")
             page.click(".nav-tab[data-view='home']")
             for theme in ("light", "dark", "auto"):
                 step(f"theme {theme}", lambda: (page.click(".theme-button"),
@@ -437,21 +441,33 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("recovery: 8 opens the Herstelcentrum", lambda: page.keyboard.press("8"), 1.0)
             expect(page.locator(".recovery-entry").count() == 2, "recovery: no entry for each move")
             focused = "(document.activeElement.closest('.recovery-entry') || {dataset: {}}).dataset.key || document.activeElement.id"
-            accept = lambda d: d.accept()
-            page.on("dialog", accept)
+            native = []
+            page.on("dialog", lambda d: (native.append(d.message), d.dismiss()))
             first_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
-            step("recovery: Enter on Terugzetten", lambda: (
-                page.focus(".recovery-entry .recovery-undo"), page.keyboard.press("Enter")), 1.2)
+            step("recovery: Enter on Terugzetten asks in the app's own window", lambda: (
+                page.focus(".recovery-entry .recovery-undo"), page.keyboard.press("Enter"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000)), 0.3)
+            expect(page.evaluate("document.activeElement.textContent") == "Annuleren"
+                   and "terugzetten" in page.text_content("#dv-confirm-title"),
+                   f"recovery: the question does not start on Annuleren ({page.evaluate('document.activeElement.textContent')!r})")
+            step("recovery: Escape cancels the question", lambda: page.keyboard.press("Escape"), 0.5)
+            expect(not Path(second_src).exists() and page.evaluate(focused) == first_key,
+                   f"recovery: Escape still undid the move, or the focus did not come back ({page.evaluate(focused)})")
+            step("recovery: Terugzetten, then confirm", lambda: (
+                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.2)
             expect(Path(second_src).exists(), "recovery: the newest move did not go back")
             left_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
             expect(left_key != first_key and page.evaluate(focused) == left_key,
                    f"recovery: focus not on the next entry after the undo ({page.evaluate(focused)})")
-            step("recovery: Enter on the last Terugzetten", lambda: page.keyboard.press("Enter"), 1.2)
+            step("recovery: Enter on the last Terugzetten", lambda: (
+                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.2)
             expect(Path(moved_src).exists(), "recovery: the file did not go back")
             expect(page.is_visible("#recovery-list .empty-state"), "recovery: the list did not show its empty state")
             expect(page.evaluate("document.activeElement.id") == "recovery-title",
                    f"recovery: focus not on the title once the list is empty ({page.evaluate(active_id)})")
-            page.remove_listener("dialog", accept)
+            expect(not native, f"recovery: a native browser dialog appeared ({native})")
 
             # Instellingen: every built-in part is there and the theme can be chosen there
             step("settings: 9 opens Instellingen", lambda: page.keyboard.press("9"), 1.0)
@@ -464,11 +480,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.evaluate("document.getElementById('settings-backup-now').scrollIntoView({block: 'center'})")
             top_before = page.evaluate(button_top)
             try:
+                # It runs as a job in the dock (PERF-4); the part is drawn again when it is done
                 step("settings: Nu back-uppen", lambda: (
                     page.focus("#settings-backup-now"), page.keyboard.press("Enter"),
-                    page.wait_for_selector("#settings-backups .backup-kind", timeout=15000)), 0.5)
+                    page.wait_for_function("jobDock.jobs.some(j => j.type === 'backup' && j.status === 'done')",
+                                           timeout=30000, polling=250),
+                    page.wait_for_selector("#settings-backups .backup-kind", timeout=15000)), 1.0)
             except PlaywrightError:
-                problems.append("settings: 'Nu back-uppen' did not show the new backup")
+                problems.append("settings: 'Nu back-uppen' did not finish as a job or did not show the new backup")
             top_after = page.evaluate(button_top)
             expect(abs(top_after - top_before) < 4,
                    f"settings: 'Nu back-uppen' moved on screen ({top_before:.0f} -> {top_after:.0f} px)")
@@ -536,8 +555,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             undone = page.evaluate(keurer_state)
             expect(undone[1] == before[1] and Path(keurer_file).exists(),
                    f"keurer: ArrowDown did not undo the decision ({undone} vs {before})")
+            # The undone photo is the next card again and counts as still to judge
+            expect(undone[0] == before[0] and page.evaluate("keurerFileQueue[keurerIndex].path") == keurer_file,
+                   f"keurer: the undone photo did not come back as the next card ({undone} vs {before})")
             # Only the Keurer tab passes arrows on: on another tab an arrow decides nothing.
-            # (Undoing a keep leaves keurerIndex where it is, so compare with the state just before.)
             base = page.evaluate(keurer_state)
             current = page.evaluate("keurerFileQueue[keurerIndex].path")
             step("keurer: arrow on the Tijdlijn tab", lambda: (
@@ -638,10 +659,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"settings: install button says {install_text!r}")
             # The install button asks first, with where it downloads from; 'Annuleren' downloads nothing
             asked = []
-            dismiss = lambda d: (asked.append(d.message), d.dismiss())  # noqa: E731
-            page.on("dialog", dismiss)
-            step("settings: install asks first", lambda: page.click("#settings-search-install"), 0.6)
-            page.remove_listener("dialog", dismiss)
+            step("settings: install asks first", lambda: (
+                page.click("#settings-search-install"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                asked.append(page.text_content("#modal-dv-confirm")),
+                page.click("#modal-dv-confirm .btn-secondary")), 0.6)
             jobs_now = page.evaluate("fetch('/api/jobs?type=model_download').then(r => r.json()).then(d => d.jobs.length)")
             expect(asked and "huggingface.co" in asked[0] and jobs_now == 0,
                    f"settings: install did not ask, or started anyway ({asked}, {jobs_now} jobs)")
@@ -921,6 +942,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                      document.getElementById('global-search').placeholder]""")
             expect(len(head[0]) == 3 and len(set(head[0])) == 1 and head[1] == "Zoeken…",
                    f"albums: at 1024 the header buttons sit at {head[0]}, search says {head[1]!r}")
+            # With another filter on, the camera list shows no archive-wide counts that would not match
+            labels = page.evaluate("[...document.querySelectorAll('#albums-camera option')].slice(1).map(o => o.textContent)")
+            expect(all("(" not in label for label in labels),
+                   f"albums: camera counts for the whole archive while Foto's is on ({labels[:3]})")
             page.set_viewport_size({"width": 1400, "height": 900})
             page.evaluate("albumsShow(null, {}, '-taken')")
 
@@ -967,6 +992,25 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("mapView().markers") <= geo[0], "map: the oldest year shows more than everything")
             step("map: clear the filters", lambda: page.click("#map-reset"), 1.0)
             expect(page.evaluate("mapView().markers") == geo[0], "map: clearing the filters did not bring every point back")
+            # A begin date after the end date: said next to the dates, the map and counts stay
+            count_before = page.text_content("#map-count")
+            step("map: dates the wrong way round", lambda: (
+                page.fill("#map-date-from", "2020-01-01"), page.dispatch_event("#map-date-from", "change"),
+                page.wait_for_timeout(800),
+                page.fill("#map-date-to", "2019-01-01"), page.dispatch_event("#map-date-to", "change")), 0.8)
+            # (the valid begin date alone may leave an empty map: that empty state is fine, a failure is not)
+            expect(page.is_visible("#map-range-error") and "mislukte" not in (page.text_content("#map-overlay") or ""),
+                   "map: reversed dates did not give the inline message, or showed the load-failed state")
+            step("map: clear the filters again", lambda: page.click("#map-reset"), 1.0)
+            expect(page.is_hidden("#map-range-error") and page.text_content("#map-count") == count_before,
+                   f"map: clearing left the date message or other counts ({page.text_content('#map-count')!r})")
+            # Back and Forward of the browser go between the screens, not out of the app
+            step("history: Back from Kaart", lambda: page.go_back(), 1.0)
+            expect(page.evaluate("currentMainView()") == "albums" and page.evaluate("location.hash").startswith("#albums"),
+                   f"history: Back went to {page.evaluate('[currentMainView(), location.hash]')}, not Albums")
+            step("history: Forward to Kaart", lambda: page.go_forward(), 1.0)
+            expect(page.evaluate("[currentMainView(), location.hash]") == ["map", ""],
+                   f"history: Forward went to {page.evaluate('[currentMainView(), location.hash]')}, not Kaart")
             expect(not outside, f"map: requests left this machine while the tiles were off: {outside}")
             # The opt-in: only after the switch does the browser ask OpenStreetMap for tiles (answered here by
             # a blank tile, so nothing really goes out), and the choice is kept by the server
@@ -1045,7 +1089,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 step("shows: close slideshow", lambda: page.keyboard.press("Escape"), 0.8)
 
             # Welke is mooier?: two photos side by side; ← / 2 pick, z takes the last pick back exactly,
-            # spatie skips, the pair just compared never comes straight back, Tab stays in the window
+            # spatie is a draw, s skips, the next pair is there at once, the pair just compared never
+            # comes straight back, Tab stays in the window; the Ranglijst has bands, movement and filters
             def board():
                 return page.evaluate("""(async () => (await fetchJSON(`${API_BASE}/api/shows/leaderboard?limit=200`))
                     .items.map(i => [i.path, i.rating, i.games]).sort())()""")
@@ -1080,14 +1125,76 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             scores = {path: rating for path, rating, _ in board()}
             expect(scores.get(first[1], 0) > 1000, f"elo: 2 did not make the right photo win ({scores})")
             count, current = comparisons(), shown_pair()
-            step("elo: spatie skips", lambda: page.keyboard.press(" "), 0.8)
-            expect(comparisons() == count and shown_pair() != current, "elo: spatie did not just skip the pair")
+            step("elo: s skips", lambda: page.keyboard.press("s"), 0.8)
+            expect(comparisons() == count and shown_pair() != current, "elo: s did not just skip the pair")
+            draws = lambda: sum(i["draws"] for i in page.evaluate(
+                "(async () => (await fetchJSON(`${API_BASE}/api/shows/leaderboard?limit=200`)).items)()"))
+            draws_before, current = draws(), shown_pair()
+            step("elo: spatie is a draw", lambda: page.keyboard.press(" "), 1.0)
+            expect(comparisons() == count + 1 and draws() == draws_before + 2 and shown_pair() != current,
+                   f"elo: spatie did not record a draw ({comparisons()} vs {count}, draws {draws()} vs {draws_before})")
+            # The next pair is already loaded: a pick shows it within 50 ms (no waiting for the server)
+            page.wait_for_timeout(600)
+            swap_ms = page.evaluate("""() => new Promise(resolve => {
+                const body = document.getElementById('elo-body');
+                const before = elo.pair && elo.pair.map(p => p.path).join('|');
+                const t0 = performance.now();
+                const obs = new MutationObserver(() => {
+                    const now = elo.pair && elo.pair.map(p => p.path).join('|');
+                    if (now && now !== before && body.querySelector('.elo-stage:not(.is-leaving) .elo-choice:not(.is-loading)')) {
+                        obs.disconnect(); resolve(performance.now() - t0);
+                    }
+                });
+                obs.observe(body, {childList: true, subtree: true});
+                document.getElementById('elo-overlay').dispatchEvent(new KeyboardEvent('keydown', {key: '1', bubbles: true}));
+                setTimeout(() => { obs.disconnect(); resolve(9999); }, 3000);
+            })""")
+            expect(swap_ms < 50, f"elo: the next pair took {swap_ms:.0f} ms to appear after a pick")
+            page.wait_for_timeout(800)
+            # What the eye sees: the new pair is (nearly) fully there within 200 ms, never a blank frame
+            seen_ms = page.evaluate("""() => new Promise(resolve => {
+                const t0 = performance.now();
+                document.getElementById('elo-overlay').dispatchEvent(new KeyboardEvent('keydown', {key: '2', bubbles: true}));
+                const tick = () => {
+                    const live = [...document.querySelectorAll('#elo-body .elo-stage:not(.is-leaving) .elo-choice')];
+                    const t = performance.now() - t0;
+                    if (live.length === 2 && live.every(c => +getComputedStyle(c).opacity >= 0.9)) resolve(t);
+                    else if (t > 2000) resolve(9999); else requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            })""")
+            expect(seen_ms < 200, f"elo: the new pair was only fully visible after {seen_ms:.0f} ms")
+            page.wait_for_timeout(800)
+            # The pick is saved before new pairs are asked for, and the pairs shown lately go along
+            # (recent=), so the pair just picked cannot come back a few picks later
+            order = page.evaluate("""() => new Promise(resolve => {
+                const log = []; const real = fetchJSON;
+                fetchJSON = (url, options) => {
+                    if (url.includes('/api/shows/compare/pair')) log.push(['pair', url]);
+                    else if (url.endsWith('/api/shows/compare')) log.push(['post', url]);
+                    return real(url, options);
+                };
+                const picked = elo.pair.map(p => p.path);
+                elo.queue.splice(1);
+                document.getElementById('elo-overlay').dispatchEvent(new KeyboardEvent('keydown', {key: '1', bubbles: true}));
+                setTimeout(() => {
+                    fetchJSON = real;
+                    const pair = log.find(l => l[0] === 'pair');
+                    resolve({kinds: log.map(l => l[0]), recent: !!pair && picked.every(p => pair[1].includes(`recent=${encodeURIComponent(p)}`))});
+                }, 1200);
+            })""")
+            expect(order["kinds"][:2] == ["post", "pair"] and order["recent"],
+                   f"elo: new pairs were asked for before the pick was saved, or without it ({order})")
+            page.wait_for_timeout(600)
+            count = comparisons()
             page.focus("#elo-scope")
             page.keyboard.press("1")
             page.wait_for_timeout(400)
             expect(comparisons() == count, "elo: a key in the collection list picked a photo")
 
-            # A second key while the next pair loads (slowed down here), and a held key, pick nothing more
+            # Double picks: a key that bounces (again within the dwell time after the new pair
+            # appeared) and a held key pick nothing more; neither does a key while no pair is ready
+            # (the queue emptied and the next pairs load slowly, faked here)
             page.evaluate("""(() => { window.__eloPosts = 0; window.__realFetchJSON = fetchJSON;
                 fetchJSON = async (url, options) => {
                     if (url.includes('/api/shows/compare/pair')) await new Promise(r => setTimeout(r, 900));
@@ -1095,17 +1202,34 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     return window.__realFetchJSON(url, options);
                 }; })()""")
             page.focus("#elo-overlay")
-            page.keyboard.press("1")
-            for _ in range(10):
-                page.wait_for_timeout(80)
-                page.keyboard.press("1")
-            page.keyboard.down("2")
-            page.keyboard.down("2")      # a repeat, as when the key is held
+            # A pick, then the same key bouncing three times within the dwell time (sent in the page,
+            # so the timing is exact)
+            page.evaluate("""() => new Promise(resolve => {
+                const overlay = document.getElementById('elo-overlay');
+                const key = (k, repeat = false) => overlay.dispatchEvent(new KeyboardEvent('keydown', {key: k, repeat, bubbles: true}));
+                key('1');
+                [50, 100, 150].forEach(ms => setTimeout(() => key('1'), ms));
+                setTimeout(resolve, 200);
+            })""")
+            page.wait_for_timeout(500)
+            page.keyboard.down("2")      # a real pick ...
+            page.keyboard.down("2")      # ... and its repeat, as when the key is held
             page.keyboard.up("2")
-            page.wait_for_timeout(1600)
-            expect(page.evaluate("window.__eloPosts") == 1,
-                   f"elo: a second key while the next pair loaded made {page.evaluate('window.__eloPosts')} comparisons")
+            page.wait_for_timeout(1400)      # also lets the (slowed) refill of the queue land
+            expect(page.evaluate("window.__eloPosts") == 2,
+                   f"elo: a bouncing or held key made {page.evaluate('window.__eloPosts')} comparisons (expected 2)")
+            page.evaluate("() => { elo.queue = []; }")
+            page.keyboard.press("1")     # the pair on screen: counts, then nothing is ready
+            page.wait_for_timeout(300)
+            for _ in range(4):
+                page.keyboard.press("1")
+                page.wait_for_timeout(60)
+            page.wait_for_timeout(1500)
+            expect(page.evaluate("window.__eloPosts") == 3,
+                   f"elo: keys while the next pair loaded made {page.evaluate('window.__eloPosts') - 2} comparisons (expected 1)")
             page.evaluate("() => { fetchJSON = window.__realFetchJSON; }")
+            page.wait_for_selector("#elo-body .elo-stage:not(.is-leaving) .elo-choice:not(.is-loading)", timeout=5000)
+            page.wait_for_timeout(400)
 
             # Tab to a photo, Enter picks it, and the keys still work after that (focus stays on a photo);
             # everything Tab reaches in the window shows a focus ring
@@ -1184,7 +1308,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # A collection with too few photos: Overslaan is off and the round counter starts again
             familie = str((vault / "library" / "Familie").resolve())
             step("elo: Familie", lambda: page.select_option("#elo-scope", familie), 1.0)
-            expect(page.is_disabled("#elo-skip"), "elo: Overslaan looks usable without a pair")
+            expect(page.is_disabled("#elo-skip") and page.is_disabled("#elo-draw"), "elo: Overslaan or Gelijk looks usable without a pair")
             expect("in deze ronde" not in (page.text_content("#elo-progress") or ""),
                    f"elo: the round counter of another collection is shown ({page.text_content('#elo-progress')})")
             step("elo: back to the library", lambda: page.select_option("#elo-scope", ""), 1.0)
@@ -1193,6 +1317,20 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("elo: Ranglijst", lambda: page.click("#elo-tab-board"), 1.0)
             ranks = page.evaluate("[...document.querySelectorAll('.elo-board-score')].map(e => Number(e.textContent.replace(/\\./g, '')))")
             expect(len(ranks) >= 2 and ranks == sorted(ranks, reverse=True), f"elo: the leaderboard is not sorted ({ranks})")
+            board_ui = page.evaluate("""({bands: document.querySelectorAll('.elo-board-row .elo-band-range').length,
+                moves: document.querySelectorAll('.elo-board-row .elo-move').length,
+                rows: document.querySelectorAll('.elo-board-row').length,
+                years: document.querySelectorAll('#elo-board-year option').length,
+                settled: (document.querySelector('#elo-board-settled .elo-settled-text') || {}).textContent || ''})""")
+            expect(board_ui["bands"] >= 2 and board_ui["moves"] == board_ui["rows"] and board_ui["years"] >= 1
+                   and board_ui["settled"].endswith("% zeker"), f"elo: Ranglijst misses bands, movement or filters ({board_ui})")
+            step("elo: top as an album", lambda: page.click("#elo-top-album"), 1.0)
+            # Told on the button itself (a toast would cover the board's tools), with 'Bekijken'
+            expect("Album gemaakt" in (page.text_content("#elo-top-album") or "") and page.is_visible("#elo-top-album-open")
+                   and not page.query_selector(".toast"), "elo: 'Als album' did not make an album, or a toast covers the tools")
+            board_box = page.evaluate("""(() => { const r = document.querySelector('.elo-board-head'); return !!r &&
+                [...r.children].every(c => c.offsetWidth === 0 || c.scrollWidth <= c.clientWidth + 1); })()""")
+            expect(board_box, "elo: the Ranglijst column headings are missing or cut off")
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
                 for tab in ("board", "compare"):
@@ -1251,8 +1389,9 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Library (media index): the app indexed the vault by itself; the dock shows it,
             # and 'Bibliotheek bijwerken' starts a full pass from the keyboard
-            # The finished export would keep the dock folded: hide it like a user would
-            page.evaluate("jobDock.jobs.filter(j => j.type === 'export').forEach(j => jobDock.dismissed.add(j.id)); renderJobDock()")
+            # The finished export and backup jobs would keep the dock folded: hide them like a user would
+            page.evaluate("jobDock.jobs.filter(j => j.type === 'export' || j.type === 'backup')"
+                          ".forEach(j => jobDock.dismissed.add(j.id)); renderJobDock()")
             step("library: line after the automatic pass", lambda: page.wait_for_function(
                 "/Bibliotheek: \\d/.test((document.getElementById('job-library') || {}).textContent || '')",
                 timeout=60000, polling=250), 0.2)
@@ -1291,6 +1430,22 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(not dock["collapsed"] and dock["incomplete"] == ["-2"] and "1 onvolledig" in dock["title"]
                    and "2 eerder" not in dock["folded"] and "onvolledig" in dock["library"],
                    f"job dock: an incomplete run is folded away or not marked: {dock}")
+            # Only finished runs and folded: a small icon with the count, not a wide pill over the page
+            tiny = page.evaluate("""(() => {
+                const saved = { jobs: jobDock.jobs, idleOpen: jobDock.idleOpen, error: jobDock.error };
+                const now = Date.now() / 1000;
+                jobDock.jobs = [{ id: -4, type: 'dup_scan', label: 'Duplicaten zoeken', status: 'done', target: 'RAW',
+                    processed: 1, total: 1, params: {}, message: 'Klaar', summary: { complete: true, errors: 0 },
+                    finished_at: now, updated_at: now }];
+                jobDock.idleOpen = false; jobDock.error = null;
+                renderJobDock();
+                const el = document.getElementById('job-dock');
+                const result = { tiny: el.classList.contains('tiny'), width: Math.round(el.getBoundingClientRect().width) };
+                Object.assign(jobDock, saved);
+                renderJobDock();
+                return result;
+            })()""")
+            expect(tiny["tiny"] and tiny["width"] <= 96, f"job dock: the idle dock is not a small icon ({tiny})")
 
             # Beste uit reeks (second tab of Duplicaten): compare, decide with the keyboard, move one
             # series after the confirmation and put it back from the Herstelcentrum
@@ -1407,6 +1562,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                    " document.activeElement.id]")
             expect(dialog[0] and "RAW_DUPLICATES/near-duplicates" in dialog[1] and "null" not in dialog[1]
                    and dialog[2] == "btn-series-cancel", f"series: the confirmation is missing or unclear, or does not start on Annuleren ({dialog})")
+            # The card's button and the dialog name the same number (exact copies that move along included)
+            numbers = page.evaluate("[document.getElementById(`series-title-${seriesState.confirm.series.key}`)"
+                                    ".closest('.series-card').querySelector('.series-confirm-btn').textContent,"
+                                    " document.getElementById('btn-series-go').textContent]")
+            expect(re.sub(r"\D", "", numbers[0]) == re.sub(r"\D", "", numbers[1]),
+                   f"series: the card button and the dialog count differently ({numbers})")
             expect_focus_trapped("modal-series-confirm", "series: confirmation")
             page.focus("#btn-series-cancel")
             step("series: Escape moves nothing", lambda: page.keyboard.press("Escape"), 0.4)
@@ -1431,13 +1592,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                   " (document.querySelector('#series-list .empty-state-action') || {}).textContent]")
             expect(empty == ["Alle reeksen overgeslagen", "Overgeslagen tonen"],
                    f"series: after the last decision the list did not say the rest was skipped ({empty})")
-            accept = lambda d: d.accept()
-            page.on("dialog", accept)
             step("series: undo in the Herstelcentrum", lambda: (
                 page.click(".top-nav [data-view='recovery']"),
                 page.wait_for_selector(".recovery-entry"),
-                page.click(".recovery-entry:has-text('Beste uit reeks') .recovery-undo")), 1.5)
-            page.remove_listener("dialog", accept)
+                page.click(".recovery-entry:has-text('Beste uit reeks') .recovery-undo"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.5)
             expect(klein.exists() and not (holding / "2022" / "bursts" / "strand klein.jpg").exists(),
                    "series: the Herstelcentrum did not put the resized photo back")
             step("series: back on the tab", lambda: page.click(".top-nav [data-view='duplicates']"), 1.0)
@@ -1671,6 +1831,18 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect_focus_trapped("dg-connect", "datagatherer: connect window")
             page.fill("#dg-connect-username", "smoketest")
             page.fill("#dg-connect-api_key", "0123456789abcdef0123456789abcdef")
+            # A key is a masked text field, never a password field (no 'save password' prompt)
+            key_field = page.evaluate("""(() => { const i = document.getElementById('dg-connect-api_key');
+                return [i.type, i.classList.contains('is-masked'),
+                        getComputedStyle(i).webkitTextSecurity || getComputedStyle(i).getPropertyValue('-webkit-text-security')]; })()""")
+            expect(key_field[0] == "text" and key_field[1] and key_field[2] in ("disc", ""),
+                   f"datagatherer: the API key field is {key_field}")
+            page.click("#dg-connect .dg-secret-toggle")
+            expect(page.evaluate("!document.getElementById('dg-connect-api_key').classList.contains('is-masked')")
+                   and page.get_attribute("#dg-connect .dg-secret-toggle", "aria-pressed") == "true",
+                   "datagatherer: Sleutel tonen did not show the key")
+            expect(page.evaluate("document.querySelectorAll('input[type=password]').length") == 0,
+                   "datagatherer: a password field is on the page")
             step("datagatherer: save Last.fm", lambda: page.click("#dg-connect .modal-footer .btn-primary"), 1.2)
             expect(not page.is_visible("#dg-connect"), "datagatherer: the connect window stayed open after saving")
             expect(page.evaluate("(document.querySelector(\".dg-card[data-source='lastfm'] .dg-primary\") || {}).dataset.action") == "sync",

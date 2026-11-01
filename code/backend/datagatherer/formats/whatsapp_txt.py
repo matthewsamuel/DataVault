@@ -28,8 +28,10 @@ from zoneinfo import ZoneInfo
 _INVISIBLE = "‎‏‪‬﻿"
 _DATE = r"(\d{1,4})[./-](\d{1,2})[./-](\d{1,4})"
 _TIME = r"(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?(?:\s*([AaPp])\.?\s*[Mm]\.?)?"
-IOS_LINE = re.compile(r"^\[" + _DATE + r",?\s+" + _TIME + r"\]\s(.*)$")
-ANDROID_LINE = re.compile(r"^" + _DATE + r",?\s+" + _TIME + r"\s[-–]\s(.*)$")
+# Between date and time: a comma or a space, or a small word ('01/06/2024 à 21:34' in French)
+_SEP = r"(?:,?\s+(?:à|um|alle|a las|om)\s+|,?\s+)"
+IOS_LINE = re.compile(r"^\[" + _DATE + _SEP + _TIME + r"\]\s(.*)$")
+ANDROID_LINE = re.compile(r"^" + _DATE + _SEP + _TIME + r"\s[-–]\s(.*)$")
 ATTACHED = re.compile(r"<(?:attached|bijgevoegd|anexo|adjunto|pièce jointe|angehängt):\s*([^>]+)>", re.I)
 ANDROID_ATTACHED = re.compile(r"^(.+?\.\w{2,5})\s\((?:file attached|bestand bijgevoegd)\)", re.I)
 OMITTED = re.compile(r"^(?:<?(?:media omitted|media weggelaten)>?|(?:image|video|audio|sticker|GIF|document|"
