@@ -76,3 +76,17 @@ def test_a_leaving_dialog_or_menu_is_inert_until_it_is_gone():
     assert "el.inert = false" in js[js.index("function stopLeaving"):js.index("function overlayLeaving")]
     shell = (FRONTEND / "motion-shell.js").read_text(encoding="utf-8")
     assert "menu.inert = true" in shell and "menu.inert = false" in shell
+
+
+def test_rustig_only_fades():
+    """Rustig (and macOS 'reduce motion'): nothing scales, rotates or slides (docs/MOTION.md, section 3)."""
+    css = _css()
+    assert re.search(r'html\[data-motion="rustig"\] \.toast \.toast-icon \{\s*animation-name: dv-fade-in;', css)
+    for name in ("dv-modal-out", "shell-menu-out"):
+        frames = re.search(r"@keyframes " + name + r" \{(.*?)\n\}", css, re.S).group(1)
+        assert "scale(var(--motion-scale-out))" in frames and "0.98" not in frames, name
+    tokens = css[css.index("/* @tokens:start */"):css.index("/* @tokens:end */")]
+    assert "--motion-scale-out: 0.98;" in tokens
+    assert css.count("--motion-scale-out: 1;") >= 3   # Rustig, Uit and prefers-reduced-motion
+    # No zoom on the photo itself while it loads
+    assert not re.search(r"\.thumb-tile img\.loading \{[^}]*transform", css)

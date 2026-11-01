@@ -132,6 +132,7 @@
     --motion-distance-lg: 24px;
     --motion-scale-in: 0.96;
     --motion-scale-press: 0.97;
+    --motion-scale-out: 0.98;
     --motion-lift: -2px;
     /* Oude namen, nu op de schaal hierboven */
     --duration-fast: var(--dur-2);
@@ -448,6 +449,7 @@ html[data-motion="rustig"] {
     --motion-distance-lg: 0px;
     --motion-scale-in: 1;
     --motion-scale-press: 1;
+    --motion-scale-out: 1;
     --motion-lift: 0px;
 }
 
@@ -469,6 +471,7 @@ html[data-motion="uit"] {
     --motion-distance-lg: 0px;
     --motion-scale-in: 1;
     --motion-scale-press: 1;
+    --motion-scale-out: 1;
     --motion-lift: 0px;
 }
 
@@ -496,6 +499,7 @@ html[data-motion="uit"] *::after {
         --motion-distance-lg: 0px;
         --motion-scale-in: 1;
         --motion-scale-press: 1;
+        --motion-scale-out: 1;
         --motion-lift: 0px;
     }
 
@@ -1383,7 +1387,7 @@ textarea.input {
 }
 
 @keyframes dv-modal-out {
-    to { opacity: 0; transform: translate3d(0, var(--motion-distance-sm), 0) scale(0.98); }
+    to { opacity: 0; transform: translate3d(0, var(--motion-distance-sm), 0) scale(var(--motion-scale-out)); }
 }
 
 @keyframes dv-fade-out {
@@ -1690,6 +1694,11 @@ textarea.input {
     0% { opacity: 0; transform: scale(0.4) rotate(-12deg); }
     40% { opacity: 1; }
     100% { opacity: 1; transform: none; }
+}
+
+/* Rustig (ook macOS 'minder beweging'): het icoon vervaagt alleen, zonder sprong of draai */
+html[data-motion="rustig"] .toast .toast-icon {
+    animation-name: dv-fade-in;
 }
 
 /* Een smalle kleurstreep links geeft de soort aan */
@@ -14039,6 +14048,7 @@ html[data-motion="uit"]::view-transition-new(*) {
 
 html[data-motion="rustig"] .job-running .job-bar::after {
     display: none;
+    animation: none;
 }
 
 .job-dock.tiny .job-dock-title i {
@@ -14149,7 +14159,7 @@ html[data-motion="rustig"] .job-running .job-bar::after {
 }
 
 @keyframes shell-menu-out {
-    to { opacity: 0; transform: translate3d(0, calc(var(--motion-distance-sm) * -0.5), 0) scale(0.98); }
+    to { opacity: 0; transform: translate3d(0, calc(var(--motion-distance-sm) * -0.5), 0) scale(var(--motion-scale-out)); }
 }
 
 /* ---------- Thema: de cirkel krijgt een zachte rand ---------- */
@@ -14297,6 +14307,7 @@ html[data-motion="rustig"] .message-loading .dot:nth-child(3) {
 
 html[data-motion="rustig"] .empty-state-icon.is-arriving::after {
     display: none;
+    animation: none;
 }
 
 /* Skeletten: een glans die via transform overtrekt (geen achtergrond die per beeld opnieuw
@@ -14349,8 +14360,11 @@ html[data-motion="rustig"] .empty-state-icon.is-arriving::after {
 }
 
 /* Rustig: geen schuivende glans, alleen een zachte ademhaling */
-html[data-motion="rustig"] .skeleton::after {
+html[data-motion="rustig"] .skeleton::after,
+html[data-motion="rustig"] .skeleton-grid > .skeleton::after,
+html[data-motion="rustig"] .skeleton-list > .skeleton-row .skeleton::after {
     display: none;
+    animation: none;
 }
 
 html[data-motion="rustig"] .skeleton {
@@ -14412,16 +14426,12 @@ html[data-motion="rustig"] .skeleton {
     transition-duration: var(--dur-1), var(--dur-2);
 }
 
-/* De foto zelf vaagt bij het laden in en zet zich (heel licht) neer; hover zoomt niet */
+/* De foto zelf vaagt bij het laden alleen in: geen zoom op de foto, ook niet bij hover */
 .thumb-tile img,
 .thumb-tile video {
     transition:
         opacity var(--dur-4) var(--ease-out),
         transform var(--dur-5) var(--ease-emphasized);
-}
-
-.thumb-tile img.loading {
-    transform: scale(1.03);
 }
 
 .thumb-tile:hover img {

@@ -22,6 +22,7 @@ with --base http://127.0.0.1:PORT.
     python3 code/tests/ui/motion_perf.py --budget 24     # stricter
     python3 code/tests/ui/motion_perf.py --runs 3        # every transition three times
     python3 code/tests/ui/motion_perf.py --big-grid      # the shell over 6000 tiles too
+    python3 code/tests/ui/motion_perf.py --calm-sweep    # Rustig: nothing may scale, rotate or slide
 
 Exit code 0 when every animation frame stayed under the budget, 1 otherwise. Not collected
 by pytest (the name does not start with test_).
@@ -306,6 +307,70 @@ def measure(page, setup, trigger, settle_ms):
     return after[0], after[1:]
 
 
+# ---------- Rustig: alleen vervagen (docs/MOTION.md, sectie 3) ----------
+# Een rAF-lus noteert elke animatie of transition die een transform laat bewegen, terwijl de
+# app in Rustig door alle schermen gaat en de vensters, het themamenu, een melding en het
+# thema opent en sluit. Alleen de tijdlijn van een melding (een haarlijn die leegloopt: een
+# voortgang, geen beweging) mag.
+CALM_SWEEP = """(() => {
+    window.__calm = new Map();
+    const neutral = (t) => !t || t === 'none' || t.trim() === 'matrix(1, 0, 0, 1, 0, 0)'
+        || (!/scale\\((?!1\\)|1,\\s*1\\))|rotate\\((?!0)/.test(t) && !/translate3?d?\\((?!0(px)?,\\s*0(px)?(,\\s*0(px)?)?\\))/.test(t));
+    const name = (el) => el ? el.tagName + (el.id ? '#' + el.id : '') + '.' + String(el.className && el.className.baseVal !== undefined
+        ? el.className.baseVal : el.className).split(' ').slice(0, 2).join('.') : '?';
+    const tick = () => {
+        for (const a of document.getAnimations()) {
+            const effect = a.effect;
+            if (!effect || !effect.getKeyframes || a.animationName === 'dv-toast-timer') continue;
+            const moving = effect.getKeyframes().map(k => k.transform).filter(t => t && !neutral(t));
+            if (!moving.length) continue;
+            const key = (a.animationName || a.transitionProperty || 'waapi') + ' @' + name(effect.target) + (effect.pseudoElement || '');
+            if (!__calm.has(key)) __calm.set(key, moving.slice(0, 2).join(' -> '));
+        }
+        if (window.__calmOn) requestAnimationFrame(tick);
+    };
+    window.__calmOn = true;
+    requestAnimationFrame(tick);
+})()"""
+CALM_VIEWS = ("home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings",
+              "albums", "datagatherer", "map", "activity", "berichten")
+
+
+def calm_sweep(browser, base) -> list:
+    context = browser.new_context(viewport={"width": 1440, "height": 900})
+    context.add_init_script("try { localStorage.setItem('motion', 'rustig'); } catch (e) {}")
+    page = context.new_page()
+    page.goto(base)
+    page.wait_for_load_state("networkidle")
+    page.evaluate(CALM_SWEEP)
+    for view in CALM_VIEWS:
+        page.evaluate(f"switchMainView('{view}')")
+        page.wait_for_timeout(900)
+    page.evaluate("showToast('Klaar', 'Rustig', 'success')")
+    page.wait_for_timeout(600)
+    page.evaluate("openShortcutHelp()")
+    page.wait_for_timeout(500)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(500)
+    page.evaluate("toggleThemeDropdown()")
+    page.wait_for_timeout(400)
+    page.evaluate("closeThemeDropdown()")
+    page.wait_for_timeout(500)
+    page.evaluate("switchMainView('viewer')")
+    page.wait_for_timeout(800)
+    for theme in ("light", "dark"):
+        page.evaluate(f"setTheme('{theme}')")
+        page.wait_for_timeout(900)
+    page.evaluate("window.__calmOn = false")
+    found = page.evaluate("[...__calm.entries()].map(([k, v]) => k + ': ' + v)")
+    mode = page.evaluate("Motion.mode()")
+    context.close()
+    print(f"Rustig sweep ({mode}): {len(found)} moving transform(s)")
+    for line in found:
+        print(f"  {line}")
+    return [f"rustig moves: {line}" for line in found]
+
+
 def run(args) -> int:
     workdir = Path(tempfile.mkdtemp(prefix="datavault-motionperf-"))
     proc = None
@@ -337,10 +402,14 @@ def run(args) -> int:
             for view in ("viewer", "timeline", "albums", "keurer", "settings", "home"):
                 page.evaluate(f"switchMainView('{view}')")
                 page.wait_for_timeout(900)
-            print(f"WebKit against {base}, budget {args.budget:.0f} ms per animation frame\n")
-            print(f"  {'transition':38} {'work':>7} {'frames':>6} {'median':>7} {'p95':>7} {'max':>7}  result")
+            if args.calm_sweep:
+                failed += calm_sweep(browser, base)
+                transitions = []
             if args.only:
                 transitions = [t for t in transitions if args.only in t[0]]
+            if transitions:
+                print(f"WebKit against {base}, budget {args.budget:.0f} ms per animation frame\n")
+                print(f"  {'transition':38} {'work':>7} {'frames':>6} {'median':>7} {'p95':>7} {'max':>7}  result")
             for name, setup, trigger, settle in transitions:
                 worst = []
                 for _ in range(args.runs):
@@ -374,7 +443,7 @@ def run(args) -> int:
     if failed:
         print("FAILED:\n  " + "\n  ".join(failed))
         return 1
-    print("All transitions stayed under the frame budget.")
+    print("Nothing moved in Rustig." if args.calm_sweep else "All transitions stayed under the frame budget.")
     return 0
 
 
@@ -389,5 +458,7 @@ if __name__ == "__main__":
     parser.add_argument("--headed", action="store_true")
     parser.add_argument("--stress", type=int, default=0, metavar="N",
                         help="also measure a folder of N photos (e.g. 5000) in Bestanden")
+    parser.add_argument("--calm-sweep", action="store_true",
+                        help="instead of frame timing: check that nothing scales, rotates or slides in Rustig")
     parser.add_argument("--only", help="only the transitions whose name contains this text")
     sys.exit(run(parser.parse_args()))

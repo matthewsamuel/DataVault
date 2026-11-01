@@ -131,6 +131,7 @@ reads the tokens, so CSS and JS always agree.
 | `--motion-distance-lg` | 24 px | Modals rising, toasts sliding in, direction of a page change |
 | `--motion-scale-in` | 0.96 | Starting scale of a modal or toast |
 | `--motion-scale-press` | 0.97 | `.btn:active` |
+| `--motion-scale-out` | 0.98 | End scale of a leaving modal or menu (1 in Rustig and Uit) |
 | `--motion-lift` | -2 px | Hover lift of a photo tile |
 
 ---
@@ -388,6 +389,7 @@ so a page without it keeps working. Its CSS is the `BEWEGING: SCHIL` block in `s
   ```sh
   python3 code/tests/ui/motion_perf.py               # small vault
   python3 code/tests/ui/motion_perf.py --showcase    # the full showcase vault
+  python3 code/tests/ui/motion_perf.py --calm-sweep  # Rustig: nothing scales, rotates or slides
   ```
 
   Add your screen's key transitions to `TRANSITIONS` in that file.
@@ -422,7 +424,8 @@ so a page without it keeps working. Its CSS is the `BEWEGING: SCHIL` block in `s
 - [ ] One hero per transition. The photo is never animated for decoration.
 - [ ] Keurer, the Elo duel and keyboard navigation remain instant.
 - [ ] Photo tiles carry `data-motion-key` when they open the viewer.
-- [ ] It looks right in Volledig, Rustig and Uit, in both themes.
+- [ ] It looks right in Volledig, Rustig and Uit, in both themes. In Rustig every transform
+      goes through a token that becomes neutral (`motion_perf.py --calm-sweep` stays green).
 - [ ] `motion_perf.py` stays green, with your transition added to `TRANSITIONS`.
 
 ---
