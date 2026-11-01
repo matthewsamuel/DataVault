@@ -575,8 +575,11 @@ def _carry_user_data(conn, src: str, dst: str, carry_keep: bool = True, keurer_d
         conn.execute("DELETE FROM file_ratings WHERE path = ?", (dst,))
         conn.execute("UPDATE file_ratings SET path = ? WHERE path = ?", (dst, src))
     # The comparison history goes along, so a comparison can still be undone exactly (elo.py)
-    conn.execute("UPDATE elo_comparisons SET path_a = ? WHERE path_a = ?", (dst, src))
-    conn.execute("UPDATE elo_comparisons SET path_b = ? WHERE path_b = ?", (dst, src))
+    moved = conn.execute("UPDATE elo_comparisons SET path_a = ? WHERE path_a = ?", (dst, src)).rowcount
+    moved += conn.execute("UPDATE elo_comparisons SET path_b = ? WHERE path_b = ?", (dst, src)).rowcount
+    if moved:
+        from backend import elo
+        elo.forget_history()        # its in-memory pair counts name the old path
     # ... and so do its model state (uncertainty) and its skipped pairs
     if conn.execute("SELECT 1 FROM elo_ratings WHERE path = ?", (src,)).fetchone():
         conn.execute("DELETE FROM elo_ratings WHERE path = ?", (dst,))

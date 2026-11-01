@@ -54,6 +54,7 @@ import math
 import os
 import random
 import stat
+import threading
 import time
 from collections import Counter, deque
 from pathlib import Path
@@ -379,6 +380,7 @@ def undo_comparison(db, comparison_id: Optional[int] = None, scope: Optional[str
                              (comp[f"mu_{side}_before"], comp[f"rd_{side}_before"], comp[f"vol_{side}_before"],
                               comp[f"rating_{side}_before"], comp[f"games_{side}_before"], time.time(), path))
         conn.execute("DELETE FROM elo_comparisons WHERE id = ?", (comp["id"],))
+    _history_removed(db, comp)
     return {
         "id": comp["id"], "scope": comp["scope"], "winner": comp["winner"],
         "a": {"path": comp["path_a"], "rating": comp["rating_a_before"], "games": comp["games_a_before"],
@@ -471,7 +473,11 @@ def states_below(db, folder: str) -> Dict[str, Dict[str, Any]]:
     """{path: state} for every judged file (a rating row) anywhere below folder."""
     low, high = _prefix_range(folder)
     with db._connect() as conn:
-        return _states(conn.execute(_STATE_SQL + "WHERE f.path >= ? AND f.path < ?", (low, high)).fetchall())
+        # Two range scans merged here: faster than the join (one index lookup per row)
+        models = {row[0]: row[1:] for row in conn.execute(
+            "SELECT path, mu, rd, vol, public, games FROM elo_ratings WHERE path >= ? AND path < ?", (low, high))}
+        return {path: _combine(path, (rating, votes), models.get(path)) for path, rating, votes in conn.execute(
+            "SELECT path, rating, votes FROM file_ratings WHERE path >= ? AND path < ?", (low, high))}
 
 
 def states_of(db, paths: Sequence[str]) -> Dict[str, Dict[str, Any]]:
@@ -549,7 +555,9 @@ def resolve_scope(key: str) -> Optional[Dict[str, Any]]:
 
 def comparisons_in_scope(db, scope: str) -> int:
     with db._connect() as conn:
-        return conn.execute("SELECT COUNT(*) FROM elo_comparisons WHERE scope = ?", (scope,)).fetchone()[0]
+        h = _history(db, conn)
+        with h.lock:
+            return h.sync(conn).scopes.get(scope, 0)
 
 
 def results_of(db, paths: Sequence[str]) -> Dict[str, Dict[str, int]]:
@@ -579,27 +587,141 @@ def is_elo_photo(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in ELO_EXTENSIONS
 
 
+# ==================== THE HISTORY IN SHORT ====================
+#
+# Every pair request needs two things from the whole history: how often each pair was
+# compared (the repeat penalty) and on which days there were comparisons (the streak).
+# Reading all rows for that each time grows with the history (75,000 comparisons: about
+# 90 ms per request), so each database keeps a summary in memory that follows the table:
+# rows with a higher id than the summary has seen are added (ids only grow: AUTOINCREMENT),
+# an undo takes its row out, and when the row count still does not match (rows changed
+# another way) the summary is built again. A move that renames paths calls forget_history().
+
+class _History:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.count = 0
+        self.max_id = 0
+        self.seen: Counter = Counter()      # frozenset({path_a, path_b}) -> comparisons
+        self.days: Counter = Counter()      # local day (ordinal) -> comparisons
+        self.scopes: Counter = Counter()    # scope -> comparisons
+        self.ready = False
+        self.session = 0                    # comparisons in the newest session ...
+        self.last_t: Optional[float] = None     # ... which ends with this one
+        self.session_ok = False             # False: walk back once to find them again
+
+    def _add(self, a: str, b: str, created_at: float, scope: Optional[str], n: int = 1) -> None:
+        self.scopes[scope] += n
+        if self.scopes[scope] <= 0:
+            del self.scopes[scope]
+        key = frozenset((a, b))
+        self.seen[key] += n
+        if self.seen[key] <= 0:
+            del self.seen[key]
+        day = _day(created_at)
+        self.days[day] += n
+        if self.days[day] <= 0:
+            del self.days[day]
+
+    def sync(self, conn) -> "_History":
+        count, max_id = conn.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM elo_comparisons").fetchone()
+        if self.ready and count == self.count and max_id <= self.max_id:
+            return self
+        if self.ready and max_id > self.max_id:
+            rows = conn.execute("SELECT id, path_a, path_b, created_at, scope FROM elo_comparisons WHERE id > ? "
+                                "ORDER BY id", (self.max_id,)).fetchall()
+            if self.count + len(rows) == count:
+                for _, a, b, at, scope in rows:
+                    self._add(a, b, at, scope)
+                    self._extend_session(at)
+                self.count, self.max_id = count, max(self.max_id, max_id)
+                return self
+        self.seen, self.days, self.scopes = Counter(), Counter(), Counter()
+        for a, b, at, scope in conn.execute("SELECT path_a, path_b, created_at, scope FROM elo_comparisons"):
+            self._add(a, b, at, scope)
+        self.count, self.max_id, self.ready = count, max(self.max_id, max_id), True
+        self.session_ok = False
+        return self
+
+    def _extend_session(self, at: float) -> None:
+        if not self.session_ok:
+            return
+        if self.last_t is not None and at < self.last_t:     # the clock went back: walk again
+            self.session_ok = False
+        elif self.last_t is None or at - self.last_t > SESSION_GAP:
+            self.session, self.last_t = 1, at
+        else:
+            self.session, self.last_t = self.session + 1, at
+
+    def current_session(self, conn) -> Tuple[int, Optional[float]]:
+        """(comparisons in the newest session, when its last one was), after sync."""
+        if not self.session_ok:
+            times = _session_times(conn)
+            self.session, self.last_t = len(times), (times[0] if times else None)
+            self.session_ok = True
+        return self.session, self.last_t
+
+
+_history_generation = [0]
+
+
+def _history(db, conn) -> _History:
+    """The in-memory summary of this database's comparisons, brought up to date (hold its lock)."""
+    h = getattr(db, "_elo_history", None)
+    if h is None or getattr(db, "_elo_history_generation", None) != _history_generation[0]:
+        h = _History()
+        db._elo_history = h
+        db._elo_history_generation = _history_generation[0]
+    return h
+
+
+def _history_removed(db, comp: Dict[str, Any]) -> None:
+    """An undo deleted this row: take it out of the summary (when the summary had it)."""
+    h = getattr(db, "_elo_history", None)
+    if h is None:
+        return
+    with h.lock:
+        if h.ready and comp["id"] <= h.max_id and h.seen.get(frozenset((comp["path_a"], comp["path_b"])), 0) > 0:
+            h._add(comp["path_a"], comp["path_b"], comp["created_at"], comp["scope"], -1)
+            h.count -= 1
+            h.session_ok = False
+        else:
+            h.ready = False
+
+
+def forget_history() -> None:
+    """Paths in the history changed (a move): every summary is built again on its next use."""
+    _history_generation[0] += 1
+
+
+def pair_counts(db) -> Counter:
+    """{frozenset({path_a, path_b}): times compared} over the whole history (shared: read only)."""
+    with db._connect() as conn:
+        h = _history(db, conn)
+        with h.lock:
+            return h.sync(conn).seen
+
+
 # ==================== SESSIONS, STREAKS, MOVEMENT ====================
 
-def _times_desc(db, limit: Optional[int] = None) -> List[float]:
-    with db._connect() as conn:
-        sql = "SELECT created_at FROM elo_comparisons ORDER BY created_at DESC"
-        rows = conn.execute(sql + " LIMIT ?", (limit,)) if limit else conn.execute(sql)
-        return [r[0] for r in rows]
+def _session_times(conn, now: Optional[float] = None) -> List[float]:
+    """The times of the newest session's comparisons, newest first (comparisons less than
+    SESSION_GAP apart are one session). With now: [] when that session ended more than
+    SESSION_GAP before now. Walks back along the created_at index only as far as needed."""
+    times: List[float] = []
+    for (t,) in conn.execute("SELECT created_at FROM elo_comparisons ORDER BY created_at DESC"):
+        last = times[-1] if times else now
+        if last is not None and last - t > SESSION_GAP:
+            break
+        times.append(t)
+    return times
 
 
 def session_start(db) -> Optional[float]:
-    """When the newest session began (comparisons less than SESSION_GAP apart are one
-    session), or None without any comparison."""
-    times = _times_desc(db, 20000)
-    if not times:
-        return None
-    start = times[0]
-    for t in times[1:]:
-        if start - t > SESSION_GAP:
-            break
-        start = t
-    return start
+    """When the newest session began, or None without any comparison."""
+    with db._connect() as conn:
+        times = _session_times(conn)
+    return times[-1] if times else None
 
 
 def _day(t: float) -> int:
@@ -611,29 +733,30 @@ def progress(db, now: Optional[float] = None, goal: int = GOAL_DEFAULT) -> Dict[
     more than SESSION_GAP ago is over), today, the streak of days in a row with at least one
     comparison (it ends today or yesterday), the best streak ever, and the session goal."""
     now = time.time() if now is None else now
-    times = _times_desc(db)
-    session = 0
-    if times and now - times[0] <= SESSION_GAP:
-        session = 1
-        for before, t in zip(times, times[1:]):
-            if before - t > SESSION_GAP:
-                break
-            session += 1
-    days = {_day(t) for t in times}
+    with db._connect() as conn:
+        h = _history(db, conn)
+        with h.lock:
+            h.sync(conn)
+            session, last = h.current_session(conn)
+            if last is None or now - last > SESSION_GAP:
+                session = 0
+            days = sorted(h.days)
+            today_count = h.days.get(_day(now), 0)
+            total = h.count
+    present = set(days)
     today = _day(now)
-    today_count = sum(1 for t in times if _day(t) == today)
-    day = today if today in days else today - 1
+    day = today if today in present else today - 1
     streak = 0
-    while day in days:
+    while day in present:
         streak += 1
         day -= 1
     best, run, previous = 0, 0, None
-    for d in sorted(days):
+    for d in days:
         run = run + 1 if previous is not None and d - previous == 1 else 1
         best = max(best, run)
         previous = d
     return {"session": session, "today": today_count, "streak": streak, "best_streak": best,
-            "goal": goal, "total": len(times)}
+            "goal": goal, "total": total}
 
 
 def ratings_at(db, paths: Sequence[str], when: float) -> Dict[str, int]:
@@ -686,28 +809,36 @@ class PairMemory:
     blocked for now (the pair just shown, recently skipped ones), and the photos shown in
     the last RECENT_ITEMS pairs (held back, so the same photo does not keep coming)."""
 
-    def __init__(self, recent: int = RECENT_ITEMS):
-        self.seen: Counter = Counter()
+    def __init__(self, recent: int = RECENT_ITEMS, seen: Optional[Counter] = None):
+        self.seen: Counter = seen if seen is not None else Counter()
+        self._shared = seen is not None
         self.blocked: set = set()
         self.recent: deque = deque(maxlen=recent * 2)
 
     def add(self, a: str, b: str) -> None:
+        if self._shared:                    # the database's summary is never changed from here
+            self.seen, self._shared = Counter(self.seen), False
         self.seen[frozenset((a, b))] += 1
         self.recent.extend((a, b))
 
     def block(self, a: str, b: str) -> None:
         self.blocked.add(frozenset((a, b)))
 
+    def shown(self, pairs: Sequence[Sequence[str]]) -> None:
+        """Pairs the screen showed lately (oldest first), some perhaps not saved yet: their
+        photos are held back like those of the last saved pairs."""
+        extra = [p for pair in pairs for p in pair]
+        if extra:
+            self.recent = deque(list(self.recent) + extra, maxlen=self.recent.maxlen + len(extra))
 
-def pair_memory(db, scope: Optional[str] = None, now: Optional[float] = None, limit: int = 50000) -> PairMemory:
+
+def pair_memory(db, scope: Optional[str] = None, now: Optional[float] = None) -> PairMemory:
     """The memory for the pair choice from the database: pairs compared before (in any
-    scope), the photos of the last RECENT_ITEMS pairs in this scope, and the skips of the
-    last SKIP_DAYS days."""
+    scope, from the in-memory summary), the photos of the last RECENT_ITEMS pairs in this
+    scope, and the skips of the last SKIP_DAYS days."""
     now = time.time() if now is None else now
-    memory = PairMemory()
+    memory = PairMemory(seen=pair_counts(db))
     with db._connect() as conn:
-        for a, b in conn.execute("SELECT path_a, path_b FROM elo_comparisons ORDER BY id DESC LIMIT ?", (limit,)):
-            memory.seen[frozenset((a, b))] += 1
         recent = conn.execute("SELECT path_a, path_b FROM elo_comparisons WHERE scope IS ? ORDER BY id DESC LIMIT ?",
                               (scope, RECENT_ITEMS)).fetchall()
         for a, b in conn.execute("SELECT path_a, path_b FROM elo_skips WHERE created_at >= ?",

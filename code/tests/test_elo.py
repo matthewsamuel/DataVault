@@ -784,6 +784,55 @@ def test_progress_counts_the_session_the_day_and_the_streak(client, app, monkeyp
     assert elo.progress(db, now=noon(0) + 3 * 86400)["streak"] == 0
 
 
+def _fresh_counts(db):
+    from collections import Counter
+    with db._connect() as conn:
+        rows = conn.execute("SELECT path_a, path_b, scope FROM elo_comparisons").fetchall()
+    return Counter(frozenset((a, b)) for a, b, _ in rows), Counter(s for _, _, s in rows)
+
+
+def test_the_in_memory_history_follows_every_change(client, app):
+    """Pair counts, scope counts and the session come from a summary kept in memory (no
+    full read of the history per request); it must match the table after every change."""
+    from backend import media_index
+    db = app.state.db
+    rng = random.Random(7)
+    paths = [f"/v/library/h/{i}.jpg" for i in range(6)]
+
+    def check():
+        seen, scopes = _fresh_counts(db)
+        assert +elo.pair_counts(db) == seen
+        for scope in set(scopes) | {"/v/library", "album:1"}:
+            assert elo.comparisons_in_scope(db, scope) == scopes.get(scope, 0)
+        p = elo.progress(db)
+        assert p["total"] == sum(seen.values())
+        with db._connect() as conn:
+            assert p["session"] == len(elo._session_times(conn, time.time()))
+
+    check()
+    ids = []
+    for i in range(12):
+        a, b = rng.sample(paths, 2)
+        ids.append(elo.record_comparison(db, a, b, rng.choice("ab"), "/v/library" if i % 3 else "album:1")["id"])
+        check()
+    for _ in range(3):                              # undo, newest first
+        elo.undo_comparison(db, ids.pop())
+        check()
+    elo.record_comparison(db, paths[0], paths[1], "draw", "/v/library")
+    check()
+    with db._connect() as conn:                     # a move renames the paths in the history
+        media_index._carry_user_data(conn, paths[0], "/v/library/h/verplaatst.jpg")
+    check()
+    with db._connect() as conn:                     # a change made another way: built again
+        conn.execute("DELETE FROM elo_comparisons WHERE id = ?", (ids[0],))
+    check()
+    # A memory built on the shared counts never changes them
+    memory = elo.pair_memory(db, "/v/library")
+    before = +elo.pair_counts(db)
+    memory.add(paths[2], paths[3])
+    assert +elo.pair_counts(db) == before
+
+
 def test_the_session_goal_is_a_setting(client, app):
     assert client.put("/api/shows/compare/goal", json={"goal": 50}).json()["goal"] == 50
     assert client.get("/api/shows/compare/pair").json()["progress"]["goal"] == 50
@@ -1011,6 +1060,55 @@ def test_migration_160_replays_an_old_comparison_between_far_apart_ratings(tmp_p
     # And a new comparison between them is saved, not a server error
     result = elo.record_comparison(db, low, high, "a")
     assert result["a"]["rating"] >= result["a"]["before"]
+    db.close_all()
+
+
+def test_migration_161_only_adds_indexes_and_keeps_every_user_row(tmp_path, monkeypatch):
+    from backend import migrations
+    from test_duplicates_runs import _migrate_to
+    from test_foundation import _make_legacy_db
+    db_path = tmp_path / "datavault.db"
+    _make_legacy_db(db_path)
+    _migrate_to(db_path, 160, monkeypatch)
+    now = time.time()
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == 160
+        conn.execute("INSERT INTO keurer_decisions (path, folder, decision, dest_path, dest_ino, dest_size) "
+                     "VALUES ('/v/RAW/weg.jpg', '/v/RAW', 'delete', '/v/TRASH/weg.jpg', 77, 1234)")
+        conn.execute("INSERT INTO app_settings VALUES ('elo_session_goal', '50', 5.0)")
+        conn.execute("INSERT INTO jobs (type, params, status, processed, created_at, updated_at, checkpoint) "
+                     "VALUES ('index', '{}', 'paused', 12, ?, ?, '{\"folder\": 3}')", (now, now))
+        conn.execute("INSERT INTO recovery_actions (kind, title, created_at) VALUES ('viewer_move', 'x', 1)")
+    db = Database(db_path)
+    # Ratings, comparisons (with undo data), skips and streak days made through the model
+    elo.record_comparison(db, "/v/library/a.jpg", "/v/library/b.jpg", "a", "/v/library")
+    elo.record_comparison(db, "/v/library/b.jpg", "/v/library/c.jpg", "draw", "/v/library")
+    elo.record_skip(db, "/v/library/a.jpg", "/v/library/c.jpg", "/v/library")
+    db.apply_vote("/v/library/d.jpg", 50)
+    db.close_all()
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DELETE FROM schema_version WHERE version = 161")
+        conn.execute("DROP INDEX idx_file_ratings_state")
+        conn.execute("DROP INDEX idx_elo_ratings_state")
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' "
+                                             "AND name != 'schema_version'")]
+        before = {t: conn.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in tables}
+    assert before["elo_comparisons"] and before["file_ratings"] and before["elo_ratings"] and before["elo_skips"]
+    db = Database(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 161
+        for table, rows in before.items():
+            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        assert {"idx_file_ratings_state", "idx_elo_ratings_state"} <= names
+        plan = " ".join(r[3] for r in conn.execute(
+            "EXPLAIN QUERY PLAN SELECT path, mu, rd, vol, public, games FROM elo_ratings WHERE path >= ? AND path < ?",
+            ("/v/", "/w")))
+        assert "COVERING INDEX" in plan
+    # The newest comparison can still be undone exactly
+    elo.undo_comparison(db)
+    assert db.get_rating("/v/library/b.jpg") == _new_pair_ratings("a")[1]
+    assert db.get_rating("/v/library/d.jpg") == 1050
     db.close_all()
 
 
