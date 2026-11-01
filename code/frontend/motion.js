@@ -660,11 +660,20 @@
 
     const LEAVING = '.modal, .dv-overlay';
 
+    // Tijdens het vertrek is het venster inert: Tab en schermlezers slaan het over, zodat de
+    // focus nooit in iets belandt dat aan het verdwijnen is.
+    function stopLeaving(el) {
+        clearTimeout(el._motionLeave);
+        el.classList.remove('is-leaving');
+        if (el._motionInert) { el.inert = false; el._motionInert = false; }
+    }
+
     function overlayLeaving(el) {
         if (mode() === 'uit') return;
         el.classList.add('is-leaving');
+        if (!el.inert) { el.inert = true; el._motionInert = true; }
         clearTimeout(el._motionLeave);
-        el._motionLeave = setTimeout(() => el.classList.remove('is-leaving'), ms('--dur-3', 200) + 40);
+        el._motionLeave = setTimeout(() => stopLeaving(el), ms('--dur-3', 200) + 40);
     }
 
     function watchOverlays() {
@@ -675,10 +684,7 @@
                 const was = (r.oldValue || '').split(/\s+/).includes('active');
                 const is = el.classList.contains('active');
                 if (was && !is) overlayLeaving(el);
-                if (is && el.classList.contains('is-leaving')) {
-                    clearTimeout(el._motionLeave);
-                    el.classList.remove('is-leaving');
-                }
+                if (is && el.classList.contains('is-leaving')) stopLeaving(el);
             });
         });
         observer.observe(document.body, { attributes: true, attributeFilter: ['class'], attributeOldValue: true, subtree: true });

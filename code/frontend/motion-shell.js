@@ -689,11 +689,19 @@
     }
 
     // Het themamenu: openen veert (CSS), sluiten vervaagt even in plaats van te verdwijnen
+    // (inert zolang hij vervaagt: Tab en schermlezers slaan het vertrekkende menu over)
+    function menuStopLeaving(menu) {
+        clearTimeout(menu._shellLeave);
+        menu.classList.remove('is-leaving');
+        if (menu._shellInert) { menu.inert = false; menu._shellInert = false; }
+    }
+
     function menuLeaving(menu) {
         if (M.off()) return;
         menu.classList.add('is-leaving');
+        if (!menu.inert) { menu.inert = true; menu._shellInert = true; }
         clearTimeout(menu._shellLeave);
-        menu._shellLeave = setTimeout(() => menu.classList.remove('is-leaving'), M.ms('--dur-3', 200) + 40);
+        menu._shellLeave = setTimeout(() => menuStopLeaving(menu), M.ms('--dur-3', 200) + 40);
     }
 
     function watchOverlaysAndMenus() {
@@ -707,10 +715,7 @@
                 } else if (el.id === 'theme-dropdown') {
                     if (was.includes('open') && !el.classList.contains('open')) menuLeaving(el);
                     // (alleen weghalen als hij er is: elke classList-wijziging is weer een melding)
-                    if (el.classList.contains('open') && el.classList.contains('is-leaving')) {
-                        clearTimeout(el._shellLeave);
-                        el.classList.remove('is-leaving');
-                    }
+                    if (el.classList.contains('open') && el.classList.contains('is-leaving')) menuStopLeaving(el);
                 }
             }
         });

@@ -66,3 +66,13 @@ def test_the_spotify_waves_only_move_in_volledig():
     should = js[js.index("shouldAnimate() {"):js.index("updateRunning() {")]
     assert "Motion.full()" in should
     assert "Motion.onChange(this.updateRunning)" in js and "this.offMotion()" in js
+
+
+def test_a_leaving_dialog_or_menu_is_inert_until_it_is_gone():
+    """Tab and screen readers skip a dialog or the theme menu while it fades out."""
+    js = (FRONTEND / "motion.js").read_text(encoding="utf-8")
+    leaving = js[js.index("function overlayLeaving"):js.index("function watchOverlays")]
+    assert "el.inert = true" in leaving
+    assert "el.inert = false" in js[js.index("function stopLeaving"):js.index("function overlayLeaving")]
+    shell = (FRONTEND / "motion-shell.js").read_text(encoding="utf-8")
+    assert "menu.inert = true" in shell and "menu.inert = false" in shell

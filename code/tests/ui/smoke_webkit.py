@@ -1844,6 +1844,44 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                         problems.append(f"unnamed control on {view} with data: {control}")
             page.evaluate("setTheme('auto')")
 
+            # Beweging without macOS 'reduce motion': in Uit the Spotify waves stand still, in
+            # Volledig they move, and switching in Instellingen stops or starts them at once
+            page.emulate_media(reduced_motion="no-preference")
+            page.evaluate("switchMainView('spotify')")
+            page.wait_for_timeout(800)
+            wave_d = "(() => { const p = document.querySelector('#section-spotify .wave-background-svg path'); return p ? p.getAttribute('d') : ''; })()"
+            raf_count = """(async () => { let n = 0; const raf = window.requestAnimationFrame;
+                window.requestAnimationFrame = (fn) => { n++; return raf.call(window, fn); };
+                await new Promise(r => setTimeout(r, 600)); window.requestAnimationFrame = raf; return n; })()"""
+            before = page.evaluate(wave_d)
+            calls = page.evaluate(raf_count)
+            expect(page.evaluate("Motion.mode()") == "uit" and calls == 0 and page.evaluate(wave_d) == before,
+                   f"motion: the Spotify waves move in Uit ({calls} rAF calls in 600 ms)")
+            page.evaluate("Motion.setPreference('volledig')")
+            page.wait_for_timeout(300)
+            before = page.evaluate(wave_d)
+            page.wait_for_timeout(300)
+            expect(page.evaluate(wave_d) != before, "motion: the Spotify waves stand still in Volledig")
+            page.evaluate("Motion.setPreference('rustig')")
+            page.wait_for_timeout(100)
+            expect(page.evaluate("window.spotifyWave.rafId") is None, "motion: the Spotify waves keep moving in Rustig")
+            # A dialog that fades out is inert: Tab right after Escape never lands inside it
+            page.evaluate("Motion.setPreference('volledig')")
+            page.evaluate("switchMainView('viewer')")
+            page.wait_for_timeout(600)
+            page.evaluate("openShortcutHelp()")
+            page.wait_for_timeout(500)
+            page.keyboard.press("Escape")
+            page.keyboard.press("Tab")
+            leaving = page.evaluate("[document.getElementById('shortcut-help').inert,"
+                                    " !!(document.activeElement && document.activeElement.closest('.is-leaving'))]")
+            expect(leaving == [True, False], f"motion: a closing dialog is not inert or takes the focus ({leaving})")
+            page.wait_for_timeout(500)
+            expect(not page.evaluate("document.getElementById('shortcut-help').inert"),
+                   "motion: the shortcut overview stays inert after it closed")
+            page.evaluate("Motion.setPreference('uit')")
+            page.emulate_media(reduced_motion="reduce")
+
             # An archive without any folder: 'Het archief is leeg', not 'Kies een map'
             page.route("**/api/folders", lambda route: route.fulfill(json={"folders": []}))
             page.reload()
