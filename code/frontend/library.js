@@ -383,6 +383,14 @@
     }
 
     function drawSidebar(library, list) {
+        // Waar de markering nu staat: hij glijdt straks naar het gekozen album
+        const wasActive = document.querySelector('.albums-sidebar .albums-side-item.active');
+        const wasRect = wasActive ? wasActive.getBoundingClientRect() : null;
+        drawSidebarItems(library, list);
+        MediaMotion.slideMarker(wasRect, document.querySelector('.albums-sidebar .albums-side-item.active'));
+    }
+
+    function drawSidebarItems(library, list) {
         const browsing = state.mode === 'browse';
         library.replaceChildren(
             sideItem({

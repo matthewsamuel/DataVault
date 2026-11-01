@@ -18,6 +18,7 @@
 //   MediaMotion.press(el)                 een knop geeft even mee (toetsenbord-feedback)
 //   MediaMotion.pop(el)                   een kleine beloning (vinkje, winnaar)
 //   MediaMotion.seriesSettle(card)        een reeks waaiert uit en komt tot rust op de beste
+//   MediaMotion.slideMarker(rect, el)     de markering van een lijst glijdt naar el (Albums-zijbalk)
 //
 // Regels: alleen transform en opacity, niets blokkeert invoer, een nieuwe beweging met
 // dezelfde key onderbreekt de vorige. Hover-licht en selectie staan in style.css
@@ -647,7 +648,24 @@
         return rollText(el, text, dir);
     }
 
+    // ---------- 11. Een markering die naar een ander item in een lijst glijdt ----------
+    // Zoals Motion.glide, maar in elke richting (een zijbalk is verticaal): de markering
+    // (pseudo, standaard '::before') van toEl komt aanglijden vanaf fromRect, de plek van de
+    // vorige. Alleen in Volledig; anders staat hij meteen op zijn plek.
+    function slideMarker(fromRect, toEl, pseudo = '::before') {
+        if (!fromRect || !toEl || !full()) return settled();
+        const r = toEl.getBoundingClientRect();
+        if (!r.width || !fromRect.width) return settled();
+        const dx = fromRect.left - r.left, dy = fromRect.top - r.top;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return settled();
+        return Motion.animate(toEl, [
+            { transform: `translate3d(${dx}px, ${dy}px, 0) scale(${fromRect.width / r.width}, ${fromRect.height / r.height})` },
+            { transform: 'none' },
+        ], { spring: 'snappy', pseudoElement: pseudo, key: 'marker' });
+    }
+
     window.MediaMotion = {
+        slideMarker,
         tileFrames,
         nearView,
         release,
