@@ -499,6 +499,21 @@ def get_coverage():
             "sources": {"export": len(plays)} if plays else {}}
 
 
+@router.get("/cover/{name}")
+def get_cover(name: str):
+    """An album cover the Spotify sync stored on this Mac (datagatherer/spotify_covers.py); never fetched here."""
+    from fastapi.responses import FileResponse
+    from backend.datagatherer import spotify_covers
+    if config is None or not spotify_covers.FILE_RE.match(name):
+        raise HTTPException(status_code=404, detail="Geen hoes")
+    path = spotify_covers.folder(config) / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Geen hoes")
+    # The name is the album: the same name is always the same picture
+    return FileResponse(path=str(path), media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=2592000, immutable"})
+
+
 @router.get("/years")
 def get_years():
     # Only the years: no full statistics run (that took seconds for a million plays)

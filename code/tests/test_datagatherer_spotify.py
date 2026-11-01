@@ -494,7 +494,7 @@ def test_recently_played_always_fetches_50_and_dedupes(client, app, fake_spotify
     fake_spotify.items = [track_item(T0 + 1000 - i * 200, f"spotify:track:{i}", f"N{i}", "B") for i in range(3)]
     assert _sync(client, app)["summary"]["added"] == 3
     assert all(r.url.params.get("limit") == "50" and "after" not in r.url.params
-               for r in fake_spotify.requests if r.url.host == "api.spotify.com")
+               for r in fake_spotify.requests if r.url.path == "/v1/me/player/recently-played")
     # A play from an offline phone arrives later, with an OLDER time than the newest stored
     fake_spotify.items.append(track_item(T0 - 5000, "spotify:track:offline", "Offline", "B"))
     job = _sync(client, app)

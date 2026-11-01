@@ -99,6 +99,9 @@
     --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
     --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
     --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);   /* licht doorverend: verschijnen, oppakken */
+    --duration-ambient: 40s;      /* één rondgang van een drijvende achtergrondgloed */
+    --duration-ambient-in: 900ms; /* het invloeien van die gloed */
+    --tilt-perspective: 700px;    /* kantelende hoezen */
     --transition-fast: var(--duration-fast);
     --transition-normal: var(--duration-base);
 
@@ -141,6 +144,8 @@
     --surface-overlay: #26272b;
     --surface-sunken: #0a0b0c;
     --surface-hover: rgba(255, 255, 255, 0.05);
+    --ambient-opacity: 0.55;      /* vervaagde hoes achter een kaart */
+    --ambient-veil: 38%;          /* hoeveel van de kaartkleur erover ligt */
     --surface-active: rgba(255, 255, 255, 0.09);
     --surface-nav: rgba(14, 15, 16, 0.86);
 
@@ -222,6 +227,8 @@
     --surface-overlay: #ffffff;
     --surface-sunken: #f0f0f2;
     --surface-hover: rgba(24, 24, 27, 0.04);
+    --ambient-opacity: 0.5;
+    --ambient-veil: 46%;
     --surface-active: rgba(24, 24, 27, 0.08);
     --surface-nav: rgba(255, 255, 255, 0.86);
 
@@ -300,6 +307,8 @@
         --surface-overlay: #ffffff;
         --surface-sunken: #f0f0f2;
         --surface-hover: rgba(24, 24, 27, 0.04);
+        --ambient-opacity: 0.5;
+        --ambient-veil: 46%;
         --surface-active: rgba(24, 24, 27, 0.08);
         --surface-nav: rgba(255, 255, 255, 0.86);
 
@@ -7187,6 +7196,166 @@ button.otd-settings-icon:hover {
 .otd-cover-3 { background: linear-gradient(135deg, var(--viz-4), var(--viz-5)); }
 .otd-cover-4 { background: linear-gradient(135deg, var(--viz-1), var(--viz-3)); }
 .otd-cover-5 { background: linear-gradient(135deg, var(--viz-5), var(--viz-4)); }
+
+/* Met albumhoes (bewaard door de Spotify-sync): de hoes zelf, die meekantelt met de muis, en
+   achter de kaart een zelfgemaakte gloed: twee vervaagde kopieën van de hoes die langzaam
+   tegen elkaar in drijven. Alleen transform en opacity bewegen; de vervaging zelf ligt stil. */
+#widget-spotify-otd {
+    overflow: hidden;
+    isolation: isolate;
+}
+
+#widget-spotify-otd > :not(.otd-ambient) {
+    position: relative;
+    z-index: 1;
+}
+
+.otd-ambient {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-ambient-in) var(--ease-out);
+}
+
+#widget-spotify-otd.has-ambient .otd-ambient {
+    opacity: 1;
+}
+
+.otd-ambient img {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 150%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    opacity: var(--ambient-opacity);
+    filter: blur(56px) saturate(1.6);
+    transform: translate(-50%, -50%) scale(1.1);
+    will-change: transform;
+}
+
+.otd-ambient-a {
+    animation: otd-drift-a var(--duration-ambient) linear infinite;
+}
+
+.otd-ambient-b {
+    width: 110%;
+    animation: otd-drift-b calc(var(--duration-ambient) * 1.35) linear infinite;
+}
+
+.otd-ambient-veil {
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(to bottom,
+            color-mix(in srgb, var(--surface-card) calc(var(--ambient-veil) + 30%), transparent) 0,
+            color-mix(in srgb, var(--surface-card) var(--ambient-veil), transparent) 22%,
+            color-mix(in srgb, var(--surface-card) var(--ambient-veil), transparent) 70%,
+            color-mix(in srgb, var(--surface-card) calc(var(--ambient-veil) + 20%), transparent) 100%);
+}
+
+@keyframes otd-drift-a {
+    0% { transform: translate(-50%, -50%) rotate(0deg) scale(1.1); }
+    50% { transform: translate(-42%, -57%) rotate(180deg) scale(1.28); }
+    100% { transform: translate(-50%, -50%) rotate(360deg) scale(1.1); }
+}
+
+@keyframes otd-drift-b {
+    0% { transform: translate(-22%, -26%) rotate(360deg) scale(0.95); }
+    50% { transform: translate(-74%, -62%) rotate(180deg) scale(1.15); }
+    100% { transform: translate(-22%, -26%) rotate(0deg) scale(0.95); }
+}
+
+.otd-item.has-cover:hover {
+    background-color: transparent;
+}
+
+.otd-cover.has-art {
+    background: var(--thumb-bg);
+    box-shadow: var(--shadow-lg);
+    transform: perspective(var(--tilt-perspective)) rotateX(0deg) rotateY(0deg);
+    transition: transform var(--duration-slow) var(--ease-spring), box-shadow var(--duration-slow) var(--ease-out);
+}
+
+.otd-item.has-cover:hover .otd-cover.has-art {
+    box-shadow: var(--shadow-xl);
+    transform: perspective(var(--tilt-perspective)) translateY(-4px) scale(1.02)
+        rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+}
+
+/* Tijdens het volgen van de muis kort en zonder doorveren, anders loopt hij achter */
+.otd-cover.has-art.is-tilting {
+    transition: transform var(--duration-fast) var(--ease-out), box-shadow var(--duration-slow) var(--ease-out);
+}
+
+.otd-cover-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+    animation: otd-art-in var(--duration-ambient-in) var(--ease-out) both;
+}
+
+/* Een zachte glans die met de muis meeloopt */
+.otd-cover.has-art::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(circle at var(--glare-x, 50%) var(--glare-y, 0%),
+        color-mix(in srgb, var(--on-media) 28%, transparent), transparent 60%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-base) var(--ease-out);
+}
+
+.otd-item.has-cover:hover .otd-cover.has-art::after {
+    opacity: 1;
+}
+
+.otd-cover.has-art .otd-cover-brand {
+    z-index: 1;
+    filter: drop-shadow(0 1px 2px var(--scrim));
+}
+
+.otd-item.has-cover .otd-when {
+    background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+    color: var(--text-secondary);
+}
+
+@keyframes otd-art-in {
+    from { opacity: 0; transform: scale(1.06); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .otd-ambient img,
+    .otd-cover-img {
+        animation: none;
+    }
+
+    .otd-cover.has-art {
+        transition: none;
+    }
+}
+
+:root[data-motion="reduce"] .otd-ambient img,
+:root[data-motion="reduce"] .otd-cover-img {
+    animation: none;
+}
+
+:root[data-motion="reduce"] .otd-cover.has-art {
+    transition: none;
+}
+
+:root[data-motion="reduce"] .otd-item.has-cover:hover .otd-cover.has-art {
+    transform: none;
+}
 
 .otd-item .otd-title {
     font-size: var(--fs-lg);

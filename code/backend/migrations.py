@@ -1111,6 +1111,27 @@ def _m135_activity_keys_per_second(conn: sqlite3.Connection):
         if keep[2] != new_key:
             conn.execute("UPDATE activity_events SET event_key = ? WHERE id = ?", (new_key, keep[0]))
 
+def _m170_spotify_covers(conn: sqlite3.Connection):
+    """
+    Album covers for Home's 'Spotify op deze dag' (backend/datagatherer/spotify_covers.py):
+    one row per track (key: title and artist as spotify_store.norm compares them), with the
+    album, the cover URL and the file in <cache>/spotify_covers once it is fetched. status:
+    'url' (only the URL is known), 'ok' (the file is there) or 'none' (Spotify does not know
+    the track; asked again after a month). Only a new table.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS spotify_covers (
+            key TEXT PRIMARY KEY,
+            track_uri TEXT,
+            album_id TEXT,
+            image_url TEXT,
+            file TEXT,
+            status TEXT NOT NULL,
+            checked_at REAL NOT NULL
+        )
+    """)
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -1146,6 +1167,8 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     # 160-169: Elo with uncertainty (Glicko-2), draws, skips (step p3x-elo)
     (160, "elo_glicko", _m160_elo_glicko),
     (161, "elo_state_indexes", _m161_elo_state_indexes),
+    # 170-179: Spotify covers on Home
+    (170, "spotify_covers", _m170_spotify_covers),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

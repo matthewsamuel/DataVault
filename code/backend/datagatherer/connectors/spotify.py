@@ -10,6 +10,8 @@ Three ways in, merged in spotify_store.py:
   the Keychain; a refresh may return a new refresh token, which is always stored. Since
   2026 a consent lasts 6 months: then the token endpoint answers invalid_grant and the card
   asks to connect again (with a warning 14 days before). A 429 is answered with Retry-After.
+- After each sync, the album covers Home needs in the coming days (spotify_covers.py): the
+  track from api.spotify.com, the image from i.scdn.co, kept in the cache folder.
 - Existing export folders anywhere below data/ (for the user: 'data/Matthew/Spotify
   Extended Streaming History'), registered in place: exactly what the dashboard read before.
 """
@@ -20,7 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
-from backend.datagatherer import keychain, raw_store, spotify_store, state
+from backend.datagatherer import keychain, raw_store, spotify_covers, spotify_store, state
 from backend.datagatherer.base import (Connector, ConnectorError, Coverage, ExportKind, GatherContext, HelpOption,
                                        SettingField, Setup)
 
@@ -59,7 +61,7 @@ class Spotify(Connector):
     record_label = ("luisterbeurt", "luisterbeurten")
     description = "Alles wat je beluisterde: je volledige export, aangevuld met je laatste nummers via de API."
     capabilities = frozenset({"api_sync", "export_request", "export_watch", "import"})
-    allowed_hosts = ("accounts.spotify.com", "api.spotify.com")
+    allowed_hosts = ("accounts.spotify.com", "api.spotify.com", spotify_covers.IMAGE_HOST)
     raw_folder = "Spotify"
     existing_folders = ("Spotify Extended Streaming History",)
     stale_days = 2
@@ -332,7 +334,25 @@ class Spotify(Connector):
         if added:
             spotify_store.reconcile(ctx.db)
         state.update(ctx.db, self.id, status_note="gap" if gap else None)
-        return {"added": added, "seen": len(rows), "gap_possible": gap, "complete": True, "errors": 0}
+        covers = self._covers(ctx, token, items)
+        return {"added": added, "seen": len(rows), "gap_possible": gap, "complete": True, "errors": 0,
+                "covers": covers}
+
+    def _covers(self, ctx: GatherContext, token: Dict[str, Any], items: List[Any]) -> int:
+        """The covers Home needs soon (spotify_covers.py); never fails the sync."""
+        from backend.routes import spotify as spotify_route
+        try:
+            spotify_covers.remember(ctx.db, items)
+            _, plays = spotify_route.load_plays()
+            ctx.progress(message="Albumhoezen ophalen…")
+            with ctx.http() as http:
+                return spotify_covers.fetch(ctx, http, lambda: {"Authorization": f"Bearer {token['access_token']}"},
+                                            plays)
+        except Exception as e:
+            if ctx.job is not None:
+                ctx.check()   # a cancelled job still stops
+            spotify_covers.log.warning("Spotify covers skipped: %s", e)
+            return 0
 
     # ---------- the card ----------
 

@@ -673,7 +673,7 @@ def test_the_sources_list_builds_cards_from_metadata(client):
     assert spotify["status"] == "export_binnen" and spotify["primary"]["action"] == "import"
     assert spotify["primary"]["label"] == "Inlezen" and "Inlezen" in spotify["next_step"]
     assert {a["action"] for a in spotify["actions"]} >= {"connect", "request_export", "find_downloads", "upload"}
-    assert spotify["network"]["hosts"] == ["accounts.spotify.com", "api.spotify.com"]
+    assert spotify["network"]["hosts"] == ["accounts.spotify.com", "api.spotify.com", "i.scdn.co"]
     assert spotify["schedule"] == {"available": True, "enabled": False, "minutes": 30, "launchd": True}
     lastfm = next(s for s in data["sources"] if s["id"] == "lastfm")
     assert lastfm["primary"]["action"] == "connect" and lastfm["status"] == "niet_ingesteld"

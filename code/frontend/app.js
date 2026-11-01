@@ -2352,21 +2352,21 @@ async function fetchHomeWidgets() {
         const data = await fetchJSON(`${API_BASE}/api/stats/spotify-on-this-day`);
         if (data.track) {
             const t = data.track;
-            // Een eigen 'hoes': een verloop dat per artiest altijd hetzelfde is (geen cover van buitenaf)
+            // Zonder hoes een eigen 'hoes': een verloop dat per artiest altijd hetzelfde is
             const hue = [...String(t.artist || '')].reduce((n, c) => (n * 31 + c.charCodeAt(0)) % 5, 0) + 1;
+            const cover = createEl('div', { class: `otd-cover otd-cover-${hue}`, 'aria-hidden': 'true' },
+                createEl('i', { class: 'fas fa-music' }), createEl('i', { class: 'fab fa-spotify otd-cover-brand' }));
             const item = createEl('div', { class: 'otd-item', onClick: () => openSpotifySearch(`${t.track} ${t.artist}`) },
-                createEl('div', { class: `otd-cover otd-cover-${hue}`, 'aria-hidden': 'true' },
-                    createEl('i', { class: 'fas fa-music' }), createEl('i', { class: 'fab fa-spotify otd-cover-brand' })),
+                cover,
                 createEl('div', { class: 'otd-title', text: t.track }),
                 createEl('div', { class: 'otd-subtitle', text: t.artist }),
                 createEl('div', { class: 'otd-when' }, createEl('i', { class: 'fas fa-clock', 'aria-hidden': 'true' }),
                     createEl('span', { class: 'mono', text: `${t.time || ''}` }), ` · ${t.year}`));
             makeActivatable(item, `${t.track} van ${t.artist} zoeken in Spotify`);
             homeOtdShow('spotify-otd-loading', 'spotify-otd-content', item);
-
-            // Geen albumcover van buitenaf (zoals vroeger via iTunes): dat zou luistergeschiedenis
-            // naar een externe dienst sturen. Het lokale Spotify-icoon blijft staan.
+            spotifyOtdCover(item, cover, t.cover ? `${API_BASE}${t.cover}` : null);
         } else {
+            spotifyOtdCover(null, null, null);
             homeOtdShow('spotify-otd-loading', 'spotify-otd-content', homeOtdState(emptyState({
                 icon: 'fa-music',
                 title: 'Niets geluisterd',
@@ -2375,6 +2375,7 @@ async function fetchHomeWidgets() {
             })));
         }
     } catch (e) {
+        spotifyOtdCover(null, null, null);
         homeOtdShow('spotify-otd-loading', 'spotify-otd-content', homeOtdState(errorState('Laden mislukt', e)));
     }
 }
@@ -2409,6 +2410,59 @@ function homeRenderStorage(data, error) {
     bar.style.width = `${data.percent_used}%`;
     bar.classList.toggle('critical', data.percent_used > 90);
     bar.classList.toggle('warning', data.percent_used > 75 && data.percent_used <= 90);
+}
+
+// Spotify op deze dag: de albumhoes die de Spotify-sync op deze Mac bewaarde (Home zelf gaat
+// nooit online). Achter de kaart drijft een zelfgemaakte, vervaagde gloed uit dezelfde hoes, en
+// de hoes kantelt mee met de muis. Alleen transform en opacity; met minder beweging (Mac of
+// Beweging in Instellingen) staat de gloed stil en kantelt er niets.
+function spotifyOtdCover(item, cover, src) {
+    const widget = document.getElementById('widget-spotify-otd');
+    widget.querySelectorAll(':scope > .otd-ambient').forEach(el => el.remove());
+    widget.classList.remove('has-ambient');
+    if (!item || !src) return;
+    const img = new Image();
+    img.decoding = 'async';
+    img.alt = '';
+    img.onload = () => {
+        if (!item.isConnected) return;
+        img.className = 'otd-cover-img';
+        cover.replaceChildren(img, createEl('i', { class: 'fab fa-spotify otd-cover-brand' }));
+        cover.classList.add('has-art');
+        item.classList.add('has-cover');
+        const ambient = createEl('div', { class: 'otd-ambient', 'aria-hidden': 'true' },
+            createEl('img', { class: 'otd-ambient-a', src, alt: '' }),
+            createEl('img', { class: 'otd-ambient-b', src, alt: '' }),
+            createEl('div', { class: 'otd-ambient-veil' }));
+        widget.prepend(ambient);
+        // Eén frame later: dan vloeit de gloed in in plaats van te verschijnen
+        requestAnimationFrame(() => requestAnimationFrame(() => widget.classList.add('has-ambient')));
+    };
+    img.src = src;   // mislukt het laden, dan blijft het eigen verloop staan
+
+    const calm = () => document.documentElement.dataset.motion === 'reduce'
+        || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    let frame = 0;
+    item.addEventListener('pointermove', e => {
+        if (calm() || !cover.classList.contains('has-art')) return;
+        const r = cover.getBoundingClientRect();
+        const x = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width) * 2 - 1));
+        const y = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height) * 2 - 1));
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => {
+            cover.classList.add('is-tilting');
+            cover.style.setProperty('--tilt-x', `${(-y * 7).toFixed(2)}deg`);
+            cover.style.setProperty('--tilt-y', `${(x * 7).toFixed(2)}deg`);
+            cover.style.setProperty('--glare-x', `${((x + 1) * 50).toFixed(1)}%`);
+            cover.style.setProperty('--glare-y', `${((y + 1) * 50).toFixed(1)}%`);
+        });
+    });
+    item.addEventListener('pointerleave', () => {
+        cancelAnimationFrame(frame);
+        cover.classList.remove('is-tilting');
+        cover.style.removeProperty('--tilt-x');
+        cover.style.removeProperty('--tilt-y');
+    });
 }
 
 // 'Op deze dag': eerst de draaier, daarna de inhoud of een lege of mislukte staat. Er komt
