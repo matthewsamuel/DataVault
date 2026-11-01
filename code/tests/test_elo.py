@@ -580,6 +580,22 @@ def test_smart_albums_are_scopes_and_top_n_becomes_an_album(client, app, vault):
         assert client.post("/api/shows/leaderboard/album", json=bad).status_code == 400, bad
 
 
+def test_an_album_of_videos_has_no_photos_to_compare(client, app, vault):
+    """The album's own kind filter counts: 'Video's' never ranks the JPGs of its folder."""
+    from test_media_index import _index
+    _index(client, full=False)
+    italy = (vault / "library/Reis Italië").resolve()
+    videos = client.post("/api/library/albums", json={"name": "Filmpjes", "filters": {"kind": ["video"], "folder": str(italy)}})
+    mixed = client.post("/api/library/albums", json={"name": "Alles", "filters": {"kind": ["photo", "video"], "folder": str(italy)}})
+    assert videos.status_code == mixed.status_code == 201, videos.text
+    key = f"album:{videos.json()['id']}"
+    body = client.get("/api/shows/compare/pair", params={"scope": key}).json()
+    assert body["pair"] is None and body["reason"] == "too_few" and body["stats"]["photos"] == 0
+    assert client.get("/api/shows/leaderboard", params={"scope": key}).json()["items"] == []
+    both = client.get("/api/shows/compare/pair", params={"scope": f"album:{mixed.json()['id']}"}).json()
+    assert {p["name"] for p in both["pair"]} == {"rome.jpg", "venetië.jpg"}
+
+
 def test_perceptual_near_duplicates_from_step_3_4_are_never_paired(client, app, vault):
     from test_media_index import _index
     from backend.routes import shows
@@ -652,6 +668,69 @@ def test_pair_api_stays_in_the_scope_and_skips_the_last_pair(client, app, vault)
     assert client.get("/api/shows/compare/pair", params={"folder": str(vault / "library/Familie")}).json()["reason"] == "too_few"
     assert client.get("/api/shows/compare/pair", params={"folder": "/etc"}).status_code == 403
     assert client.get("/api/shows/compare/pair", params={"count": 9}).status_code == 422
+
+
+def _photos(folder, n):
+    """n small, distinct JPEGs (different sizes: never copies of each other)."""
+    import io
+    from PIL import Image
+    folder.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        buf = io.BytesIO()
+        Image.new("RGB", (32, 24), ((i * 37) % 256, (i * 91) % 256, (i * 13) % 256)).save(buf, "JPEG")
+        (folder / f"k{i:02d}.jpg").write_bytes(buf.getvalue() + b"\0" * (i + 1))
+    return folder.resolve()
+
+
+def _play_like_the_screen(client, folder, picks, rng, ring=8):
+    """The duel screen in its fastest order: a pick shows the next queued pair and asks for
+    new pairs before the pick is saved. Answers the pairs in the order they were shown."""
+    flat = lambda pairs: [p for pair in pairs for p in pair]
+    paths = lambda pair: [p["path"] for p in pair]
+
+    def fetch(count, current, queue, shown):
+        params = {"folder": str(folder), "count": count, "prev": current,
+                  "exclude": current + flat(queue), "recent": flat(shown[-ring:])}
+        r = client.get("/api/shows/compare/pair", params=params)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        busy = set(body["apart"]) if body["shared"] else set(current + flat(queue))
+        for pair in body["pairs"]:
+            if not busy & set(paths(pair)) and set(paths(pair)) not in [set(q) for q in queue + [current]]:
+                queue.append(paths(pair))
+                busy.update(paths(pair))
+
+    queue = []
+    fetch(3, [], queue, [])
+    shown = [queue.pop(0)]
+    for i in range(picks):
+        picked = shown[-1]
+        shown.append(queue.pop(0))
+        if len(queue) < 2:
+            fetch(3 - min(1, len(queue)), shown[-1], queue, shown)
+        r = client.post("/api/shows/compare", json={"a": picked[0], "b": picked[1], "winner": rng.choice("ab"),
+                                                    "folder": str(folder), "client_token": f"t{i}"})
+        assert r.status_code == 200, r.text
+    return [frozenset(p) for p in shown]
+
+
+def test_a_pair_just_picked_does_not_come_back_while_its_save_is_on_the_way(client, app, vault):
+    """The screen asks for new pairs before the pick is saved; the pairs it showed lately
+    (recent=) keep the pair just picked away all the same."""
+    rng = random.Random(3)
+    small = _play_like_the_screen(client, _photos(vault / "library/acht", 8), 40, rng)
+    for i, pair in enumerate(small):
+        assert pair not in small[max(0, i - 6):i], (i, small[max(0, i - 6):i + 1])
+    # In 8 photos the queue may share photos, so the duel goes round all 28 pairs instead
+    # of the same dozen
+    assert len(set(small)) >= 22
+    # Four photos: every one of the 6 pairs comes by, never the same pair twice in a row
+    tiny = _play_like_the_screen(client, _photos(vault / "library/vier", 4), 20, rng)
+    assert len(set(tiny)) == 6 and all(a != b for a, b in zip(tiny, tiny[1:]))
+    larger = _play_like_the_screen(client, _photos(vault / "library/dertig", 30), 40, rng)
+    for i, pair in enumerate(larger):
+        assert pair not in larger[max(0, i - 8):i], i
+    assert len(set(larger)) >= 36
 
 
 def test_a_skipped_pair_stays_away(client, app, vault):

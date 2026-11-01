@@ -305,6 +305,7 @@ LEADERBOARD_MAX = 200
 MAX_COMPARISON_ID = 2 ** 63 - 1
 MAX_PAIRS = 4              # pairs per request (the screen keeps a few ready)
 MAX_EXCLUDE = 16
+MAX_RECENT_PAIRS = 8       # pairs the screen showed lately (recent=, two paths per pair)
 MAX_TOKEN = 64
 TOP_ALBUM_MAX = 200
 GOAL_KEY = "elo_session_goal"
@@ -491,6 +492,12 @@ def _album_scope(value: str) -> Optional[Dict[str, Any]]:
         query = library_filters.to_query(album["filters"], config)
     except (library_filters.FilterError, HTTPException):
         return {"title": album["name"], "paths": [], "filters": album["filters"]}
+    # Only the album's photos: an album of videos (kind without 'photo') has none
+    kinds = query.get("kind")
+    if isinstance(kinds, str):
+        kinds = [kinds]
+    if kinds and "photo" not in kinds:
+        return {"title": album["name"], "paths": [], "filters": album["filters"]}
     query["kind"] = ["photo"]
     key = f"album:{value}"
     version = (media_index.selection_version(db, query), album.get("updated_at"))
@@ -540,9 +547,15 @@ def _paths_param(values: Optional[List[str]], limit: int) -> List[str]:
     return [v for v in (values or [])[:limit] if isinstance(v, str)]
 
 
+def _shown_pairs(values: Optional[List[str]]) -> List[Tuple[str, str]]:
+    flat = _paths_param(values, 2 * MAX_RECENT_PAIRS)
+    return [(flat[i], flat[i + 1]) for i in range(0, len(flat) - 1, 2) if flat[i] != flat[i + 1]]
+
+
 @router.get("/compare/pair")
 def compare_pair(folder: Optional[str] = None, scope: Optional[str] = None,
                  prev: Optional[List[str]] = Query(None), exclude: Optional[List[str]] = Query(None),
+                 recent: Optional[List[str]] = Query(None),
                  count: int = Query(1, ge=1, le=MAX_PAIRS)) -> Dict[str, Any]:
     """
     The next pairs to compare in a scope (folder, or scope=<kind>:<value> for a registered
@@ -552,7 +565,11 @@ def compare_pair(folder: Optional[str] = None, scope: Optional[str] = None,
     best_streak, goal, total}}.
     prev (twice): the pair on screen now, which never comes back straight away; neither
     does the last pair compared in this scope. exclude: photos that must not be in the new
-    pairs (on screen, or already waiting in the queue).
+    pairs (on screen, or already waiting in the queue; two per pair); in a small collection
+    only those on screen are kept out, in a tiny one none (shared: true; apart: the photos
+    that were kept out). recent (two per pair, oldest
+    first): the pairs the screen showed lately, also those whose choice is still being
+    saved; they do not come back while other pairs can, and their photos are held back.
     """
     _require_db()
     sc = _scope(folder, scope)
@@ -566,12 +583,33 @@ def compare_pair(folder: Optional[str] = None, scope: Optional[str] = None,
         avoid.append((last["path_a"], last["path_b"]))
     stats = _scope_stats(sc, candidates)
     memory = elo.pair_memory(db, sc.key)
+    shown = _shown_pairs(recent)
+    memory.shown(shown)
     excluded = _paths_param(exclude, MAX_EXCLUDE)
+    # The pairs on screen and in the queue never come again now (exclude: two per pair)
+    avoid = avoid + _shown_pairs(excluded)
+    # In a small collection, keeping every queued photo out leaves so few that the same
+    # handful of pairs comes round again and again: then only the photos on screen are
+    # kept out (in a tiny one not even those), and the new pairs may share a photo with a
+    # queued one (shared: true). apart: the photos the new pairs really leave out.
+    known = {c["path"] for c in candidates}
+    shared = False
+    if len(known - set(excluded)) < 2 * count + 4:
+        shared = True
+        on_screen = [p for p in excluded if p in prev]
+        excluded = on_screen if len(known - set(on_screen)) >= 4 else []
+    # Rather a pair that was not on screen lately; in a small collection, where every pair
+    # was, the newer ones are avoided first
+    tries = [avoid + shown[-n:] if n else avoid for n in (len(shown), 4, 2, 0) if n <= len(shown)]
+    tries = [t for i, t in enumerate(tries) if t not in tries[:i]]
     pairs: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
     gone = False
     pool = candidates
     for _ in range(6):
-        pairs = elo.choose_pairs(pool, count, avoid, memory=memory, exclude=excluded)
+        for avoid_now in tries:
+            pairs = elo.choose_pairs(pool, count, avoid_now, memory=memory, exclude=excluded)
+            if pairs:
+                break
         missing = [c["path"] for pair in pairs for c in pair if not elo.still_there(c["path"])]
         if not missing:
             break
@@ -591,6 +629,8 @@ def compare_pair(folder: Optional[str] = None, scope: Optional[str] = None,
         "pair": described[0] if described else None,
         "pairs": described,
         "reason": reason,
+        "shared": shared,
+        "apart": [p for p in excluded if p in known],
         "stats": stats,
         "progress": _progress(),
     }
