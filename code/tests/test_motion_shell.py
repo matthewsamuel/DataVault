@@ -57,3 +57,9 @@ def test_every_caller_works_without_the_shell_motion():
             guard = "\n".join(lines[max(0, i - 3):i + 1])
             assert re.search(r"window\.ShellMotion|if \((before|play)\)", guard), \
                 f"{name}: unguarded ShellMotion call: {line.strip()}"
+
+
+def test_the_theme_circle_has_a_narrow_feather():
+    # A wide feather (14vmax) read as a grey smear and cost a dropped frame at the start
+    css = (FRONTEND / "style.css").read_text(encoding="utf-8")
+    assert "--shell-reveal-feather: 32px;" in css

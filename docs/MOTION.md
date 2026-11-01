@@ -322,7 +322,7 @@ so a page without it keeps working. Its CSS is the `BEWEGING: SCHIL` block in `s
 | Toasts | `initToastSwipe` | Swipe right to dismiss, rubber band to the left |
 | Modals | `overlayOrigin` | `transform-origin` at the click or the focused trigger, so a window grows from its button |
 | Menus | CSS `shell-menu-in` / `-out` | The theme menu and `.menu` spring open, items follow on the stagger step |
-| Theme | `themeChanged` | Soft-edged circle (masked view transition) and the icon turns half a turn |
+| Theme | `themeChanged` | A crisp circle with a 32 px soft edge (`--shell-reveal-feather`, a masked view transition; a wider feather reads as a grey smear and repaints more) and the icon turns half a turn |
 | Segments | `initSegmented` | A thumb glides between the old and new `.segmented` / `.view-toggle` choice |
 | Shortcut overview | `initShortcutEcho` | The key you press lights up |
 | Pasha | (none) | Owned by `motion-data.js` (section 13); the shell only gives the typing dots a calm opacity breath in Rustig |

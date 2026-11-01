@@ -14670,7 +14670,7 @@ html[data-motion="uit"]::view-transition-new(*) {
     --shell-sheen-period: 2200ms;
     --shell-breathe-period: 1400ms;
     /* De zachte rand van de cirkel waarmee een nieuw thema uitloopt */
-    --shell-reveal-feather: 14vmax;
+    --shell-reveal-feather: 32px;
 }
 
 /* ---------- Menu: een zwevende vlek onder de muis, indrukken ---------- */
