@@ -185,7 +185,7 @@ def test_without_the_model_search_explains_how_to_install_it_and_nothing_else_br
     found = client.get("/api/search/filename", params={"q": "taart"}).json()
     assert _names(found) == ["🎂 taart.png"]
     assert client.get("/api/library/media").status_code == 200
-    assert client.post("/api/search/warm").json() == {"ready": False}
+    assert client.post("/api/search/warm").json() == {"ready": False, "loaded": False}
 
 
 def test_the_app_never_downloads_by_itself(client, config, monkeypatch):
@@ -213,9 +213,14 @@ def test_photos_are_recognised_and_found_by_text(client, config, vault, fake):
     assert result["made_thumbs"] == result["embedded"]   # the thumbnails were made on the way
     answer = client.get("/api/search/semantic", params={"q": "iets blauws"}).json()
     strand_names = {Path(STRAND).name, "strand 001 kopie.jpg", "dup van strand.jpg", "strand klein.jpg"}
-    assert set(_names(answer)[:4]) == strand_names
+    # The three exact copies of the strand photo are one tile; the smaller one saved under
+    # another name is a picture of its own
+    copies = strand_names - {"strand klein.jpg"}
+    tile = next(i for i in answer["items"] if i["name"] in copies)
+    assert tile["copies"] == 2 and {tile["name"], *(Path(p).name for p in tile["copy_paths"])} == copies
+    assert set(_names(answer)[:2]) == {tile["name"], "strand klein.jpg"}
     assert answer["items"][0]["score"] >= answer["items"][-1]["score"]
-    assert answer["total"] >= 4 and answer["indexed"] == result["embedded"] and answer["pending"] == 0
+    assert answer["total"] >= 1 and answer["indexed"] == result["embedded"] and answer["pending"] == 0
     first = answer["items"][0]
     assert {"id", "path", "name", "kind", "taken", "score"} <= set(first)
     assert client.get("/api/search/semantic", params={"q": "oranje"}).json()["items"][0]["name"] == "IMG_0002.JPG"
@@ -271,12 +276,12 @@ def test_a_changed_photo_is_recognised_again_and_search_sees_it_at_once(client, 
     _embed(client)
     target = vault / BURST[0]
     assert "burst_00.jpg" not in _names(client.get("/api/search/semantic", params={"q": "oranje"}).json())[:1]
-    _photo(target, (200, 120, 30), "nu oranje", "2022:05:01 12:00:00")
+    _photo(target, (220, 90, 60), "nu oranje", "2022:05:01 12:00:00")    # orange, not a copy of IMG_0002
     os.utime(target, (time.time() + 5, time.time() + 5))
     _index(client)
     assert semantic.counts(_manager().db)["pending"] == 1
     assert _embed(client)["embedded"] == 1
-    top = _names(client.get("/api/search/semantic", params={"q": "oranje"}).json())[:2]
+    top = _names(client.get("/api/search/semantic", params={"q": "oranje", "include_weak": True}).json())[:2]
     assert "burst_00.jpg" in top
     with sqlite3.connect(str(config.DB_PATH)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM semantic_embeddings WHERE media_id = "
@@ -292,13 +297,41 @@ def test_a_moved_photo_keeps_its_embedding_and_one_in_trash_is_not_found(client,
     src = vault / STRAND_COPIES[0]
     moved = move_no_overwrite(src, vault / "RAW/2019" / src.name)
     assert semantic.counts(db)["pending"] == 0
-    names = _names(client.get("/api/search/semantic", params={"q": "blauw"}).json())
-    assert moved.name in names
-    paths = [i["path"] for i in client.get("/api/search/semantic", params={"q": "blauw"}).json()["items"]]
-    assert str(moved) in paths and str(src) not in paths
+
+    def paths():    # the tiles and the copies folded into them
+        items = client.get("/api/search/semantic", params={"q": "blauw"}).json()["items"]
+        return [p for i in items for p in (i["path"], *i.get("copy_paths", ()))]
+    assert str(moved) in paths() and str(src) not in paths()
     trashed = move_no_overwrite(vault / STRAND, config.TRASH_FOLDER / STRAND)
-    paths = [i["path"] for i in client.get("/api/search/semantic", params={"q": "blauw"}).json()["items"]]
-    assert str(vault / STRAND) not in paths and str(trashed) not in paths
+    assert str(vault / STRAND) not in paths() and str(trashed) not in paths()
+
+
+def test_files_changed_in_finder_are_not_shown_and_the_index_catches_up(client, config, vault, fake, monkeypatch):
+    """Removed or moved outside the app: the stale row is left out and an index pass is asked for."""
+    from backend import media_index
+    _index(client)
+    _embed(client)
+    asked = []
+    monkeypatch.setattr(media_index, "_updater", lambda: asked.append(1))
+    # Opening the search window asks for a pass (cheap when nothing changed)
+    assert client.post("/api/search/warm").json() == {"ready": True, "loaded": True}
+    assert asked == [1]
+    target = vault / "RAW/2019/zomer vakantie/IMG_0002.JPG"
+    before = client.get("/api/search/semantic", params={"q": "oranje"}).json()
+    assert str(target) in [i["path"] for i in before["items"]]
+    shutil.move(target, config.CACHE_FOLDER.parent.parent / "weg.jpg")       # as in Finder
+    after = client.get("/api/search/semantic", params={"q": "oranje", "include_weak": True}).json()
+    assert str(target) not in [i["path"] for i in after["items"]] and len(asked) == 2
+    by_name = client.get("/api/search/filename", params={"q": "IMG_0002"}).json()
+    assert by_name["items"] == [] and len(asked) == 3
+    # A pass that finds the file in its new place tells Slim zoeken at once
+    told = []
+    monkeypatch.setattr(media_index, "_on_new_files", lambda: told.append(1))
+    shutil.move(config.CACHE_FOLDER.parent.parent / "weg.jpg", vault / "RAW/2019/terug.jpg")
+    _index(client)
+    assert told == [1]
+    _index(client)                    # nothing new: nobody is told
+    assert told == [1]
 
 
 def test_embeddings_of_removed_files_are_purged(client, config, vault, fake):

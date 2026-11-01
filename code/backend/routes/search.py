@@ -11,6 +11,7 @@ Installing the model and recognising the photos are jobs: POST /api/jobs
 {type: 'model_download'} (only when the user clicks) and {type: 'semantic'}.
 The filters are those of /api/library/media (media_index._where).
 """
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -50,7 +51,7 @@ def _job(job_type: str) -> Optional[Dict[str, Any]]:
 def search_status() -> Dict[str, Any]:
     """
     {model: {id, label, licence, homepage, sources, size, folder, installed}, ready,
-    library_ready, total, embedded, pending, undecodable, device, per_second, job, download}.
+    text_loaded (a query will not wait for the text model), library_ready, total, embedded, pending, undecodable, device, per_second, job, download}.
     ready: the model is installed (search works for what is recognised so far).
     """
     model = semantic.model_info(config)
@@ -58,6 +59,7 @@ def search_status() -> Dict[str, Any]:
     return {
         "model": model,
         "ready": semantic.model_ready(config),
+        "text_loaded": semantic.text_loaded(config),
         "library_ready": media_index.usable(db),
         **semantic.counts(db, fresh=True),
         "device": info.get("device"),
@@ -101,7 +103,34 @@ def _paging(offset: int, limit: int):
     return max(0, min(offset, MAX_INT)), max(1, min(limit, MAX_PAGE))
 
 
+def _present(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Leave out results whose file is gone from the disk (removed or moved in Finder since
+    the last index pass) and ask the index to catch up. Nothing is left out while the
+    vault itself is not there.
+    """
+    if not result["items"] or not config.VAULT_ROOT.is_dir():
+        return result
+    items, gone = [], 0
+    for item in result["items"]:
+        if not os.path.exists(item["path"]):
+            gone += 1
+            continue
+        if item.get("copy_paths"):
+            copies = [p for p in item["copy_paths"] if os.path.exists(p)]
+            gone += len(item["copy_paths"]) - len(copies)
+            item = {**item, "copy_paths": copies, "copies": len(copies)}
+            if not copies:
+                item.pop("copy_paths"); item.pop("copies")
+        items.append(item)
+    if not gone:
+        return result
+    media_index.request_update()
+    return {**result, "items": items, "total": max(len(items), result["total"] - gone)}
+
+
 def _answer(result: Dict[str, Any], started: float, **extra) -> Dict[str, Any]:
+    result = _present(result)
     counts = semantic.counts(db)
     return {**result, **extra, "took_ms": round((time.perf_counter() - started) * 1000, 1),
             "library_ready": media_index.usable(db), "indexed": counts["embedded"], "pending": counts["pending"]}
@@ -204,16 +233,26 @@ def search_filename(
         raise HTTPException(status_code=400, detail="Typ (een deel van) een bestandsnaam")
     filters = _filters(kind, date_from, date_to, folder, recursive, camera, has_gps, min_rating, orientation)
     offset, limit = _paging(offset, limit)
-    result = semantic.search_filename(db, q, filters, offset, limit)
+    result = _present(semantic.search_filename(db, q, filters, offset, limit))
     return {**result, "mode": "filename", "query": q, "library_ready": media_index.usable(db),
             "took_ms": round((time.perf_counter() - started) * 1000, 1)}
 
 
 @router.post("/warm")
 def search_warm() -> Dict[str, Any]:
-    """Load the text model and the vectors now, so the first query is quick. Cheap when loaded."""
+    """
+    The search window opens: bring the media index up to date (files added, moved or
+    removed in Finder; cheap when nothing changed) and load the text model and the
+    vectors, so the first query is quick. Cheap when loaded. {ready, loaded}: loaded is
+    false while the text model is still being read (the window says 'Zoekmodel laden').
+    """
+    media_index.request_update()
     if not semantic.model_ready(config):
-        return {"ready": False}
+        return {"ready": False, "loaded": False}
+    loaded = semantic.text_loaded(config)
+    if loaded:
+        semantic.vector_index().refresh(db, semantic.current_model())
+        return {"ready": True, "loaded": True}
     import threading
 
     def warm():
@@ -226,4 +265,4 @@ def search_warm() -> Dict[str, Any]:
             db.release_thread()
 
     threading.Thread(target=warm, name="semantic-warm", daemon=True).start()
-    return {"ready": True}
+    return {"ready": True, "loaded": False}

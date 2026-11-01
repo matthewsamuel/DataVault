@@ -59,6 +59,12 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Berichten: de datum bij het gekozen gesprek is ook in het donkere thema goed leesbaar.
 - DataGatherer: de Spotify-kaart zegt tot wanneer je export gaat en dat hij nog niet is ingelezen, in plaats van 'Nog geen gegevens'; een kaart zonder gegevens toont geen lege grijze balk meer.
 - Kleine afwerking: een leeg archief in Albums heeft een knop 'Naar Bestanden', zoeken zonder treffers in Berichten heeft 'Zoekterm wissen', 'Bronnen beheren' bij Shows heeft een voettekst met Sluiten, en het opslagvenster zegt bovenaan 'van het totaal'.
+- Slim zoeken laat veel meer van de juiste foto's meteen zien, vooral bij Nederlandse zoekopdrachten: van de foto's die echt passen staat nu 86% (Nederlands) en 87% (Engels) bij de goede resultaten, was 77% en 80%, en er glipt minder onzin tussen.
+- Past niets echt goed, dan zie je meteen de foto's die er het meest op lijken, met een korte uitleg erboven, in plaats van alleen 'Niets gevonden' en een knop.
+- Foto's die je buiten de app toevoegt, verplaatst of verwijdert, kloppen in de zoekresultaten zodra je het zoekvenster opent: een verdwenen bestand verschijnt niet meer en nieuwe foto's worden meteen herkend.
+- Na het starten (of na een kwartier niet zoeken) zegt het zoekvenster 'Zoekmodel laden…' zolang het zoekmodel nog wordt ingelezen, en een zoekopdracht kan niet meer mislukken doordat het model net op dat moment werd vrijgegeven.
+- Dezelfde foto op meer plekken (bijvoorbeeld in je bibliotheek en in een back-upmap) staat één keer in de resultaten, met een teller voor de kopieën; als je de muis erop houdt, zie je waar ze staan.
+- Het zoekvenster legt uit dat woorden als 'zonder' en 'niet' niet werken bij Slim zoeken, en geeft een tip als je ze gebruikt.
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.

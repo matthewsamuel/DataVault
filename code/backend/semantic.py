@@ -87,26 +87,51 @@ TEXT_IDLE_SECONDS = 900.0         # the text model (about 1.7 GB in memory) is l
 QUERY_CACHE = 128                 # text queries whose vector is kept
 RANKING_CACHE = 16                # rankings kept for paging
 MAX_RANKED = 5000                 # a query never ranks more than this many photos
-# The relevance cut (measured on the labelled set, scripts/eval_semantic_search.py): a result
-# is 'strong' when its cosine is at least MIN_SCORE, at most SCORE_SPREAD below the best one,
-# and SCORE_Z standard deviations above the mean of the selection (a real match stands out
-# from the rest; a query of nonsense lifts nothing out of the crowd). Measured on the 179-photo
-# set with 50 Dutch and 50 English queries: the strong set holds 73% (NL) / 81% (EN) of the
-# right photos at 67% / 72% precision, and no query with right photos comes up empty; the rest
-# is one click away (include_weak).
+# Hub correction: some photos (busy, high-contrast, text-like) score a little higher for
+# every text, and a Dutch text scores a little lower on every photo than its English
+# twin. Subtracting HUB_ALPHA times the mean vector of REFERENCE_TEXTS (generic captions,
+# none of them a concept people search for) from the query removes both: the rankings get
+# better (mAP 0.924 -> 0.953 NL, 0.949 -> 0.966 EN on the labelled set) and the scores of
+# both languages land on one scale, so one cut serves both. Scores below are on this
+# corrected scale (the query is not normalised again).
+HUB_ALPHA = 0.8
+REFERENCE_TEXTS = (
+    "a photo", "een foto", "a picture", "een afbeelding", "a photo of a person", "een foto van een persoon",
+    "a photo of an object", "een voorwerp", "a room", "een kamer", "a street", "een straat", "a building",
+    "een gebouw", "a screenshot", "een schermafbeelding", "a document", "een document", "a group of people",
+    "een groep mensen", "a close-up", "een close-up", "outdoors", "buiten", "indoors", "binnen", "a landscape",
+    "een landschap", "an animal", "een dier", "a plant", "een plant", "a vehicle", "een voertuig", "a drawing",
+    "een tekening", "a selfie", "een selfie", "something", "iets", "a blurry photo", "een onscherpe foto",
+    "the sky", "de lucht", "water", "water", "a table", "een tafel", "text", "tekst",
+)
+# The relevance cut (measured on the labelled set, scripts/eval_semantic_search.py
+# --thumbnails, as the job embeds): a result is 'strong' when its score is at least
+# MIN_SCORE, at most SCORE_SPREAD below the best one, and SCORE_Z standard deviations (MAD)
+# above the median of the whole index (a query of nonsense lifts nothing out of the crowd).
+# On the 179-photo set with 50 Dutch and 50 English queries the strong set holds 86% (NL) /
+# 87% (EN) of the right photos at 69% / 75% precision, and no query with right photos
+# comes up empty (before the hub correction: 77% / 80% at 62% / 72%). Of 24 queries for
+# things that are not in the set, 3 let a photo through (4 photos; before: 4 and 12).
+# tests/test_semantic_ranking.py checks these numbers on stored vectors of that set.
 # The background (median and MAD) is taken over the whole index, not the filtered selection:
-# when a concept is a fifth of a folder, the folder's own mean would rise above the matches.
-# MIN_SCORE is calibrated for SigLIP 2: true matches score 0.09-0.16, nonsense 0.06-0.09
-# (a wider net, 0.07, gives 81-84% recall at 60-64% precision but lets more nonsense through).
+# when a concept is a fifth of a folder, the folder's own median would rise above the matches.
 # A best score of at least CLEAR_SCORE is never emptied by the background rule.
-MIN_SCORE = 0.085
-SCORE_SPREAD = 0.06
-SCORE_Z = 2.0
+MIN_SCORE = 0.045
+SCORE_SPREAD = 0.055
+SCORE_Z = 1.0
 SCORE_Z_MIN_COUNT = 30            # with fewer photos the spread says too little
-CLEAR_SCORE = 0.095
+CLEAR_SCORE = 0.07
 WEAK_FALLBACK = 5                 # search_photos: weaker hits returned when nothing is strong
 # Image to image cosines sit on another scale (0.6-0.95): a near-copy must not set the cut
 NEAR_COPY = 0.93
+# Text results show one tile per picture: a photo whose vector is this close to a better
+# result and that has the same file name or size (the same picture in another folder, or
+# saved again under its name) is folded into that result ('copies'). Burst shots and edits
+# stay apart: they can look as alike, but differ in name and size.
+COPY_COSINE = 0.985
+COPY_SCORE_GAP = 0.01             # copies score (almost) the same for any text
+COPY_WINDOW = 64                  # better results compared with, at most
+COLLAPSE_LIMIT = 2000             # copies are folded within the best this many
 SIMILAR_SPREAD = 0.12
 MAX_QUERY_CHARS = 200
 
@@ -434,6 +459,8 @@ class Encoder:
         self._image = None
         self.image_device: Optional[str] = None
         self.text_used = 0.0
+        self._reference: Optional[np.ndarray] = None
+        self._reference_lock = threading.Lock()
 
     def _options(self):
         import onnxruntime as ort
@@ -449,6 +476,7 @@ class Encoder:
     def load_text(self) -> None:
         with self._lock:
             if self._text is not None:
+                self.text_used = time.monotonic()      # (warm-up counts as use: not let go right after)
                 return
             import onnxruntime as ort
             from tokenizers import Tokenizer
@@ -476,11 +504,28 @@ class Encoder:
             self.image_device = None
 
     def encode_text(self, text: str) -> np.ndarray:
-        self.load_text()
-        self.text_used = time.monotonic()
-        ids = np.array([self._tokenizer.encode(clean_query(text)).ids], dtype=np.int64)
-        vector = self._text.run(["pooler_output"], {"input_ids": ids})[0][0]
+        # The session and tokenizer are taken (and the use recorded) under the lock, so the
+        # idle unload cannot let them go between loading and running
+        while True:
+            self.load_text()
+            with self._lock:
+                tokenizer, session = self._tokenizer, self._text
+                if session is not None:
+                    self.text_used = time.monotonic()
+                    break
+        ids = np.array([tokenizer.encode(clean_query(text)).ids], dtype=np.int64)
+        vector = session.run(["pooler_output"], {"input_ids": ids})[0][0]
         return _normalised(vector)
+
+    def reference_vector(self) -> np.ndarray:
+        """The mean vector of REFERENCE_TEXTS (the hub correction), worked out once (about 1 s)."""
+        with self._reference_lock:
+            if self._reference is None:
+                self._reference = np.mean([self.encode_text(t) for t in REFERENCE_TEXTS], axis=0).astype(np.float32)
+            return self._reference
+
+    def reference_ready(self) -> bool:
+        return self._reference is not None
 
     def load_image(self, device: str = "auto") -> str:
         """Load the image session; device 'auto' (Core ML, else CPU) or 'cpu'. Returns the device used."""
@@ -898,6 +943,16 @@ class VectorIndex:
                 return None
             return self.vectors[row].astype(np.float32)
 
+    def vectors_of(self, media_ids: Sequence[int]) -> np.ndarray:
+        """The vectors of these media ids as float32 rows (zeros for one that is not here)."""
+        with self._lock:
+            out = np.zeros((len(media_ids), self.dim), dtype=np.float32)
+            for k, media_id in enumerate(media_ids):
+                row = self._row_of.get(int(media_id))
+                if row is not None and self.ids[row] == media_id:
+                    out[k] = self.vectors[row]
+            return out
+
     def scores(self, query: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """(ids, cosine scores) of every row, in float32 chunks (float16 matmul is slow in numpy)."""
         with self._lock:
@@ -937,14 +992,44 @@ def text_vector(config, text: str) -> np.ndarray:
     return vector
 
 
+def _reference(encoder) -> Optional[np.ndarray]:
+    """The hub correction of an encoder (None for a test encoder without one)."""
+    fn = getattr(encoder, "reference_vector", None)
+    return fn() if fn is not None else None
+
+
+def corrected(vector: np.ndarray, reference: Optional[np.ndarray]) -> np.ndarray:
+    """A text vector minus the hub correction (see HUB_ALPHA): the vector that is ranked with."""
+    if reference is None:
+        return vector
+    return (vector - HUB_ALPHA * reference).astype(np.float32)
+
+
+def query_vector(config, text: str) -> np.ndarray:
+    """The vector a search text is ranked with."""
+    vector = text_vector(config, text)
+    return corrected(vector, _reference(get_encoder(config)))
+
+
 def warm_up(config) -> bool:
-    """Load the text model and the vectors ahead of the first query (the search window opens)."""
+    """Load the text model (and its hub correction) ahead of the first query (the search window opens)."""
     if not model_ready(config):
         return False
     encoder = get_encoder(config)
     if hasattr(encoder, "load_text"):
         encoder.load_text()
+    _reference(encoder)
     return True
+
+
+def text_loaded(config) -> bool:
+    """True when a text query will not wait for the model to load (for 'Zoekmodel laden...')."""
+    if _encoder_factory is not None:
+        return True
+    spec = current_model()
+    with _encoders_lock:
+        encoder = _encoders.get((str(model_dir(config, spec)), spec.id))
+    return encoder is not None and encoder.text_ready() and encoder.reference_ready()
 
 
 _allowed_cache: "OrderedDict[Tuple, np.ndarray]" = OrderedDict()
@@ -973,6 +1058,76 @@ def _filters_key(filters: Dict[str, Any]) -> str:
     return json.dumps(filters, sort_keys=True, default=str)
 
 
+def relevance_cut(scores: np.ndarray, background: np.ndarray, spread: float = SCORE_SPREAD,
+                  best: Optional[float] = None) -> float:
+    """
+    The score a result needs to be 'strong' (see MIN_SCORE above): scores are those of the
+    selection, background those of the whole index; best (default: the best score) is
+    where the spread is counted from.
+    """
+    cut = MIN_SCORE
+    if not len(scores):
+        return cut
+    top = float(scores.max())
+    cut = max(cut, (top if best is None else best) - spread)
+    if len(background) >= SCORE_Z_MIN_COUNT:
+        median = float(np.median(background))
+        mad = float(np.median(np.abs(background - median))) * 1.4826
+        z_cut = max(cut, median + SCORE_Z * mad)
+        if top >= CLEAR_SCORE and z_cut > top:
+            z_cut = cut      # a clear match is never hidden by a crowded background
+        cut = z_cut
+    return cut
+
+
+def collapse_copies(ids: np.ndarray, scores: np.ndarray, vectors: np.ndarray,
+                    files: Dict[int, Tuple[str, int]]):
+    """
+    Fold copies of one picture into their best result (ids and scores are best first,
+    vectors the image vectors of the first rows, files {id: (name, size)}). A copy looks
+    the same (COPY_COSINE) and has the same file name or the same size: two shots of one
+    scene look as alike but are not copies. Returns (keep mask, {kept id: [copy ids]}).
+    """
+    n = min(len(ids), len(vectors))
+    keep = np.ones(len(ids), dtype=bool)
+    copies: Dict[int, List[int]] = {}
+    group: Dict[int, List[Tuple[str, int]]] = {}       # kept id -> names and sizes of it and its copies
+
+    def same_file(kept_id: int, name: str, size: int) -> bool:
+        members = group.setdefault(kept_id, [files.get(kept_id, ("", -1))])
+        return any(name.casefold() == str(n).casefold() or size == s for n, s in members)
+
+    for i in range(1, n):
+        lo = max(0, i - COPY_WINDOW)
+        near = lo + np.flatnonzero(keep[lo:i] & (scores[lo:i] - scores[i] <= COPY_SCORE_GAP))
+        if not len(near):
+            continue
+        sims = vectors[near] @ vectors[i]
+        name, size = files.get(int(ids[i]), (None, None))
+        for k in np.argsort(-sims):
+            if sims[k] < COPY_COSINE:
+                break
+            kept_id = int(ids[near[k]])
+            if name is not None and same_file(kept_id, name, size):
+                keep[i] = False
+                copies.setdefault(kept_id, []).append(int(ids[i]))
+                group[kept_id].append((name, size))
+                break
+    return keep, copies
+
+
+def _files_by_id(db, ids: Sequence[int]) -> Dict[int, Tuple[str, int]]:
+    out: Dict[int, Tuple[str, int]] = {}
+    ids = [int(i) for i in ids]
+    with db._connect() as conn:
+        for start in range(0, len(ids), 900):
+            chunk = ids[start:start + 900]
+            for media_id, name, size in conn.execute(
+                    f"SELECT id, name, size FROM media WHERE id IN ({', '.join('?' * len(chunk))})", chunk):
+                out[media_id] = (name, size)
+    return out
+
+
 def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: Dict[str, Any],
          exclude: Optional[int] = None, keep_stale: bool = False) -> Dict[str, Any]:
     """
@@ -999,30 +1154,26 @@ def rank(db, config, key: Tuple, vector_fn: Callable[[], np.ndarray], filters: D
     if exclude is not None:
         keep &= ids != exclude
     ids, scores = ids[keep], scores[keep]
-    cut = MIN_SCORE
-    if len(scores):
-        best = float(scores.max())
-        spread = SCORE_SPREAD
-        if key[0] == "similar":
-            spread = SIMILAR_SPREAD
-            apart = scores[scores < NEAR_COPY]
-            if len(apart):
-                best = float(apart.max())
-        cut = max(cut, best - spread)
-        if len(background) >= SCORE_Z_MIN_COUNT:
-            median = float(np.median(background))
-            mad = float(np.median(np.abs(background - median))) * 1.4826
-            z_cut = max(cut, median + SCORE_Z * mad)
-            if float(scores.max()) >= CLEAR_SCORE and z_cut > float(scores.max()):
-                z_cut = cut      # a clear match is never hidden by a crowded background
-            cut = z_cut
+    if key[0] == "similar":
+        apart = scores[scores < NEAR_COPY]
+        cut = relevance_cut(scores, background, SIMILAR_SPREAD, float(apart.max()) if len(apart) else None)
+    else:
+        cut = relevance_cut(scores, background)
     if len(ids) > MAX_RANKED:
         top = np.argpartition(-scores, MAX_RANKED - 1)[:MAX_RANKED]
         ids, scores = ids[top], scores[top]
     order = np.argsort(-scores, kind="stable")
     ids, scores = ids[order], scores[order]
+    copies: Dict[int, List[int]] = {}
+    if key[0] == "text" and len(ids) > 1:
+        head = min(len(ids), COLLAPSE_LIMIT)
+        kept, copies = collapse_copies(ids[:head], scores[:head], _index.vectors_of(ids[:head]),
+                                       _files_by_id(db, ids[:head]))
+        if copies:
+            kept = np.concatenate([kept, np.ones(len(ids) - head, dtype=bool)])
+            ids, scores = ids[kept], scores[kept]
     strong = int(np.searchsorted(-scores, -cut, side="right")) if len(scores) else 0
-    ranking = {"ids": ids, "scores": scores, "strong": strong, "state": state_key}
+    ranking = {"ids": ids, "scores": scores, "strong": strong, "copies": copies, "state": state_key}
     with _rankings_lock:
         _rankings[cache_key] = ranking
         while len(_rankings) > RANKING_CACHE:
@@ -1046,12 +1197,19 @@ def page(db, ranking: Dict[str, Any], offset: int, limit: int, include_weak: boo
     end_all = len(ranking["ids"]) if include_weak else ranking["strong"]
     ids = ranking["ids"][offset:min(offset + limit, end_all)]
     scores = ranking["scores"][offset:offset + len(ids)]
-    rows = _rows_by_id(db, ids)
+    folded = ranking.get("copies") or {}
+    copy_ids = [c for media_id in ids.tolist() for c in folded.get(media_id, ())]
+    rows = _rows_by_id(db, [*ids.tolist(), *copy_ids])
     items = []
     for media_id, score in zip(ids.tolist(), scores.tolist()):
         row = rows.get(media_id)
         if row is not None:   # hidden since (moved to TRASH): left out
-            items.append({**row, "score": round(score, 4)})
+            item = {**row, "score": round(score, 4)}
+            copies = [rows[c]["path"] for c in folded.get(media_id, ()) if c in rows]
+            if copies:        # the same picture elsewhere in the library: one tile with a badge
+                item["copies"] = len(copies)
+                item["copy_paths"] = copies
+            items.append(item)
     next_offset = offset + len(ids)
     return {
         "total": ranking["strong"],
@@ -1070,7 +1228,7 @@ def search_text(db, config, text: str, filters: Optional[Dict[str, Any]] = None,
     filters = dict(filters or {})
     if not model_ready(config):
         raise NotReady(not_installed_message(config))
-    ranking = rank(db, config, ("text", clean_query(text)), lambda: text_vector(config, text), filters,
+    ranking = rank(db, config, ("text", clean_query(text)), lambda: query_vector(config, text), filters,
                    keep_stale=offset > 0)
     return page(db, ranking, offset, limit, include_weak)
 
