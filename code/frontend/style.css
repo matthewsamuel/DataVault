@@ -11178,8 +11178,8 @@ button.otd-settings-icon:hover {
    het sessiedoel, de reeks, hoe zeker de ranglijst is en Terugdraaien / Gelijk / Overslaan. De
    ranglijst gebruikt hetzelfde venster.
    Beweging (alles in deze sectie, los van de rest van de app): de winnaar krijgt een groene ring
-   en een vinkje dat opveert, het paar zweeft weg (.is-leaving, absoluut over het nieuwe heen,
-   niet klikbaar) en het nieuwe komt omhoog. De choreografie zelf zit in elo.js (Web Animations
+   en een vinkje dat opveert en vliegt naar de uitslag onderin (.elo-result); het oude paar ligt
+   dan als .is-leaving absoluut over het nieuwe heen (niet klikbaar) en het nieuwe komt omhoog. De choreografie zelf zit in elo.js (Web Animations
    API); hier staan de toestanden en de overgangen. Alleen transform en opacity bewegen. */
 
 .elo-overlay {
@@ -11215,8 +11215,12 @@ button.otd-settings-icon:hover {
     margin: 0;
 }
 
+/* Eén regel: op een smal scherm eindigt de zin op '…' (de hele zin staat in de title) */
 .elo-subtitle {
     margin: var(--space-xs) 0 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-secondary);
     font-size: var(--fs-sm);
     line-height: var(--lh-snug);
@@ -11556,6 +11560,10 @@ button.otd-settings-icon:hover {
     transition: stroke var(--duration-fast) var(--ease-out);
 }
 
+.elo-goal.is-lapped .elo-ring-track {
+    stroke: var(--accent-border);
+}
+
 .elo-ring-fill {
     stroke: var(--accent);
     stroke-linecap: round;
@@ -11646,14 +11654,93 @@ button.otd-settings-icon:hover {
     white-space: nowrap;
 }
 
-.elo-progress {
+/* De voortgang en, na een keuze, even de uitslag: op dezelfde plek, ze wisselen elkaar af */
+.elo-status {
     flex: 1 1 0;
     min-width: 0;
+    display: grid;
+    align-items: center;
+}
+
+.elo-status > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--elo-spring);
+}
+
+.elo-progress {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-secondary);
     font-size: var(--fs-sm);
+}
+
+.elo-status.has-result .elo-progress {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--space-xs)));
+}
+
+.elo-result {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    opacity: 0;
+    transform: translateY(var(--space-xs));
+    pointer-events: none;
+}
+
+.elo-status.has-result .elo-result {
+    opacity: 1;
+    transform: none;
+}
+
+.elo-result-side {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.elo-result-thumb {
+    flex: none;
+    width: var(--control-h);
+    height: var(--control-h);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background-color: var(--media-bg);
+    box-shadow: 0 0 0 1px var(--border-hairline);
+}
+
+.elo-result-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Gekozen: dezelfde groene ring als op de grote foto */
+.elo-result-thumb.is-win {
+    box-shadow: 0 0 0 2px var(--accent), 0 0 var(--space-md) var(--accent-glow);
+}
+
+.elo-result-thumb.is-draw {
+    box-shadow: 0 0 0 2px var(--border-strong);
+}
+
+.elo-result-side:not(:has(.is-win)):not(:has(.is-draw)) .elo-result-thumb img {
+    opacity: 0.6;
+}
+
+.elo-result-delta {
+    min-width: var(--space-2xl);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    color: var(--text-secondary);
+}
+
+.elo-result-delta.is-up {
+    color: var(--accent-text);
 }
 
 .elo-scope-name {
@@ -11696,6 +11783,7 @@ button.otd-settings-icon:hover {
 /* ---------- Ranglijst ---------- */
 
 .elo-board {
+    --elo-col-move: calc(var(--space-4xl) + var(--space-xl));
     flex: 1 1 0;
     min-height: 0;
     overflow-y: auto;
@@ -11854,7 +11942,7 @@ button.otd-settings-icon:hover {
     display: block;
     height: var(--space-sm);
     border-radius: var(--radius-full);
-    background-color: var(--border-hairline);
+    background-color: var(--border-default);
 }
 
 .elo-band.is-unknown {
@@ -11866,8 +11954,7 @@ button.otd-settings-icon:hover {
     top: 0;
     bottom: 0;
     border-radius: var(--radius-full);
-    background-color: var(--accent-subtle);
-    border: 1px solid var(--accent-border);
+    background-color: var(--accent-border);
 }
 
 .elo-band-dot {
@@ -11880,10 +11967,45 @@ button.otd-settings-icon:hover {
     transform: translate(-50%, -50%);
 }
 
+/* Kopjes boven de kolommen, op dezelfde maten als de rijen */
+.elo-board-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: 0 var(--space-sm) var(--space-xs);
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+}
+
+.elo-board-head-photo {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-left: calc(var(--control-h-sm) + var(--space-md));
+}
+
+.elo-board-head .elo-board-band {
+    text-align: center;
+    white-space: nowrap;
+}
+
+.elo-board-head-move {
+    flex: none;
+    width: var(--elo-col-move);
+    text-align: center;
+    white-space: nowrap;
+}
+
+.elo-board-head-score {
+    flex: none;
+    min-width: var(--space-4xl);
+    text-align: right;
+}
+
 /* Beweging sinds de vorige sessie */
 .elo-move {
     flex: none;
-    min-width: var(--space-3xl);
+    width: var(--elo-col-move);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -11901,11 +12023,22 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
-.elo-move.is-new {
+.elo-move-chip {
     height: var(--space-lg);
+    display: inline-flex;
+    align-items: center;
     padding: 0 var(--space-sm);
     border-radius: var(--radius-full);
     background-color: var(--accent-subtle);
+    color: var(--accent-text);
+}
+
+/* 'Als album' gelukt: de knop zegt het zelf, met een groen vinkje (en doet even niets) */
+.elo-board-actions .btn.is-done {
+    pointer-events: none;
+}
+
+.elo-board-actions .btn.is-done i {
     color: var(--accent-text);
 }
 
@@ -11922,6 +12055,10 @@ button.otd-settings-icon:hover {
 @media (max-width: 1180px) {
     .elo-board-band {
         width: var(--space-4xl);
+    }
+
+    .elo-board-head-extra {
+        display: none;
     }
 
     .elo-settled-track {

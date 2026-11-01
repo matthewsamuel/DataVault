@@ -17,8 +17,8 @@
 // Een ingedrukt gehouden toets telt één keer, en een keuze binnen ELO_MIN_DWELL_MS nadat een paar
 // verscheen telt niet (een dubbelklik of een toets die stuitert kiest zo nooit een paar dat je niet zag).
 //
-// Beweging: de winnaar licht op (groene ring, vinkje, score omhoog), het paar zweeft weg en het
-// volgende komt omhoog, met de Web Animations API. Animaties blokkeren nooit: het nieuwe paar is
+// Beweging: de winnaar licht op (groene ring, vinkje, +N) en vliegt dan als miniatuur naar de
+// uitslag onderin; het volgende paar komt meteen omhoog, met de Web Animations API. Animaties blokkeren nooit: het nieuwe paar is
 // meteen te kiezen, en een volgende keuze breekt een lopende animatie af. Bij 'beweging verminderen'
 // (systeem of html[data-motion="reduce"]) wisselt alles zonder animatie.
 //
@@ -34,6 +34,9 @@ const ELO_UNDO_MAX = 200;
 const ELO_TOP_CHOICES = [10, 25, 50];
 const ELO_GOALS = [10, 20, 50, 100];
 const ELO_SCOPE_CHARS = 30;         // langere namen in de keuzelijst eindigen op '…'
+const ELO_RECENT_PAIRS = 8;         // zoveel getoonde paren hoort de server (recent=), ook nog niet opgeslagen keuzes
+const ELO_RECENT_CHARS = 6000;      // maar nooit meer dan dit in de adresregel
+const ELO_RESULT_MS = 2200;         // zo lang staat de uitslag (+N · −N) onderin
 
 const elo = {
     scope: '',          // pad van de collectie ('' = hele bibliotheek), of 'soort:waarde' (album)
@@ -43,6 +46,8 @@ const elo = {
     queue: [],          // klaarstaande paren (met hun geladen afbeeldingen)
     fetching: null,     // de lopende aanvraag voor nieuwe paren
     last: null,         // het laatst getoonde paar, zodat het niet meteen terugkomt
+    shown: [],          // de paden van de laatste ELO_RECENT_PAIRS getoonde paren, oudste eerst
+    resultTimer: 0,     // wanneer de uitslag onderin weer plaatsmaakt voor de voortgang
     notice: '',         // korte melding vooraan in de voortgangsregel
     noticeIcon: 'fa-rotate-left',
     stats: null,        // {photos, compared, comparisons, settled}
@@ -83,6 +88,8 @@ function eloAnimate(el, keyframes, options) {
 
 const ELO_SPRING = 'cubic-bezier(0.22, 1.2, 0.36, 1)';     // licht doorverend
 const ELO_GLIDE = 'cubic-bezier(0.2, 0.8, 0.2, 1)';        // = --ease-out
+const ELO_SWOOP = 'cubic-bezier(0.55, 0, 0.25, 1)';        // traag weg, snel aan: de vlucht naar onderen
+const ELO_SUBTITLE = 'Kies steeds de mooiste van twee. Hoe hoger de score, hoe vaker een foto in Shows komt.';
 
 function eloToken() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -121,8 +128,7 @@ function eloBuild() {
             createEl('div', { class: 'elo-header' },
                 createEl('div', { class: 'elo-heading' },
                     createEl('h2', { id: 'elo-title', class: 'modal-title' }, eloIcon('fa-scale-balanced'), ' Welke is mooier?'),
-                    createEl('p', { class: 'elo-subtitle',
-                        text: 'Kies steeds de mooiste van twee. Hoe hoger de score, hoe vaker een foto in Shows komt.' })),
+                    createEl('p', { class: 'elo-subtitle', title: ELO_SUBTITLE, text: ELO_SUBTITLE })),
                 createEl('div', { class: 'elo-controls' }, scopeSelect, tabs, close)),
             createEl('div', { id: 'elo-body', class: 'elo-body' }),
             createEl('div', { id: 'elo-footer', class: 'elo-footer' },
@@ -134,7 +140,10 @@ function eloBuild() {
                         createEl('div', { class: 'elo-settled-track', 'aria-hidden': 'true' },
                             createEl('div', { id: 'elo-settled-fill', class: 'elo-settled-fill' })),
                         createEl('span', { id: 'elo-settled-text', class: 'elo-settled-text', text: '0% zeker' })),
-                    createEl('div', { id: 'elo-progress', class: 'elo-progress', 'aria-live': 'polite' })),
+                    // De voortgang, en na een keuze even de uitslag op dezelfde plek
+                    createEl('div', { id: 'elo-status', class: 'elo-status' },
+                        createEl('div', { id: 'elo-progress', class: 'elo-progress', 'aria-live': 'polite' }),
+                        createEl('div', { id: 'elo-result', class: 'elo-result', 'aria-hidden': 'true' }))),
                 createEl('div', { class: 'elo-actions' },
                     createEl('button', { type: 'button', id: 'elo-undo', class: 'btn btn-secondary btn-sm', disabled: true,
                         onClick: eloUndo, title: 'Laatste keuze terugdraaien (z)' },
@@ -207,10 +216,17 @@ function eloFillScopes() {
     eloScopeTitle();
 }
 
+function eloAlbumHasPhotos(album) {
+    const kind = album.filters && album.filters.kind;
+    if (!kind || !kind.length) return true;
+    return (Array.isArray(kind) ? kind : [kind]).includes('photo');
+}
+
 async function eloLoadAlbums() {
     try {
         const data = await fetchJSON(`${API_BASE}/api/library/albums?with_hidden=false`);
-        elo.albums = (data.albums || []).filter(a => !a.hidden);
+        // Alleen albums waar foto's in kunnen: een album met alleen video's (of audio) doet niet mee
+        elo.albums = (data.albums || []).filter(a => !a.hidden && eloAlbumHasPhotos(a));
         const select = document.getElementById('elo-scope');
         if (select && document.activeElement !== select) eloFillScopes();
     } catch (_) {
@@ -267,7 +283,9 @@ function eloResetRound() {
     elo.undo = [];
     elo.round = 0;
     elo.pair = null;
+    elo.shown = [];
     elo.notice = '';
+    eloHideResult(true);
     eloDropQueue();
 }
 
@@ -415,23 +433,61 @@ function eloPaths(pair) {
     return pair ? pair.map(p => p.path) : [];
 }
 
-// Paren bijhalen tot er ELO_QUEUE_TARGET klaarstaan (één aanvraag tegelijk)
+function eloPairKey(paths) {
+    return [...paths].sort().join('\n');
+}
+
+// Een paar staat in beeld: de server hoort het bij de volgende aanvragen (recent=), ook als de
+// keuze erover nog onderweg is. Zo komt een net gekozen paar nooit een paar stappen later terug.
+function eloRemember(pair) {
+    const paths = eloPaths(pair);
+    const last = elo.shown[elo.shown.length - 1];
+    if (last && eloPairKey(last) === eloPairKey(paths)) return;
+    elo.shown.push(paths);
+    if (elo.shown.length > ELO_RECENT_PAIRS) elo.shown.shift();
+}
+
+// recent= voor de laatst getoonde paren, oudste eerst, zolang de adresregel kort blijft
+function eloRecentParams() {
+    const out = [];
+    let used = 0;
+    for (let i = elo.shown.length - 1; i >= 0; i--) {
+        const parts = elo.shown[i].map(p => `recent=${encodeURIComponent(p)}`);
+        used += parts.join('&').length + 1;
+        if (used > ELO_RECENT_CHARS) break;
+        out.unshift(...parts);
+    }
+    return out;
+}
+
+// Paren bijhalen tot er ELO_QUEUE_TARGET klaarstaan (één aanvraag tegelijk). Eerst wat nog
+// opgeslagen wordt: dan kent de server die keuzes al (en kloppen scores en voortgang); er staat
+// dan nog een paar klaar, dus wachten merk je niet.
 function eloFillQueue() {
     if (elo.fetching || elo.queue.length >= ELO_QUEUE_TARGET || elo.tab !== 'compare') return elo.fetching;
     const seq = elo.seq;
-    const exclude = [...eloPaths(elo.pair), ...elo.queue.flatMap(eloPaths)];
-    const params = [eloScopeParam(), `count=${ELO_FETCH_COUNT - Math.min(1, elo.queue.length)}`,
-        ...eloPaths(elo.pair || elo.last).map(p => `prev=${encodeURIComponent(p)}`),
-        ...exclude.map(p => `exclude=${encodeURIComponent(p)}`)].filter(Boolean);
-    const request = fetchJSON(`${API_BASE}/api/shows/compare/pair?${params.join('&')}`).then(data => {
+    const request = elo.chain.then(() => {
         if (seq !== elo.seq) return null;
+        const exclude = [...eloPaths(elo.pair), ...elo.queue.flatMap(eloPaths)];
+        const params = [eloScopeParam(), `count=${ELO_FETCH_COUNT - Math.min(1, elo.queue.length)}`,
+            ...eloPaths(elo.pair || elo.last).map(p => `prev=${encodeURIComponent(p)}`),
+            ...exclude.map(p => `exclude=${encodeURIComponent(p)}`), ...eloRecentParams()].filter(Boolean);
+        return fetchJSON(`${API_BASE}/api/shows/compare/pair?${params.join('&')}`);
+    }).then(data => {
+        if (!data || seq !== elo.seq) return null;
         elo.stats = data.stats;
         elo.progress = data.progress;
         elo.scopeTitle = data.scope.title;
-        const busy = new Set([...eloPaths(elo.pair), ...elo.queue.flatMap(eloPaths)]);
+        // In een kleine collectie mogen nieuwe paren een foto delen met een wachtend paar (of in
+        // een heel kleine met het paar in beeld): de server zegt welke foto's hij buiten liet
+        // (apart). Nooit hetzelfde paar twee keer achter elkaar.
+        const busy = new Set(data.shared ? (data.apart || []) : [...eloPaths(elo.pair), ...elo.queue.flatMap(eloPaths)]);
+        const queued = new Set([elo.pair, ...elo.queue].filter(Boolean).map(q => eloPairKey(eloPaths(q))));
         (data.pairs || []).forEach(pair => {
-            if (pair.some(p => busy.has(p.path))) return;
+            const key = eloPairKey(eloPaths(pair));
+            if (pair.some(p => busy.has(p.path)) || queued.has(key)) return;
             pair.forEach(p => busy.add(p.path));
+            queued.add(key);
             elo.queue.push(eloPreload(pair));
         });
         eloUpdateProgress();
@@ -562,6 +618,7 @@ function eloShowPair(pair, direction = 'next') {
     const stage = eloStage(pair);
     elo.pair = pair;
     elo.last = pair;
+    eloRemember(pair);
     elo.shownAt = performance.now();
     const leaving = old && !old.querySelector('.is-loading') && direction !== 'none' && eloMotionOK();
     if (leaving) {
@@ -581,50 +638,89 @@ function eloShowPair(pair, direction = 'next') {
     return old;
 }
 
-// Het nieuwe paar komt binnen: van onderen (na een keuze), van opzij (overslaan, terugdraaien)
+// Het nieuwe paar komt binnen: van onderen (na een keuze), van opzij (overslaan, terugdraaien).
+// Meteen en al grotendeels zichtbaar (vanaf 0,55), zodat er tussen twee paren nooit een leeg
+// vlak oplicht; de tweede foto volgt 40 ms later.
 function eloEnter(stage, direction) {
     if (direction === 'none') {
         eloAnimate(stage, [{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: ELO_GLIDE, fill: 'none' });
         return;
     }
-    const from = { next: 'translateY(28px) scale(0.97)', skip: 'translateX(48px)', back: 'translateX(-48px)' }[direction]
-        || 'translateY(16px)';
+    const from = { next: 'translateY(18px) scale(0.98)', skip: 'translateX(32px)', back: 'translateX(-32px)' }[direction]
+        || 'translateY(12px)';
     stage.querySelectorAll('.elo-choice').forEach((choice, i) => {
         eloAnimate(choice, [
-            { opacity: 0, transform: from },
+            { opacity: 0.55, transform: from },
             { opacity: 1, transform: 'none' }],
-            { duration: 420, delay: 110 + i * 60, easing: ELO_SPRING, fill: 'backwards' });
+            { duration: 380, delay: i * 40, easing: ELO_SPRING, fill: 'backwards' });
     });
     eloAnimate(stage.querySelector('.elo-vs'), [
         { opacity: 0, transform: 'translate(-50%, -50%) scale(0.4) rotate(-90deg)' },
         { opacity: 1, transform: 'translate(-50%, -50%) scale(1) rotate(0deg)' }],
-        { duration: 420, delay: 150, easing: ELO_SPRING, fill: 'backwards' });
+        { duration: 380, delay: 60, easing: ELO_SPRING, fill: 'backwards' });
 }
 
-// Het oude paar gaat weg: de winnaar zweeft omhoog, de ander zakt weg (bij gelijk allebei omhoog)
+// Het oude paar gaat weg. Na een keuze blijft de winnaar even staan (ring, vinkje, +N) en vliegt
+// dan als miniatuur naar de uitslag onderin; de ander verdwijnt snel. Bij overslaan en
+// terugdraaien schuift het paar kort opzij. Alles sneller weg dan het nieuwe paar binnenkomt.
 function eloLeave(old, direction) {
     const animations = [];
     old.querySelectorAll('.elo-choice').forEach((choice, i) => {
-        let frames;
+        let a = null;
         if (direction === 'skip') {
-            frames = [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateX(${i ? 40 : -40}px) rotate(${i ? 2 : -2}deg)` }];
+            a = eloAnimate(choice, [{ opacity: 1, transform: 'none' },
+                { opacity: 0, transform: `translateX(${i ? 24 : -24}px) rotate(${i ? 1.5 : -1.5}deg)` }],
+            { duration: 160, easing: ELO_GLIDE });
         } else if (direction === 'back') {
-            frames = [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(56px)' }];
+            a = eloAnimate(choice, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(40px)' }],
+                { duration: 160, easing: ELO_GLIDE });
         } else if (choice.classList.contains('is-chosen') || choice.classList.contains('is-draw')) {
-            frames = [
-                { opacity: 1, transform: 'none', offset: 0 },
-                { opacity: 1, transform: 'translateY(-6px) scale(1.03)', offset: 0.4 },
-                { opacity: 0, transform: 'translateY(-32px) scale(0.96)', offset: 1 }];
+            a = eloFlight(choice, document.querySelector(`#elo-result .elo-result-thumb[data-side="${i}"]`));
         } else {
-            frames = [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(20px) scale(0.94)' }];
+            a = eloAnimate(choice, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(10px) scale(0.97)' }],
+                { duration: 150, easing: ELO_GLIDE });
         }
-        const a = eloAnimate(choice, frames, { duration: direction === 'next' ? 300 : 240, easing: ELO_GLIDE });
         if (a) animations.push(a);
     });
-    const vs = eloAnimate(old.querySelector('.elo-vs'), [{ opacity: 1 }, { opacity: 0 }], { duration: 160 });
+    const vs = eloAnimate(old.querySelector('.elo-vs'), [{ opacity: 1 }, { opacity: 0 }], { duration: 120 });
     if (vs) animations.push(vs);
     if (!animations.length) { old.remove(); return; }
     Promise.all(animations.map(a => a.finished.catch(() => {}))).then(() => old.remove());
+}
+
+const ELO_FLIGHT_MS = 520;
+
+// De gekozen foto vliegt naar zijn plek in de uitslag (een gedeeld element: van groot naar
+// miniatuur). Eerst ~125 ms stil met een lichte lift, zodat de ring, het vinkje en +N te lezen
+// zijn; de effectcurve is lineair, elk stuk heeft zijn eigen easing. Zonder doel (de uitslag is
+// niet zichtbaar): zweeft de foto omhoog weg, met dezelfde pauze.
+function eloFlight(choice, target) {
+    const frame = choice.querySelector('.elo-frame');
+    const img = frame && frame.querySelector('.elo-img.is-loaded');
+    const box = choice.getBoundingClientRect();
+    const from = (img || frame || choice).getBoundingClientRect();
+    const to = target && target.offsetParent ? target.getBoundingClientRect() : null;
+    const lift = 'scale(1.012)';       // een tikje naar voren, niet omhoog over de kop heen
+    // De naam en score eronder gaan meteen weg: ze zouden over die van het nieuwe paar heen staan
+    eloAnimate(choice.querySelector('.elo-meta'), [{ opacity: 1 }, { opacity: 0 }], { duration: 90, easing: 'linear' });
+    if (!to || !to.width || !from.width) {
+        return eloAnimate(choice, [
+            { offset: 0, opacity: 1, transform: 'none', easing: ELO_GLIDE },
+            { offset: 0.3, opacity: 1, transform: lift, easing: ELO_GLIDE },
+            { offset: 1, opacity: 0, transform: 'scale(0.96)' }],
+        { duration: 420, easing: 'linear' });
+    }
+    const scale = Math.min(to.width / from.width, to.height / from.height);
+    const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+    const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+    choice.style.transformOrigin = `${from.left + from.width / 2 - box.left}px ${from.top + from.height / 2 - box.top}px`;
+    const land = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${scale.toFixed(4)})`;
+    return eloAnimate(choice, [
+        { offset: 0, opacity: 1, transform: 'none', easing: ELO_GLIDE },
+        { offset: 0.24, opacity: 1, transform: lift, easing: ELO_SWOOP },
+        { offset: 0.8, opacity: 1, transform: land, easing: 'linear' },
+        { offset: 1, opacity: 0, transform: land }],
+    { duration: ELO_FLIGHT_MS, easing: 'linear' });
 }
 
 // Na een keuze: de groene ring, het vinkje (of bij gelijk een '=' op allebei)
@@ -640,22 +736,76 @@ function eloMarkChoice(stage, outcome) {
     marks.forEach(mark => eloAnimate(mark, [
         { transform: 'scale(0.2) rotate(-30deg)', opacity: 0 },
         { transform: 'scale(1.15) rotate(0deg)', opacity: 1, offset: 0.6 },
-        { transform: 'scale(1)', opacity: 1 }], { duration: 320, easing: ELO_SPRING }));
+        { transform: 'scale(1)', opacity: 1 }], { duration: 260, easing: ELO_SPRING }));
 }
 
-// +N/−N op de foto's zodra de server antwoordt (ook op het vertrekkende plaatje)
-function eloShowDeltas(stage, result) {
-    if (!stage || !stage.isConnected) return;
-    const choices = stage.querySelectorAll('.elo-choice');
+// ==================== DE UITSLAG ONDERIN ====================
+// Na een keuze staat op de plek van de voortgang even de uitslag: beide foto's als miniatuur
+// (de winnaar met een groene ring) met hoeveel hun score veranderde. De winnaar vliegt erheen
+// (eloFlight); na ELO_RESULT_MS komt de voortgang terug. Nooit in de weg: niet klikbaar.
+
+function eloShowResult(pair, outcome, token) {
+    const status = document.getElementById('elo-status');
+    const box = document.getElementById('elo-result');
+    if (!status || !box) return;
+    const imgs = pair._imgs || [];
+    const flying = eloMotionOK();
+    box.dataset.token = token;
+    box.replaceChildren(...pair.map((photo, i) => {
+        const won = outcome === 'draw' || outcome === i;
+        const thumb = createEl('span', {
+            class: `elo-result-thumb${outcome === i ? ' is-win' : ''}${outcome === 'draw' ? ' is-draw' : ''}`,
+            dataset: { side: String(i) },
+        }, createEl('img', { src: (imgs[i] && (imgs[i].currentSrc || imgs[i].src)) || vaultFileUrl('thumb', photo.path),
+            alt: '', draggable: false }));
+        // Wat erheen vliegt, verschijnt pas als het landt
+        if (won && flying) thumb.style.opacity = '0';
+        return createEl('span', { class: 'elo-result-side', dataset: { side: String(i) } },
+            thumb, createEl('span', { class: 'elo-result-delta tabular' }));
+    }));
+    status.classList.add('has-result');
+    clearTimeout(elo.resultTimer);
+    elo.resultTimer = setTimeout(() => eloHideResult(), ELO_RESULT_MS);
+    if (!flying) return;
+    box.querySelectorAll('.elo-result-thumb').forEach(thumb => {
+        if (thumb.style.opacity !== '0') return;
+        const a = eloAnimate(thumb, [
+            { opacity: 0, transform: 'scale(0.6)' },
+            { opacity: 1, transform: 'scale(1.12)', offset: 0.6 },
+            { opacity: 1, transform: 'scale(1)' }],
+        { duration: 260, delay: ELO_FLIGHT_MS * 0.76, easing: ELO_SPRING, fill: 'forwards' });
+        if (!a) { thumb.style.opacity = ''; return; }
+        a.finished.then(() => { thumb.style.opacity = ''; a.cancel(); }, () => { thumb.style.opacity = ''; });
+    });
+}
+
+function eloHideResult(clear = false) {
+    clearTimeout(elo.resultTimer);
+    const status = document.getElementById('elo-status');
+    if (status) status.classList.remove('has-result');
+    const box = document.getElementById('elo-result');
+    if (box && clear) { box.replaceChildren(); delete box.dataset.token; }
+}
+
+// +N/−N op de foto's zodra de server antwoordt (ook op het vertrekkende plaatje) en in de uitslag
+function eloShowDeltas(stage, result, token) {
+    const box = document.getElementById('elo-result');
+    const sides = box && box.dataset.token === token ? box.querySelectorAll('.elo-result-delta') : [];
+    const choices = stage && stage.isConnected ? stage.querySelectorAll('.elo-choice') : [];
     [result.a, result.b].forEach((change, i) => {
+        const n = change.rating - change.before;
+        const tone = n > 0 ? 'is-up' : n < 0 ? 'is-down' : 'is-even';
+        if (sides[i]) {
+            sides[i].textContent = eloSigned(n);
+            sides[i].classList.add(tone);
+        }
         const delta = choices[i] && choices[i].querySelector('.elo-delta');
         if (!delta) return;
-        const n = change.rating - change.before;
         delta.textContent = eloSigned(n);
-        delta.classList.add(n > 0 ? 'is-up' : n < 0 ? 'is-down' : 'is-even');
+        delta.classList.add(tone);
         eloAnimate(delta, [
             { opacity: 0, transform: 'translateY(10px) scale(0.8)' },
-            { opacity: 1, transform: 'translateY(0) scale(1)' }], { duration: 260, easing: ELO_SPRING });
+            { opacity: 1, transform: 'translateY(0) scale(1)' }], { duration: 220, easing: ELO_SPRING });
     });
 }
 
@@ -668,8 +818,9 @@ function eloSigned(n) {
 // side: 0 (links), 1 (rechts) of 'draw'; how: 'key' of 'pointer'
 function eloPick(side, how = 'key') {
     if (!elo.pair || elo.busy || elo.tab !== 'compare') return;
-    // Te snel na het verschijnen van dit paar: een dubbelklik of een stuiterende toets
-    if (performance.now() - elo.shownAt < ELO_MIN_DWELL_MS) return;
+    // Te snel na het verschijnen van dit paar: een dubbelklik of een stuiterende toets. Telt
+    // niet, maar je ziet dat: de foto (of Gelijk) schudt even nee
+    if (performance.now() - elo.shownAt < ELO_MIN_DWELL_MS) { eloNudge(side); return; }
     const pair = elo.pair;
     const [a, b] = pair;
     const winner = side === 'draw' ? 'draw' : side === 0 ? 'a' : 'b';
@@ -681,7 +832,9 @@ function eloPick(side, how = 'key') {
     const token = eloToken();
     const scopeBody = eloScopeBody();
     const seq = elo.seq;
-    eloAdvance('next');
+    eloShowResult(pair, side, token);
+    // Eerst de keten (het opslaan), dan pas het volgende paar: zo wacht een nieuwe aanvraag
+    // voor paren op deze keuze (eloFillQueue)
     elo.chain = elo.chain.then(async () => {
         try {
             const result = await eloPost('/api/shows/compare', { a: a.path, b: b.path, winner, client_token: token, ...scopeBody });
@@ -693,11 +846,12 @@ function eloPick(side, how = 'key') {
             }
             const before = elo.progress ? elo.progress.session : 0;
             if (result.progress) elo.progress = result.progress;
-            eloShowDeltas(stage, result);
+            eloShowDeltas(stage, result, token);
             eloCelebrateGoal(before);
         } catch (err) {
             // Niet bewaard: dit paar komt meteen terug, met een melding
             elo.round = Math.max(0, elo.round - 1);
+            eloHideResult(true);
             toastFetchError('Keuze niet opgeslagen', err);
             if (seq === elo.seq && eloIsOpen() && elo.tab === 'compare') {
                 if (elo.pair) elo.queue.unshift(elo.pair);
@@ -709,7 +863,17 @@ function eloPick(side, how = 'key') {
             eloUpdateActions();
         }
     });
+    eloAdvance('next');
     eloUpdateProgress();
+}
+
+// Een keuze die (nog) niet telt: een korte 'nee' op wat je koos
+function eloNudge(side) {
+    const target = side === 'draw' ? document.getElementById('elo-draw')
+        : document.querySelector(`#elo-body .elo-stage:not(.is-leaving) .elo-choice[data-side="${side}"] .elo-frame`);
+    eloAnimate(target, [
+        { transform: 'translateX(0)' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(3px)' },
+        { transform: 'translateX(-1px)' }, { transform: 'translateX(0)' }], { duration: 180, easing: 'ease-out', fill: 'none' });
 }
 
 function eloSkip() {
@@ -741,6 +905,7 @@ async function eloUndo() {
         const back = new Set(eloPaths(pair));
         elo.queue = elo.queue.filter(q => !q.some(p => back.has(p.path)));
         if (elo.pair && !elo.pair.some(p => back.has(p.path))) elo.queue.unshift(elo.pair);
+        eloHideResult(true);
         elo.notice = 'Teruggedraaid, kies opnieuw';
         elo.noticeIcon = 'fa-rotate-left';
         eloShowPair(eloPreload(pair), 'back');
@@ -779,38 +944,57 @@ function eloKeydown(e) {
 
 // ==================== VOORTGANG ====================
 
+// De voortgangsregel onderin: een melding (teruggedraaid, doel gehaald) en hoeveel foto's van
+// deze collectie al beoordeeld zijn. De naam van de collectie staat al bovenin (in de keuzelijst).
 function eloUpdateProgress() {
     const box = document.getElementById('elo-progress');
     if (!box) return;
-    const parts = [];
+    let text = '';
     if (elo.stats) {
         const photos = elo.stats.photos === 1 ? 'foto' : 'foto\'s';
-        parts.push(`${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} beoordeeld`);
+        text = `${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} beoordeeld`;
     }
-    if (elo.round) parts.push(`${formatNumberNl(elo.round)} in deze ronde`);
     const notice = elo.notice ? createEl('span', { class: 'elo-notice' },
-        eloIcon(elo.noticeIcon), ` ${elo.notice}`) : null;
-    box.replaceChildren(...[notice, notice ? ' · ' : null,
-        createEl('span', { class: 'elo-scope-name', text: elo.scopeTitle }),
-        parts.length ? createEl('span', { text: ` · ${parts.join(' · ')}` }) : null].filter(Boolean));
-    box.title = box.textContent;
+        eloIcon(elo.noticeIcon), ` ${elo.notice}`) : null;
+    box.replaceChildren(...[notice, notice && text ? ' · ' : null, text ? createEl('span', { text }) : null].filter(Boolean));
+    box.title = [elo.scopeTitle, box.textContent].filter(Boolean).join(' · ');
     eloUpdateMeters();
+}
+
+// Het sessiedoel: de ring loopt vol tot het doel; daarna begint hij aan een nieuwe ronde (op een
+// lichtgroene baan) en staat er 'doel gehaald' in plaats van 'van 20'
+function eloGoalFill(session, goal) {
+    if (session <= goal) return session / goal;
+    return (((session - 1) % goal) + 1) / goal;
 }
 
 function eloUpdateMeters() {
     const p = elo.progress || { session: 0, goal: 20, streak: 0, best_streak: 0 };
     const goal = p.goal || 20;
     const session = Math.max(p.session || 0, 0);
+    const done = session >= goal;
     const fill = document.getElementById('elo-ring-fill');
-    if (fill) fill.style.strokeDashoffset = String(100 - Math.min(1, session / goal) * 100);
+    if (fill) {
+        const value = eloGoalFill(session, goal);
+        // Een nieuwe ronde begint leeg, zonder eerst terug te lopen
+        if (session > goal && value < Number(fill.dataset.value || 0)) {
+            fill.style.transition = 'none';
+            requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.transition = ''; }));
+        }
+        fill.dataset.value = String(value);
+        fill.style.strokeDashoffset = String(100 - value * 100);
+    }
     const count = document.getElementById('elo-goal-count');
     if (count) count.textContent = formatNumberNl(session);
     const of = document.getElementById('elo-goal-of');
-    if (of) of.textContent = `van ${formatNumberNl(goal)}`;
+    if (of) of.textContent = done ? 'doel gehaald' : `van ${formatNumberNl(goal)}`;
     const button = document.getElementById('elo-goal');
     if (button) {
-        button.classList.toggle('is-done', session >= goal);
-        const label = `Sessiedoel: ${session} van ${goal} vergelijkingen. Klik om het doel te wijzigen.`;
+        button.classList.toggle('is-done', done);
+        button.classList.toggle('is-lapped', session > goal);
+        const label = done
+            ? `Sessiedoel van ${goal} gehaald: ${session} vergelijkingen deze sessie. Klik om het doel te wijzigen.`
+            : `Sessiedoel: ${session} van ${goal} vergelijkingen. Klik om het doel te wijzigen.`;
         button.setAttribute('aria-label', label);
         button.title = label;
     }
@@ -896,13 +1080,16 @@ async function eloLoadBoard() {
 }
 
 function eloMovement(item) {
-    if (item.new) return createEl('span', { class: 'elo-move is-new', title: 'Voor het eerst vergeleken in de laatste sessie', text: 'Nieuw' });
-    if (!item.movement) return createEl('span', { class: 'elo-move is-same', title: 'Zelfde plek als voor de laatste sessie', 'aria-label': 'Geen verandering' }, '–');
+    if (item.new) {
+        return createEl('span', { class: 'elo-move is-new', title: 'Voor het eerst vergeleken in de laatste sessie' },
+            createEl('span', { class: 'elo-move-chip', text: 'Nieuw' }));
+    }
+    if (!item.movement) return createEl('span', { class: 'elo-move is-same', title: 'Zelfde plek als vóór de laatste sessie', 'aria-label': 'Geen verandering' }, '–');
     const up = item.movement > 0;
     const n = Math.abs(item.movement);
     return createEl('span', {
         class: `elo-move ${up ? 'is-up' : 'is-down'}`,
-        title: `${n} ${n === 1 ? 'plek' : 'plekken'} ${up ? 'gestegen' : 'gedaald'} sinds de laatste sessie`,
+        title: `${n} ${n === 1 ? 'plek' : 'plekken'} ${up ? 'gestegen' : 'gedaald'} sinds vóór de laatste sessie`,
         'aria-label': `${n} ${n === 1 ? 'plek' : 'plekken'} ${up ? 'omhoog' : 'omlaag'}`,
     }, eloIcon(up ? 'fa-arrow-up' : 'fa-arrow-down'), createEl('span', { class: 'tabular', text: String(n) }));
 }
@@ -928,44 +1115,67 @@ function eloSettledMeter(share, id) {
     const settled = Math.round((share || 0) * 100);
     const fill = createEl('div', { class: 'elo-settled-fill' });
     fill.style.transform = `scaleX(${settled / 100})`;
-    return createEl('div', { class: 'elo-settled', id, title: 'Hoe zeker de ranglijst van deze collectie is' },
+    return createEl('div', { class: 'elo-settled', id, title: 'Hoe zeker de volgorde van deze ranglijst is: het deel van de foto\'s waarvan de score vaststaat' },
         createEl('div', { class: 'elo-settled-track', 'aria-hidden': 'true' }, fill),
-        createEl('span', { class: 'elo-settled-text', text: `${settled}% zeker` }));
+        createEl('span', { class: 'elo-settled-text', text: `Ranglijst ${settled}% zeker` }));
+}
+
+function eloSessionDate(data) {
+    return data.session_start
+        ? new Date(data.session_start * 1000).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : '';
 }
 
 function eloBoardTools(data) {
-    const years = createEl('select', {
+    const empty = !data.items.length;
+    const years = (data.years || []).length ? createEl('select', {
         id: 'elo-board-year', class: 'select select-sm', 'aria-label': 'Jaar',
         onChange: (e) => { elo.boardYear = e.target.value; eloLoadBoard(); },
     }, createEl('option', { value: '', text: 'Alle jaren' }),
-        ...(data.years || []).map(y => createEl('option', { value: String(y.year), text: `${y.year} (${formatNumberNl(y.count)})` })));
-    years.value = elo.boardYear;
-    if (years.value !== elo.boardYear) years.value = '';
+        ...data.years.map(y => createEl('option', { value: String(y.year), text: `${y.year} (${formatNumberNl(y.count)})` }))) : null;
+    if (years) {
+        years.value = elo.boardYear;
+        if (years.value !== elo.boardYear) years.value = '';
+    }
     const top = createEl('select', {
         id: 'elo-board-top', class: 'select select-sm', 'aria-label': 'Hoeveel foto\'s',
         onChange: (e) => { elo.topN = Number(e.target.value); },
     }, ...ELO_TOP_CHOICES.map(n => createEl('option', { value: String(n), text: `Top ${n}` })));
     top.value = String(elo.topN);
+    // Een lege lijst: alleen de titel (en het jaar, om terug te kunnen), geen 0% en geen knoppen
     return createEl('div', { class: 'elo-board-tools' },
         createEl('div', { class: 'elo-board-heading' },
             createEl('h3', { class: 'elo-board-title', text: data.scope.title }),
-            createEl('p', { class: 'elo-board-caption', text: eloBoardCaption(data) })),
-        eloSettledMeter(data.settled, 'elo-board-settled'),
-        createEl('div', { class: 'elo-board-actions' }, years, top,
-            createEl('button', { type: 'button', id: 'elo-top-album', class: 'btn btn-secondary btn-sm', onClick: eloTopAlbum,
-                disabled: !data.items.length, title: 'Een slim album met de beste foto\'s van deze lijst' },
-                eloIcon('fa-images'), ' Als album'),
-            createEl('button', { type: 'button', id: 'elo-top-export', class: 'btn btn-secondary btn-sm', onClick: eloTopExport,
-                disabled: !data.items.length || !window.DVExport, title: 'De beste foto\'s kopiëren naar een map' },
-                eloIcon('fa-file-export'), ' Exporteren')));
+            empty ? null : createEl('p', { class: 'elo-board-caption', text: eloBoardCaption(data) })),
+        empty ? null : eloSettledMeter(data.settled, 'elo-board-settled'),
+        createEl('div', { class: 'elo-board-actions' }, years,
+            ...(empty ? [] : [top,
+                createEl('button', { type: 'button', id: 'elo-top-album', class: 'btn btn-secondary btn-sm', onClick: eloTopAlbum,
+                    title: 'Een slim album met de beste foto\'s van deze lijst. Het volgt de scores: wat later stijgt, komt erbij.' },
+                    eloIcon('fa-images'), ' Als album'),
+                createEl('button', { type: 'button', id: 'elo-top-export', class: 'btn btn-secondary btn-sm', onClick: eloTopExport,
+                    disabled: !window.DVExport, title: 'De beste foto\'s kopiëren naar een map' },
+                    eloIcon('fa-file-export'), ' Exporteren')])));
 }
 
 function eloBoardCaption(data) {
     const shown = data.items.length < data.total ? `De beste ${data.items.length} van ${formatNumberNl(data.total)}` : `${formatNumberNl(data.total)} beoordeeld`;
     const year = data.year ? ` uit ${data.year}` : '';
-    const since = data.session_start
-        ? ` · pijltjes: sinds de sessie van ${new Date(data.session_start * 1000).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' })}` : '';
+    const date = eloSessionDate(data);
+    const since = date ? ` · pijltjes: verschil met vóór je laatste sessie (${date})` : '';
     return `${shown}${year}${since}`;
+}
+
+// Kopjes boven de kolommen (dezelfde breedtes als de rijen): wat de balk, de pijltjes en het getal zijn
+function eloBoardHead(data) {
+    const date = eloSessionDate(data);
+    return createEl('div', { class: 'elo-board-head', 'aria-hidden': 'true' },
+        createEl('span', { class: 'elo-board-head-photo', text: 'Foto' }),
+        createEl('span', { class: 'elo-board-band',
+            title: 'De score ligt met 95% zekerheid binnen de groene balk; de punt is de score zelf' },
+        'Marge', createEl('span', { class: 'elo-board-head-extra', text: ' (95%)' })),
+        createEl('span', { class: 'elo-board-head-move', text: 'Laatste sessie',
+            title: date ? `Plaatsen gestegen of gedaald sinds vóór je laatste sessie (${date})` : 'Plaatsen gestegen of gedaald in je laatste sessie' }),
+        createEl('span', { class: 'elo-board-head-score', text: 'Score' }));
 }
 
 function eloRenderBoard(data) {
@@ -1000,27 +1210,56 @@ function eloRenderBoard(data) {
             createEl('span', { class: 'elo-board-score tabular', 'aria-label': `Score ${item.rating}`, text: formatNumberNl(item.rating) }));
     });
     const list = createEl('ol', { class: 'elo-board-list', tabindex: '-1', 'aria-label': `Ranglijst ${data.scope.title}` }, ...rows);
-    eloSetBody(createEl('div', { class: 'elo-board' }, tools, list));
+    eloSetBody(createEl('div', { class: 'elo-board' }, tools, eloBoardHead(data), list));
     rows.slice(0, 14).forEach((row, i) => eloAnimate(row, [
         { opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }],
         { duration: 320, delay: i * 28, easing: ELO_GLIDE, fill: 'backwards' }));
 }
 
+// 'Als album': de bevestiging staat op de knop zelf (een melding rechtsboven zou de knoppen van
+// de ranglijst bedekken), met ernaast 'Bekijken'; na een paar seconden is de knop weer gewoon
 async function eloTopAlbum() {
-    if (!elo.board) return;
     const btn = document.getElementById('elo-top-album');
+    if (!elo.board || (btn && btn.classList.contains('is-done'))) return;
     if (btn) btn.disabled = true;
+    let made = false;
     try {
         const album = await eloPost('/api/shows/leaderboard/album', {
             n: elo.topN, ...eloScopeBody(), ...(elo.boardYear ? { year: Number(elo.boardYear) } : {}),
         });
-        showToast('Album gemaakt', `'${album.name}' staat bij Albums. Het volgt de scores: wat later stijgt, komt erbij.`, 'success',
-            window.albumsShow ? { label: 'Bekijken', onClick: () => { closeElo(); window.albumsShow(album.id, album.filters, album.sort); } } : null);
+        made = true;
+        eloLoadAlbums();                // het nieuwe album staat meteen in de keuzelijst
+        if (btn && btn.isConnected) eloAlbumMade(btn, album);
+        else showToast('Album gemaakt', `'${album.name}' staat bij Albums.`, 'success');
     } catch (err) {
         toastFetchError('Album niet gemaakt', err);
     } finally {
-        if (btn && btn.isConnected) btn.disabled = false;
+        if (!made && btn && btn.isConnected) btn.disabled = false;
     }
+}
+
+function eloAlbumMade(btn, album) {
+    const label = [...btn.childNodes];
+    btn.disabled = false;               // geslaagd ziet er niet uit als 'uit'; klikken doet even niets
+    btn.classList.add('is-done');
+    btn.replaceChildren(eloIcon('fa-check'), ' Album gemaakt');
+    const status = createEl('span', { class: 'sr-only', role: 'status',
+        text: `Album gemaakt: '${album.name}' staat bij Albums. Het volgt de scores: wat later stijgt, komt erbij.` });
+    const open = window.albumsShow ? createEl('button', {
+        type: 'button', id: 'elo-top-album-open', class: 'btn btn-ghost btn-sm', title: `'${album.name}' bij Albums openen`,
+        onClick: () => { closeElo(); window.albumsShow(album.id, album.filters, album.sort); },
+    }, 'Bekijken ', eloIcon('fa-arrow-right')) : null;
+    btn.after(...[open, status].filter(Boolean));
+    eloAnimate(btn.querySelector('i'), [{ transform: 'scale(0.3)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }],
+        { duration: 260, easing: ELO_SPRING });
+    setTimeout(() => {
+        if (!btn.isConnected) return;
+        btn.classList.remove('is-done');
+        btn.replaceChildren(...label);
+        btn.disabled = false;
+        if (open) open.remove();
+        status.remove();
+    }, 6000);
 }
 
 function eloTopExport() {

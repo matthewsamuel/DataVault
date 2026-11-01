@@ -1103,6 +1103,41 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             })""")
             expect(swap_ms < 50, f"elo: the next pair took {swap_ms:.0f} ms to appear after a pick")
             page.wait_for_timeout(800)
+            # What the eye sees: the new pair is (nearly) fully there within 200 ms, never a blank frame
+            seen_ms = page.evaluate("""() => new Promise(resolve => {
+                const t0 = performance.now();
+                document.getElementById('elo-overlay').dispatchEvent(new KeyboardEvent('keydown', {key: '2', bubbles: true}));
+                const tick = () => {
+                    const live = [...document.querySelectorAll('#elo-body .elo-stage:not(.is-leaving) .elo-choice')];
+                    const t = performance.now() - t0;
+                    if (live.length === 2 && live.every(c => +getComputedStyle(c).opacity >= 0.9)) resolve(t);
+                    else if (t > 2000) resolve(9999); else requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            })""")
+            expect(seen_ms < 200, f"elo: the new pair was only fully visible after {seen_ms:.0f} ms")
+            page.wait_for_timeout(800)
+            # The pick is saved before new pairs are asked for, and the pairs shown lately go along
+            # (recent=), so the pair just picked cannot come back a few picks later
+            order = page.evaluate("""() => new Promise(resolve => {
+                const log = []; const real = fetchJSON;
+                fetchJSON = (url, options) => {
+                    if (url.includes('/api/shows/compare/pair')) log.push(['pair', url]);
+                    else if (url.endsWith('/api/shows/compare')) log.push(['post', url]);
+                    return real(url, options);
+                };
+                const picked = elo.pair.map(p => p.path);
+                elo.queue.splice(1);
+                document.getElementById('elo-overlay').dispatchEvent(new KeyboardEvent('keydown', {key: '1', bubbles: true}));
+                setTimeout(() => {
+                    fetchJSON = real;
+                    const pair = log.find(l => l[0] === 'pair');
+                    resolve({kinds: log.map(l => l[0]), recent: !!pair && picked.every(p => pair[1].includes(`recent=${encodeURIComponent(p)}`))});
+                }, 1200);
+            })""")
+            expect(order["kinds"][:2] == ["post", "pair"] and order["recent"],
+                   f"elo: new pairs were asked for before the pick was saved, or without it ({order})")
+            page.wait_for_timeout(600)
             count = comparisons()
             page.focus("#elo-scope")
             page.keyboard.press("1")
@@ -1242,9 +1277,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(board_ui["bands"] >= 2 and board_ui["moves"] == board_ui["rows"] and board_ui["years"] >= 1
                    and board_ui["settled"].endswith("% zeker"), f"elo: Ranglijst misses bands, movement or filters ({board_ui})")
             step("elo: top as an album", lambda: page.click("#elo-top-album"), 1.0)
-            expect(any("Album gemaakt" in (t or "") for t in page.eval_on_selector_all(".toast", "ts => ts.map(t => t.textContent)")),
-                   "elo: 'Als album' did not make an album")
-            page.evaluate("document.querySelectorAll('.toast').forEach(t => t.remove())")
+            # Told on the button itself (a toast would cover the board's tools), with 'Bekijken'
+            expect("Album gemaakt" in (page.text_content("#elo-top-album") or "") and page.is_visible("#elo-top-album-open")
+                   and not page.query_selector(".toast"), "elo: 'Als album' did not make an album, or a toast covers the tools")
+            board_box = page.evaluate("""(() => { const r = document.querySelector('.elo-board-head'); return !!r &&
+                [...r.children].every(c => c.offsetWidth === 0 || c.scrollWidth <= c.clientWidth + 1); })()""")
+            expect(board_box, "elo: the Ranglijst column headings are missing or cut off")
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
                 for tab in ("board", "compare"):
