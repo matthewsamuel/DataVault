@@ -96,6 +96,10 @@ SCROLL_LOOP = """(async () => {
     for (let i = 0; i < 12; i++) { s.scrollBy(0, 90); await new Promise(r => requestAnimationFrame(r)); }
 })()"""
 
+# Opens the first photo of the Files grid in the viewer (as a click does)
+REOPEN_PHOTO = ("(() => { const c = document.querySelector('#media-grid .media-card[data-motion-key]:not(.other-card):not(.audio-card)');"
+                " c.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})); c.click(); })()")
+
 # (name, setup JS run before recording or None, trigger JS, settle ms)
 TRANSITIONS = [
     ("pagina: Home -> Bestanden", "switchMainView('home')", "switchMainView('viewer')", 900),
@@ -122,11 +126,12 @@ TRANSITIONS = [
      "(() => { const q = document.getElementById('global-search'); q.value = 'a'; handleGlobalSearch('a'); })()", 800),
     ("bestanden: raster -> lijst", "(() => { const q = document.getElementById('global-search'); q.value = ''; handleGlobalSearch(''); })()",
      "toggleView('list')", 800),
-    ("bestanden: lijst -> raster", None, "toggleView('grid')", 800),
+    ("bestanden: lijst -> raster", "toggleView('list')", "toggleView('grid')", 800),
     ("viewer: volgende foto", "(() => { const c = document.querySelector('#media-grid .media-card[data-motion-key]:not(.other-card):not(.audio-card)');"
      " c.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})); c.click(); })()", "nextFile()", 700),
     ("viewer: vorige foto", None, "prevFile()", 700),
-    ("viewer: dicht", None, "closeModal()", 900),
+    # Every run opens the photo again (with --runs 2 the second run would otherwise close nothing)
+    ("viewer: dicht", "if (!document.getElementById('modal-viewer').classList.contains('active')) " + REOPEN_PHOTO, "closeModal()", 900),
     ("keurer: houden (kaart vliegt)", KEURER_FOLDER, "keurerDecideKeep()", 800),
     ("keurer: prullenmand (kaart vliegt)", None, "keurerDecideDelete()", 800),
     ("keurer: ongedaan (komt terug)", None, "keurerUndo()", 900),
@@ -138,7 +143,7 @@ TRANSITIONS = [
      "(() => { const c = document.querySelector('#series-list .series-card'); if (c) MediaMotion.seriesSettle(c, {again: true}); })()", 1300),
     ("shows: collecties husselen", "switchMainView('shows')", "shuffleShows()", 900),
     ("shows: dia wisselt (kruisvervagen)", "startShow(_lastShowsData.featured)", "activeShow.next()", 1300),
-    ("shows: slideshow dicht", None, "activeShow.close()", 700),
+    ("shows: slideshow dicht", "if (!activeShow) startShow(_lastShowsData.featured)", "activeShow.close()", 700),
 ]
 
 # 5000+ photos in one folder (--stress): the first screen cascades, the rest reveals per row
@@ -148,7 +153,7 @@ STRESS_TRANSITIONS = [
     ("stress: sorteren (FLIP)", "window.scrollTo(0, 0)", "handleSort('size')", 1000),
     ("stress: viewer open en volgende", "(() => { const c = document.querySelector('#media-grid .media-card[data-motion-key]');"
      " c.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})); c.click(); })()", "nextFile()", 800),
-    ("stress: viewer dicht", None, "closeModal()", 900),
+    ("stress: viewer dicht", "if (!document.getElementById('modal-viewer').classList.contains('active')) " + REOPEN_PHOTO, "closeModal()", 900),
 ]
 
 
