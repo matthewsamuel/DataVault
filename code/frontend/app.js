@@ -1721,13 +1721,22 @@ function renderAudioPlayer(file, container) {
 // ==================== MOVE FILE SYSTEM ====================
 
 let fileToMove = null;
+let moveBatch = null;       // de selectiebalk (export.js): { files, folder (hun gezamenlijke map of null), onMove(folder) }
 let moveInFlight = false;   // één verplaatsing tegelijk: dubbel Enter/klikken stuurt niets extra
 let moveNav = null;         // toetsenbordnavigatie van de mappenboom (één per modal)
 
-function openMoveFileModal(fileData = null) {
+// fileData: één bestand, of een lijst (de selectie) met onMove(folder) -> Promise<bool> die het
+// verplaatsen zelf doet; bij true sluit het venster
+function openMoveFileModal(fileData = null, { onMove = null } = {}) {
     if (moveInFlight) return;
+    moveBatch = null;
     // Welk bestand: expliciet meegegeven, de dia van de slideshow, of wat de viewer toont
-    if (fileData) {
+    if (Array.isArray(fileData)) {
+        if (!fileData.length || !onMove) return;
+        const folders = new Set(fileData.map(f => f.path.substring(0, f.path.lastIndexOf('/'))));
+        moveBatch = { files: fileData, folder: folders.size === 1 ? [...folders][0] : null, onMove };
+        fileToMove = fileData[0];
+    } else if (fileData) {
         fileToMove = fileData;
     } else if (activeShow) {
         fileToMove = activeShow.files[activeShow.currentIndex];
@@ -1739,26 +1748,39 @@ function openMoveFileModal(fileData = null) {
     if (!fileToMove) return;
 
     const modal = document.getElementById('modal-move-file');
-    document.getElementById('move-file-name').textContent = fileToMove.name || 'Onbekend bestand';
+    const count = moveBatch ? moveBatch.files.length : 1;
+    const countText = `${count.toLocaleString('nl-NL')} bestanden`;
+    document.getElementById('move-modal-title').textContent = moveBatch ? `${countText} verplaatsen` : 'Bestand verplaatsen';
+    document.getElementById('move-file-label').textContent = moveBatch ? 'Selectie' : 'Bestand';
+    document.getElementById('move-file-name').textContent = moveBatch
+        ? (count === 1 ? fileToMove.name : countText) : (fileToMove.name || 'Onbekend bestand');
     document.getElementById('btn-confirm-move').disabled = true;
     selectedMoveFolder = null;
     const destDisplay = document.getElementById('move-dest-display');
     if (destDisplay) destDisplay.style.display = 'none';
 
-    // Show source folder path
+    // Show source folder path (een selectie uit meer mappen heeft er geen)
     const sourcePath = fileToMove.path || '';
-    const sourceFolder = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
+    const sourceFolder = moveBatch ? moveBatch.folder : sourcePath.substring(0, sourcePath.lastIndexOf('/'));
     const sourceEl = document.getElementById('move-file-source');
     if (sourceEl) {
         // Hetzelfde pad als in de viewer: vanaf het archief, in mono
-        sourceEl.querySelector('span').replaceChildren(...pathNodes(archivePath(sourceFolder)));
-        sourceEl.title = sourceFolder;
+        sourceEl.classList.toggle('is-mixed', !sourceFolder);
+        sourceEl.querySelector('span').replaceChildren(...(sourceFolder ? pathNodes(archivePath(sourceFolder)) : ['Verschillende mappen']));
+        sourceEl.title = sourceFolder || '';
     }
 
-    // Show thumbnail preview
+    // Show thumbnail preview: voor een selectie een waaiertje van de eerste drie
     const previewEl = document.getElementById('move-file-preview');
     if (previewEl) {
-        previewEl.innerHTML = html`<img src="${vaultFileUrl('thumb', fileToMove.path)}" alt="Voorbeeld">`;
+        previewEl.classList.toggle('is-stack', !!moveBatch && count > 1);
+        if (moveBatch && count > 1) {
+            previewEl.replaceChildren(
+                ...moveBatch.files.slice(0, 3).reverse().map(f => createEl('img', { src: vaultFileUrl('thumb', f.path), alt: '' })),
+                createEl('span', { class: 'move-stack-count tabular', text: count.toLocaleString('nl-NL') }));
+        } else {
+            previewEl.innerHTML = html`<img src="${vaultFileUrl('thumb', fileToMove.path)}" alt="Voorbeeld">`;
+        }
     }
 
     renderMoveFolderTreeUI();
@@ -1786,7 +1808,7 @@ function openMoveFileModal(fileData = null) {
     }).nav;
     showMoveQuery('');
     // Beginnen bij de map waar het bestand nu staat: de buurmappen zijn meestal het doel
-    const here = [...document.querySelectorAll('#move-folder-tree .move-folder-node')]
+    const here = sourceFolder && [...document.querySelectorAll('#move-folder-tree .move-folder-node')]
         .find(node => node.dataset.path === sourceFolder);
     if (here) moveNav.highlightItem(here, false);
 }
@@ -1813,6 +1835,7 @@ function closeMoveFileModal() {
     if (moveNav) moveNav.resetIndex();
 
     fileToMove = null;
+    moveBatch = null;
     selectedMoveFolder = null;
 
     // Resume show if it was playing and not intentionally paused
@@ -1855,11 +1878,11 @@ function previewMoveDestination(path, quiet) {
     const btn = document.getElementById('btn-confirm-move');
 
     // Prevent moving to the same directory
-    const currentDir = fileToMove.path.substring(0, fileToMove.path.lastIndexOf('/'));
+    const currentDir = moveBatch ? moveBatch.folder : fileToMove.path.substring(0, fileToMove.path.lastIndexOf('/'));
 
     if (path === currentDir) {
         btn.disabled = true;
-        if (!quiet) showToast('Verplaatsen', 'Het bestand staat al in deze map', 'warning');
+        if (!quiet) showToast('Verplaatsen', moveBatch ? 'Alles staat al in deze map' : 'Het bestand staat al in deze map', 'warning');
     } else {
         btn.disabled = false;
     }
@@ -1893,6 +1916,16 @@ async function confirmMoveFile() {
     const originalContent = [...btn.childNodes];
     btn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Verplaatsen…';
     btn.disabled = true;
+
+    // De selectie: export.js verplaatst en meldt; dicht als het gelukt is
+    if (moveBatch) {
+        const done = await moveBatch.onMove(destination);
+        btn.replaceChildren(...originalContent);
+        btn.disabled = false;
+        moveInFlight = false;
+        if (done) closeMoveFileModal();
+        return;
+    }
 
     let moved;
     try {

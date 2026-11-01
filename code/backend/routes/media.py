@@ -4,14 +4,14 @@ DataVault Dashboard - Media Routes
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 import sqlite3
 
 from backend import recovery
 from backend.config import Config, content_type, is_video, media_type
-from backend.paths import resolve_in_vault, ArchiveFilter
+from backend.paths import resolve_in_vault, is_in_vault, ArchiveFilter
 from backend.file_ops import (
-    move_no_overwrite, same_folder, ARCHIVE_LOCK,
+    move_no_overwrite, same_folder, is_inside, ARCHIVE_LOCK,
     FileOperationError, CrossDeviceError, DestinationFolderError, ProtectedPathError,
 )
 
@@ -221,3 +221,113 @@ def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
         "new_path": str(destination_path),
         "message": f"Verplaatst naar {destination_folder.name}/{destination_path.name}"
     }
+
+
+# ==================== SELECTION: MOVE OR TRASH MANY FILES AT ONCE ====================
+# The selection bar (export.js) in the Tijdlijn and Albums. One request is one action in
+# the recovery center (Herstelcentrum), which moves every file back in one go. The trash is
+# a folder like any other: nothing is deleted.
+
+MAX_SELECTION = 20000   # as many as the selection bar selects at once (MAX_ALL in export.js)
+
+recovery.register_kind("selection_move", "Selectie verplaatst")
+recovery.register_kind("selection_trash", "Naar de prullenmand")
+
+
+def _selection_paths(body: Any) -> List[str]:
+    paths = body.get("paths") if isinstance(body, dict) else None
+    if not isinstance(paths, list) or not paths or not all(isinstance(p, str) and p for p in paths):
+        raise HTTPException(status_code=400, detail="Ontbrekende of ongeldige 'paths'")
+    if len(paths) > MAX_SELECTION:
+        raise HTTPException(status_code=400, detail=f"Hoogstens {MAX_SELECTION} bestanden tegelijk")
+    return list(dict.fromkeys(paths))
+
+
+def _move_selection(paths: List[str], destination: Path, kind: str, title: str,
+                    already_there: str = "Staat al in deze map") -> Dict[str, Any]:
+    """
+    Move each file into destination, under one lock and one recovery action. A file that
+    cannot go (gone, outside the vault, already there) is skipped with its reason; the rest
+    still moves. If recording fails the file goes straight back and the batch stops there.
+    """
+    moved: List[Dict[str, str]] = []
+    skipped: List[Dict[str, str]] = []
+    error: Optional[str] = None
+    with ARCHIVE_LOCK:
+        recorder = recovery.ActionRecorder(db, kind, title, folder=str(destination))
+        for path_str in paths:
+            try:
+                source = resolve_in_vault(path_str, config)
+            except HTTPException as e:
+                skipped.append({"path": path_str, "reason": str(e.detail)})
+                continue
+            if source.is_symlink() or not source.is_file():
+                skipped.append({"path": path_str, "reason": "Bestand niet gevonden"})
+                continue
+            if same_folder(destination, source.parent) or (kind == "selection_trash" and is_inside(source, destination)):
+                skipped.append({"path": path_str, "reason": already_there})
+                continue
+            try:
+                target = move_no_overwrite(source, destination / source.name)
+            except ProtectedPathError:
+                skipped.append({"path": path_str, "reason": "Toegang geweigerd: cache-map van de app"})
+                continue
+            except DestinationFolderError as e:
+                error = str(e)
+                break
+            except (CrossDeviceError, FileOperationError) as e:
+                skipped.append({"path": path_str, "reason": str(e)})
+                continue
+            try:
+                recorder.add(source, target)
+            except sqlite3.OperationalError:
+                raise   # database gone with the disk: 503 (errors.py)
+            except Exception as e:
+                error = f"Verplaatsen niet vastgelegd, gestopt na {len(moved)} bestanden: {e}"
+                break
+            moved.append({"path": path_str, "new_path": str(target)})
+    return {
+        "success": error is None,
+        "moved": moved,
+        "skipped": skipped,
+        "action_id": recorder.action_id,
+        "error": error,
+    }
+
+
+@router.post("/api/move-files")
+def move_files_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Move a selection into one folder (never overwrites; a name clash gets _DUP_001).
+
+    Body: { "paths": ["/vault/a.jpg", ...], "destination_folder": "/vault/library/X" }
+    Returns: { "moved": [{path, new_path}], "skipped": [{path, reason}], "action_id", "error" }
+    """
+    if not config:
+        raise HTTPException(status_code=500, detail="Configuration not initialized")
+    paths = _selection_paths(body)
+    destination_str = body.get("destination_folder")
+    if not isinstance(destination_str, str) or not destination_str:
+        raise HTTPException(status_code=400, detail="Ontbrekende of ongeldige 'destination_folder'")
+    destination = resolve_in_vault(destination_str, config, folder=True)
+    if destination.exists() and not destination.is_dir():
+        raise HTTPException(status_code=400, detail="De bestemming is geen map")
+    return _move_selection(paths, destination, "selection_move", f"Verplaatst naar {destination.name or 'het archief'}")
+
+
+@router.post("/api/trash-files")
+def trash_files_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Move a selection to the trash folder (TRASH): the app's 'delete'. Undo in the recovery center.
+
+    Body: { "paths": ["/vault/a.jpg", ...] }
+    Returns: the same as /api/move-files
+    """
+    if not config:
+        raise HTTPException(status_code=500, detail="Configuration not initialized")
+    paths = _selection_paths(body)
+    trash = config.TRASH_FOLDER
+    # The recovery center only moves files back from inside the vault
+    if not is_in_vault(trash, config, allow_internal=True):
+        raise HTTPException(status_code=409, detail="De prullenmand staat buiten het archief; verwijderen kan hier niet")
+    return _move_selection(paths, trash, "selection_trash", "Naar de prullenmand", "Staat al in de prullenmand")

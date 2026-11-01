@@ -60,6 +60,8 @@ def _mutating_requests(vault):
     photo = vault / STRAND
     return [
         ("post", "/api/move-file", {"json": {"source_path": str(photo), "destination_folder": str(vault / "library")}}),
+        ("post", "/api/move-files", {"json": {"paths": [str(photo)], "destination_folder": str(vault / "library")}}),
+        ("post", "/api/trash-files", {"json": {"paths": [str(photo)]}}),
         ("post", "/api/open-in-finder", {"json": {"path": str(photo)}}),
         ("post", "/api/keurer/decide", {"json": {"path": str(photo), "folder": str(photo.parent), "decision": "delete"}}),
         ("post", "/api/keurer/undo", {"json": {"id": 1}}),

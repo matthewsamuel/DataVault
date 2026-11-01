@@ -735,8 +735,11 @@
         card.appendChild(dateLabel);
         card.setAttribute('aria-label', `${file.name}, ${dateStr} ${timeStr}${file.type === 'video' ? ', video' : ''}`);
 
-        // Click handler - open in viewer modal
-        if (window.DVExport && DVExport.has(file.path)) card.classList.add('selected');
+        // Click handler - open in viewer modal; het rondje rechtsboven selecteert altijd
+        if (window.DVExport) {
+            if (DVExport.has(file.path)) card.classList.add('selected');
+            card.appendChild(DVExport.selectButton((e) => selectTimelineFile(file, index, e.shiftKey)));
+        }
         card.onclick = (e) => {
             if (window.DVExport && DVExport.wantsSelect(e)) return selectTimelineFile(file, index, e.shiftKey);
             openTimelinePhoto(file, index);
@@ -755,15 +758,38 @@
         }
         tlAnchor = index;
     }
-    if (window.DVExport) {
+    // export.js laadt na dit bestand: pas dan bestaat DVExport
+    document.addEventListener('DOMContentLoaded', () => {
+        if (!window.DVExport) return;
         DVExport.onChange(() => {
             if (!tlContentEl) return;
             tlContentEl.querySelectorAll('.tl-photo-card').forEach(card => {
                 const f = tlFiles[Number(card.getAttribute('data-index'))];
                 if (f) card.classList.toggle('selected', DVExport.has(f.path));
             });
+            tlContentEl.classList.toggle('is-selecting', DVExport.count > 0);
         });
-    }
+
+        // Verplaatst met de selectiebalk: wat nog in een gekozen map staat, blijft met zijn
+        // nieuwe pad; de rest (en alles uit de prullenmand) gaat eruit
+        DVExport.onMoved((moved, { trashed }) => {
+            if (!tlInitialized || !tlFiles.length) return;
+            if (tlPagesLoading) { scanTimeline(); return; }   // de volgende pagina's schuiven anders op
+            let removed = false;
+            moved.forEach(({ path, new_path: newPath }) => {
+                const file = tlFiles.find(f => f.path === path);
+                if (!file) return;
+                if (!trashed && markAbove(newPath, tlSelectedFolders, tlExcludedFolders)?.chosen === true) {
+                    file.path = newPath;
+                    file.name = newPath.split('/').pop();
+                } else if (dropTimelineFile(path)) removed = true;
+            });
+            if (removed) relayoutAfterRemoval();
+            else { tlRenderedRange = { start: -1, end: -1 }; renderVisibleRows(); }
+        });
+        // Ongedaan gemaakt: de bestanden staan weer op hun plek, dus opnieuw inlezen
+        DVExport.onRestored(() => { if (tlInitialized && tlSelectedFolders.size > 0) scanTimeline(); });
+    });
 
     // De gedeelde viewer van app.js, met de tijdlijn als eigen lijst: bladeren gaat door de
     // tijdlijn, en Open in Finder en Verplaatsen werken op de foto die te zien is
@@ -773,9 +799,14 @@
 
     // Een verplaatst bestand uit de tijdlijn halen en de indeling opnieuw opbouwen
     function removeTimelineFile(file) {
-        const at = tlFiles.findIndex(f => f.path === file.path);
-        if (at < 0) return;
-        tlFiles.splice(at, 1);
+        if (dropTimelineFile(file.path)) relayoutAfterRemoval();
+    }
+
+    // Eén bestand uit de lijst en de tellingen halen, zonder opnieuw te tekenen
+    function dropTimelineFile(path) {
+        const at = tlFiles.findIndex(f => f.path === path);
+        if (at < 0) return false;
+        const [file] = tlFiles.splice(at, 1);
         const dt = new Date(file.timestamp * 1000);
         const year = String(dt.getFullYear());
         const month = String(dt.getMonth() + 1);
@@ -792,6 +823,10 @@
             if (!tlDateIndex[y]) delete tlYearBoundaries[y];
             else if (tlYearBoundaries[y] > at) tlYearBoundaries[y]--;
         });
+        return true;
+    }
+
+    function relayoutAfterRemoval() {
         if (tlFiles.length === 0 && !tlPagesLoading) {
             renderEmptyState('Geen foto\'s of video\'s in de gekozen mappen');
             return;

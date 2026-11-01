@@ -98,6 +98,7 @@
     --duration-slow: 250ms;
     --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
     --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);   /* licht doorverend: verschijnen, oppakken */
     --transition-fast: var(--duration-fast);
     --transition-normal: var(--duration-base);
 
@@ -1895,6 +1896,92 @@ textarea.input {
     transform: rotate(-45deg);
 }
 
+/* Het selectierondje rechtsboven (export.js DVExport.selectButton): verschijnt bij hover, en op
+   elke tegel zodra er iets geselecteerd is (.is-selecting op het raster). Een klik selecteert
+   zonder ⇧ of ⌘. Op een geselecteerde tegel is het onzichtbaar boven het groene vinkje. */
+.thumb-select {
+    position: absolute;
+    z-index: 2;
+    top: calc(var(--space-sm) - 5px);
+    right: calc(var(--space-sm) - 5px);
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--ease-spring);
+}
+
+.thumb-select::before {
+    content: '';
+    position: absolute;
+    inset: 5px;
+    border-radius: var(--radius-full);
+    border: 2px solid var(--on-media);
+    background-color: var(--media-scrim-soft);
+    box-shadow: var(--shadow-sm);
+    transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.thumb-tile:hover .thumb-select,
+.is-selecting .thumb-select,
+.thumb-select:focus-visible {
+    opacity: 1;
+    transform: none;
+}
+
+.thumb-select:hover::before {
+    background-color: var(--media-scrim);
+}
+
+.thumb-select:active {
+    transform: scale(0.88);
+}
+
+.thumb-select:focus-visible {
+    outline: none;
+}
+
+.thumb-select:focus-visible::before {
+    box-shadow: var(--focus-shadow);
+}
+
+.thumb-tile.selected .thumb-select::before {
+    border-color: transparent;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+/* Het vinkje springt erin, en de foto wijkt een fractie terug binnen de groene ring */
+.thumb-tile.selected::after,
+.thumb-tile.selected::before {
+    animation: dv-check-pop var(--duration-slow) var(--ease-spring);
+}
+
+.thumb-tile.selected img {
+    transform: scale(0.94);
+    border-radius: calc(var(--radius-thumb) - 2px);
+}
+
+.thumb-tile.selected:hover img {
+    transform: scale(0.95);
+}
+
+@keyframes dv-check-pop {
+    from { opacity: 0; scale: 0.4; }
+    to { opacity: 1; scale: 1; }
+}
+
+:root[data-motion="reduce"] .thumb-select,
+:root[data-motion="reduce"] .thumb-tile.selected::after,
+:root[data-motion="reduce"] .thumb-tile.selected::before {
+    transition: none;
+    animation: none;
+}
+
 /* Bijschrift onderaan op de foto zelf */
 .thumb-caption {
     position: absolute;
@@ -3353,6 +3440,65 @@ a.breadcrumb-item:hover {
     width: 100%;
     height: 100%;
     object-fit: cover;
+}
+
+/* Een selectie: de eerste drie als waaiertje, met het aantal erop */
+.move-file-thumb.is-stack {
+    position: relative;
+    overflow: visible;
+    background: none;
+}
+
+.move-file-thumb.is-stack img {
+    position: absolute;
+    inset: 10%;
+    width: 80%;
+    height: 80%;
+    border-radius: var(--radius-thumb);
+    border: 2px solid var(--surface-overlay);
+    background-color: var(--thumb-bg);
+    box-shadow: var(--shadow-md);
+    animation: dv-stack-fan var(--duration-slow) var(--ease-spring) both;
+}
+
+.move-file-thumb.is-stack img:nth-last-of-type(3) { --fan: -9deg; --fan-x: -9%; }
+.move-file-thumb.is-stack img:nth-last-of-type(2) { --fan: 7deg; --fan-x: 8%; animation-delay: 40ms; }
+.move-file-thumb.is-stack img:nth-last-of-type(1) { --fan: 0deg; --fan-x: 0%; animation-delay: 80ms; }
+
+.move-file-thumb.is-stack img:nth-last-of-type(n) {
+    transform: translateX(var(--fan-x)) rotate(var(--fan));
+}
+
+@keyframes dv-stack-fan {
+    from { opacity: 0; transform: translateY(8px) scale(0.92); }
+}
+
+.move-stack-count {
+    position: absolute;
+    right: 4%;
+    bottom: 4%;
+    z-index: 1;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 var(--space-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    background-color: var(--accent);
+    color: var(--text-on-accent);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    box-shadow: 0 0 0 2px var(--surface-overlay), var(--shadow-sm);
+}
+
+.move-meta-location.is-mixed span {
+    font-family: inherit;
+}
+
+:root[data-motion="reduce"] .move-file-thumb.is-stack img {
+    animation: none;
 }
 
 .move-file-meta {
@@ -13449,6 +13595,8 @@ button.otd-settings-icon:hover {
 .export-bar-count { font-weight: 600; color: var(--text-primary); white-space: nowrap; }
 .export-bar-size { font-weight: 400; color: var(--text-secondary); }
 .export-bar-spacer { flex: 1; min-width: var(--space-md); }
+.export-bar-divider { flex: none; width: 1px; height: var(--space-lg); background-color: var(--border-default); }
+.export-bar .btn { flex: none; white-space: nowrap; }
 
 .export-modal { width: min(560px, 100%); }
 .export-modal-wide { width: min(880px, 100%); }

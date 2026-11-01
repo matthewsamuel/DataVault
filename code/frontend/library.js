@@ -1151,6 +1151,8 @@
         if (!onOpen) {
             if (window.DVExport && DVExport.has(file.path)) card.classList.add('selected');
             card.setAttribute('aria-pressed', card.classList.contains('selected') ? 'true' : 'false');
+            // Het rondje rechtsboven selecteert altijd, ook zonder ⇧ of ⌘
+            if (window.DVExport) card.appendChild(DVExport.selectButton((e) => selectTile(file, index, e.shiftKey)));
         }
         card.addEventListener('click', (e) => {
             if (onOpen) return onOpen(index);
@@ -1178,6 +1180,7 @@
     }
 
     function paintSelection() {
+        $('albums-content').classList.toggle('is-selecting', DVExport.count > 0);
         $('albums-content').querySelectorAll('.albums-tile[data-index]').forEach(tile => {
             const file = itemAt(Number(tile.dataset.index));
             if (!file) return;
@@ -1243,6 +1246,11 @@
         if (state.mode === 'browse') reload(true);
         loadAlbums();
     }, 400);
+    // Ook na verplaatsen of verwijderen met de selectiebalk, en na 'Ongedaan maken'
+    if (window.DVExport) {
+        DVExport.onMoved(() => { if (state.inited) libraryChanged(); });
+        DVExport.onRestored(() => { if (state.inited) libraryChanged(); });
+    }
 
     // ── Raster: toetsenbord ──────────────────────────────
 

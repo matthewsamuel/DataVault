@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=77">
+    <link rel="stylesheet" href="style.css?v=82">
 </head>
 
 <body>
@@ -1217,14 +1217,14 @@
     <div class="modal" id="modal-move-file">
         <div class="move-modal-container">
             <div class="move-modal-header">
-                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Bestand verplaatsen</h2>
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> <span id="move-modal-title">Bestand verplaatsen</span></h2>
                 <button class="modal-close" onclick="closeMoveFileModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
             </div>
             <div class="move-modal-body">
                 <div class="move-panel-file">
                     <div class="move-file-thumb" id="move-file-preview"></div>
                     <div class="move-file-meta">
-                        <div class="move-meta-label">Bestand</div>
+                        <div class="move-meta-label" id="move-file-label">Bestand</div>
                         <div class="move-meta-value" id="move-file-name"></div>
                     </div>
                     <div class="move-file-meta">
@@ -1607,21 +1607,21 @@
     <script src="folder-tree.js?v=8"></script>
     <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
     <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
-    <script src="app.js?v=78"></script>
+    <script src="app.js?v=79"></script>
     <script src="pasha-tools.js?v=2"></script>
     <script src="jobs.js?v=17"></script>
     <script src="duplicates.js?v=29"></script>
     <script src="series.js?v=3"></script>
     <script src="keurer.js?v=23"></script>
-    <script src="timeline.js?v=13"></script>
+    <script src="timeline.js?v=17"></script>
     <script src="wave-background.js?v=4"></script>
     <script src="resizable-sidebar.js?v=1"></script>
     <script src="recovery.js?v=9"></script>
     <script src="settings.js?v=5"></script>
     <script src="map.js?v=9"></script>
     <script src="shortcuts.js?v=9"></script>
-    <script src="export.js?v=4"></script>
-    <script src="library.js?v=7"></script>
+    <script src="export.js?v=5"></script>
+    <script src="library.js?v=8"></script>
     <script src="datagatherer.js?v=8"></script>
     <script src="activity.js?v=5"></script>
     <script src="elo.js?v=7"></script>

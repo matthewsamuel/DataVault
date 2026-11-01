@@ -1,12 +1,18 @@
 // ==================== EXPORTEREN ====================
-// Een selectie (klikken, shift-klikken, cmd-klikken of spatie in Albums en de tijdlijn) of de
-// beste foto's van een periode kopieer je naar een map buiten het archief. Het archief zelf
-// verandert nooit: er wordt alleen gelezen en gekopieerd. Het kopiëren is een achtergrondtaak
-// (type 'export', zie backend/export.py); de voortgang staat in het takenpaneel.
+// Een selectie (het rondje op een tegel, klikken, shift-klikken, cmd-klikken of spatie in
+// Albums en de tijdlijn) of de beste foto's van een periode kopieer je naar een map buiten het
+// archief. Het archief zelf verandert nooit: er wordt alleen gelezen en gekopieerd. Het
+// kopiëren is een achtergrondtaak (type 'export', zie backend/export.py); de voortgang staat
+// in het takenpaneel.
+// Dezelfde selectie kun je ook in één keer verplaatsen of naar de prullenmand doen (⌫); dat is
+// één actie in het Herstelcentrum, en de melding heeft 'Ongedaan maken'.
 //
 //   DVExport.toggle(file) / has(path) / clear() / selectRange(files) / selectMany(files)
 //   DVExport.setSelectAll(fn)   fn() geeft alle bestanden van de huidige filter (Albums)
 //   DVExport.openExport(files)  het exportvenster; DVExport.openBest() 'Beste van een periode'
+//   DVExport.onMoved(fn)        fn(moved, {trashed}) na verplaatsen: [{path, new_path}]
+//   DVExport.onRestored(fn)     fn() na 'Ongedaan maken': de bestanden staan weer op hun plek
+//   DVExport.selectButton(fn)   het rondje voor op een tegel; fn(event) bij een klik
 
 (function () {
     'use strict';
@@ -18,6 +24,9 @@
 
     const selection = new Map();        // pad -> {path, name, size}
     const listeners = [];
+    const movedListeners = [];
+    const restoredListeners = [];
+    let moving = false;                 // één verplaatsing of verwijdering tegelijk
     let selectAllFn = null;
     let selectAllCount = null;
     let bar = null;
@@ -75,8 +84,94 @@
         },
         openExport,
         openBest,
+        onMoved: (fn) => movedListeners.push(fn),
+        onRestored: (fn) => restoredListeners.push(fn),
+        selectButton(onClick) {
+            return createEl('button', {
+                type: 'button', class: 'thumb-select', tabindex: '-1', 'aria-label': 'Selecteren', title: 'Selecteren',
+                onClick: (e) => { e.stopPropagation(); onClick(e); },
+            });
+        },
+        moveSelection,
+        trashSelection,
     };
     window.DVExport = DVExport;
+
+    // ── Verplaatsen en verwijderen ───────────────────────
+
+    function notify(list, ...args) {
+        list.forEach(fn => { try { fn(...args); } catch (e) { console.error(e); } });
+    }
+
+    function plural(n) {
+        return `${n.toLocaleString('nl-NL')} ${n === 1 ? 'bestand' : 'bestanden'}`;
+    }
+
+    // Wat er gebeurd is: de views halen de bestanden weg, de selectie laat ze los, een melding
+    // met 'Ongedaan maken' (de hele actie terug via het Herstelcentrum)
+    function finishMove(result, trashed, where) {
+        const moved = result.moved || [];
+        const skipped = result.skipped || [];
+        if (moved.length) {
+            notify(movedListeners, moved, { trashed });
+            moved.forEach(m => selection.delete(m.path));
+            changed();
+        }
+        const undo = result.action_id && moved.length ? { label: 'Ongedaan maken', onClick: () => undoAction(result.action_id) } : null;
+        const skippedText = skipped.length ? ` ${plural(skipped.length)} overgeslagen: ${skipped[0].reason.toLowerCase()}${skipped.length > 1 ? ' …' : ''}.` : '';
+        if (result.error) {
+            showToast(trashed ? 'Verwijderen gestopt' : 'Verplaatsen gestopt', `${result.error}.${skippedText}`, 'error', undo);
+        } else if (!moved.length) {
+            showToast(trashed ? 'Niets verwijderd' : 'Niets verplaatst', skippedText.trim() || 'Er was niets om te verplaatsen.', 'warning');
+        } else {
+            showToast(trashed ? 'Naar de prullenmand' : 'Verplaatst',
+                `${plural(moved.length)} ${trashed ? 'in de prullenmand' : `naar ${where}`}.${skippedText} Terugzetten kan ook in het Herstelcentrum.`,
+                skipped.length ? 'warning' : 'success', undo);
+        }
+    }
+
+    async function undoAction(actionId) {
+        try {
+            const r = await post('/api/recovery/undo', { action_id: actionId });
+            const back = r.restored || 0;
+            showToast('Teruggezet', `${plural(back)} weer op de oude plek${r.skipped && r.skipped.length ? `, ${r.skipped.length} niet (zie het Herstelcentrum)` : ''}.`,
+                r.skipped && r.skipped.length ? 'warning' : 'success');
+            notify(restoredListeners);
+        } catch (e) { toastFetchError('Terugzetten mislukt', e); }
+    }
+
+    // Het verplaatsvenster van de viewer, met de hele selectie
+    function moveSelection() {
+        if (moving || !selection.size || typeof openMoveFileModal !== 'function') return;
+        openMoveFileModal(DVExport.files(), {
+            onMove: async (folder) => {
+                moving = true;
+                try {
+                    const result = await post('/api/move-files', { paths: DVExport.files().map(f => f.path), destination_folder: folder });
+                    finishMove(result, false, folder.split('/').filter(Boolean).pop() || 'het archief');
+                    return true;
+                } catch (e) {
+                    toastFetchError('Verplaatsen mislukt', e);
+                    return false;
+                } finally { moving = false; }
+            },
+        });
+    }
+
+    // 'Verwijderen' is naar de prullenmand (TRASH) verplaatsen: er wordt nooit iets gewist
+    async function trashSelection() {
+        if (moving || !selection.size) return;
+        moving = true;
+        renderBar();
+        try {
+            finishMove(await post('/api/trash-files', { paths: DVExport.files().map(f => f.path) }), true);
+        } catch (e) {
+            toastFetchError('Verwijderen mislukt', e);
+        } finally {
+            moving = false;
+            renderBar();
+        }
+    }
 
     // ── Selectiebalk ─────────────────────────────────────
 
@@ -106,7 +201,12 @@
                 },
             }, `Alles selecteren (${selectAllCount.toLocaleString('nl-NL')})`));
         }
-        buttons.push(createEl('button', { type: 'button', class: 'btn btn-ghost btn-sm', id: 'export-clear', onClick: () => DVExport.clear() }, 'Wissen'));
+        buttons.push(createEl('button', { type: 'button', class: 'btn btn-ghost btn-sm', id: 'export-clear', title: 'Selectie wissen (Esc)', onClick: () => DVExport.clear() }, 'Wissen'));
+        buttons.push(createEl('span', { class: 'export-bar-divider', 'aria-hidden': 'true' }));
+        buttons.push(createEl('button', { type: 'button', class: 'btn btn-secondary btn-sm', id: 'selection-move', disabled: moving,
+            title: 'Naar een andere map in het archief', onClick: moveSelection }, icon('fa-folder-open'), 'Verplaatsen…'));
+        buttons.push(createEl('button', { type: 'button', class: `btn btn-danger btn-sm${moving ? ' is-loading' : ''}`, id: 'selection-trash', disabled: moving,
+            title: 'Naar de prullenmand (⌫); terugzetten kan in het Herstelcentrum', onClick: trashSelection }, icon('fa-trash-can'), 'Verwijderen'));
         buttons.push(createEl('button', { type: 'button', class: 'btn btn-primary btn-sm', id: 'export-open', onClick: () => openExport(DVExport.files()) },
             icon('fa-file-export'), 'Exporteren…'));
         el.replaceChildren(
@@ -120,7 +220,13 @@
     DVExport.wantsSelect = (event) => event.shiftKey || event.metaKey || event.ctrlKey || selection.size > 0;
 
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && selection.size && !anyOverlayOpen() && !isTypingTarget(e.target)) DVExport.clear();
+        if (!selection.size || anyOverlayOpen() || isTypingTarget(e.target)) return;
+        if (e.key === 'Escape') DVExport.clear();
+        // ⌫ of Delete: de selectie naar de prullenmand (de melding kan het terugdraaien)
+        else if ((e.key === 'Backspace' || e.key === 'Delete') && !e.altKey && !e.ctrlKey && bar && !bar.hidden) {
+            e.preventDefault();
+            trashSelection();
+        }
     });
 
     // ── Modal ────────────────────────────────────────────
@@ -386,10 +492,11 @@
     });
 
     if (typeof addShortcutGroup === 'function') {
-        addShortcutGroup('Selecteren en exporteren', [
+        addShortcutGroup('Selecteren, verplaatsen en exporteren', [
             [['spatie'], 'Foto selecteren of deselecteren (Albums en Tijdlijn)'],
             [['⇧ klik'], 'Alles tussen twee foto\'s selecteren'],
             [['⌘ klik'], 'Eén foto toevoegen aan de selectie'],
+            [['⌫'], 'Selectie naar de prullenmand'],
             [['Esc'], 'Selectie wissen'],
         ]);
     }
