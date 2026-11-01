@@ -964,6 +964,109 @@ def _m110_activity_and_location(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_media_location_inferred_latlon ON media_location_inferred(lat, lon)")
 
 
+def _m160_elo_glicko(conn: sqlite3.Connection):
+    """
+    'Welke is mooier?' gets an uncertainty-aware model (Glicko-2, backend/elo.py), draws
+    ('gelijk'), remembered skips ('overslaan') and protection against a double POST.
+
+    - elo_comparisons is rebuilt (SQLite cannot change a CHECK): winner may now be 'draw';
+      new columns keep both photos' model state before and after (mu, rd, vol), the model
+      name, and a client_token (unique when given). k_a/k_b are kept for the old rows and
+      are NULL from now on. Every row keeps its id, paths, winner, scope and time, and the
+      AUTOINCREMENT counter is carried over, so an id is never handed out twice.
+    - elo_ratings: the model state per photo (mu, rd, vol, the public rating it wrote last,
+      games). Paths follow moves like file_ratings (media_index._carry_user_data).
+    - elo_skips: skipped pairs (kept out of the pair choice for a while).
+    - The history is then played again with the new model (elo.replay_history): the
+      before/after values of every comparison and the rating of every compared photo are
+      recomputed from the same choices; votes cast between comparisons are carried over
+      exactly. Files that were never compared keep their rating untouched.
+    Version 160: numbers 160-169 belong to this feature.
+    """
+    from backend import elo
+
+    seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'elo_comparisons'").fetchone()
+    conn.execute("""
+        CREATE TABLE elo_comparisons_v160 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_a TEXT NOT NULL,
+            path_b TEXT NOT NULL,
+            winner TEXT NOT NULL CHECK (winner IN ('a', 'b', 'draw')),
+            rating_a_before INTEGER NOT NULL,
+            rating_a_after INTEGER NOT NULL,
+            rating_b_before INTEGER NOT NULL,
+            rating_b_after INTEGER NOT NULL,
+            games_a_before INTEGER NOT NULL,
+            games_b_before INTEGER NOT NULL,
+            existed_a INTEGER NOT NULL,
+            existed_b INTEGER NOT NULL,
+            k_a INTEGER,
+            k_b INTEGER,
+            scope TEXT,
+            created_at REAL NOT NULL,
+            mu_a_before REAL, rd_a_before REAL, vol_a_before REAL,
+            mu_a_after REAL, rd_a_after REAL, vol_a_after REAL,
+            mu_b_before REAL, rd_b_before REAL, vol_b_before REAL,
+            mu_b_after REAL, rd_b_after REAL, vol_b_after REAL,
+            model TEXT,
+            client_token TEXT
+        )
+    """)
+    columns = ("id, path_a, path_b, winner, rating_a_before, rating_a_after, rating_b_before, rating_b_after, "
+               "games_a_before, games_b_before, existed_a, existed_b, k_a, k_b, scope, created_at")
+    conn.execute(f"INSERT INTO elo_comparisons_v160 ({columns}) SELECT {columns} FROM elo_comparisons ORDER BY id")
+    conn.execute("DROP TABLE elo_comparisons")
+    conn.execute("ALTER TABLE elo_comparisons_v160 RENAME TO elo_comparisons")
+    if seq:
+        conn.execute("INSERT INTO sqlite_sequence (name, seq) SELECT 'elo_comparisons', 0 WHERE NOT EXISTS "
+                     "(SELECT 1 FROM sqlite_sequence WHERE name = 'elo_comparisons')")
+        conn.execute("UPDATE sqlite_sequence SET seq = max(seq, ?) WHERE name = 'elo_comparisons'", (seq[0],))
+    else:
+        # The copy of an empty table leaves a counter at 0 that was not there before
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'elo_comparisons' AND seq = 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_a ON elo_comparisons(path_a)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_b ON elo_comparisons(path_b)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_scope ON elo_comparisons(scope, id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_created ON elo_comparisons(created_at)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_elo_token ON elo_comparisons(client_token) "
+                 "WHERE client_token IS NOT NULL")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elo_ratings (
+            path TEXT PRIMARY KEY,
+            mu REAL NOT NULL,
+            rd REAL NOT NULL,
+            vol REAL NOT NULL,
+            public INTEGER NOT NULL,
+            games INTEGER NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elo_skips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_a TEXT NOT NULL,
+            path_b TEXT NOT NULL,
+            scope TEXT,
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_skips_time ON elo_skips(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_skips_a ON elo_skips(path_a)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_skips_b ON elo_skips(path_b)")
+    elo.replay_history(conn)
+
+
+
+def _m161_elo_state_indexes(conn: sqlite3.Connection):
+    """
+    Covering indexes for reading the ratings and model states of every photo below a folder
+    (elo.states_below, once per pair request): a range scan reads them from the index
+    instead of looking up each row (10,000 rated photos: about 14 to 9 ms). Only indexes
+    are added; no row changes.
+    """
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_file_ratings_state ON file_ratings(path, rating, votes)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_ratings_state ON elo_ratings(path, mu, rd, vol, public, games)")
+
 
 # The kinds google_formats.activity_item makes (My Activity and YouTube's own history)
 _ACTIVITY_ITEM_KINDS = ("youtube_watch", "youtube_search", "search", "maps", "web_visit", "activity")
@@ -1040,6 +1143,9 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (110, "activity_and_location", _m110_activity_and_location),
     # 135-139: DataGatherer verification round
     (135, "activity_keys_per_second", _m135_activity_keys_per_second),
+    # 160-169: Elo with uncertainty (Glicko-2), draws, skips (step p3x-elo)
+    (160, "elo_glicko", _m160_elo_glicko),
+    (161, "elo_state_indexes", _m161_elo_state_indexes),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

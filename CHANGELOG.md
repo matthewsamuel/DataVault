@@ -602,16 +602,16 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
 ### Shows: "Welke is mooier?"
 - Nieuw bij Shows: **Welke is mooier?** Twee foto's naast elkaar, jij kiest de mooiste. Kies met
-  **←** of **1** (links) en **→** of **2** (rechts), sla over met **spatie** of **s**, en draai de
-  laatste keuze terug met **z** (dan staat datzelfde paar weer in beeld). Je kiest bovenin uit welke
+  **←** of **1** (links) en **→** of **2** (rechts), sla over met **s** (**spatie** is sinds de
+  nieuwe versie "gelijk"), en draai de laatste keuze terug met **z** (dan staat datzelfde paar weer
+  in beeld). Je kiest bovenin uit welke
   collectie de foto's komen: de hele bibliotheek of één show.
 - De score is dezelfde als die van de duimpjes in de slideshow (1000 om te beginnen; een duim blijft
   +50 of −50), dus hoe vaker je een foto kiest, hoe vaker hij in Shows en "Verras me" komt. Na een
   keuze zie je kort hoeveel beide scores veranderden.
-- Hoe de score verandert (Elo, zoals bij schaken): wint een foto van een hoger gewaardeerde, dan
-  stijgt hij veel; wint hij van een lagere, dan weinig. Een foto met minder dan 30 vergelijkingen
-  beweegt maximaal 32 punten per keuze, daarna 16, zodat één verrassende keuze niet alles omgooit.
-  Geen score zakt onder de 100.
+- Hoe de score verandert (eerst Elo, zoals bij schaken; nu Glicko-2, zie "Welke is mooier?: slimmer,
+  sneller en met zekerheid"): wint een foto van een hoger gewaardeerde, dan stijgt hij veel; wint
+  hij van een lagere, dan weinig. Geen score zakt onder de 100.
 - De paren zijn gekozen om snel een goede volgorde te krijgen: eerst foto's die nog weinig
   vergeleken zijn, tegen foto's met een vergelijkbare score, uit de hele collectie (ook in een
   nieuwe bibliotheek, waar alle scores nog gelijk zijn). Nooit twee keer achter elkaar hetzelfde
@@ -723,6 +723,59 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
   Wenen, Parijs, Lissabon, Tokio, ...). In het sneltoetsenoverzicht heet de spatiebalk overal 'spatie'.
 - **Schermafbeeldingen**: de README toont acht schermen in licht en donker (docs/screenshots), gemaakt
   van een gegenereerd voorbeeldarchief zonder echte foto's of persoonlijke gegevens.
+
+### Welke is mooier?: slimmer, sneller en met zekerheid
+- **Sneller een goede ranglijst.** Elke foto heeft nu naast zijn score ook een *onzekerheid*
+  (Glicko-2). Een nieuwe foto beweegt bij zijn eerste keuzes veel en vindt zo snel zijn plek; een
+  foto die al vaak vergeleken is, beweegt nog maar weinig. In een simulatie met 100 foto's bereikt
+  de ranglijst dezelfde kwaliteit als voorheen met 15 tot 45% minder keuzes (zie docs/ELO.md).
+- **Slimmere paren.** De app kiest het paar waar het meest van te leren valt: twee foto's die dicht
+  bij elkaar liggen en waarover nog twijfel is, met af en toe een nieuwe of weinig vergeleken foto
+  ertussen, en wat meer aandacht voor foto's die bij de top kunnen horen. Een foto komt niet in twee
+  paren vlak na elkaar, een paar dat je al vergeleek komt zelden terug, en bijna-duplicaten uit
+  "Beste uit reeks" staan nooit naast elkaar.
+- **Gelijk en overslaan.** Zijn ze even mooi? Druk **spatie** of kies **Gelijk**. **s** (of
+  Overslaan) slaat een paar over; dat paar komt een maand niet terug.
+- **Meteen het volgende paar.** De volgende paren staan al klaar, foto's al geladen: na een keuze
+  staat het nieuwe paar er direct, ook als je snel achter elkaar kiest. Het opslaan loopt op de
+  achtergrond, in de goede volgorde, en een dubbelklik of een stuiterende toets telt niet dubbel.
+- **Terugdraaien in stappen.** Druk vaker op **z** om verder terug te gaan; elk paar komt weer in
+  beeld met de scores van daarvoor.
+- **Ranglijst met zekerheid.** Bij elke foto een balkje dat laat zien tussen welke scores hij met 95%
+  zekerheid ligt, pijltjes voor hoeveel plekken hij steeg of daalde sinds je vorige sessie (of
+  "Nieuw"), en hoeveel hij won, gelijk speelde en verloor. Filter op jaar, kies een show of een
+  **album** als collectie, en maak van de **top 10, 25 of 50** in één klik een album of exporteer ze.
+- **Voortgang en motivatie.** Onderin een ring die volloopt naar je sessiedoel (10, 20, 50 of 100;
+  klik om te wisselen), je reeks dagen op rij, en hoe zeker de ranglijst van deze collectie al is.
+  Haal je je doel, dan licht de ring op.
+- **Mooi in beweging.** De gekozen foto licht op met een groene ring en een vinkje, zweeft weg, en
+  het volgende paar komt zacht omhoog; overslaan en terugdraaien schuiven opzij. Het nieuwe paar is
+  altijd meteen te kiezen, en met "minder beweging" in macOS wisselt alles zonder animatie.
+- **Je bestaande keuzes blijven.** Alle eerdere vergelijkingen blijven bewaard; de scores worden
+  eenmalig opnieuw uitgerekend met het nieuwe model uit precies dezelfde keuzes, en je duimpjes uit
+  de slideshow tellen mee zoals altijd.
+- **Een net gekozen paar komt niet meer terug.** Koos je snel achter elkaar, dan kon het paar dat je
+  net beoordeelde drie keuzes later opnieuw verschijnen, vooral in een klein album. Nu onthoudt het
+  scherm de laatste acht paren, ook als de keuze nog wordt opgeslagen, en gaat een klein album alle
+  paren langs in plaats van steeds hetzelfde dozijn.
+- **Je ziet wat je koos.** De gekozen foto blijft even staan met zijn groene ring, vinkje en +punten,
+  en vliegt dan als miniatuur naar onderin, waar de uitslag (+35 · −24) even staat. Het nieuwe paar
+  is er meteen en vrijwel direct helemaal zichtbaar: geen witte flits meer tussen twee paren. Een
+  keuze die te snel komt (binnen een kwart seconde) telt nog steeds niet, maar de foto schudt dan
+  even nee.
+- **Sessiedoel voorbij.** Haal je je doel, dan staat er "doel gehaald" en begint de ring aan een
+  nieuwe ronde, in plaats van "127 van 20". De dubbele teller "in deze ronde" is weg.
+- **Ranglijst met uitleg.** Boven de kolommen staat nu wat ze zijn: Marge (95%), Laatste sessie en
+  Score, en de meter heet "Ranglijst 81% zeker". De balkjes zijn in het lichte thema beter te zien.
+  Een lege ranglijst toont geen "0% zeker" meer. "Als album" bevestigt op de knop zelf, met
+  Bekijken ernaast (een melding bedekte de knoppen), en het nieuwe album staat meteen in de
+  keuzelijst.
+- **Albums met alleen video's** doen niet meer mee als collectie: het album Video's rangschikte
+  foto's.
+- **Sneller bij een grote geschiedenis.** Met 10.000 foto's en 75.000 vergelijkingen duurt het
+  volgende paar 40 ms in plaats van 159 ms, en opslaan 31 in plaats van 88 ms.
+- Twee foto's die duizenden punten uit elkaar liggen (door veel duimpjes) gaven een fout bij
+  vergelijken, en konden de app bij het bijwerken van de database laten vastlopen. Opgelost.
 
 ## Fase 2 – Stabiliseren
 

@@ -483,46 +483,58 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
   dan de back-up terug met de backup API (geen bestand wordt vervangen of weggegooid). Bij het
   volgende starten vult de app de lege caches vanzelf weer.
 
-### Shows: Welke is mooier? (Elo)
-- Twee foto's naast elkaar (`frontend/elo.js`, knop in de kop van Shows); de keuze verandert beide
-  scores in `file_ratings`, dezelfde schaal als de duimpjes (start 1000, duim ±50, nooit onder 100).
-- Elo (`backend/elo.py`): verwachte score `E = 1 / (1 + 10^((Rb − Ra) / 400))`, nieuwe score
-  `R + round(K · (S − E))` met S = 1 of 0. K is 32 voor de eerste 30 vergelijkingen van een foto en
-  daarna 16, per foto. Bij gelijke K is de verandering symmetrisch; één keuze verandert een score
-  nooit meer dan K.
-- Beide scores en de geschiedenisregel worden in één transactie geschreven die eerst de
-  schrijfvergrendeling neemt (`BEGIN IMMEDIATE`), dus twee keuzes tegelijk (twee tabbladen) gaan na
-  elkaar. `elo_comparisons` (migratie 50) bewaart beide paden, de winnaar en beide scores en aantallen
-  vóór en na: `POST /api/shows/compare/undo` zet ze precies terug, of weigert (409) als een van de
-  foto's daarna nog veranderde. Het aantal vergelijkingen van een foto wordt uit die geschiedenis
-  geteld. Paden in de geschiedenis gaan mee bij verplaatsen (`media_index._carry_user_data`).
-- Paren (`elo.choose_pair`): de eerste foto met voorkeur voor weinig vergelijkingen (gewicht
-  1/(1+n)²), de tegenstander uit de 8 foto's met de dichtstbijzijnde score. Bij gelijke scores (een
-  nieuwe bibliotheek: bijna alles 1000) begint het zoeken op een willekeurige plek in dat blok en
-  beslist bij gelijke afstand een muntworp, anders kwamen steeds de alfabetisch eerste foto's.
-  Nooit het paar dat net in beeld was of net vergeleken is, nooit dezelfde grootte (een kopie) en
-  nooit twee foto's uit één reeks (`elo.mark_series`: per map op EXIF- of video-tijd gesorteerd; een
-  reeks loopt door zolang elke foto binnen 2 s na de vorige komt, dus ook frame 1 en 5 van een
-  burst). Bijna-duplicaten op beeld meldt een latere stap met `elo.register_near_duplicate_check(fn)`.
-  RAW-bestanden doen niet mee (de browser toont ze niet). De foto's komen uit de media-index als die
-  klaar is (een map die de index nog niet kent: uit een wandeling, en de index wordt bijgewerkt),
-  anders uit een wandeling (60 s bewaard). Uitgeschakelde Shows-mappen doen niet mee.
-- Andere collecties dan mappen (albums) haken in met `elo.register_scope('album', resolve)`, waarbij
-  `resolve(waarde)` `{title, paths}` geeft (of None). De routes nemen dan `scope=album:<waarde>` in
-  plaats van `folder`, en de geschiedenis bewaart `album:<waarde>` als scope. In de keuzelijst van
-  het venster komen ze met `registerEloScopes(label, () => [{value: 'album:7', text}])` (elo.js).
-- Routes: `GET /api/shows/compare/pair?folder=|scope=&prev=&prev=`, `POST /api/shows/compare {a, b,
-  winner, folder|scope}`, `POST /api/shows/compare/undo {id}` (antwoordt ook de voortgang `stats`
-  van de collectie) en `GET /api/shows/leaderboard?folder=|scope=&limit=`.
-- Toetsen in het venster: een ingedrukt gehouden toets telt één keer, en zolang het volgende paar
-  laadt telt geen keuze. Na het opnieuw tekenen blijft de focus op dezelfde kant (`eloSetBody`).
-  Na Tab of Enter krijgt het venster `.is-keyboard`, en dan heeft wat de focus heeft altijd een ring
-  (WebKit geeft `:focus-visible` niet bij focus die met de hand verplaatst wordt).
-- Na een keuze is `elo.pair` meteen `null` (het gekozen paar komt nooit terug, ook niet via de
-  tabbladen); het volgende paar laadt na de korte pauze alleen als het venster nog open is, op
-  Vergelijken staat en er intussen niets anders laadde (`elo.seq`). Een antwoord dat binnenkomt
-  terwijl de Ranglijst openstaat, wordt weggegooid. Terugdraaien haalt de vergelijking pas van de
-  stapel als de server hem terugdraaide of weigerde (400, 404, 409).
+### Shows: Welke is mooier? (Glicko-2)
+Hoe het werkt en waarom staat voor een buitenstaander in [docs/ELO.md](../docs/ELO.md), met de
+metingen uit de simulatie. Kort:
+- Twee foto's naast elkaar (`frontend/elo.js`, knop in de kop van Shows); de keuze ('a', 'b' of
+  'draw') verandert beide scores in `file_ratings`, dezelfde schaal als de duimpjes (start 1000,
+  duim ±50, nooit onder 100).
+- Model (`backend/elo.py`, sinds migratie 160): **Glicko-2**. Per foto `mu` (score), `rd`
+  (onzekerheid, 350 voor een nieuwe foto, nooit onder 30) en `vol` (volatiliteit), in `elo_ratings`.
+  Na een vergelijking past elk van beide foto's Glicko-2 toe voor één partij tegen de stand van de
+  ander vóór die partij (gelijk = 0,5). `file_ratings.rating` is `round(mu)`; een duim verandert
+  alleen `file_ratings` en het model ziet hem als verschuiving (`mu + (rating_nu − public)`).
+- Alles van één vergelijking (beide foto's, `elo_ratings`, de geschiedenisregel) gaat in één
+  transactie met `BEGIN IMMEDIATE`. `elo_comparisons` bewaart per kant de score en de modelstand
+  vóór en na, dus `POST /api/shows/compare/undo` zet alles precies terug (meerdere keren achter
+  elkaar: nieuwste eerst) of weigert met 409 als een foto daarna nog veranderde. Een `client_token`
+  (uniek) laat een dubbele POST één keer tellen. Paden in `elo_comparisons`, `elo_ratings` en
+  `elo_skips` gaan mee bij verplaatsen (`media_index._carry_user_data`).
+- Migratie 160 bouwt `elo_comparisons` opnieuw (CHECK met 'draw', modelkolommen, `client_token`; ids
+  en de AUTOINCREMENT-teller blijven) en speelt de hele geschiedenis opnieuw af met Glicko-2
+  (`elo.replay_history`). Duimen tussen twee vergelijkingen blijven precies waar ze waren. Bij een
+  volgende modelwijziging: een nieuwe migratie die `replay_history` aanroept.
+- Paren (`elo.choose_pairs`): de verwachte informatie van een paar is hoeveel de onzekerheid van
+  beide foto's krimpt (`elo.information`); eerste foto's worden getrokken naar `rd²` (en wat extra
+  voor foto's die tot de top kunnen horen), tegenstanders zijn de 14 dichtstbijzijnde in score plus
+  3 willekeurige, en één paar wordt getrokken met kans ∝ informatie³. Foto's uit de laatste 8 paren
+  en eerder vergeleken paren tellen veel minder; nooit het paar in beeld, een overgeslagen paar
+  (30 dagen, `elo_skips`), een kopie, een reeks (`elo.mark_series`) of een bijna-duplicaat uit
+  `near_dup_pairs` (stap 3.4). Slimme albums zijn een scope (`album:<id>`), naast mappen en shows.
+- Routes:
+  - `GET /api/shows/compare/pair?folder=|scope=&count=1..4&prev=&prev=&exclude=...` geeft `pair`,
+    `pairs` (zonder overlap), `stats {photos, compared, comparisons, settled}` en `progress
+    {session, today, streak, best_streak, goal, total}`.
+  - `POST /api/shows/compare {a, b, winner: a|b|draw, folder|scope, client_token}`,
+    `POST /api/shows/compare/skip {a, b, folder|scope}`, `POST /api/shows/compare/undo {id}`,
+    `PUT /api/shows/compare/goal {goal: 10|20|50|100}`.
+  - `GET /api/shows/leaderboard?folder=|scope=&year=&limit=` met per foto `rd`, `low`/`high` (95%),
+    `wins/draws/losses`, `movement` (plaatsen sinds het begin van de laatste sessie; een sessie
+    eindigt na 30 minuten zonder vergelijking) en `new`; plus `settled`, `years` en `session_start`.
+  - `POST /api/shows/leaderboard/album {n, folder|scope, year?}` maakt een slim album 'Top N · …'
+    (de filter van de collectie plus `min_rating` = de score van nummer N).
+- Frontend: een wachtrij van 2 vooraf geladen (en gedecodeerde) paren; een keuze wisselt direct en
+  het opslaan loopt erachteraan in een vaste keten (`elo.chain`), zodat z wacht op wat nog
+  opgeslagen wordt. Een keuze binnen 250 ms na het verschijnen van een paar en een herhaalde toets
+  tellen niet. Toetsen: ←/1, →/2, spatie (gelijk), s (overslaan), z (terugdraaien), Esc.
+- Beweging: Web Animations API in elo.js, toestanden in de CSS-sectie `WELKE IS MOOIER?`. Het oude paar
+  vertrekt als `.elo-stage.is-leaving` (absoluut, niet klikbaar) terwijl het nieuwe binnenkomt; bij
+  `prefers-reduced-motion` of `html[data-motion="reduce"]` wisselt alles zonder animatie.
+- Na Tab of Enter krijgt het venster `.is-keyboard` en heeft wat de focus heeft altijd een ring
+  (WebKit geeft `:focus-visible` niet bij focus die met de hand verplaatst wordt). De inhoud wordt
+  alleen via `eloSetBody`/`eloShowPair` vervangen, die de focus op dezelfde kant houden.
+- Simulatie: `venv/bin/python tests/elo_simulation.py` (tabellen voor docs/ELO.md);
+  `tests/test_elo_simulation.py` bewijst de besparing in pytest.
 
 
 ### DataGatherer: berichten en sociaal
