@@ -173,6 +173,17 @@ def test_a_keurer_file_that_is_gone_from_the_trash_says_why(client, vault, confi
     assert _undo(client, entry).status_code == 409
 
 
+def test_old_keurer_decisions_without_a_recorded_place_are_left_out(client, vault, config):
+    """Before migration 2 a Keurer delete did not record where the file went: it can never go back."""
+    _decide(client, vault / INBOX / "IMG_0001.JPG", "delete")
+    with sqlite3.connect(str(config.DB_PATH)) as conn:
+        conn.execute("INSERT INTO keurer_decisions (path, folder, decision) VALUES (?, ?, 'delete')",
+                     (str(vault / INBOX / "oud.jpg"), str(vault / INBOX)))
+    listed = _list(client)
+    assert listed["total"] == 1
+    assert [e["files"][0]["name"] for e in listed["entries"]] == ["IMG_0001.JPG"]
+
+
 def test_a_duplicate_whose_old_place_is_taken_comes_back_beside_it(client, vault):
     keep = vault / "library" / "orig.jpg"
     keep.write_bytes(b"x" * 300)

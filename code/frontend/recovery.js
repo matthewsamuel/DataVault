@@ -100,7 +100,9 @@ function recoveryShortFolder(path) {
     return recoveryShortDir((path || '').slice(0, (path || '').lastIndexOf('/')));
 }
 
-function recoveryFileRow(file) {
+// entryReason: de reden die al boven de bestanden staat (actie kan niet terug); die herhaalt de rij niet
+function recoveryFileRow(file, entryReason) {
+    const reason = file.reason && file.reason !== entryReason ? file.reason : null;
     return createEl('li', { class: 'recovery-file' + (file.restorable ? '' : ' blocked') },
         createEl('span', { class: 'recovery-file-name', text: file.name, title: file.from }),
         createEl('span', { class: 'recovery-file-move' },
@@ -108,13 +110,14 @@ function recoveryFileRow(file) {
             createEl('i', { class: 'fas fa-arrow-right', 'aria-hidden': 'true' }),
             createEl('span', { class: 'sr-only', text: ' naar ' }),
             createEl('span', { class: 'recovery-path', text: recoveryShortFolder(file.to), title: file.to })),
-        file.reason ? createEl('span', { class: 'recovery-file-reason' + (file.restorable ? ' note' : ''), text: file.reason }) : null);
+        reason ? createEl('span', { class: 'recovery-file-reason' + (file.restorable ? ' note' : ''), text: reason }) : null);
 }
 
 function recoveryEntryCard(entry) {
     const count = entry.file_count;
     const shown = entry.files || [];
-    const files = createEl('ul', { class: 'recovery-files' }, ...shown.map(recoveryFileRow));
+    const blockedReason = entry.undoable ? null : entry.reason;
+    const files = createEl('ul', { class: 'recovery-files' }, ...shown.map(f => recoveryFileRow(f, blockedReason)));
     let fileBlock = files;
     if (count > 1) {
         const more = count > shown.length ? ` (de eerste ${shown.length} getoond)` : '';
@@ -123,15 +126,15 @@ function recoveryEntryCard(entry) {
                 `${count} bestanden${more}`), files);
     }
 
-    const button = createEl('button', {
+    // Kan de actie niet terug, dan geen uitgeschakelde knop: de reden eronder zegt waarom
+    const button = entry.undoable ? createEl('button', {
         type: 'button',
         class: 'btn btn-secondary btn-small recovery-undo',
-        disabled: !entry.undoable,
         text: 'Terugzetten',
         'aria-label': `Terugzetten: ${entry.title}`,
-        title: entry.undoable ? 'Naar de oorspronkelijke plek terugzetten' : (entry.reason || 'Kan niet terug'),
+        title: 'Naar de oorspronkelijke plek terugzetten',
         onClick: (e) => recoveryUndo(entry, e.currentTarget),
-    });
+    }) : null;
 
     // Bij een grote actie controleert de lijst niet elk bestand (dat doet het terugzetten zelf):
     // 'checked' zegt hoeveel bestanden 'restorable' telt

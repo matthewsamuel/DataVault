@@ -63,8 +63,6 @@ def _keurer_newest(limit: int):
 
 
 def _keurer_state(rec: Dict[str, Any]) -> str:
-    if not rec["dest_path"]:
-        return "unknown"
     state = keurer_routes._dest_state(rec)
     if state == "ok" and os.path.lexists(rec["path"]):
         return "occupied"
@@ -73,12 +71,10 @@ def _keurer_state(rec: Dict[str, Any]) -> str:
 
 def _keurer_entry(rec: Dict[str, Any]) -> Dict[str, Any]:
     delete = rec["decision"] == "delete"
-    dest = rec["dest_path"] or ""
+    # get_keurer_moves leaves out old decisions without dest_path: those can never go back
+    dest = rec["dest_path"]
     place = "de prullenmand" if delete else recovery.place_of(dest, config)
-    state = _keurer_state(rec)
-    file = recovery.file_entry(rec["path"], dest, state, place)
-    if not rec["dest_path"]:
-        file["reason"] = "Van deze oudere beslissing is niet bewaard waar het bestand staat; zet het zo nodig met de hand terug"
+    file = recovery.file_entry(rec["path"], dest, _keurer_state(rec), place)
     return {
         "key": f"keurer:{rec['id']}",
         "source": "keurer",

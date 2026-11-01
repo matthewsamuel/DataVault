@@ -707,11 +707,15 @@ class Database:
             conn.execute("DELETE FROM keurer_decisions WHERE id = ?", (decision_id,))
 
     def get_keurer_moves(self, limit: int) -> List[Dict[str, Any]]:
-        """De nieuwste beslissingen die een bestand verplaatsten (weggooien, verplaatsen), voor het herstelcentrum."""
+        """
+        De nieuwste beslissingen die een bestand verplaatsten (weggooien, verplaatsen), voor het
+        herstelcentrum. Oude beslissingen zonder dest_path (van voor migratie 2) blijven weg: van
+        die bestanden is niet bewaard waar ze staan, dus ze kunnen nooit terug.
+        """
         with self._connect() as conn:
             rows = conn.execute(
                 f"SELECT {self._KEURER_COLUMNS} FROM keurer_decisions "
-                "WHERE decision IN ('delete', 'move') ORDER BY id DESC LIMIT ?",
+                "WHERE decision IN ('delete', 'move') AND dest_path IS NOT NULL ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         return [self._keurer_row(r) for r in rows]
@@ -719,7 +723,7 @@ class Database:
     def count_keurer_moves(self) -> int:
         with self._connect() as conn:
             return conn.execute(
-                "SELECT COUNT(*) FROM keurer_decisions WHERE decision IN ('delete', 'move')"
+                "SELECT COUNT(*) FROM keurer_decisions WHERE decision IN ('delete', 'move') AND dest_path IS NOT NULL"
             ).fetchone()[0]
 
     def get_keurer_stats(self) -> Dict[str, Any]:
