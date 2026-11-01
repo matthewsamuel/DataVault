@@ -428,6 +428,7 @@
 
         const ghost = document.createElement('img');
         ghost.className = 'dv-shared-ghost';
+        if (opts.className) ghost.classList.add(opts.className);
         ghost.alt = '';
         ghost.setAttribute('aria-hidden', 'true');
         ghost.src = src;

@@ -73,3 +73,15 @@ def test_the_viewer_lands_exactly_closes_faster_and_never_double_exposes():
     js = (FRONTEND / "media-motion.js").read_text(encoding="utf-8")
     step = js[js.index("function viewerStep"):js.index("function viewerSwipe")]
     assert "Motion.ms('--dur-1', 90) * 0.6" in step and "scale(0.98)" not in step
+
+
+def test_a_show_grows_out_of_the_cover_that_was_clicked():
+    app = (FRONTEND / "app.js").read_text(encoding="utf-8")
+    assert "startShow(featured, { from: hero.querySelector('.shows-hero-img'), fromPath: cover.path })" in app
+    assert "playFolderShow(show, card.querySelector('.show-card-thumb'))" in app
+    player = app[app.index("class CinematicPlayer"):app.index("function startShow")]
+    assert "overlay.className = 'cinematic-overlay';" in player   # 'active' one frame later: a fade, no cut
+    assert "Motion.sharedElement(cover, img" in player and "kb-hold" in player
+    css = (FRONTEND / "style.css").read_text(encoding="utf-8")
+    assert re.search(r"\.cinematic-overlay:not\(\.active\) \{\s*transition: opacity var\(--dur-3\)", css)
+    assert re.search(r"\.dv-shared-ghost\.mm-show-ghost \{\s*z-index: 20001;", css)

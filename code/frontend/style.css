@@ -15597,6 +15597,34 @@ html:not([data-motion="volledig"]) .cinematic-slide {
     transform: none;
 }
 
+/* Openen: het zwart vaagt op in --dur-4 terwijl de omslag uitgroeit tot de eerste dia (een
+   gedeeld element boven de speler); sluiten gaat sneller, in --dur-3 */
+.cinematic-overlay {
+    transition: opacity var(--dur-4) var(--ease-out);
+}
+
+.cinematic-overlay:not(.active) {
+    transition: opacity var(--dur-3) var(--ease-exit);
+}
+
+.dv-shared-ghost.mm-show-ghost {
+    z-index: 20001;   /* boven .cinematic-overlay (20000) */
+}
+
+/* De eerste dia staat er meteen (geen vervaging uit het zwart); de Ken Burns wacht tot de
+   omslag geland is */
+.cinematic-slide.is-first {
+    transition: none;
+}
+
+.cinematic-slide.is-opening {
+    transition-duration: var(--dur-4);
+}
+
+.cinematic-media.kb-hold {
+    animation-play-state: paused;
+}
+
 /* Albums: de groene markering in de zijbalk is een eigen laag (::before), zodat hij naar het
    gekozen album kan glijden (MediaMotion.slideMarker) in plaats van te verspringen */
 .albums-side-item {

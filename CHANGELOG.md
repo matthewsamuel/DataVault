@@ -56,6 +56,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Keurer: de weggevlogen kaart gaat onder de volgende foto door in plaats van erover, er vliegt er maar één tegelijk, en de volgende twee foto's staan al klaar, zodat de nieuwe kaart nooit even leeg is.
 - Viewer: de foto die opent landt precies op zijn plek (geen sprongetje meer als hij geladen is), sluiten gaat sneller dan openen, en bij volgende en vorige liggen nooit twee halfdoorzichtige foto's over elkaar: de oude is weg voor de nieuwe opkomt.
 - Welke is mooier?: de beweging volgt nu ook de instelling Beweging; bij Rustig of Uit wisselen de paren zonder animatie.
+- Shows: een diavoorstelling begint met de foto waarop je klikte; de omslag groeit uit tot de eerste dia terwijl het zwart opkomt, en de Ken Burns begint pas als hij geland is. Sluiten gaat sneller dan openen.
 
 ### Verificatieronde
 - Database-updates die later zijn toegevoegd maar een lager nummer hebben (Slim zoeken en 'Welke is mooier?') worden nu altijd uitgevoerd, ook op een database die al verder was bijgewerkt. Ontbrak er zo een, dan vult de app hem bij de volgende start alsnog aan en blijven alle gegevens staan.

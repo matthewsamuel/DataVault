@@ -463,7 +463,7 @@ function renderShows(data) {
         const hero = document.createElement('div');
         hero.className = 'shows-hero';
         const cover = featured.files[0];
-        hero.onclick = () => startShow(featured);
+        hero.onclick = () => startShow(featured, { from: hero.querySelector('.shows-hero-img'), fromPath: cover.path });
         makeActivatable(hero, `Afspelen: ${featured.title}`);
 
         hero.innerHTML = html`
@@ -500,7 +500,7 @@ function renderShows(data) {
         shows.forEach(show => {
             const card = document.createElement('div');
             card.className = 'show-card';
-            card.onclick = () => playFolderShow(show);
+            card.onclick = () => playFolderShow(show, card.querySelector('.show-card-thumb'));
             makeActivatable(card, `Afspelen: ${show.title}`);
 
             let thumbUrl = '';
@@ -565,7 +565,7 @@ function shuffleShows() {
     }
 }
 
-async function playFolderShow(showObj) {
+async function playFolderShow(showObj, coverImg = null) {
     try {
         // Fetch files for this folder
         const files = await fetchJSON(`${API_BASE}/api/shows/folder-content?path=${encodeURIComponent(showObj.path)}`);
@@ -574,7 +574,7 @@ async function playFolderShow(showObj) {
             startShow({
                 title: showObj.title,
                 files: files
-            });
+            }, { from: coverImg, fromPath: showObj.preview && showObj.preview.path });
         } else {
             showToast('Empty', 'No media found in this folder', 'warning');
         }
@@ -3404,9 +3404,14 @@ function slidePlaysAsVideo(file) {
 }
 
 class CinematicPlayer {
-    constructor(story) {
+    // opts.from: de omslag waarop geklikt werd (<img>), opts.fromPath: welk bestand die toont.
+    // De show begint dan met die foto, en de omslag groeit uit tot de eerste dia (één object).
+    constructor(story, opts = {}) {
         this.story = story;
         this.files = (story.files || []).filter(f => f && (f.type === 'photo' || f.type === 'video'));
+        const first = opts.fromPath ? this.files.findIndex(f => f.path === opts.fromPath) : -1;
+        if (first > 0) this.files = [...this.files.slice(first), ...this.files.slice(0, first)];
+        this.from = first >= 0 && this.files[0].type === 'photo' ? opts.from : null;
         this.currentIndex = 0;
         this.isPlaying = true;
         this.timer = null;
@@ -3421,7 +3426,10 @@ class CinematicPlayer {
     createUI() {
         const overlay = document.createElement('div');
         overlay.id = 'cinematic-player';
-        overlay.className = 'cinematic-overlay active';
+        // Zonder 'active' erin, en die in het volgende beeld erbij: het zwart vaagt op (--dur-4)
+        // in plaats van in één beeld te verschijnen
+        overlay.className = 'cinematic-overlay';
+        requestAnimationFrame(() => { if (overlay.isConnected) overlay.classList.add('active'); });
         overlay.innerHTML = `
 <div id="slide-container"></div>
  
@@ -3468,9 +3476,30 @@ class CinematicPlayer {
     close() {
         this.stopLoop();
         document.removeEventListener('keydown', this.keyHandler);
+        // Weg in --dur-3 (sneller dan het openen); niet meer klikbaar en niet meer in de Tab-volgorde
         this.playerEl.classList.remove('active');
-        setTimeout(() => this.playerEl.remove(), 500);
+        this.playerEl.inert = true;
+        setTimeout(() => this.playerEl.remove(), Motion.ms('--dur-3', 200) + 40);
         activeShow = null;
+    }
+
+    // De eerste dia: de omslag groeit uit tot de foto (gedeeld element). De dia staat meteen
+    // helemaal zichtbaar en de Ken Burns begint pas als de omslag geland is.
+    morphIn(slide, img) {
+        const cover = this.from;
+        this.from = null;
+        if (!cover || !cover.isConnected || !cover.naturalWidth || !Motion.full()) return false;
+        const box = document.getElementById('slide-container').getBoundingClientRect();
+        const aspect = cover.naturalWidth / cover.naturalHeight;
+        let w = box.width, h = w / aspect;
+        if (h > box.height) { h = box.height; w = h * aspect; }
+        const rect = { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h };
+        slide.classList.add('active', 'is-first');
+        img.classList.add('kb-hold');
+        const anim = Motion.sharedElement(cover, img, { direction: 'open', rect, className: 'mm-show-ghost' });
+        const go = () => { img.classList.remove('kb-hold'); slide.classList.remove('is-first'); };
+        anim.finished.then(go, go);
+        return true;
     }
 
     startLoop() {
@@ -3594,11 +3623,28 @@ class CinematicPlayer {
         setTimeout(() => el.remove(), 1000);
     }
 
+    // Titel en gegevens van de dia
+    showMeta(file) {
+        const titleEl = document.getElementById('player-slide-title');
+        const metaEl = document.getElementById('player-slide-meta');
+        // Show folder name (from API or extracted from path)
+        const folderName = file.folder || file.path.split(/[/\\\\]/).slice(-2, -1)[0] || 'Onbekende map';
+
+        MediaMotion.rollText(titleEl, folderName, 1);
+
+        metaEl.innerHTML = html`
+<span class="player-meta-item"><i class="fas fa-folder" aria-hidden="true"></i> ${folderName}</span>
+<span class="player-meta-item"><i class="fas fa-camera" aria-hidden="true"></i> ${file.name}</span>
+<span class="player-meta-item"><i class="fas fa-calendar" aria-hidden="true"></i> ${new Date(file.modified * 1000).toLocaleDateString('nl-NL')}</span>
+${file.size ? html`<span class="player-meta-item"><i class="fas fa-hard-drive" aria-hidden="true"></i> ${formatBytes(file.size)}</span>` : ''}
+<div class="elo-rating-badge"></div>
+`;
+        setScoreBadge(metaEl.querySelector('.elo-rating-badge'), file.rating || 1000);
+    }
+
     renderSlide() {
         const file = this.files[this.currentIndex];
         const container = document.getElementById('slide-container');
-        const titleEl = document.getElementById('player-slide-title');
-        const metaEl = document.getElementById('player-slide-meta');
 
         // Reset vote state for new slide
         this._votedOnSlide = false;
@@ -3658,6 +3704,13 @@ class CinematicPlayer {
         }
 
         container.appendChild(slide);
+        if (!oldSlide && !isVideo && this.morphIn(slide, slide.querySelector('img'))) {
+            this.showMeta(file);
+            this.resetProgress();
+            return;
+        }
+        // De eerste dia zonder omslag: hij vaagt op met het zwart mee, niet in de trage overgang
+        if (!oldSlide) slide.classList.add('is-opening');
 
         // Kruisvervagen: de nieuwe dia komt erover, de oude gaat pas weg als de nieuwe er staat.
         // Snel bladeren: dia's die nog aan het vertrekken waren, gaan meteen weg.
@@ -3666,24 +3719,12 @@ class CinematicPlayer {
         requestAnimationFrame(() => requestAnimationFrame(() => {
             slide.classList.add('active');
             if (oldSlide) {
-                oldSlide.classList.remove('active');
+                oldSlide.classList.remove('active', 'is-opening', 'is-first');
                 setTimeout(() => oldSlide.remove(), Motion.ms('--dur-6', 640) * 1.5 + 100);
             }
         }));
 
-        // Show folder name (from API or extracted from path)
-        const folderName = file.folder || file.path.split(/[/\\\\]/).slice(-2, -1)[0] || 'Onbekende map';
-
-        MediaMotion.rollText(titleEl, folderName, 1);
-
-        metaEl.innerHTML = html`
-<span class="player-meta-item"><i class="fas fa-folder" aria-hidden="true"></i> ${folderName}</span>
-<span class="player-meta-item"><i class="fas fa-camera" aria-hidden="true"></i> ${file.name}</span>
-<span class="player-meta-item"><i class="fas fa-calendar" aria-hidden="true"></i> ${new Date(file.modified * 1000).toLocaleDateString('nl-NL')}</span>
-${file.size ? html`<span class="player-meta-item"><i class="fas fa-hard-drive" aria-hidden="true"></i> ${formatBytes(file.size)}</span>` : ''}
-<div class="elo-rating-badge"></div>
-`;
-        setScoreBadge(metaEl.querySelector('.elo-rating-badge'), file.rating || 1000);
+        this.showMeta(file);
 
         // For videos: don't start the timer (video 'ended' event handles advancement)
         // For photos: use normal timer
@@ -3702,14 +3743,14 @@ ${file.size ? html`<span class="player-meta-item"><i class="fas fa-hard-drive" a
     }
 }
 
-function startShow(story) {
+function startShow(story, opts = {}) {
     if (activeShow) activeShow.close();
     const playable = (story.files || []).some(f => f && (f.type === 'photo' || f.type === 'video'));
     if (!playable) {
         showToast('Leeg', "Geen foto's of video's in deze show", 'warning');
         return;
     }
-    activeShow = new CinematicPlayer(story);
+    activeShow = new CinematicPlayer(story, opts);
 }
 
 
