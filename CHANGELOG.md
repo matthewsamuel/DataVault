@@ -36,6 +36,13 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Activiteit toont 'Hele dag' bij items zonder tijdstip (Netflix, agendapunten voor de hele dag, stappen) in plaats van een verzonnen uur.
 - Kaart: de rij 'Uit je Tijdlijn' staat in dezelfde kolom als de kop en de filters, en is weg als er geen locatiegeschiedenis is.
 - Beste uit reeks: zoeken naar reeksen gaat bij veel op elkaar lijkende foto's (scans, screenshots, effen afbeeldingen) in seconden in plaats van minuten, met een fractie van het geheugen, en de app blijft er soepel bij reageren; nieuwe foto's worden alleen met de rest vergeleken in plaats van alles opnieuw.
+- DataGatherer: het tabblad opent direct, ook met miljoenen nummers, berichten en locatiepunten; de tellingen op de kaarten worden bewaard tot er nieuwe gegevens binnenkomen, en na het starten alvast klaargezet.
+- Spotify: 'Bijgewerkt t/m' staat er direct, en de eerste statistieken na het starten zijn er twee tot drie keer sneller.
+- Kaart en Activiteit: de lijst met dagen staat er direct, ook bij miljoenen locatiepunten.
+- Instellingen > Back-ups: 'Nu back-uppen' loopt als taak in het takenpaneel, met de stappen, een knop om te stoppen en een melding als hij klaar is, ook als je intussen naar een ander scherm gaat.
+- Exporteren: een grote selectie (50.000 bestanden) is in een paar seconden klaar om te starten in plaats van een halve minuut, en het takenpaneel blijft daarna licht.
+- Grootste bestanden staat er in een fractie van een seconde in plaats van enkele seconden.
+- Kaart: met heel veel foto's zoom je vloeiender; de groepen springen dan zonder animatie naar hun nieuwe plek (en ook bij 'minder beweging' van je Mac).
 
 ### Laatste reparaties
 - Meldingen van een scherm (bijvoorbeeld 'Bijgewerkt' bij Duplicaten) verdwijnen als je naar een ander scherm gaat.
