@@ -157,7 +157,7 @@
     // Een onderdeel komt binnen. direction: 1 van rechts, -1 van links, 0 van onder.
     function enterView(view, section, direction = 0) {
         if (!section) return settled();
-        const anims = [M.enterPage(section, { direction })];
+        const anims = [enterPageLight(section, direction)];
         if (!M.full()) {
             if (view === 'home') homeArrive(0);
             return reduceAll(anims);
@@ -174,6 +174,34 @@
         else if (view === 'settings') anims.push(settingsArrive(direction));
         else if (view === 'recovery') anims.push(listArrive(document.getElementById('recovery-list'), '.recovery-entry', direction));
         return reduceAll(anims);
+    }
+
+    // Motion.enterPage, maar een blok dat vele schermen hoog is (een raster van duizenden
+    // foto's) schuift niet mee: een transform op zo'n blok maakt er één reusachtige laag van en
+    // kost frames. Het komt binnen met de vervaging van de sectie; de rest schuift zoals altijd.
+    function enterPageLight(section, direction) {
+        const huge = [];
+        if (M.full()) {
+            const limit = window.innerHeight * 3;
+            let level = [...section.children];
+            for (let depth = 0; depth < 3 && level.length; depth++) {
+                const next = [];
+                level.forEach(el => {
+                    if (el.hasAttribute('data-motion-skip')) return;
+                    if (el.offsetHeight > limit) {
+                        // Alleen het diepste hoge blok: zijn kop en knoppen (de broers) schuiven wel
+                        const tall = [...el.children].filter(c => c.offsetHeight > limit);
+                        if (tall.length) next.push(...el.children);
+                        else huge.push(el);
+                    }
+                });
+                level = next;
+            }
+            huge.forEach(el => el.setAttribute('data-motion-skip', ''));
+        }
+        const anim = M.enterPage(section, { direction });
+        huge.forEach(el => el.removeAttribute('data-motion-skip'));
+        return anim;
     }
 
     // Een lijst die binnenkomt: wat in beeld staat in ritme vanuit de richting, de rest pas als

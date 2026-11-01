@@ -21,6 +21,7 @@ with --base http://127.0.0.1:PORT.
     python3 code/tests/ui/motion_perf.py --showcase      # the fuller showcase vault
     python3 code/tests/ui/motion_perf.py --budget 24     # stricter
     python3 code/tests/ui/motion_perf.py --runs 3        # every transition three times
+    python3 code/tests/ui/motion_perf.py --big-grid      # the shell over 6000 tiles too
 
 Exit code 0 when every animation frame stayed under the budget, 1 otherwise. Not collected
 by pytest (the name does not start with test_).
@@ -122,6 +123,29 @@ TRANSITIONS += [
      " document.querySelector('#search-overlay .search-mode[data-mode=\"filename\"]').click()", 700),
     ("schil: lege staat komt binnen", "closeSearch()", SHELL_EMPTY, 900),
     ("schil: taak klaar (feestje)", "document.getElementById('perf-empty')?.remove()", SHELL_BURST, 900),
+    ("schil: takenpaneel inklappen", "jobDock.collapsed = false; jobDock.idleOpen = true; renderJobDock()",
+     "document.querySelector('#job-dock .job-dock-header')?.click()", 700),
+    ("schil: takenpaneel uitklappen", None, "document.querySelector('#job-dock .job-dock-header')?.click()", 800),
+]
+
+# Een groot raster (6000 tegels, zoals een map met duizenden foto's) in Bestanden: de schil
+# moet er even soepel overheen bewegen. Grijze vlakken in plaats van foto's, zodat het meten
+# over de beweging gaat en niet over het laden van miniaturen.
+SHELL_STRESS = ("(() => { if (document.getElementById('perf-stress')) return;"
+                " const grid = document.createElement('div'); grid.id = 'perf-stress';"
+                " grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;padding:24px';"
+                " const frag = document.createDocumentFragment();"
+                " for (let i = 0; i < 6000; i++) { const t = document.createElement('div'); t.className = 'media-card';"
+                " t.style.cssText = 'aspect-ratio:1;border-radius:8px;background:var(--surface-raised)'; t.textContent = 'IMG_' + i; frag.append(t); }"
+                " grid.append(frag); document.getElementById('section-viewer').append(grid); })()")
+STRESS_TRANSITIONS = [
+    ("groot raster: Home -> Bestanden", "switchMainView('home'); " + SHELL_STRESS, "switchMainView('viewer')", 1000),
+    ("groot raster: sneltoetsen open", None, "openShortcutHelp()", 800),
+    ("groot raster: sneltoetsen dicht", None, "document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))", 600),
+    ("groot raster: melding binnen", None, "showToast('Klaar', 'Zesduizend foto\\u2019s bekeken', 'success')", 800),
+    ("groot raster: thema naar licht", "document.getElementById('theme-button').focus()", "setTheme('light')", 1000),
+    ("groot raster: thema naar donker", "document.getElementById('theme-button').focus()", "setTheme('dark')", 1000),
+    ("groot raster: Bestanden -> Home", None, "switchMainView('home')", 1000),
 ]
 
 
@@ -202,7 +226,7 @@ def run(args) -> int:
                 page.wait_for_timeout(900)
             print(f"WebKit against {base}, budget {args.budget:.0f} ms per animation frame\n")
             print(f"  {'transition':38} {'work':>7} {'frames':>6} {'median':>7} {'p95':>7} {'max':>7}  result")
-            for name, setup, trigger, settle in TRANSITIONS:
+            for name, setup, trigger, settle in TRANSITIONS + (STRESS_TRANSITIONS if args.big_grid else []):
                 worst = []
                 for _ in range(args.runs):
                     work, deltas = measure(page, setup, trigger, settle)
@@ -245,5 +269,7 @@ if __name__ == "__main__":
     parser.add_argument("--base", help="measure against a running test server instead of starting one")
     parser.add_argument("--budget", type=float, default=32.0, help="max ms per animation frame (default 32)")
     parser.add_argument("--runs", type=int, default=2, help="measure every transition this many times (worst counts)")
+    parser.add_argument("--big-grid", action="store_true",
+                        help="also measure the shell over a grid of 6000 tiles in Bestanden")
     parser.add_argument("--headed", action="store_true")
     sys.exit(run(parser.parse_args()))
