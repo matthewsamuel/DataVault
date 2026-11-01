@@ -460,11 +460,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.evaluate("document.getElementById('settings-backup-now').scrollIntoView({block: 'center'})")
             top_before = page.evaluate(button_top)
             try:
+                # It runs as a job in the dock (PERF-4); the part is drawn again when it is done
                 step("settings: Nu back-uppen", lambda: (
                     page.focus("#settings-backup-now"), page.keyboard.press("Enter"),
-                    page.wait_for_selector("#settings-backups .backup-kind", timeout=15000)), 0.5)
+                    page.wait_for_function("jobDock.jobs.some(j => j.type === 'backup' && j.status === 'done')",
+                                           timeout=30000, polling=250),
+                    page.wait_for_selector("#settings-backups .backup-kind", timeout=15000)), 1.0)
             except PlaywrightError:
-                problems.append("settings: 'Nu back-uppen' did not show the new backup")
+                problems.append("settings: 'Nu back-uppen' did not finish as a job or did not show the new backup")
             top_after = page.evaluate(button_top)
             expect(abs(top_after - top_before) < 4,
                    f"settings: 'Nu back-uppen' moved on screen ({top_before:.0f} -> {top_after:.0f} px)")
@@ -1247,8 +1250,9 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Library (media index): the app indexed the vault by itself; the dock shows it,
             # and 'Bibliotheek bijwerken' starts a full pass from the keyboard
-            # The finished export would keep the dock folded: hide it like a user would
-            page.evaluate("jobDock.jobs.filter(j => j.type === 'export').forEach(j => jobDock.dismissed.add(j.id)); renderJobDock()")
+            # The finished export and backup jobs would keep the dock folded: hide them like a user would
+            page.evaluate("jobDock.jobs.filter(j => j.type === 'export' || j.type === 'backup')"
+                          ".forEach(j => jobDock.dismissed.add(j.id)); renderJobDock()")
             step("library: line after the automatic pass", lambda: page.wait_for_function(
                 "/Bibliotheek: \\d/.test((document.getElementById('job-library') || {}).textContent || '')",
                 timeout=60000, polling=250), 0.2)
