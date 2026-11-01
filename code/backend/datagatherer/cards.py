@@ -115,11 +115,31 @@ def forget_existing_cache() -> None:
         _existing_cache.clear()
 
 
+def coverage(connector: Connector, gctx: GatherContext):
+    """The connector's coverage, cached until its data changes: counting millions of rows per visit took seconds."""
+    return state.cached(gctx.db, "coverage", lambda: connector.coverage(gctx), connector.id)
+
+
+def warm(config, db) -> None:
+    """Fill the coverage cache in the background after the start, so the first visit of the tab is quick too."""
+    from backend.datagatherer import registry
+    for connector in registry.connectors():
+        try:
+            coverage(connector, GatherContext(config, db, connector))
+        except Exception:
+            pass    # the card reports it when the tab is opened
+    try:
+        from backend.datagatherer import location_store
+        location_store.days(db)     # Kaart: 'Route per dag'
+    except Exception:
+        pass
+
+
 def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) -> Dict[str, Any]:
     gctx = GatherContext(config, db, connector)
     st = state.get_state(db, connector.id)
     now = time.time()
-    cov = connector.coverage(gctx)
+    cov = coverage(connector, gctx)
     api = connector.has("api_sync")
     local = connector.has("local_import")
     access = connector.access(gctx) if local else None
@@ -390,7 +410,7 @@ def watch_folder(connector: Connector, settings: Dict[str, Any]) -> Optional[Pat
 
 def since_for(connector: Connector, gctx: GatherContext) -> Optional[str]:
     """The 'since' date for an incremental export request: the data's last day, minus one day of overlap."""
-    cov = connector.coverage(gctx)
+    cov = coverage(connector, gctx)
     if not cov.last:
         return None
     return (datetime.fromtimestamp(cov.last) - timedelta(days=1)).strftime("%Y-%m-%d")

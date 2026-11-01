@@ -32,7 +32,8 @@ from backend.routes import (
     folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, albums,
     series, datagatherer, search, geo, messages, history,
 )
-from backend.datagatherer import daemon as gather_daemon, jobs as gather_jobs, registry as gather_registry
+from backend.datagatherer import (cards as gather_cards, daemon as gather_daemon, jobs as gather_jobs,
+                                  registry as gather_registry)
 from backend.routes import backup as backup_routes
 from backend.routes import export as export_routes
 
@@ -186,6 +187,9 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         # DATAVAULT_GATHER_DAEMON=0 turns the DataGatherer thread off (tests tick it themselves)
         if os.environ.get("DATAVAULT_GATHER_DAEMON", "1") != "0":
             app.state.gather_daemon = gather_daemon.Daemon(config, db, lambda: app.state.jobs)
+            # The coverage of every card (counts over millions of rows) is cached in the background
+            db.when_ready(lambda: threading.Thread(target=gather_cards.warm, args=(config, db), daemon=True,
+                                                   name="dg-warm").start())
 
         # The database is copied to the Mac's own disk (backend/backup.py): on start when the
         # newest backup is older than a day, then daily (DATAVAULT_AUTO_BACKUP=0: tests). While
