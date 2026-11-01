@@ -213,7 +213,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         recovery.init_router(config, db)
         series.init_router(config, db, job_manager)
         datagatherer.init_router(config, db, job_manager)
-        backup_routes.init_router(config, app.state.auto_backup)
+        backup_routes.init_router(config, app.state.auto_backup, job_manager)
         search.init_router(config, db, job_manager)
         geo.init_router(config, db)
         export_routes.init_router(config, db)

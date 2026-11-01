@@ -449,6 +449,42 @@ def phash_type(config: Config, db) -> JobType:
                    results_to_keep=3, jobs_to_keep=5, describe=lambda params: "hele archief")
 
 
+# ---------- backup ----------
+
+BACKUP_JOB = "backup"
+
+
+def backup_type(config: Config) -> JobType:
+    """
+    'Nu back-uppen' in Instellingen (backup.make_backup): copying, compacting, checking and
+    compressing a large database takes minutes (2 min for 1 GB), so it runs as a job with
+    its steps in the dock, can be cancelled, and its outcome survives a reload. Cancelling
+    removes the temporary copies; the backups that were there stay.
+    """
+    from backend import backup
+
+    def prepare(params: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            backup.preflight(config)
+        except backup.BackupError as e:
+            raise HTTPException(status_code=e.status, detail=str(e))
+        return {}
+
+    def run(ctx: JobContext) -> Dict[str, Any]:
+        def step(done: int, message: str) -> None:
+            ctx.check()
+            ctx.progress(done, backup.STEPS, message)
+
+        result = backup.make_backup(config, manual=True, keep_daily=config.BACKUP_KEEP_DAILY,
+                                    keep_weekly=config.BACKUP_KEEP_WEEKLY, step=step)
+        ctx.progress(backup.STEPS, backup.STEPS, "Back-up gemaakt en gecontroleerd")
+        return result
+
+    return JobType(BACKUP_JOB, "Back-up maken", prepare, run,
+                   summarize=lambda r: {k: r.get(k) for k in ("name", "size", "plain_size", "seconds")},
+                   results_to_keep=3, jobs_to_keep=5, describe=lambda params: "database")
+
+
 def build_job_types(config: Config, db, on_dup_scan_done=None) -> List[JobType]:
     return [
         dup_scan_type(config, db, on_dup_scan_done),
@@ -457,4 +493,5 @@ def build_job_types(config: Config, db, on_dup_scan_done=None) -> List[JobType]:
         index_type(config, db),
         phash_type(config, db),
         export_type(config, db),
+        backup_type(config),
     ]

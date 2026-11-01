@@ -442,7 +442,9 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
 ### Back-ups van de database
 - `backend/backup.py` kopieert de database naar de schijf van de Mac: bij het starten als de nieuwste
   back-up ouder is dan 24 uur, daarna elk uur een controle (dus ongeveer dagelijks), en met
-  **Nu back-uppen** in Instellingen (`POST /api/backup/run`; `GET /api/backup/status` geeft de stand).
+  **Nu back-uppen** in Instellingen (`POST /api/backup/run` start de taak `backup` en antwoordt meteen met 202;
+  de stappen staan in het takenpaneel, de taak is te stoppen; `GET /api/backup/status` geeft de stand).
+  Een database van 600 MB: ~75 s als taak, waar het verzoek eerst 115 s openstond.
   `DATAVAULT_AUTO_BACKUP=0` zet het automatische deel uit (de tests doen dat). De volledige kopie
   vóór elke migratie (`db_backups/` naast de database) blijft daarnaast bestaan.
 - Zo wordt hij gemaakt: de SQLite backup API maakt één consistente momentopname (ook wat nog in het
