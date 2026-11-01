@@ -918,7 +918,9 @@
         actDays,
         actEvents,
         celebrate,
-        // Kleine helpers voor wie ze nodig heeft (zie notes in docs/MOTION.md, sectie Data)
+        // Kleine helpers voor andere schermen: tick (getal tikt alleen bij verandering), swapText (nieuwe
+        // tekst komt zacht omhoog), glideY (selectie in ::before glijdt mee), arrive (zichtbaar in
+        // ritme, de rest bij scrollen, met plafond), whenVisible (één keer zodra iets in beeld komt)
         tick,
         swapText,
         glideY,
