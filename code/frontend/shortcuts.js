@@ -70,6 +70,7 @@ const SHORTCUT_GROUPS = [
             [['+', '−', '0'], 'Inzoomen, uitzoomen, passend'],
             [['m'], 'Verplaatsen'],
             [['f'], 'Toon in Finder'],
+            [['b'], 'Toon in Bestanden'],
             [['spatie'], 'Audio pauzeren of afspelen'],
         ],
     },

@@ -1483,9 +1483,9 @@ async function openInFinder() {
     const file = viewerFile();
     if (!file || !file.path) return;
 
-    // Show visual feedback immediately
+    // Meteen zichtbaar dat er iets gebeurt; daarna komen icoon en tekst terug
     const btn = document.getElementById('btn-open-finder');
-    const oldText = btn.textContent;
+    const content = [...btn.childNodes];
     btn.textContent = 'Openen…';
     btn.disabled = true;
 
@@ -1499,10 +1499,63 @@ async function openInFinder() {
         toastFetchError('Tonen in Finder mislukt', e);
     } finally {
         setTimeout(() => {
-            btn.textContent = oldText;
+            btn.replaceChildren(...content);
             btn.disabled = false;
         }, 1000);
     }
+}
+
+// 'In Bestanden': de map van het bestand openen in de app zelf, met de tegel in beeld en
+// even aangewezen. Wat erboven openstond (zoeken, chat, een slideshow) gaat ook dicht.
+async function showViewerFileInFiles() {
+    const file = viewerFile();
+    if (!file || !file.path) return;
+    const folder = parentFolder(file.path);
+    for (let top = topOverlay(), guard = 0; top && guard < 10; top = topOverlay(), guard++) closeOverlay(top);
+    const here = currentMainView() === 'viewer' && currentFolder === folder
+        && gridItems.some(item => item.path === file.path);
+    if (currentMainView() !== 'viewer') switchMainView('viewer');
+    if (!here) {
+        if (document.getElementById('global-search').value) handleGlobalSearch('');
+        await selectFolder(folder);
+        if (currentFolder !== folder) return;   // intussen iets anders gekozen
+    }
+    const index = gridItems.findIndex(item => item.path === file.path);
+    if (index < 0) {
+        showToast('Niet in deze map', `${file.name} staat niet (meer) in ${displayPath(folder)}.`, 'info');
+        return;
+    }
+    focusGridCard(index);
+    const card = document.querySelector(`#media-grid [data-grid-index="${index}"]`);
+    if (card) locateGridCard(card);
+}
+
+// Een tegel aanwijzen: hij komt naar het midden, veert even op en een groene ring licht op en
+// dooft weer. Met minder beweging (Mac of Beweging in Instellingen) alleen de ring, even.
+function locateGridCard(card) {
+    const calm = document.documentElement.dataset.motion === 'reduce'
+        || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    card.scrollIntoView({ block: 'center', behavior: calm ? 'auto' : 'smooth' });
+    card.querySelectorAll(':scope > .locate-ring').forEach(el => el.remove());
+    const ring = createEl('span', { class: 'locate-ring', 'aria-hidden': 'true' });
+    card.appendChild(ring);
+    if (calm || typeof card.animate !== 'function') {
+        setTimeout(() => ring.remove(), 1600);
+        return;
+    }
+    card.animate([
+        { transform: 'scale(0.94)' },
+        { transform: 'scale(1.04)', offset: 0.45 },
+        { transform: 'scale(0.99)', offset: 0.75 },
+        { transform: 'scale(1)' },
+    ], { duration: 620, delay: 180, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)', fill: 'backwards' });
+    ring.animate([
+        { opacity: 0, transform: 'scale(1.12)' },
+        { opacity: 1, transform: 'scale(1)', offset: 0.2 },
+        { opacity: 1, transform: 'scale(1)', offset: 0.7 },
+        { opacity: 0, transform: 'scale(1)' },
+    ], { duration: 1800, delay: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' })
+        .finished.then(() => ring.remove(), () => ring.remove());
 }
 
 function renderAudioPlayer(file, container) {
@@ -2000,6 +2053,7 @@ document.addEventListener('keydown', (e) => {
         else if (e.key === '0' && isImage) fitToScreen();
         else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); openMoveFileModal(); }
         else if (e.key === 'f' || e.key === 'F') openInFinder();
+        else if (e.key === 'b' || e.key === 'B') { e.preventDefault(); showViewerFileInFiles(); }
     }
     if (e.key === 'Escape') {
         // Alleen de viewer sluiten, niet ook de chat of slideshow eronder

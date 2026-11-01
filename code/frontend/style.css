@@ -3243,8 +3243,8 @@ a.breadcrumb-item:hover {
     border-left: 1px solid var(--media-border);
 }
 
-/* Twee kolommen in de smalle kolom: Vergelijkbaar en Finder naast elkaar, Verplaatsen over de
-   hele breedte; met 'Op kaart tonen' erbij een nette 2 x 2 */
+/* Twee kolommen in de smalle kolom: Vergelijkbaar en Finder naast elkaar, daaronder In Bestanden
+   naast Verplaatsen; met 'Op kaart tonen' erbij een nette 2 x 2 en Verplaatsen over de hele breedte */
 .viewer-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -3257,11 +3257,21 @@ a.breadcrumb-item:hover {
 }
 
 .viewer-actions #btn-move-file {
-    grid-column: span 2;
+    grid-column: auto;
 }
 
 .viewer-actions:has(#btn-show-on-map:not([hidden])) #btn-move-file {
-    grid-column: auto;
+    grid-column: span 2;
+}
+
+/* De groene ring waarmee 'In Bestanden' de tegel aanwijst (locateGridCard in app.js) */
+.locate-ring {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 3px var(--accent), inset 0 0 0 7px var(--accent-border);
+    pointer-events: none;
 }
 
 #modal-viewer .btn-secondary {
