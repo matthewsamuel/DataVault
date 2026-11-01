@@ -13882,3 +13882,477 @@ html[data-motion="uit"]::view-transition-new(*) {
     font-size: var(--fs-2xs);
     box-shadow: var(--shadow-sm);
 }
+
+/* ==================== BEWEGING: GEGEVENSSCHERMEN (motion-data.js) ====================
+   Spotify, Kaart, DataGatherer, Berichten, Activiteit en Pasha. De JS staat in
+   motion-data.js (window.MotionData), de taal in docs/MOTION.md (sectie 8, Data). Alles hier
+   gebruikt de bewegingstokens, dus Rustig en Uit kloppen vanzelf; wat herhaalt of verschuift
+   staat achter html[data-motion="volledig"]. Dit blok staat los van de andere schermgroepen. */
+
+@keyframes md-fade {
+    from { opacity: 0; }
+}
+
+@keyframes md-pop {
+    from { opacity: 0; transform: scale(0.5); }
+}
+
+@keyframes md-rise {
+    from { opacity: 0; transform: translate3d(0, var(--motion-distance-md), 0) scale(var(--motion-scale-in)); }
+}
+
+/* ---------- Gedeeld: een klein feest (ring en stipjes) en een rand die even oplicht ---------- */
+
+.md-burst-layer {
+    position: fixed;
+    z-index: 90;
+    pointer-events: none;
+}
+
+.md-burst-ring,
+.md-burst-dot {
+    position: absolute;
+    pointer-events: none;
+    opacity: 0;
+}
+
+.md-burst-ring {
+    inset: calc(-1 * var(--space-2xs));
+    border: var(--space-2xs) solid var(--accent);
+    border-radius: inherit;
+}
+
+.md-burst-dot {
+    top: 50%;
+    left: 50%;
+    width: var(--space-sm);
+    height: var(--space-sm);
+    margin: calc(-1 * var(--space-xs)) 0 0 calc(-1 * var(--space-xs));
+    border-radius: var(--radius-full);
+    background: var(--accent);
+}
+
+.md-burst-dot.is-soft {
+    background: var(--accent-hover);
+}
+
+/* ---------- Spotify: tellers, toplijsten, staafjes en de DNA-helix ---------- */
+
+/* Het getal en de eenheid ('0,7 uur') staan los: alleen het getal tikt */
+#stat-record-day-hours .stat-number {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Een dun staafje onder elke regel: het aandeel ten opzichte van nummer één */
+.spotify-list-item {
+    position: relative;
+}
+
+.md-share {
+    position: absolute;
+    left: calc(2 * var(--space-md) + var(--space-2xl));
+    right: var(--space-md);
+    bottom: var(--space-xs);
+    height: var(--space-2xs);
+    border-radius: var(--radius-full);
+    background: var(--spotify-border);
+    transform: scaleX(var(--share, 0));
+    transform-origin: left center;
+    pointer-events: none;
+}
+
+.spotify-list-item:hover .md-share {
+    background: var(--spotify);
+}
+
+/* Staafjes groeien vanaf de basislijn; tot ze in beeld komen staan ze laag (alleen Volledig) */
+.simple-bar-chart .chart-bar {
+    transform-origin: 50% 100%;
+}
+
+html[data-motion="volledig"] .simple-bar-chart[data-md-pending] .chart-bar {
+    opacity: 0;
+    transform: scaleY(0);
+}
+
+html[data-motion="volledig"] .simple-bar-chart[data-md-pending] + .chart-axis {
+    opacity: 0;
+}
+
+/* Luister-DNA: een dubbele helix, één sport per uur; vollere stip = vaker op dat uur */
+.stat-card.listening-personality {
+    overflow: hidden;
+}
+
+.md-helix {
+    position: absolute;
+    top: var(--space-lg);
+    right: var(--space-lg);
+    width: min(56%, 184px);
+    height: auto;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.md-helix.is-drawing .md-helix-rung {
+    opacity: 0;
+}
+
+.md-helix-bar {
+    stroke: var(--spotify-border);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    opacity: calc(0.35 + var(--v, 0) * 0.65);
+    transform-box: fill-box;
+    transform-origin: center;
+}
+
+.md-helix-dot {
+    fill: var(--spotify);
+    opacity: calc(0.35 + var(--v, 0) * 0.65);
+}
+
+.md-helix-dot.is-b {
+    fill: var(--text-tertiary);
+}
+
+html[data-motion="volledig"] .md-helix-rung > * {
+    animation-duration: calc(var(--dur-6) * 2.5);
+    animation-timing-function: var(--ease-in-out);
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+    /* Een hele slag = twee keer heen; de fase zet elke sport op zijn eigen plek */
+    animation-delay: calc(var(--phase, 0) * var(--dur-6) * -5);
+    animation-play-state: paused;
+}
+
+html[data-motion="volledig"] .md-helix-bar { animation-name: md-helix-bar; }
+html[data-motion="volledig"] .md-helix-dot.is-a { animation-name: md-helix-a; }
+html[data-motion="volledig"] .md-helix-dot.is-b { animation-name: md-helix-b; }
+
+html[data-motion="volledig"] .md-helix.is-spinning .md-helix-rung > * {
+    animation-play-state: running;
+}
+
+@keyframes md-helix-a {
+    from { transform: translateY(calc(-1 * var(--amp))); }
+    to { transform: translateY(var(--amp)); }
+}
+
+@keyframes md-helix-b {
+    from { transform: translateY(var(--amp)); }
+    to { transform: translateY(calc(-1 * var(--amp))); }
+}
+
+@keyframes md-helix-bar {
+    from { transform: scaleY(-1); }
+    to { transform: scaleY(1); }
+}
+
+/* ---------- Kaart: groepen die splitsen en samenvloeien, popups, de route van een dag ---------- */
+
+/* markercluster zet .leaflet-cluster-anim tijdens het zoomen; zijn eigen 0,3 s blijft de grens */
+.map-canvas .leaflet-cluster-anim .leaflet-marker-icon,
+.map-canvas .leaflet-cluster-anim .leaflet-marker-shadow {
+    transition: transform var(--dur-4) var(--ease-emphasized), opacity var(--dur-3) var(--ease-out);
+}
+
+.map-canvas .leaflet-cluster-anim .leaflet-cluster-spider-leg {
+    transition: stroke-dashoffset var(--dur-4) var(--ease-emphasized), stroke-opacity var(--dur-3) var(--ease-out);
+}
+
+/* Rustig: groepen verschuiven niet, ze verschijnen en verdwijnen alleen */
+html[data-motion="rustig"] .map-canvas .leaflet-cluster-anim .leaflet-marker-icon,
+html[data-motion="rustig"] .map-canvas .leaflet-cluster-anim .leaflet-marker-shadow {
+    transition: opacity var(--dur-3) var(--ease-out);
+}
+
+/* Komt de kaart in beeld, dan ploffen de groepen en spelden zacht op hun plek (de buitenste
+   laag is van Leaflet). Alleen dan: bij het zoomen glijden ze al, en honderden tegelijk
+   laten ploffen kost beelden (motion-data.js zet .md-map-arriving even op de kaart) */
+html[data-motion="volledig"] .md-map-arriving .map-cluster,
+html[data-motion="volledig"] .md-map-arriving .map-pin {
+    animation: md-pop var(--spring-snappy-dur) var(--spring-snappy) backwards;
+}
+
+.map-cluster,
+.map-pin {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+/* Popup: rijst op vanaf de speld; de inhoud volgt in ritme */
+.map-popup .leaflet-popup-content-wrapper,
+.map-popup .leaflet-popup-tip-container {
+    transform-origin: 50% 100%;
+}
+
+html[data-motion="volledig"] .map-popup .leaflet-popup-content-wrapper,
+html[data-motion="volledig"] .map-popup .leaflet-popup-tip-container {
+    animation: md-rise var(--spring-smooth-dur) var(--spring-smooth) backwards;
+}
+
+html[data-motion="rustig"] .map-popup .leaflet-popup-content-wrapper,
+html[data-motion="rustig"] .map-popup .leaflet-popup-tip-container {
+    animation: md-fade var(--dur-3) var(--ease-out) backwards;
+}
+
+html[data-motion="volledig"] .map-popup-body > * {
+    animation: md-fade var(--dur-4) var(--ease-out) backwards;
+}
+
+html[data-motion="volledig"] .map-popup-body > :nth-child(2) { animation-delay: var(--stagger-step); }
+html[data-motion="volledig"] .map-popup-body > :nth-child(3) { animation-delay: calc(2 * var(--stagger-step)); }
+
+/* De route: een lichtpuntje loopt voorop; bezochte plekken schalen vanuit hun midden */
+.map-canvas .md-route-head {
+    fill: var(--info);
+    stroke: var(--surface-card);
+    stroke-width: 3;
+    pointer-events: none;
+}
+
+.map-canvas .map-track-visit {
+    transform-box: fill-box;
+    transform-origin: center;
+}
+
+/* ---------- DataGatherer: kaarten, een bron die bezig is, voortgang, een feestje ---------- */
+
+.dg-card {
+    position: relative;
+}
+
+/* De rand die even oplicht bij een beloning: een losse laag boven de pagina (motion-data.js glow) */
+.md-glow-layer {
+    position: fixed;
+    z-index: 90;
+    border: 1px solid var(--accent);
+    border-radius: inherit;
+    box-shadow: 0 0 0 var(--space-xs) var(--accent-subtle);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.dg-card-icon {
+    position: relative;
+}
+
+.dg-card-icon > i {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.dg-card:hover .dg-card-icon > i {
+    transform: scale(1.12) rotate(-6deg);
+}
+
+/* Bezig: een stipje draait als een satelliet om het icoon */
+.dg-card.is-busy .dg-card-icon::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: calc(var(--space-xs) + var(--space-2xs));
+    height: calc(var(--space-xs) + var(--space-2xs));
+    margin: calc(-0.5 * (var(--space-xs) + var(--space-2xs)));
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    box-shadow: 0 0 0 var(--space-2xs) var(--surface-card);
+    transform: rotate(-45deg) translateX(var(--space-xl));
+}
+
+html[data-motion="volledig"] .dg-card.is-busy .dg-card-icon::after {
+    animation: md-orbit calc(var(--dur-6) * 2.5) linear infinite;
+}
+
+@keyframes md-orbit {
+    from { transform: rotate(-45deg) translateX(var(--space-xl)); }
+    to { transform: rotate(315deg) translateX(var(--space-xl)); }
+}
+
+/* Voortgang met karakter: een lichte glans loopt over het gevulde deel */
+.dg-progress .progress-fill {
+    position: relative;
+    overflow: hidden;
+}
+
+html[data-motion="volledig"] .dg-progress .progress:not(.is-indeterminate) .progress-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+    mix-blend-mode: screen;
+    transform: translateX(-100%);
+    animation: md-sheen calc(var(--dur-6) * 2.5) var(--ease-in-out) infinite;
+}
+
+@keyframes md-sheen {
+    to { transform: translateX(100%); }
+}
+
+/* De dekkingsbalk groeit van links naar rechts (motion-data.js zet de animatie) */
+.dg-coverage-seg {
+    transform-origin: left center;
+}
+
+/* ---------- Berichten: de selectie glijdt mee, bubbels groeien uit hun staartje ---------- */
+
+/* Lange lijsten (5000 gesprekken, een gesprek van duizenden berichten, 1500 dagen) houden hun
+   tekenwerk binnen hun eigen kader: zonder deze afbakening kost het eerste beeld van elke
+   animatie in de lijst in WebKit tot 200 ms (gemeten met code/tests/ui/motion_perf.py) */
+.msg-list,
+.msg-scroll {
+    contain: strict;
+}
+
+.act-days-panel {
+    contain: content;
+}
+
+/* De geselecteerde achtergrond staat in ::before, zodat hij van item naar item kan glijden.
+   Alleen het actieve item wordt een eigen laag: duizenden gestapelde lagen (een lijst van
+   5000 gesprekken) zouden WebKit bij elke animatie in de lijst laten haperen. */
+.msg-item.active,
+.act-day[aria-pressed="true"] {
+    position: relative;
+    isolation: isolate;
+    background: transparent;
+    border-color: transparent;
+}
+
+.msg-item.active::before,
+.act-day[aria-pressed="true"]::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border: 1px solid var(--accent-border);
+    border-radius: inherit;
+    background: var(--accent-subtle);
+    pointer-events: none;
+}
+
+.msg-row {
+    transform-origin: 0% 100%;
+}
+
+.msg-row.is-me {
+    transform-origin: 100% 100%;
+}
+
+/* Een gevonden bericht: een ring die één keer oplicht */
+.msg-bubble.md-spotlight::after {
+    content: '';
+    position: absolute;
+    inset: calc(-1 * var(--space-xs));
+    border: var(--space-2xs) solid var(--accent);
+    border-radius: inherit;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ---------- Activiteit: de dag als tijdlijn ---------- */
+
+.act-list {
+    position: relative;
+    isolation: isolate;
+}
+
+/* De lijn door de icoontjes (kolom tijd + tussenruimte + half icoon) */
+.act-list::before {
+    content: '';
+    position: absolute;
+    top: calc(var(--space-md) + var(--space-lg));
+    bottom: calc(var(--space-md) + var(--space-lg));
+    left: calc(var(--space-3xl) + var(--space-md) + var(--space-lg) - var(--space-2xs) / 2);
+    width: var(--space-2xs);
+    border-radius: var(--radius-full);
+    z-index: -1;
+    background: var(--border-hairline);
+    transform-origin: 50% 0%;
+    pointer-events: none;
+}
+
+/* De icoontjes liggen gewoon boven de lijn (die staat op z-index -1 in .act-list): geen laag per gebeurtenis */
+.act-icon {
+    box-shadow: 0 0 0 var(--space-xs) var(--surface-card);
+}
+
+/* ---------- Pasha: een levend kopje, een typende ballon, bubbels die opspringen ---------- */
+
+/* Losse transformaties: ademen (scale), luisteren (rotate, translate) en knikken (transform)
+   stapelen zonder elkaar te overschrijven */
+.chat-mascot {
+    transform-origin: 50% 85%;
+    transition: rotate var(--spring-snappy-dur) var(--spring-snappy), translate var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+/* Je typt: Pasha houdt zijn kopje schuin en spitst zijn oren */
+html[data-motion="volledig"] .chat-mascot.is-listening {
+    rotate: -10deg;
+    translate: 0 calc(-1 * var(--space-2xs));
+}
+
+/* Ademen zolang hij wakker is (eindigt vanzelf op zijn rustpunt) */
+html[data-motion="volledig"] .chat-mascot.is-awake {
+    animation: md-breathe calc(var(--dur-6) * 3.5) var(--ease-in-out) 10 alternate;
+}
+
+/* Nadenken (wachten op het eerste woord): zacht heen en weer, als voortgang */
+html[data-motion="volledig"] .chat-mascot.is-thinking {
+    animation: md-ponder calc(var(--dur-6) * 1.6) var(--ease-in-out) infinite alternate;
+}
+
+html[data-motion="volledig"] .chat-mascot.is-awake.is-thinking {
+    animation: md-breathe calc(var(--dur-6) * 3.5) var(--ease-in-out) 10 alternate,
+        md-ponder calc(var(--dur-6) * 1.6) var(--ease-in-out) infinite alternate;
+}
+
+@keyframes md-breathe {
+    from { scale: 1; }
+    to { scale: 1.045 1.06; }
+}
+
+@keyframes md-ponder {
+    from { rotate: -7deg; }
+    to { rotate: 7deg; }
+}
+
+/* De typende ballon: drie stipjes in een golf */
+html[data-motion="volledig"] .message-loading .dot {
+    animation: md-typing calc(var(--dur-6) * 2) var(--ease-in-out) infinite;
+}
+
+html[data-motion="volledig"] .message-loading .dot:nth-child(1) { animation-delay: 0s; }
+html[data-motion="volledig"] .message-loading .dot:nth-child(2) { animation-delay: calc(var(--stagger-step) * 5); }
+html[data-motion="volledig"] .message-loading .dot:nth-child(3) { animation-delay: calc(var(--stagger-step) * 10); }
+
+@keyframes md-typing {
+    0%, 60%, 100% { opacity: 0.35; transform: none; }
+    30% { opacity: 1; transform: translate3d(0, calc(-1 * var(--space-xs)), 0); }
+}
+
+/* Tijdens het binnenkomen van een antwoord: een zachte cursor achter de tekst */
+.message-bubble.md-streaming::after {
+    content: '';
+    display: inline-block;
+    width: 0.55em;
+    height: 0.55em;
+    margin-left: var(--space-xs);
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    vertical-align: 0.05em;
+}
+
+html[data-motion="volledig"] .message-bubble.md-streaming::after {
+    animation: md-caret calc(var(--dur-6) * 1.2) var(--ease-in-out) infinite alternate;
+}
+
+@keyframes md-caret {
+    from { opacity: 0.3; transform: scale(0.7); }
+    to { opacity: 1; transform: none; }
+}
+
+.md-confirm-check {
+    display: inline-block;
+    color: var(--accent-text);
+}
