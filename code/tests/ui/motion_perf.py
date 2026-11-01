@@ -100,6 +100,39 @@ TRANSITIONS = [
 ]
 
 
+# ---------- Gegevensschermen (motion-data.js): Spotify, Kaart, DataGatherer, Berichten, Activiteit, Pasha ----------
+# Een apart blok, zodat de andere schermgroepen hun eigen overgangen ernaast kunnen zetten.
+DATA_TRANSITIONS = [
+    ("spotify: binnenkomen, tellers, helix", "switchMainView('home')", "switchMainView('spotify')", 1400),
+    ("spotify: staafjes groeien (scrollen)", None, "window.scrollTo(0, document.body.scrollHeight)", 1200),
+    ("spotify: ander jaar, staafjes morphen",
+     "(() => { window.scrollTo(0, 0); const s = document.getElementById('spotify-year-select');"
+     " s.value = s.options[s.options.length - 1].value; loadSpotifyStats(); })()",
+     "(() => { const s = document.getElementById('spotify-year-select'); s.value = 'all'; loadSpotifyStats(); })()", 1200),
+    # (Kaart binnenkomen zelf meet vooral het opnieuw laden van alle punten, geen beweging)
+    ("kaart: groep splitst (inzoomen)", "switchMainView('map')",
+     "(() => { const c = document.querySelector('.map-cluster-wrap'); if (c) c.click(); })()", 1000),
+    ("kaart: route tekent zich", None, "document.getElementById('map-track').click()", 2200),
+    ("datagatherer: kaarten in ritme", "switchMainView('home')", "switchMainView('datagatherer')", 1200),
+    ("berichten: ander gesprek", "switchMainView('berichten')",
+     "(() => { const i = [...document.querySelectorAll('#msg-list .msg-item')]; const n = i.find(x => !x.classList.contains('active')); if (n) n.click(); })()", 1000),
+    # Een lange lijst: 5000 gesprekken (een kopie van wat er is) komen binnen; alleen wat in beeld
+    # staat beweegt, de rest wacht op reveal (met een plafond), dus de beelden blijven vlot
+    ("berichten: 5000 gesprekken", "switchMainView('berichten')",
+     "(() => { const c = msgState.convs[0]; if (!c) return; msgState.q = '';"
+     " msgState.convs = Array.from({ length: 5000 }, (_, i) => ({ ...c, id: 900000 + i, title: c.title + ' ' + i }));"
+     " document.getElementById('msg-list')._mdKey = null; msgRenderList(); })()", 1200),
+    ("berichten: scrollen door 5000", None,
+     "document.getElementById('msg-list').scrollTop = 4000", 900),
+    ("activiteit: andere dag (tijdlijn)", "switchMainView('activity')",
+     "(() => { const d = [...document.querySelectorAll('.act-day')]; const n = d.find(x => x.getAttribute('aria-pressed') !== 'true'); if (n) n.click(); })()", 1000),
+    ("pasha: bubbel springt in", "switchMainView('home')",
+     "(() => { const m = document.getElementById('chat-messages'); m.appendChild(createEl('div', { class: 'chat-message user-message' },"
+     " createEl('div', { class: 'message-bubble message-text', text: 'Hoi Pasha' }))); m.appendChild(chatLoadingBubble()); })()", 900),
+]
+TRANSITIONS += DATA_TRANSITIONS
+
+
 def start_server(workdir: Path, showcase: bool):
     python = server_python()
     vault = workdir / "vault"
