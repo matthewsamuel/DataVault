@@ -42,15 +42,25 @@ REGION_NL = {
     'Trentino-Alto Adige': 'Trentino-Zuid-Tirol', 'Corse': 'Corsica', 'Guyane française': 'Frans-Guyana',
     'England': 'Engeland', 'Scotland': 'Schotland', 'Northern Ireland': 'Noord-Ierland',
 }
-PROVINCE_NL = {('BEL', 'Brussels'): 'Brussel', ('FRA', 'Nord'): 'Nord'}
+PROVINCE_NL = {('BEL', 'Brussels'): 'Brussel', ('FRA', 'Nord'): 'Nord',
+               # Natural Earth vertaalt de Deense hoofdstadregio letterlijk ('Hoofdstad'); Nederlands gebruikt de Deense naam
+               ('DNK', 'Hovedstaden'): 'Hovedstaden', ('DNK', 'Sjaælland'): 'Seeland',
+               # één spelling voor de stad en haar regio, zoals de kaart de stad noemt
+               ('MAR', 'Marrakech - Tensift - Al Haouz'): 'Marrakesh-Tensift-Al Haouz'}
+# Zweedse län: de naam zonder 'län' (Natural Earth's Nederlandse naam is 'Stockholms län')
+RAW_NAME = {'SWE'}
+RAW_FIX = {('SWE', 'Orebro'): 'Örebro'}
 # Wat voor gebied het is, voor 'provincie Gelderland' bij een foto (alleen de gewone soorten)
 KIND_NL = {'Province': 'provincie', 'State': 'staat', 'Region': 'regio', 'District': 'district', 'County': 'graafschap',
            'Department': 'departement', 'Canton': 'kanton', 'Prefecture': 'prefectuur', 'Voivodeship|Province': 'woiwodschap'}
 KIND_BY_COUNTRY = {'ESP': 'provincie', 'DEU': 'deelstaat', 'AUT': 'deelstaat', 'FRA': 'regio', 'ITA': 'regio', 'GBR': ''}
+# Een fylke (Noorwegen) en een län (Zweden) heten in het Nederlands provincie, geen graafschap
+KIND_COUNTY = {'NOR': 'provincie', 'SWE': 'provincie'}
 CITY_NL = {
     'Brussels': 'Brussel', 'Antwerp': 'Antwerpen', 'Ghent': 'Gent', 'Bruges': 'Brugge', 'Ostend': 'Oostende',
     'Liège': 'Luik', 'Namur': 'Namen', 'Mons': 'Bergen', 'Tournai': 'Doornik', 'Mouscron': 'Moeskroen',
     'Arlon': 'Aarlen', 'Wavre': 'Waver', 'Louvain': 'Leuven', 'Courtrai': 'Kortrijk', 'Malines': 'Mechelen',
+    'Almere Stad': 'Almere',    # GeoNames noemt het centrum zo; iedereen zegt Almere
 }
 SKIP_FCODES = {'PPLX', 'PPLH', 'PPLQ', 'PPLW', 'PPLCH', 'PPLR'}
 CITY_MIN_POP = 50000
@@ -163,10 +173,12 @@ def build_provinces(src):
             name = clean_name(a3, p[key], None)
             label = None
         else:
-            name = clean_name(a3, p['name'], p.get('name_nl'))
+            raw = RAW_FIX.get((a3, p['name']), p['name'])
+            name = clean_name(a3, raw, None if a3 in RAW_NAME else p.get('name_nl'))
             label = (p['longitude'], p['latitude']) if p.get('longitude') is not None else None
         groups[a3][name].append((g, label))
-        kinds.setdefault(a3, {})[name] = KIND_BY_COUNTRY.get(a3, KIND_NL.get(p.get('type_en') or '', ''))
+        kind = KIND_COUNTY.get(a3) if p.get('type_en') == 'County' and a3 in KIND_COUNTY else None
+        kinds.setdefault(a3, {})[name] = kind or KIND_BY_COUNTRY.get(a3, KIND_NL.get(p.get('type_en') or '', ''))
     result, shapes = {}, {}
     for a3, units in groups.items():
         polys = {name: unary_union([g for g, _ in parts]) for name, parts in units.items()}
