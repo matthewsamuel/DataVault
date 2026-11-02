@@ -12327,8 +12327,8 @@ button.storage-file-thumb:hover .storage-file-play {
 
 .elo-scope-chevron {
     flex: none;
-    font-size: var(--fs-2xs);
-    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
     transition: transform var(--dur-2) var(--ease-standard);
 }
 
@@ -12371,11 +12371,38 @@ button.storage-file-thumb:hover .storage-file-play {
 }
 
 .elo-scope-list {
+    --scope-fade-top: 0px;
+    --scope-fade-bottom: 0px;
     max-height: min(360px, 55vh);
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: var(--space-xs) 0;
+    /* Staat er meer dan je ziet, dan vervaagt de rand (macOS verbergt de schuifbalk) */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, var(--text-primary) var(--scope-fade-top),
+        var(--text-primary) calc(100% - var(--scope-fade-bottom)), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, var(--text-primary) var(--scope-fade-top),
+        var(--text-primary) calc(100% - var(--scope-fade-bottom)), transparent 100%);
 }
+
+.elo-scope-list.has-more-above {
+    --scope-fade-top: var(--space-xl);
+}
+
+.elo-scope-list.has-more-below {
+    --scope-fade-bottom: var(--space-2xl);
+}
+
+/* Bij het openen schuiven de eerste rijen achter elkaar in, zoals in de andere menu's
+   (Rustig en Uit: --stagger-step 0 en geen afstand, dus meteen) */
+.elo-scope-pop.is-entering .elo-scope-list > * {
+    animation: shell-menu-item-in var(--spring-smooth-dur) var(--spring-smooth) both;
+}
+
+.elo-scope-pop.is-entering .elo-scope-list > :nth-child(2) { animation-delay: var(--stagger-step); }
+.elo-scope-pop.is-entering .elo-scope-list > :nth-child(3) { animation-delay: calc(var(--stagger-step) * 2); }
+.elo-scope-pop.is-entering .elo-scope-list > :nth-child(4) { animation-delay: calc(var(--stagger-step) * 3); }
+.elo-scope-pop.is-entering .elo-scope-list > :nth-child(5) { animation-delay: calc(var(--stagger-step) * 4); }
+.elo-scope-pop.is-entering .elo-scope-list > :nth-child(n + 6) { animation-delay: calc(var(--stagger-step) * 5); }
 
 .elo-scope-group {
     padding: var(--space-sm) var(--space-sm) var(--space-xs);
@@ -12418,6 +12445,20 @@ button.storage-file-thumb:hover .storage-file-play {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Het aantal bestanden, rustig en in mono, zoals in de zijbalk van Albums */
+.elo-scope-option-count {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    color: var(--text-tertiary);
+}
+
+/* Een album met te weinig foto's om te vergelijken: achteraan en gedimd */
+.elo-scope-option.is-few .elo-scope-option-name,
+.elo-scope-option.is-few .elo-scope-option-icon {
+    color: var(--text-tertiary);
 }
 
 .elo-scope-option-check {
@@ -13071,6 +13112,22 @@ html[data-motion="rustig"] .elo-trash:hover i {
 
 .elo-notice i {
     color: var(--accent-text);
+}
+
+/* Alleen de naam wordt afgekort, zodat 'is weg' altijd te lezen is */
+.elo-notice-name {
+    display: inline-block;
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
+@media (max-width: 1200px) {
+    .elo-notice-name {
+        max-width: 8ch;
+    }
 }
 
 .elo-empty-actions {

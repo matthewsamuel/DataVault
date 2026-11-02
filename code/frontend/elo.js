@@ -47,6 +47,7 @@ const ELO_RESULT_MS = 2200;         // zo lang staat de uitslag (+N · −N) ond
 const elo = {
     scope: '',          // pad van de collectie ('' = hele bibliotheek), of 'soort:waarde' (album)
     scopeTitle: 'Hele bibliotheek',
+    swallowClick: false, // de klik na een pointerdown die alleen de kiezer sloot (eloScopeOutsidePointer)
     tab: 'compare',     // 'compare' of 'board'
     pair: null,         // het paar in beeld ([a, b] zoals de server ze gaf); null zonder paar
     queue: [],          // klaarstaande paren (met hun geladen afbeeldingen)
@@ -56,6 +57,7 @@ const elo = {
     resultTimer: 0,     // wanneer de uitslag onderin weer plaatsmaakt voor de voortgang
     notice: '',         // korte melding vooraan in de voortgangsregel
     noticeIcon: 'fa-rotate-left',
+    noticeName: '',     // een naam vóór de melding, die als enige wordt afgekort ('Oud album' is weg)
     stats: null,        // {photos, compared, comparisons, settled}
     progress: null,     // {session, today, streak, best_streak, goal, total}
     undo: [],           // ids van vergelijkingen in deze ronde, nieuwste laatst
@@ -186,6 +188,8 @@ function eloBuild() {
         if (e.key === 'Tab' || e.key === 'Enter') overlay.classList.add('is-keyboard');
     }, true);
     overlay.addEventListener('pointerdown', () => overlay.classList.remove('is-keyboard'), true);
+    overlay.addEventListener('pointerdown', eloScopeOutsidePointer, true);
+    overlay.addEventListener('click', eloScopeSwallowClick, true);
     document.body.appendChild(overlay);
     return overlay;
 }
@@ -227,18 +231,19 @@ function eloScopePicker() {
     },
         createEl('i', { id: 'elo-scope-icon', class: 'fas fa-photo-film elo-scope-icon', 'aria-hidden': 'true' }),
         createEl('span', { id: 'elo-scope-label', class: 'elo-scope-label', text: 'Hele bibliotheek' }),
-        createEl('i', { class: 'fas fa-chevron-down elo-scope-chevron', 'aria-hidden': 'true' }),
+        createEl('i', { class: 'fas fa-caret-down elo-scope-chevron', 'aria-hidden': 'true' }),   // dezelfde pijl als de keuzelijsten
         createEl('kbd', { text: 'c' }));
     const filter = createEl('input', {
         id: 'elo-scope-filter', class: 'input input-sm', type: 'text', placeholder: 'Zoek een collectie',
         autocomplete: 'off', spellcheck: 'false', role: 'combobox', 'aria-label': 'Zoek een collectie',
         'aria-controls': 'elo-scope-list', 'aria-expanded': 'true', 'aria-autocomplete': 'list',
-        onInput: () => eloScopeRenderList(true),
+        onInput: () => { document.getElementById('elo-scope-pop').classList.remove('is-entering'); eloScopeRenderList(true); },
         onKeydown: eloScopeKey,
     });
     const pop = createEl('div', { id: 'elo-scope-pop', class: 'popover elo-scope-pop', hidden: true },
         createEl('div', { class: 'search-field elo-scope-search' }, eloIcon('fa-magnifying-glass'), filter),
-        createEl('div', { id: 'elo-scope-list', class: 'elo-scope-list', role: 'listbox', 'aria-label': 'Collecties' }));
+        createEl('div', { id: 'elo-scope-list', class: 'elo-scope-list', role: 'listbox', 'aria-label': 'Collecties',
+            onScroll: eloScopeFades }));
     const wrap = createEl('div', { class: 'elo-scope-wrap' }, button, pop);
     wrap.addEventListener('focusout', (e) => {
         if (eloScopeIsOpen() && !wrap.contains(e.relatedTarget)) eloScopeClose(false);
@@ -253,7 +258,12 @@ function eloScopeOptions() {
     const options = [{ value: '', title: 'Hele bibliotheek', group: '', icon: 'fa-photo-film' }];
     [...shows].sort((a, b) => a.title.localeCompare(b.title, 'nl'))
         .forEach(show => options.push({ value: show.path, title: show.title, group: 'Shows', icon: 'fa-film' }));
-    elo.albums.forEach(a => options.push({ value: `album:${a.id}`, title: a.name, group: 'Albums', icon: a.icon || 'fa-images' }));
+    // Albums met te weinig foto's om te vergelijken (minder dan 2) komen achteraan, gedimd
+    const few = (a) => typeof a.count === 'number' && a.count < 2;
+    [...elo.albums.filter(a => !few(a)), ...elo.albums.filter(few)].forEach(a => options.push({
+        value: `album:${a.id}`, title: a.name, group: 'Albums', icon: a.icon || 'fa-images',
+        count: typeof a.count === 'number' ? a.count : null, few: few(a),
+    }));
     eloScopeProviders.forEach(({ label, list }) => {
         let items = [];
         try { items = list() || []; } catch (_) { items = []; }
@@ -310,22 +320,40 @@ function eloScopeRenderList(resetActive) {
         }
         const selected = o.value === elo.scope;
         nodes.push(createEl('div', {
-            id: `elo-scope-opt-${i}`, class: `elo-scope-option${o.value === elo.scopeActive ? ' is-active' : ''}`,
-            role: 'option', 'aria-selected': String(selected), title: o.title, dataset: { value: o.value },
+            id: `elo-scope-opt-${i}`,
+            class: `elo-scope-option${o.value === elo.scopeActive ? ' is-active' : ''}${o.few ? ' is-few' : ''}`,
+            role: 'option', 'aria-selected': String(selected), dataset: { value: o.value },
+            title: o.few ? `${o.title}: te weinig foto's om te vergelijken` : o.title,
             onPointerdown: (e) => e.preventDefault(),      // de focus blijft in het zoekveld
             onClick: () => eloScopeChoose(o.value),
             onPointermove: () => eloScopeSetActive(o.value, false),
         },
             createEl('i', { class: `fas fa-fw ${o.icon} elo-scope-option-icon`, 'aria-hidden': 'true' }),
             createEl('span', { class: 'elo-scope-option-name', text: o.title }),
+            typeof o.count === 'number' ? createEl('span', { class: 'elo-scope-option-count', text: formatNumberNl(o.count) }) : null,
             createEl('i', { class: 'fas fa-check elo-scope-option-check', 'aria-hidden': 'true' })));
     });
     if (!shown.length) {
         nodes.push(createEl('div', { class: 'elo-scope-empty', role: 'presentation' },
             eloIcon('fa-magnifying-glass'), createEl('span', { text: 'Geen collectie met die naam' })));
     }
-    list.replaceChildren(...nodes);
+    // Niets veranderd (de albums kwamen na het openen nog eens binnen): de rijen blijven staan
+    const key = JSON.stringify([elo.scope, shown.map(o => [o.value, o.title, o.icon, o.count])]);
+    if (list.dataset.key !== key || !list.childElementCount) {
+        list.dataset.key = key;
+        list.replaceChildren(...nodes);
+    }
     eloScopeSetActive(elo.scopeActive, true);
+    eloScopeFades();
+}
+
+// Een zachte rand onder (en boven) de lijst zolang er nog meer staat dan je ziet
+function eloScopeFades() {
+    const list = document.getElementById('elo-scope-list');
+    if (!list) return;
+    const more = list.scrollHeight - list.clientHeight - list.scrollTop;
+    list.classList.toggle('has-more-below', more > 1);
+    list.classList.toggle('has-more-above', list.scrollTop > 1);
 }
 
 function eloScopeSetActive(value, scroll) {
@@ -355,6 +383,12 @@ function eloScopeOpen() {
     const filter = document.getElementById('elo-scope-filter');
     filter.value = '';
     elo.scopeActive = elo.scope;
+    // De rijen schuiven bij het openen even achter elkaar in (niet bij typen)
+    const list = document.getElementById('elo-scope-list');
+    list.dataset.key = '';
+    pop.classList.add('is-entering');
+    clearTimeout(pop._eloEnter);
+    pop._eloEnter = setTimeout(() => pop.classList.remove('is-entering'), 600);
     pop.hidden = false;
     document.getElementById('elo-scope').setAttribute('aria-expanded', 'true');
     eloScopeRenderList(false);
@@ -381,6 +415,25 @@ function eloScopeClose(toButton, toDuel = false) {
     const overlay = document.getElementById('elo-overlay');
     if (toDuel && overlay) eloFocusInBody(overlay);
     else if (toButton) document.getElementById('elo-scope').focus({ preventScroll: true });
+}
+
+// Een klik naast de open kiezer sluit alleen de kiezer: bijna alles ernaast is een foto, en die
+// klik mag nooit ook een keuze in het duel zijn. De pointerdown en de klik erna worden opgevangen.
+function eloScopeOutsidePointer(e) {
+    elo.swallowClick = false;
+    const wrap = document.querySelector('.elo-scope-wrap');
+    if (!eloScopeIsOpen() || !wrap || wrap.contains(e.target)) return;
+    e.preventDefault();      // ook geen focuswissel (die zou de kiezer via focusout sluiten)
+    e.stopPropagation();
+    elo.swallowClick = true;
+    eloScopeClose(false, true);
+}
+
+function eloScopeSwallowClick(e) {
+    if (!elo.swallowClick) return;
+    elo.swallowClick = false;
+    e.preventDefault();
+    e.stopPropagation();
 }
 
 function eloScopeKey(e) {
@@ -458,8 +511,11 @@ function eloScopeGone(err) {
     if (!err || err.status !== 404 || !elo.scope) return false;
     const gone = elo.scopeTitle;
     eloSetScope('', 'Hele bibliotheek');
-    elo.notice = `'${gone}' bestaat niet meer`;
+    // Onderin past alleen kort (de naam wordt zo nodig afgekort); de uitleg staat in de melding
+    elo.notice = 'is weg';
+    elo.noticeName = `'${gone}'`;
     elo.noticeIcon = 'fa-circle-info';
+    showToast('Collectie niet gevonden', `'${gone}' bestaat niet meer. Je vergelijkt nu de hele bibliotheek.`, 'info');
     eloUpdateProgress();
     return true;
 }
@@ -1201,6 +1257,7 @@ async function eloUndo() {
         if (elo.pair && !elo.pair.some(p => back.has(p.path))) elo.queue.unshift(elo.pair);
         eloHideResult(true);
         elo.notice = 'Teruggedraaid, kies opnieuw';
+        elo.noticeName = '';
         elo.noticeIcon = 'fa-rotate-left';
         eloShowPair(eloPreload(pair), 'back');
         elo.shownAt = 0;            // een teruggedraaid paar ken je al: meteen te kiezen
@@ -1252,8 +1309,11 @@ function eloUpdateProgress() {
         // 'vergeleken' = in een duel geweest; stemmen in de slideshow tellen hier niet mee (de ranglijst zegt 'met een score')
         text = `${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} vergeleken`;
     }
+    if (!elo.notice) elo.noticeName = '';
     const notice = elo.notice ? createEl('span', { class: 'elo-notice' },
-        eloIcon(elo.noticeIcon), ` ${elo.notice}`) : null;
+        eloIcon(elo.noticeIcon), ' ',
+        elo.noticeName ? createEl('span', { class: 'elo-notice-name', text: elo.noticeName }) : null,
+        `${elo.noticeName ? ' ' : ''}${elo.notice}`) : null;
     box.replaceChildren(...[notice, notice && text ? ' · ' : null, text ? createEl('span', { text }) : null].filter(Boolean));
     box.title = [elo.scopeTitle, box.textContent].filter(Boolean).join(' · ');
     eloUpdateMeters();
@@ -1325,6 +1385,7 @@ function eloCelebrateGoal(before) {
     const p = elo.progress;
     if (!p || before >= p.goal || p.session < p.goal) return;
     elo.notice = `Sessiedoel gehaald: ${formatNumberNl(p.goal)} vergelijkingen`;
+    elo.noticeName = '';
     elo.noticeIcon = 'fa-trophy';
     const ring = document.getElementById('elo-goal');
     if (!ring) return;

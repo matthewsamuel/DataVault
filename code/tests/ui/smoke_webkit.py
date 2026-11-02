@@ -1220,6 +1220,17 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(not page.is_visible("#elo-scope-pop") and page.is_visible("#elo-overlay")
                    and page.evaluate("document.activeElement.id") == "elo-scope",
                    "elo: Escape in the collection picker did not close just the picker")
+            # A click next to the open picker (nearly always on a photo) only closes the picker
+            page.wait_for_timeout(400)
+            step("elo: c opens the picker again", lambda: page.keyboard.press("c"), 0.4)
+            step("elo: a click on a photo closes only the picker",
+                 lambda: page.click("#elo-body .elo-stage:not(.is-leaving) .elo-choice[data-side='0']"), 0.6)
+            expect(not page.is_visible("#elo-scope-pop") and comparisons() == count,
+                   f"elo: a click next to the open picker also picked a photo ({comparisons()} vs {count})")
+            # (that the next click picks again is checked after the album below: a pick here would
+            # make the album's two photos 'recent')
+            expect(not page.evaluate("elo.swallowClick"),
+                   "elo: the click after closing the picker is still being swallowed")
 
             # Double picks: a key that bounces (again within the dwell time after the new pair
             # appeared) and a held key pick nothing more; neither does a key while no pair is ready
@@ -1382,6 +1393,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("elo.scope") == album_key, "elo: the window did not reopen on the album chosen last time")
             page.focus("#elo-overlay")
             choose_scope("hele bib", "back to the library again")
+            # With the picker closed, a click on a photo picks it
+            page.wait_for_timeout(400)
+            count = comparisons()
+            step("elo: a click on a photo picks it",
+                 lambda: page.click("#elo-body .elo-stage:not(.is-leaving) .elo-choice[data-side='0']"), 1.0)
+            expect(comparisons() == count + 1, f"elo: a click on a photo did not pick it ({comparisons()} vs {count})")
             page.focus("#elo-overlay")
             expect_focus_trapped("elo-overlay", "elo: window")
             step("elo: Ranglijst", lambda: page.click("#elo-tab-board"), 1.0)
