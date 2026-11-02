@@ -121,11 +121,18 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   kopieën, bewerkingen, bursts), niet byte voor byte gelijk. `backend/near_dups.py`, routes in
   `backend/routes/series.py`, scherm in `frontend/series.js`; migraties 30 en 31.
 - **Vergelijken** is een achtergrondtaak (`phash`, na een snelle ronde van de bibliotheek). Per foto
-  (alleen foto's; video's en RAW-bestanden die Pillow niet kan openen worden overgeslagen) een klein
-  gedecodeerde versie (JPEG in draft-modus, HEIC via pillow_heif, rechtop volgens EXIF): dHash en
-  pHash (64 bits), de gemiddelde kleur van de vier kwarten, contrast, scherpte (variantie van de
-  Laplaciaan), en afgekapte schaduwen en hoge lichten. Alleen nieuwe of veranderde foto's worden
-  gelezen; pauzeren, hervatten en annuleren verliezen hooguit één stapel van 200.
+  (RAW-bestanden die Pillow niet kan openen worden overgeslagen) een klein gedecodeerde versie (JPEG
+  in draft-modus, HEIC via pillow_heif, rechtop volgens EXIF): dHash en pHash (64 bits), de
+  gemiddelde kleur van de vier kwarten, contrast, scherpte (variantie van de Laplaciaan), en
+  afgekapte schaduwen en hoge lichten. Alleen nieuwe of veranderde foto's worden gelezen; pauzeren,
+  hervatten en annuleren verliezen hooguit één stapel van 200.
+- **Video's** doen mee als ffmpeg er is: per video één beeld (op 1 s, anders het eerste; ffmpeg
+  geeft het als PNG door een pipe, op hooguit 512 px, één thread, hooguit 30 s), in dezelfde taak en
+  net zo bewaard bij grootte en wijzigingstijd, dus één keer per video. Video's vormen alleen reeksen
+  met video's; de video van een Live Photo (een video met een foto van dezelfde naam in de map) doet
+  niet mee. Zonder ffmpeg tellen video's niet mee en wacht er niets. Op het scherm: een afspeelteken
+  met de duur op de tegel, en **Groot bekijken** toont het vergeleken beeld met **Afspelen** (mp4,
+  m4v, mov, webm; andere formaten tonen alleen het beeld).
 - Paren: multi-index hashing (4 delen van 16 bits, nooit alle paren); foto's die precies hetzelfde
   ogen vormen één groep. Bursts: dezelfde camera, EXIF-tijden hooguit 3 s na elkaar, dezelfde map.
 - Strengheid (pHash / dHash / kleur): **Streng** 4/6/10, **Normaal** 8/10/16 (standaard), **Ruim**

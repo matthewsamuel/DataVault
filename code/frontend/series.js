@@ -185,7 +185,8 @@ function seriesRenderStatus(job) {
         button.disabled = true;
         return;
     }
-    const parts = [`${formatNumberNl(status.analysed)} van ${formatNumberNl(status.photos)} foto's vergeleken`];
+    const parts = [`${formatNumberNl(status.analysed)} van ${formatNumberNl(status.photos)} `
+        + `${status.videos ? 'foto\'s en video\'s' : 'foto\'s'} vergeleken`];
     // 'Nog te doen' telt alleen de foto's die nog bekeken moeten worden (zo klopt de som); het
     // zoeken naar reeksen tussen al bekeken foto's is een aparte, korte stap
     const toAnalyse = status.to_analyse ?? status.pending;
@@ -379,10 +380,25 @@ function seriesWatchMore(button) {
 
 // ==================== TEKENEN ====================
 
+// 'foto' of 'video' (een reeks bestaat uit alleen foto's of alleen video's)
+function seriesNoun(series, n) {
+    if (series && series.media === 'video') return n === 1 ? 'video' : 'video\'s';
+    return n === 1 ? 'foto' : 'foto\'s';
+}
+
+function seriesDuration(seconds) {
+    if (!seconds) return null;
+    const total = Math.round(seconds);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = String(total % 60).padStart(2, '0');
+    return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
 function seriesTitle(series) {
     const title = series.kind === 'burst'
         ? `Burst van ${series.count} foto's`
-        : `${series.count} foto's die op elkaar lijken`;
+        : `${series.count} ${seriesNoun(series, series.count)} die op elkaar lijken`;
     // Een heel grote groep komt in delen (de server knipt hem op tijdsvolgorde)
     return series.part ? `${title} (deel ${series.part[0]} van ${series.part[1]})` : title;
 }
@@ -534,26 +550,26 @@ function seriesCard(series) {
         createEl('div', { class: 'series-card-header' },
             createEl('div', { class: 'series-card-heading' },
                 createEl('span', { class: 'series-kind-icon', 'aria-hidden': 'true' },
-                    createEl('i', { class: `fas ${series.kind === 'burst' ? 'fa-bolt' : 'fa-clone'}` })),
+                    createEl('i', { class: `fas ${series.kind === 'burst' ? 'fa-bolt' : series.media === 'video' ? 'fa-film' : 'fa-clone'}` })),
                 createEl('div', { class: 'series-card-titles' },
                     createEl('h2', { class: 'series-card-title', id: `series-title-${series.key}`, text: seriesTitle(series) }),
                     createEl('div', { class: 'series-card-meta' }, ...seriesJoin(meta)))),
             createEl('div', { class: 'series-card-actions' },
                 createEl('button', {
-                    class: 'btn btn-ghost', title: 'De foto\'s groot naast elkaar (v)', onClick: () => seriesOpenCompare(series),
+                    class: 'btn btn-ghost', title: `De ${seriesNoun(series, 2)} groot naast elkaar (v)`, onClick: () => seriesOpenCompare(series),
                 }, createEl('i', { class: 'fas fa-magnifying-glass-plus', 'aria-hidden': 'true' }), 'Groot bekijken'),
                 createEl('button', {
                     class: 'btn btn-ghost', title: 'Deze reeks nu overslaan (s)', onClick: () => seriesSkip(series),
                 }, 'Overslaan'),
                 createEl('button', {
-                    class: 'btn btn-secondary series-keepall-btn', title: 'Alle foto\'s blijven; de reeks komt niet terug (a)',
+                    class: 'btn btn-secondary series-keepall-btn', title: `Alle ${seriesNoun(series, 2)} blijven; de reeks komt niet terug (a)`,
                     onClick: () => seriesKeepAll(series),
                 }, 'Alles behouden'),
                 createEl('button', {
                     class: 'btn btn-primary series-confirm-btn', title: 'Bevestigen (Enter)',
                     onClick: () => seriesConfirm(series),
                 }, `Verplaats ${seriesMoveCount(series, keep).files}`))),
-        createEl('div', { class: 'series-photos', role: 'group', 'aria-label': `Foto's: ${seriesTitle(series)}` },
+        createEl('div', { class: 'series-photos', role: 'group', 'aria-label': `${series.media === 'video' ? 'Video\'s' : 'Foto\'s'}: ${seriesTitle(series)}` },
             ...series.members.map(member => seriesPhoto(series, member, keep.has(member.id)))),
         createEl('div', { class: 'series-detail', 'aria-live': 'polite' }));
     const tile = SERIES_TILE[series.members.length];
@@ -575,9 +591,9 @@ function seriesMoveCount(series, keep) {
     return { photos: move.length, copies, files: move.length + copies };
 }
 
-function seriesMoveTitle(count) {
+function seriesMoveTitle(count, series) {
     return count.copies
-        ? `${count.photos} ${count.photos === 1 ? 'foto' : 'foto\'s'} en ${count.copies} exacte ${count.copies === 1 ? 'kopie' : 'kopieën'} verplaatsen (Enter)`
+        ? `${count.photos} ${seriesNoun(series, count.photos)} en ${count.copies} exacte ${count.copies === 1 ? 'kopie' : 'kopieën'} verplaatsen (Enter)`
         : 'Bevestigen (Enter)';
 }
 
@@ -588,7 +604,7 @@ function seriesSyncActions(card, series, keep) {
     const moving = count.photos;
     confirm.hidden = !moving;
     confirm.textContent = `Verplaats ${count.files}`;
-    confirm.title = seriesMoveTitle(count);
+    confirm.title = seriesMoveTitle(count, series);
     keepAll.classList.toggle('btn-primary', !moving);
     keepAll.classList.toggle('btn-secondary', !!moving);
 }
@@ -603,7 +619,16 @@ function seriesJoin(nodes) {
 }
 
 function seriesPhotoLabel(member, kept) {
-    return `${member.name}: ${kept ? 'blijft' : 'gaat naar RAW_DUPLICATES'}${member.best ? ', voorgesteld als beste' : ''}, score ${member.score}`;
+    const video = member.kind === 'video' ? `, video${member.duration ? ` van ${seriesDuration(member.duration)}` : ''}` : '';
+    return `${member.name}${video}: ${kept ? 'blijft' : 'gaat naar RAW_DUPLICATES'}${member.best ? ', voorgesteld als beste' : ''}, score ${member.score}`;
+}
+
+// Een video in de reeks: een afspeelteken met de duur, rechtsonder op het beeld
+function seriesVideoBadge(member, title) {
+    if (member.kind !== 'video') return null;
+    return createEl('span', { class: 'series-video-badge', 'aria-hidden': 'true', title: title || null },
+        createEl('i', { class: 'fas fa-play' }),
+        seriesDuration(member.duration) || 'Video');
 }
 
 function seriesPhoto(series, member, kept) {
@@ -625,6 +650,7 @@ function seriesPhoto(series, member, kept) {
         img,
         member.best ? createEl('span', { class: 'series-best-badge' },
             createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), 'Beste') : null,
+        seriesVideoBadge(member),
         createEl('span', { class: 'series-photo-state', 'aria-hidden': 'true', text: kept ? '' : 'Gaat weg' }));
     const size = member.width && member.height ? `${member.width} × ${member.height}` : formatBytes(member.size);
     return createEl('div', { class: 'series-photo-cell' },
@@ -866,7 +892,7 @@ async function seriesKeepAll(series) {
         seriesDone(series, true);
         if (seriesState.status) seriesState.status.reviewed += 1;
         seriesRenderStatus();
-        showToast('Alles behouden', `${series.count} foto's blijven staan. Deze reeks komt niet meer terug, tenzij hij verandert; `
+        showToast('Alles behouden', `${series.count} ${seriesNoun(series, series.count)} blijven staan. Deze reeks komt niet meer terug, tenzij hij verandert; `
             + 'met \u2018Ongedaan maken\u2019 boven de lijst staat hij er meteen weer.', 'success');
     } catch (err) {
         toastFetchError('Behouden mislukt', err);
@@ -890,14 +916,14 @@ function seriesConfirm(series) {
     seriesState.confirm = { series, keep: kept.map(m => m.id) };
     const destination = seriesState.status ? seriesState.status.holding_folder : null;
     document.getElementById('series-confirm-title').textContent =
-        `${files} ${files === 1 ? 'foto' : 'foto\'s'} uit deze reeks verplaatsen?`;
+        `${files} ${seriesNoun(series, files)} uit deze reeks verplaatsen?`;
     const list = document.getElementById('series-confirm-list');
     list.replaceChildren(...[
         createEl('li', {},
             `${files} ${files === 1 ? 'bestand gaat' : 'bestanden gaan'} (${formatBytes(bytes)}) naar `,
             createEl('span', { class: 'path-label', title: destination || '', text: 'RAW_DUPLICATES/near-duplicates' }),
             ', in dezelfde mappen als nu.'),
-        copies ? createEl('li', { text: `Daarvan ${copies} exacte ${copies === 1 ? 'kopie' : 'kopieën'} van een foto die weggaat.` }) : null,
+        copies ? createEl('li', { text: `Daarvan ${copies} exacte ${copies === 1 ? 'kopie' : 'kopieën'} van een ${seriesNoun(series, 1)} die weggaat.` }) : null,
         createEl('li', { class: 'dup-confirm-keep' },
             `${kept.length === 1 ? 'Blijft' : 'Blijven'}: `,
             ...kept.flatMap((m, i) => [i ? ', ' : null,
@@ -905,7 +931,7 @@ function seriesConfirm(series) {
         createEl('li', { text: 'Er wordt niets gewist. In het Herstelcentrum zet je deze reeks in één keer terug.' }),
     ].filter(Boolean));
     const go = document.getElementById('btn-series-go');
-    go.textContent = `Verplaats ${files} ${files === 1 ? 'foto' : 'foto\'s'}`;
+    go.textContent = `Verplaats ${files} ${seriesNoun(series, files)}`;
     go.disabled = false;
     document.getElementById('modal-series-confirm').classList.add('active');
 }
@@ -937,7 +963,7 @@ async function seriesRunConfirm() {
                 result.failed.map(f => `${f.path ? f.path.split('/').pop() : 'foto'}: ${f.reason}`).join('\n'), 'warning');
             seriesLoad(true);
         } else {
-            showToast(`${moved} ${moved === 1 ? 'foto' : 'foto\'s'} verplaatst`,
+            showToast(`${moved} ${seriesNoun(pending.series, moved)} verplaatst`,
                 'Ze staan in RAW_DUPLICATES/near-duplicates. Terugzetten kan in het Herstelcentrum.', 'success');
             seriesState.moved += 1;
             seriesDone(pending.series, true);
@@ -981,28 +1007,39 @@ function seriesOpenCompare(series, id) {
 }
 
 function seriesCloseCompare() {
+    document.querySelectorAll('#series-compare-grid video').forEach(v => v.pause());
     document.getElementById('modal-series-compare').classList.remove('active');
     document.getElementById('series-compare-grid').replaceChildren();
     seriesCompareState.series = null;
 }
 
 function seriesComparePane(series, member) {
+    const isVideo = member.kind === 'video';
     const img = createEl('img', { class: 'series-compare-img loading', alt: member.name, draggable: 'false' });
     img.addEventListener('load', () => img.classList.remove('loading'), { once: true });
-    // Kan de browser het origineel niet tonen (HEIC buiten Safari), dan de miniatuur
+    // Kan de browser het origineel niet tonen (HEIC buiten Safari), dan de miniatuur. Een video
+    // toont eerst het beeld waarop hij vergeleken is (de miniatuur); afspelen kan erbij
     img.addEventListener('error', () => {
         if (img.dataset.fallback) { img.classList.remove('loading'); return; }
         img.dataset.fallback = '1';
         img.src = vaultFileUrl('thumb', member.path);
     });
-    img.src = vaultFileUrl('file', member.path);
+    img.src = vaultFileUrl(isVideo ? 'thumb' : 'file', member.path);
+    const playable = isVideo && slidePlaysAsVideo(member);
     const frame = createEl('div', { class: 'series-compare-frame' },
         img,
         member.best ? createEl('span', { class: 'series-best-badge' },
-            createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), 'Beste') : null);
+            createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), 'Beste') : null,
+        playable ? createEl('button', {
+            type: 'button', class: 'btn btn-secondary btn-sm series-compare-play',
+            'aria-label': `${member.name} afspelen`,
+            onClick: e => { e.stopPropagation(); seriesComparePlay(frame, member); },
+        }, createEl('i', { class: 'fas fa-play', 'aria-hidden': 'true' }), 'Afspelen')
+            : isVideo ? seriesVideoBadge(member, 'Dit formaat speelt de browser niet af; je ziet het beeld waarop vergeleken is') : null);
     frame.addEventListener('pointerdown', e => seriesCompareDragStart(e, frame));
     const facts = [
         member.width && member.height ? `${member.width} × ${member.height}` : null,
+        isVideo ? seriesDuration(member.duration) : null,
         formatBytes(member.size),
         member.camera,
     ].filter(Boolean).join(' · ');
@@ -1088,9 +1125,27 @@ function seriesComparePan() {
 }
 
 // Slepen op 100%: de uitsnede van alle foto's schuift mee
+// Een video speelt op zijn plek in het venster; een andere video die speelt, pauzeert
+function seriesComparePlay(frame, member) {
+    document.querySelectorAll('#series-compare-grid video').forEach(v => v.pause());
+    const video = createEl('video', {
+        class: 'series-compare-img series-compare-video', controls: true, playsinline: true, preload: 'auto',
+        poster: vaultFileUrl('thumb', member.path), src: vaultFileUrl('file', member.path),
+        'aria-label': member.name,
+    });
+    video.addEventListener('play', () => {
+        document.querySelectorAll('#series-compare-grid video').forEach(v => { if (v !== video) v.pause(); });
+    });
+    frame.querySelector('img')?.replaceWith(video);
+    frame.classList.add('is-playing');
+    frame.querySelector('.series-compare-play')?.remove();
+    video.play().catch(() => {});
+    video.focus({ preventScroll: true });
+}
+
 function seriesCompareDragStart(e, frame) {
-    if (!seriesCompareState.detail || e.button !== 0) return;
-    const img = frame.querySelector('img');
+    if (!seriesCompareState.detail || e.button !== 0 || e.target.closest('video, button')) return;
+    const img = frame.querySelector('img, video');
     const rect = img.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     e.preventDefault();
@@ -1118,6 +1173,7 @@ function seriesCompareDragStart(e, frame) {
 
 function seriesCompareKeydown(e) {
     if (e.metaKey || e.ctrlKey || e.altKey || !seriesCompareState.series) return;
+    if (e.target instanceof HTMLVideoElement) return;   // pijlen en spatie zijn dan van de video
     const series = seriesCompareState.series;
     const pos = series.members.findIndex(m => m.id === seriesCompareState.current);
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {

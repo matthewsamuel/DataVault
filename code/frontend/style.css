@@ -5183,6 +5183,51 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     font-size: 10px;
 }
 
+/* Een video in een reeks: afspeelteken en duur, rechtsonder (linksboven staat de ster,
+   rechtsboven het vinkje van wat blijft, linksonder 'Gaat weg') */
+.series-video-badge {
+    position: absolute;
+    z-index: 1;
+    right: var(--space-sm);
+    bottom: var(--space-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    height: 22px;
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background: var(--media-scrim-strong);
+    color: var(--on-media);
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-semibold);
+    font-variant-numeric: tabular-nums;
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+}
+
+.series-video-badge i {
+    font-size: 0.75em;
+}
+
+/* Afspelen in 'Groot bekijken': linksonder op het beeld, boven de video */
+.series-compare-play {
+    position: absolute;
+    z-index: 2;
+    left: var(--space-md);
+    bottom: var(--space-md);
+    box-shadow: var(--shadow-md);
+}
+
+.series-compare-video {
+    background: var(--media-bg);
+}
+
+/* Speelt de video, dan staan de eigen knoppen van de video linksboven: de ster gaat opzij */
+.series-compare-frame.is-playing .series-best-badge {
+    display: none;
+}
+
 .series-photo-name {
     font-size: var(--fs-sm);
     color: var(--text-primary);

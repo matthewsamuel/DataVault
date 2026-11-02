@@ -841,6 +841,10 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
   geïnstalleerd is, leest de bibliotheek nu ook bij deze video's de opnamedatum, de duur en het
   formaat. Ze staan daardoor op de juiste plek in de tijdlijn. Video's die al in de bibliotheek
   stonden worden bij de volgende ronde één keer opnieuw gelezen.
+- **Video's in Beste uit reeks.** Twee kopieën van dezelfde video (bijvoorbeeld het origineel en
+  de verkleinde versie uit WhatsApp) staan nu ook als reeks klaar. Elke tegel toont een afspeelteken
+  met de duur, en in Groot bekijken speel je de video meteen af. Video's komen alleen in een reeks
+  met andere video's, en de video van een Live Photo blijft bij zijn foto. Hiervoor is ffmpeg nodig.
 
 ## Fase 2 – Stabiliseren
 
