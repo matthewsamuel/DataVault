@@ -262,7 +262,7 @@ def _load_detail() -> Dict[str, Any]:
         scale = float(raw["scale"])
 
         def ring(flat: List[int]):
-            a = np.cumsum(np.asarray(flat, dtype=np.int64).reshape(-1, 2), axis=0) / scale
+            a = (np.cumsum(np.asarray(flat, dtype=np.int64).reshape(-1, 2), axis=0) / scale).astype(np.float32)
             return a if len(a) > 2 and (a[0] == a[-1]).all() else np.vstack([a, a[:1]])
 
         provinces, boxes = [], []
@@ -273,16 +273,19 @@ def _load_detail() -> Dict[str, Any]:
             provinces.append((raw["codes"][code], name, shapes, kind))
         a, b = [], []
         for flat in raw["coast"]:
-            line = np.cumsum(np.asarray(flat, dtype=np.int64).reshape(-1, 2), axis=0) / scale
+            line = (np.cumsum(np.asarray(flat, dtype=np.int64).reshape(-1, 2), axis=0) / scale).astype(np.float32)
             a.append(line[:-1])
             b.append(line[1:])
         a, b = np.vstack(a), np.vstack(b)
+        # the antimeridian cuts some shapes: those straight edges along 180 degrees are no coast
+        real = (np.abs(a[:, 0] - b[:, 0]) < 180) & ~((np.abs(a[:, 0]) > 179.9) & (np.abs(b[:, 0]) > 179.9))
+        a, b = a[real], b[real]
         towns = raw["towns"]
+        del raw["provinces"], raw["coast"]
         dutch_country = _dutch(COUNTRY_ALIASES)
         _detail = {
             "provinces": provinces, "boxes": np.asarray(boxes),
-            "coast_a": a, "coast_b": b,
-            "coast_lo": np.minimum(a, b), "coast_hi": np.maximum(a, b),
+            "coast_a": a, "coast_b": b, "coast_lo": np.minimum(a, b), "coast_hi": np.maximum(a, b),
             "town_names": [t[0] for t in towns],
             "town_xy": np.asarray([[t[1] / scale, t[2] / scale] for t in towns]),
             "town_pop": np.asarray([t[3] for t in towns], dtype=np.float64),
