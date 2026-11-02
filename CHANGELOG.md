@@ -14,6 +14,8 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Een gepauzeerde taak hervatten zonder schijf geeft nu de duidelijke melding dat het archief niet bereikbaar is (de stand van de taak staat in de database op de schijf); met de schijf terug gaat het gewoon.
 - De rooktest in de browser draait nu ook via pytest, als je erom vraagt: `pytest -m smoke`. In een gewone testronde wordt hij overgeslagen.
 - De rooktest is beter bestand tegen een druk bezette computer: na elke stap wacht hij zolang er nog verzoeken onderweg zijn, de wachttijden rekken mee met de belasting van de machine, en een verzoek dat door het herladen van de pagina werd afgebroken wordt één keer opnieuw gevraagd (alleen lezen). Echte fouten blijven fouten. Elke stap toont hoe lang hij duurde, met de traagste stappen op het einde.
+- De rooktest is strenger over fouten tijdens het herladen: alleen een verzoek dat echt werd afgebroken wordt opnieuw gevraagd, op zijn eigen adres. Een foutmelding gaat alleen door als ze naar zo'n verzoek verwijst. Een fout die de app zelf meldt, of een fout zonder adres, blijft een fout, en de test controleert dat bij de start zelf.
+- `pytest -m smoke` houdt zich nu echt aan zijn tijdslimiet (30 minuten, of `DATAVAULT_SMOKE_TIMEOUT`). Een rooktest die blijft hangen wordt op tijd gestopt, samen met zijn testserver, en zijn tijdelijke map wordt opgeruimd.
 
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
