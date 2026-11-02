@@ -111,7 +111,6 @@
     --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
     --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
     --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-    --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);   /* licht doorverend: verschijnen, oppakken */
     --duration-ambient: 40s;      /* één rondgang van een drijvende achtergrondgloed */
     --duration-ambient-in: 900ms; /* het invloeien van die gloed */
     --tilt-perspective: 700px;    /* kantelende hoezen */
@@ -138,6 +137,8 @@
     --motion-scale-press: 0.97;
     --motion-scale-out: 0.98;
     --motion-lift: -2px;
+    --motion-scale-pop: 0.4;    /* begin van een beloning die erin springt (vinkje, winnaar) */
+    --motion-scale-hint: 0.85;  /* een klein bedieningselement dat op de foto verschijnt */
     /* Oude namen, nu op de schaal hierboven */
     --duration-fast: var(--dur-2);
     --duration-base: var(--dur-3);
@@ -461,6 +462,8 @@ html[data-motion="rustig"] {
     --motion-scale-press: 1;
     --motion-scale-out: 1;
     --motion-lift: 0px;
+    --motion-scale-pop: 1;
+    --motion-scale-hint: 1;
 }
 
 html[data-motion="uit"] {
@@ -483,6 +486,8 @@ html[data-motion="uit"] {
     --motion-scale-press: 1;
     --motion-scale-out: 1;
     --motion-lift: 0px;
+    --motion-scale-pop: 1;
+    --motion-scale-hint: 1;
 }
 
 html[data-motion="uit"] *,
@@ -511,6 +516,8 @@ html[data-motion="uit"] *::after {
         --motion-scale-press: 1;
         --motion-scale-out: 1;
         --motion-lift: 0px;
+        --motion-scale-pop: 1;
+        --motion-scale-hint: 1;
     }
 
     *,
@@ -2106,8 +2113,8 @@ html[data-motion="rustig"] .toast .toast-icon {
     background: none;
     cursor: pointer;
     opacity: 0;
-    transform: scale(0.8);
-    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--ease-spring);
+    transform: scale(var(--motion-scale-hint));
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
 }
 
 .thumb-select::before {
@@ -2133,7 +2140,8 @@ html[data-motion="rustig"] .toast .toast-icon {
 }
 
 .thumb-select:active {
-    transform: scale(0.88);
+    transform: scale(var(--motion-scale-hint));
+    transition-duration: var(--dur-1);
 }
 
 .thumb-select:focus-visible {
@@ -2150,12 +2158,8 @@ html[data-motion="rustig"] .toast .toast-icon {
     box-shadow: none;
 }
 
-/* Het vinkje springt erin, en de foto wijkt een fractie terug binnen de groene ring */
-.thumb-tile.selected::after,
-.thumb-tile.selected::before {
-    animation: dv-check-pop var(--duration-slow) var(--ease-spring);
-}
-
+/* De foto wijkt een fractie terug binnen de groene ring. Het vinkje springt erin met de overgang
+   uit de media-beweging verderop (een overgang, geen animatie: een opnieuw getekende tegel springt niet nog eens) */
 .thumb-tile.selected img {
     transform: scale(0.94);
     border-radius: calc(var(--radius-thumb) - 2px);
@@ -2165,16 +2169,10 @@ html[data-motion="rustig"] .toast .toast-icon {
     transform: scale(0.95);
 }
 
-@keyframes dv-check-pop {
-    from { opacity: 0; scale: 0.4; }
-    to { opacity: 1; scale: 1; }
-}
-
-:root:not([data-motion="volledig"]) .thumb-select,
-:root:not([data-motion="volledig"]) .thumb-tile.selected::after,
-:root:not([data-motion="volledig"]) .thumb-tile.selected::before {
-    transition: none;
-    animation: none;
+/* Rustig: het rondje en de foto vervagen alleen; niets schaalt mee */
+html[data-motion="rustig"] .thumb-select,
+html[data-motion="rustig"] .thumb-tile img {
+    transition: opacity var(--dur-2) var(--ease-out);
 }
 
 /* Bijschrift onderaan op de foto zelf */
@@ -3653,19 +3651,19 @@ a.breadcrumb-item:hover {
     border: 2px solid var(--surface-overlay);
     background-color: var(--thumb-bg);
     box-shadow: var(--shadow-md);
-    animation: dv-stack-fan var(--duration-slow) var(--ease-spring) both;
+    animation: dv-stack-fan var(--spring-smooth-dur) var(--spring-smooth) both;
 }
 
 .move-file-thumb.is-stack img:nth-last-of-type(3) { --fan: -9deg; --fan-x: -9%; }
-.move-file-thumb.is-stack img:nth-last-of-type(2) { --fan: 7deg; --fan-x: 8%; animation-delay: 40ms; }
-.move-file-thumb.is-stack img:nth-last-of-type(1) { --fan: 0deg; --fan-x: 0%; animation-delay: 80ms; }
+.move-file-thumb.is-stack img:nth-last-of-type(2) { --fan: 7deg; --fan-x: 8%; animation-delay: var(--stagger-step); }
+.move-file-thumb.is-stack img:nth-last-of-type(1) { --fan: 0deg; --fan-x: 0%; animation-delay: calc(2 * var(--stagger-step)); }
 
 .move-file-thumb.is-stack img:nth-last-of-type(n) {
     transform: translateX(var(--fan-x)) rotate(var(--fan));
 }
 
 @keyframes dv-stack-fan {
-    from { opacity: 0; transform: translateY(8px) scale(0.92); }
+    from { opacity: 0; transform: translateY(var(--motion-distance-md)) scale(var(--motion-scale-in)); }
 }
 
 .move-stack-count {
@@ -3692,8 +3690,9 @@ a.breadcrumb-item:hover {
     font-family: inherit;
 }
 
-:root:not([data-motion="volledig"]) .move-file-thumb.is-stack img {
-    animation: none;
+/* Rustig: de waaier ligt meteen goed en vervaagt alleen in */
+html[data-motion="rustig"] .move-file-thumb.is-stack img {
+    animation-name: dv-fade-in;
 }
 
 .move-file-meta {
@@ -3785,7 +3784,7 @@ a.breadcrumb-item:hover {
     white-space: pre;
     overflow: hidden;
     text-overflow: ellipsis;
-    animation: move-query-in var(--duration-base) var(--ease-out);
+    animation: move-query-in var(--spring-snappy-dur) var(--spring-snappy);
 }
 
 .move-tree-query[hidden] {
@@ -3803,7 +3802,7 @@ a.breadcrumb-item:hover {
 }
 
 @keyframes move-query-in {
-    from { opacity: 0; transform: translateY(-2px) scale(0.96); }
+    from { opacity: 0; transform: translateY(calc(-1 * var(--motion-distance-xs))) scale(var(--motion-scale-in)); }
 }
 
 .move-folder-node .tree-match {
@@ -3907,7 +3906,7 @@ a.breadcrumb-item:hover {
     padding: var(--space-md) var(--space-xl);
     border-top: 1px solid var(--border-hairline);
     background: var(--surface-raised);
-    animation: move-twin-in var(--duration-slow) var(--ease-spring);
+    animation: move-twin-in var(--spring-smooth-dur) var(--spring-smooth);
 }
 
 .move-twin[hidden] {
@@ -3964,11 +3963,7 @@ a.breadcrumb-item:hover {
 }
 
 @keyframes move-twin-in {
-    from { opacity: 0; transform: translateY(6px); }
-}
-
-:root:not([data-motion="volledig"]) .move-twin {
-    animation: none;
+    from { opacity: 0; transform: translateY(var(--motion-distance-sm)); }
 }
 
 /* ==================== ARCHIEF- EN SYSTEEMSTATUS ==================== */
@@ -6342,11 +6337,6 @@ a.breadcrumb-item:hover {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 8s var(--ease-out);
-}
-
-.shows-hero:hover .shows-hero-img {
-    transform: scale(1.05);
 }
 
 .shows-hero-content {
@@ -7536,12 +7526,12 @@ button.otd-settings-icon:hover {
     background: var(--thumb-bg);
     box-shadow: var(--shadow-lg);
     transform: perspective(var(--tilt-perspective)) rotateX(0deg) rotateY(0deg);
-    transition: transform var(--duration-slow) var(--ease-spring), box-shadow var(--duration-slow) var(--ease-out);
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy), box-shadow var(--dur-4) var(--ease-out);
 }
 
 .otd-item.has-cover:hover .otd-cover.has-art {
     box-shadow: var(--shadow-xl);
-    transform: perspective(var(--tilt-perspective)) translateY(-4px) scale(1.02)
+    transform: perspective(var(--tilt-perspective)) translateY(calc(2 * var(--motion-lift))) scale(1.02)
         rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
 }
 
@@ -7586,9 +7576,10 @@ button.otd-settings-icon:hover {
     color: var(--text-secondary);
 }
 
+/* De hoes vervaagt alleen in: geen zoom op een foto die laadt */
 @keyframes otd-art-in {
-    from { opacity: 0; transform: scale(1.06); }
-    to { opacity: 1; transform: none; }
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -7602,8 +7593,7 @@ button.otd-settings-icon:hover {
     }
 }
 
-:root:not([data-motion="volledig"]) .otd-ambient img,
-:root:not([data-motion="volledig"]) .otd-cover-img {
+:root:not([data-motion="volledig"]) .otd-ambient img {
     animation: none;
 }
 
@@ -8250,11 +8240,16 @@ button.storage-file-thumb {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform var(--duration-slow) var(--ease-spring);
 }
 
-button.storage-file-thumb:hover img {
-    transform: scale(1.08);
+/* Geen zoom op de foto zelf (docs/MOTION.md): de miniatuur komt een fractie omhoog */
+button.storage-file-thumb {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy), box-shadow var(--dur-2) var(--ease-out);
+}
+
+button.storage-file-thumb:hover {
+    transform: translate3d(0, var(--motion-lift), 0);
+    box-shadow: var(--shadow-md);
 }
 
 button.storage-file-thumb:focus-visible {
@@ -8273,7 +8268,7 @@ button.storage-file-thumb:focus-visible {
     color: var(--on-media);
     font-size: var(--fs-2xs);
     pointer-events: none;
-    transition: transform var(--duration-base) var(--ease-spring);
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
 }
 
 .storage-file-play i {
@@ -8281,7 +8276,7 @@ button.storage-file-thumb:focus-visible {
 }
 
 button.storage-file-thumb:hover .storage-file-play {
-    transform: scale(1.12);
+    transform: scale(calc(2 - var(--motion-scale-hint)));
 }
 
 .storage-file-main {
@@ -9733,13 +9728,13 @@ button.storage-file-thumb:hover .storage-file-play {
 
 /* Openklappen: de submappen glijden zacht in beeld (alleen transform en opacity) */
 .tl-picker-children:not([hidden]) {
-    animation: tl-picker-unfold var(--duration-slow) var(--ease-out);
+    animation: tl-picker-unfold var(--spring-smooth-dur) var(--spring-smooth);
 }
 
 @keyframes tl-picker-unfold {
     from {
         opacity: 0;
-        transform: translateY(calc(-1 * var(--space-sm)));
+        transform: translateY(calc(-1 * var(--motion-distance-sm)));
     }
 }
 
@@ -12258,7 +12253,6 @@ button.storage-file-thumb:hover .storage-file-play {
    API); hier staan de toestanden en de overgangen. Alleen transform en opacity bewegen. */
 
 .elo-overlay {
-    --elo-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
     --elo-ring-size: var(--control-h);
     padding: var(--space-lg);
 }
@@ -12372,7 +12366,7 @@ button.storage-file-thumb:hover .storage-file-play {
     border-radius: var(--radius-lg);
     background-color: var(--media-bg);
     border: 1px solid var(--media-border);
-    transition: box-shadow var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--elo-spring);
+    transition: box-shadow var(--duration-base) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
 }
 
 .elo-img {
@@ -12380,18 +12374,16 @@ button.storage-file-thumb:hover .storage-file-play {
     max-height: 100%;
     object-fit: contain;
     opacity: 0;
-    transform: scale(1.015);
-    transition: opacity var(--duration-slow) var(--ease-out), transform var(--duration-slow) var(--ease-out);
+    transition: opacity var(--dur-4) var(--ease-out);
     user-select: none;
 }
 
 .elo-img.is-loaded {
     opacity: 1;
-    transform: none;
 }
 
 .elo-choice:hover .elo-frame {
-    transform: translateY(calc(-1 * var(--space-2xs)));
+    transform: translate3d(0, var(--motion-lift), 0);
     box-shadow: 0 0 0 2px var(--accent-border), var(--shadow-lg);
 }
 
@@ -12611,8 +12603,8 @@ button.storage-file-thumb:hover .storage-file-play {
     font-size: var(--icon-sm);
     cursor: pointer;
     opacity: 0;
-    transform: scale(0.8);
-    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--elo-spring),
+    transform: scale(var(--motion-scale-hint));
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy),
         background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
@@ -12623,7 +12615,7 @@ button.storage-file-thumb:hover .storage-file-play {
 
 .elo-side:hover .elo-trash {
     opacity: 1;
-    transform: translateY(calc(-1 * var(--space-2xs)));
+    transform: translate3d(0, var(--motion-lift), 0);
 }
 
 .elo-overlay.is-keyboard .elo-trash {
@@ -12638,12 +12630,12 @@ button.storage-file-thumb:hover .storage-file-play {
 }
 
 .elo-side .elo-trash:hover {
-    transform: translateY(calc(-1 * var(--space-2xs))) scale(1.08);
+    transform: translate3d(0, var(--motion-lift), 0) scale(1.08);
 }
 
 /* Het deksel wiebelt even: wat je aanwijst, gaat weg */
 .elo-trash:hover i {
-    animation: elo-trash-wiggle 420ms var(--ease-out);
+    animation: elo-trash-wiggle var(--dur-5) var(--ease-out);
 }
 
 @keyframes elo-trash-wiggle {
@@ -12654,10 +12646,14 @@ button.storage-file-thumb:hover .storage-file-play {
     100% { transform: rotate(0deg); }
 }
 
+html[data-motion="rustig"] .elo-trash:hover i {
+    animation: none;
+}
+
 /* Wie de prullenmand aanwijst, ziet welke foto weggaat: een rode ring, de foto dooft wat */
 .elo-side:has(.elo-trash:hover) .elo-frame,
 .elo-choice.is-trashed .elo-frame {
-    transform: translateY(calc(-1 * var(--space-2xs)));
+    transform: translate3d(0, var(--motion-lift), 0);
     box-shadow: 0 0 0 2px var(--danger), var(--shadow-lg);
 }
 
@@ -12747,7 +12743,7 @@ button.storage-file-thumb:hover .storage-file-play {
     stroke-linecap: round;
     stroke-dasharray: 100 100;
     stroke-dashoffset: 100;
-    transition: stroke-dashoffset var(--duration-slow) var(--elo-spring);
+    transition: stroke-dashoffset var(--spring-smooth-dur) var(--spring-smooth);
 }
 
 .elo-goal.is-done .elo-ring {
@@ -12824,7 +12820,7 @@ button.storage-file-thumb:hover .storage-file-play {
     background-color: var(--accent);
     transform: scaleX(0);
     transform-origin: left center;
-    transition: transform var(--duration-slow) var(--elo-spring);
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
 }
 
 .elo-settled-text {
@@ -12843,7 +12839,7 @@ button.storage-file-thumb:hover .storage-file-play {
 .elo-status > * {
     grid-area: 1 / 1;
     min-width: 0;
-    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--elo-spring);
+    transition: opacity var(--duration-base) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
 }
 
 .elo-progress {
@@ -13077,11 +13073,6 @@ button.storage-file-thumb:hover .storage-file-play {
     height: 100%;
     object-fit: cover;
     display: block;
-    transition: transform var(--duration-slow) var(--ease-out);
-}
-
-.elo-board-row:hover .elo-board-img {
-    transform: scale(1.06);
 }
 
 .elo-board-text {
@@ -14040,7 +14031,7 @@ button.storage-file-thumb:hover .storage-file-play {
     background: var(--surface-overlay);
     box-shadow: var(--shadow-md);
     font-size: var(--fs-xs);
-    animation: map-chip-in var(--duration-slow) var(--ease-out);
+    animation: map-chip-in var(--spring-smooth-dur) var(--spring-smooth);
 }
 
 .map-country-chip[hidden] {
@@ -14085,14 +14076,8 @@ button.storage-file-thumb:hover .storage-file-play {
 }
 
 @keyframes map-chip-in {
-    from { opacity: 0; transform: translate(-50%, -6px); }
+    from { opacity: 0; transform: translate(-50%, calc(-1 * var(--motion-distance-sm))); }
     to { opacity: 1; transform: translate(-50%, 0); }
-}
-
-:root:not([data-motion="volledig"]) .map-country-chip,
-:root:not([data-motion="volledig"]) .map-label-new,
-:root:not([data-motion="volledig"]) .map-canvas .map-region-border {
-    animation: none;
 }
 
 /* Markers: een groene stip met een lichte rand; groepen met het aantal erin */
@@ -14344,20 +14329,20 @@ button.storage-file-thumb:hover .storage-file-play {
     font-family: var(--font-sans);
     pointer-events: none;
     opacity: 0;
-    transform: translateY(6px) scale(0.92);
+    transform: translateY(var(--motion-distance-sm)) scale(var(--motion-scale-in));
     transform-origin: var(--origin-x, 50%) 100%;
-    transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-slow) var(--ease-spring);
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
     will-change: transform, opacity;
 }
 
 .map-hover[data-side="below"] {
-    transform: translateY(-6px) scale(0.92);
+    transform: translateY(calc(-1 * var(--motion-distance-sm))) scale(var(--motion-scale-in));
     transform-origin: var(--origin-x, 50%) 0;
 }
 
 .map-hover[data-side="right"],
 .map-hover[data-side="left"] {
-    transform: scale(0.92);
+    transform: scale(var(--motion-scale-in));
     transform-origin: var(--origin-x, 0) var(--origin-y, 50%);
 }
 
@@ -14414,8 +14399,8 @@ button.storage-file-thumb:hover .storage-file-play {
 }
 
 .map-hover-thumb:active {
-    transform: scale(0.97);
-    transition: transform var(--duration-fast) var(--ease-out);
+    transform: scale(var(--motion-scale-press));
+    transition: transform var(--dur-1) var(--ease-out);
 }
 
 .map-hover-grid-1 .map-hover-thumb {
@@ -14438,19 +14423,13 @@ button.storage-file-thumb:hover .storage-file-play {
     height: 100%;
     object-fit: cover;
     opacity: 0;
-    transform: scale(1.06);
-    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--ease-out);
-    transition-delay: calc(var(--hover-i, 0) * 40ms);
+    transition: opacity var(--dur-3) var(--ease-out);
+    transition-delay: calc(var(--hover-i, 0) * var(--stagger-step));
 }
 
+/* De foto's vervagen in, op het ritme van de stagger; geen zoom op de foto */
 .map-hover-thumb.is-loaded img {
     opacity: 1;
-    transform: none;
-}
-
-.map-hover-thumb.is-loaded:hover img {
-    transform: scale(1.05);
-    transition-delay: 0ms;
 }
 
 .map-hover-noimg,
@@ -16365,7 +16344,7 @@ html:not([data-motion="volledig"]) .mm-light {
     background-color: var(--accent);
     box-shadow: 0 0 0 2px var(--on-media);
     opacity: 0;
-    transform: scale(0.4);
+    transform: scale(var(--motion-scale-pop));
     pointer-events: none;
     transition:
         opacity var(--dur-1) var(--ease-exit),
@@ -16384,7 +16363,7 @@ html:not([data-motion="volledig"]) .mm-light {
     border-top: none;
     border-right: none;
     opacity: 0;
-    transform: rotate(-45deg) scale(0.3);
+    transform: rotate(-45deg) scale(var(--motion-scale-pop));
     pointer-events: none;
     transition:
         opacity var(--dur-1) var(--ease-exit),

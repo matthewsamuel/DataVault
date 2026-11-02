@@ -86,15 +86,33 @@ function eloMotionOK() {
     return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
-// Element.animate met de juiste voorzorg: geen animatie bij verminderde beweging of zonder API
-function eloAnimate(el, keyframes, options) {
-    if (!el || !eloMotionOK() || typeof el.animate !== 'function') return null;
-    try { return el.animate(keyframes, { fill: 'both', ...options }); } catch (_) { return null; }
+// Animeren via Motion.animate (docs/MOTION.md): duur, curve en veer komen uit de tokens
+// (options.duration '--dur-3', options.spring 'snappy' of 'bouncy'). In Rustig blijft alleen de
+// vervaging over, in Uit niets. Geeft null als er niets beweegt.
+function eloAnimate(el, keyframes, options = {}) {
+    if (!el || typeof el.animate !== 'function') return null;
+    if (window.Motion) {
+        const a = Motion.animate(el, keyframes, { fill: 'both', key: 'elo', ...options });
+        return a.stub ? null : a;
+    }
+    if (!eloMotionOK()) return null;
+    const { spring, ...rest } = options;
+    const duration = typeof rest.duration === 'number' ? rest.duration : 280;
+    const easing = rest.easing && !rest.easing.startsWith('--') ? rest.easing : ELO_GLIDE;
+    try { return el.animate(keyframes, { fill: 'both', ...rest, duration, easing }); } catch (_) { return null; }
 }
 
-const ELO_SPRING = 'cubic-bezier(0.22, 1.2, 0.36, 1)';     // licht doorverend
-const ELO_GLIDE = 'cubic-bezier(0.2, 0.8, 0.2, 1)';        // = --ease-out
-const ELO_SWOOP = 'cubic-bezier(0.55, 0, 0.25, 1)';        // traag weg, snel aan: de vlucht naar onderen
+// Een token in ms of px (zonder motion.js: de waarde voor Volledig)
+function eloMs(name, fallback) { return window.Motion ? Motion.ms(name, fallback) : fallback; }
+function eloPx(name, fallback) { return window.Motion ? Motion.px(name, fallback) : fallback; }
+function eloCurve(name, fallback) {
+    const value = window.Motion && Motion.token(name);
+    return value || fallback;
+}
+
+// Curves voor de stukken binnen één vlucht (een keyframe kan geen token lezen)
+const ELO_GLIDE = eloCurve('--ease-out', 'cubic-bezier(0.2, 0.8, 0.2, 1)');
+const ELO_SWOOP = eloCurve('--ease-in-out', 'cubic-bezier(0.4, 0, 0.2, 1)');   // traag weg, snel aan
 const ELO_SUBTITLE = 'Kies steeds de mooiste van twee. Hoe hoger de score, hoe vaker een foto in Shows komt.';
 
 function eloToken() {
@@ -268,9 +286,6 @@ function openElo(scope = '', title = '') {
     // Eerst de inhoud (het skelet), dan pas zichtbaar: zo onthoudt ui.js waar de focus vandaan kwam
     eloShowTab('compare');
     overlay.classList.add('active');
-    eloAnimate(overlay.querySelector('.elo-panel'), [
-        { opacity: 0, transform: 'translateY(12px) scale(0.985)' },
-        { opacity: 1, transform: 'none' }], { duration: 280, easing: ELO_GLIDE, fill: 'none' });
     setTimeout(() => { if (!overlay.contains(document.activeElement) || document.activeElement === overlay) eloFocusInBody(overlay); }, 0);
 }
 
@@ -665,27 +680,29 @@ function eloShowPair(pair, direction = 'next') {
     return old;
 }
 
-// Het nieuwe paar komt binnen: van onderen (na een keuze), van opzij (overslaan, terugdraaien).
-// Meteen en al grotendeels zichtbaar (vanaf 0,55), zodat er tussen twee paren nooit een leeg
-// vlak oplicht; de tweede foto volgt 40 ms later.
+// Het nieuwe paar komt binnen (docs/MOTION.md: de duel blijft direct): het staat er in het
+// volgende beeld, al grotendeels zichtbaar (vanaf 0,55), en schuift hooguit --motion-distance-sm
+// in de richting van de keuze (van onderen na een keuze, van opzij bij overslaan en terugdraaien)
+// op de snappy-veer; de tweede foto volgt één stagger-stap later. Rustig: alleen de vervaging.
 function eloEnter(stage, direction) {
     if (direction === 'none') {
-        eloAnimate(stage, [{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: ELO_GLIDE, fill: 'none' });
+        eloAnimate(stage, [{ opacity: 0 }, { opacity: 1 }], { duration: '--dur-3', easing: '--ease-out', fill: 'none' });
         return;
     }
-    const from = { next: 'translateY(18px) scale(0.98)', trash: 'translateY(18px) scale(0.98)', skip: 'translateX(32px)',
-        back: 'translateX(-32px)' }[direction]
-        || 'translateY(12px)';
+    const d = eloPx('--motion-distance-sm', 6);
+    const from = { next: `translate3d(0, ${d}px, 0)`, trash: `translate3d(0, ${d}px, 0)`, skip: `translate3d(${d}px, 0, 0)`,
+        back: `translate3d(${-d}px, 0, 0)` }[direction] || `translate3d(0, ${d}px, 0)`;
+    const step = eloMs('--stagger-step', 28);
     stage.querySelectorAll('.elo-choice').forEach((choice, i) => {
         eloAnimate(choice, [
             { opacity: 0.55, transform: from },
             { opacity: 1, transform: 'none' }],
-            { duration: 380, delay: i * 40, easing: ELO_SPRING, fill: 'backwards' });
+            { spring: 'snappy', delay: i * step, fill: 'backwards' });
     });
     eloAnimate(stage.querySelector('.elo-vs'), [
-        { opacity: 0, transform: 'translate(-50%, -50%) scale(0.4) rotate(-90deg)' },
-        { opacity: 1, transform: 'translate(-50%, -50%) scale(1) rotate(0deg)' }],
-        { duration: 380, delay: 60, easing: ELO_SPRING, fill: 'backwards' });
+        { opacity: 0, transform: `translate(-50%, -50%) scale(${eloCurve('--motion-scale-in', '0.96')})` },
+        { opacity: 1, transform: 'translate(-50%, -50%)' }],
+        { spring: 'snappy', delay: 2 * step, fill: 'backwards' });
 }
 
 // Het oude paar gaat weg. Na een keuze blijft de winnaar even staan (ring, vinkje, +N) en vliegt
@@ -697,34 +714,37 @@ function eloLeave(old, direction) {
     old.querySelectorAll('.elo-choice').forEach((choice, i) => {
         let a = null;
         if (choice.classList.contains('is-trashed')) {
-            eloAnimate(choice.querySelector('.elo-meta'), [{ opacity: 1 }, { opacity: 0 }], { duration: 90, easing: 'linear' });
+            eloAnimate(choice.querySelector('.elo-meta'), [{ opacity: 1 }, { opacity: 0 }], { duration: '--dur-1', easing: 'linear' });
             a = eloAnimate(choice, [
                 { offset: 0, opacity: 1, transform: 'none', easing: ELO_GLIDE },
                 { offset: 0.25, opacity: 1, transform: `translateY(-6px) rotate(${i ? 1 : -1}deg) scale(0.98)`, easing: ELO_SWOOP },
                 { offset: 1, opacity: 0, transform: `translateY(64px) rotate(${i ? 6 : -6}deg) scale(0.8)` }],
-            { duration: 360, easing: 'linear' });
+            { duration: '--dur-4', easing: 'linear' });
         } else if (direction === 'skip' || direction === 'trash') {
+            const far = eloPx('--motion-distance-lg', 24);
             a = eloAnimate(choice, [{ opacity: 1, transform: 'none' },
-                { opacity: 0, transform: `translateX(${i ? 24 : -24}px) rotate(${i ? 1.5 : -1.5}deg)` }],
-            { duration: 160, easing: ELO_GLIDE });
+                { opacity: 0, transform: `translateX(${i ? far : -far}px) rotate(${i ? 1.5 : -1.5}deg)` }],
+            { duration: '--dur-3', easing: '--ease-exit' });
         } else if (direction === 'back') {
-            a = eloAnimate(choice, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(40px)' }],
-                { duration: 160, easing: ELO_GLIDE });
+            a = eloAnimate(choice, [{ opacity: 1, transform: 'none' },
+                { opacity: 0, transform: `translateX(${eloPx('--motion-distance-lg', 24)}px)` }],
+                { duration: '--dur-3', easing: '--ease-exit' });
         } else if (choice.classList.contains('is-chosen') || choice.classList.contains('is-draw')) {
             a = eloFlight(choice, document.querySelector(`#elo-result .elo-result-thumb[data-side="${i}"]`));
         } else {
-            a = eloAnimate(choice, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(10px) scale(0.97)' }],
-                { duration: 150, easing: ELO_GLIDE });
+            a = eloAnimate(choice, [{ opacity: 1, transform: 'none' },
+                { opacity: 0, transform: `translateY(${eloPx('--motion-distance-sm', 6)}px) scale(${eloCurve('--motion-scale-out', '0.98')})` }],
+                { duration: '--dur-3', easing: '--ease-exit' });
         }
         if (a) animations.push(a);
     });
-    const vs = eloAnimate(old.querySelector('.elo-vs'), [{ opacity: 1 }, { opacity: 0 }], { duration: 120 });
+    const vs = eloAnimate(old.querySelector('.elo-vs'), [{ opacity: 1 }, { opacity: 0 }], { duration: '--dur-2', easing: '--ease-exit' });
     if (vs) animations.push(vs);
     if (!animations.length) { old.remove(); return; }
     Promise.all(animations.map(a => a.finished.catch(() => {}))).then(() => old.remove());
 }
 
-const ELO_FLIGHT_MS = 520;
+const ELO_FLIGHT_MS = eloMs('--spring-smooth-dur', 520);   // de winnaar vliegt naar de uitslag
 
 // De gekozen foto vliegt naar zijn plek in de uitslag (een gedeeld element: van groot naar
 // miniatuur). Eerst ~125 ms stil met een lichte lift, zodat de ring, het vinkje en +N te lezen
@@ -738,13 +758,13 @@ function eloFlight(choice, target) {
     const to = target && target.offsetParent ? target.getBoundingClientRect() : null;
     const lift = 'scale(1.012)';       // een tikje naar voren, niet omhoog over de kop heen
     // De naam en score eronder gaan meteen weg: ze zouden over die van het nieuwe paar heen staan
-    eloAnimate(choice.querySelector('.elo-meta'), [{ opacity: 1 }, { opacity: 0 }], { duration: 90, easing: 'linear' });
+    eloAnimate(choice.querySelector('.elo-meta'), [{ opacity: 1 }, { opacity: 0 }], { duration: '--dur-1', easing: 'linear' });
     if (!to || !to.width || !from.width) {
         return eloAnimate(choice, [
             { offset: 0, opacity: 1, transform: 'none', easing: ELO_GLIDE },
             { offset: 0.3, opacity: 1, transform: lift, easing: ELO_GLIDE },
-            { offset: 1, opacity: 0, transform: 'scale(0.96)' }],
-        { duration: 420, easing: 'linear' });
+            { offset: 1, opacity: 0, transform: `scale(${eloCurve('--motion-scale-in', '0.96')})` }],
+        { duration: '--dur-5', easing: 'linear' });
     }
     const scale = Math.min(to.width / from.width, to.height / from.height);
     const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
@@ -770,9 +790,8 @@ function eloMarkChoice(stage, outcome) {
         : [stage.querySelector(`.elo-choice[data-side="${outcome}"] .elo-check`)];
     if (outcome === 'draw') marks.forEach(m => m.replaceChildren(eloIcon('fa-equals')));
     marks.forEach(mark => eloAnimate(mark, [
-        { transform: 'scale(0.2) rotate(-30deg)', opacity: 0 },
-        { transform: 'scale(1.15) rotate(0deg)', opacity: 1, offset: 0.6 },
-        { transform: 'scale(1)', opacity: 1 }], { duration: 260, easing: ELO_SPRING }));
+        { transform: 'scale(0.4) rotate(-30deg)', opacity: 0 },
+        { transform: 'none', opacity: 1 }], { spring: 'bouncy' }));
 }
 
 // ==================== DE UITSLAG ONDERIN ====================
@@ -807,9 +826,8 @@ function eloShowResult(pair, outcome, token) {
         if (thumb.style.opacity !== '0') return;
         const a = eloAnimate(thumb, [
             { opacity: 0, transform: 'scale(0.6)' },
-            { opacity: 1, transform: 'scale(1.12)', offset: 0.6 },
-            { opacity: 1, transform: 'scale(1)' }],
-        { duration: 260, delay: ELO_FLIGHT_MS * 0.76, easing: ELO_SPRING, fill: 'forwards' });
+            { opacity: 1, transform: 'none' }],
+        { spring: 'bouncy', delay: ELO_FLIGHT_MS * 0.76, fill: 'forwards' });
         if (!a) { thumb.style.opacity = ''; return; }
         a.finished.then(() => { thumb.style.opacity = ''; a.cancel(); }, () => { thumb.style.opacity = ''; });
     });
@@ -840,8 +858,8 @@ function eloShowDeltas(stage, result, token) {
         delta.textContent = eloSigned(n);
         delta.classList.add(tone);
         eloAnimate(delta, [
-            { opacity: 0, transform: 'translateY(10px) scale(0.8)' },
-            { opacity: 1, transform: 'translateY(0) scale(1)' }], { duration: 220, easing: ELO_SPRING });
+            { opacity: 0, transform: `translateY(${eloPx('--motion-distance-sm', 6)}px) scale(0.8)` },
+            { opacity: 1, transform: 'none' }], { spring: 'bouncy' });
     });
 }
 
@@ -909,7 +927,7 @@ function eloNudge(side) {
         : document.querySelector(`#elo-body .elo-stage:not(.is-leaving) .elo-choice[data-side="${side}"] .elo-frame`);
     eloAnimate(target, [
         { transform: 'translateX(0)' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(3px)' },
-        { transform: 'translateX(-1px)' }, { transform: 'translateX(0)' }], { duration: 180, easing: 'ease-out', fill: 'none' });
+        { transform: 'translateX(-1px)' }, { transform: 'translateX(0)' }], { duration: '--dur-3', easing: '--ease-out', fill: 'none' });
 }
 
 function eloSkip() {
@@ -1111,8 +1129,7 @@ function eloCelebrateGoal(before) {
     elo.noticeIcon = 'fa-trophy';
     const ring = document.getElementById('elo-goal');
     if (!ring) return;
-    eloAnimate(ring, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }],
-        { duration: 520, easing: ELO_SPRING, fill: 'none' });
+    eloAnimate(ring, [{ transform: 'scale(0.85)' }, { transform: 'none' }], { spring: 'bouncy', fill: 'none' });
     if (!eloMotionOK()) return;
     for (let i = 0; i < 14; i++) {
         const spark = createEl('span', { class: 'elo-spark', 'aria-hidden': 'true' });
@@ -1122,7 +1139,7 @@ function eloCelebrateGoal(before) {
         const a = eloAnimate(spark, [
             { transform: 'translate(-50%, -50%) scale(1)', opacity: 1 },
             { transform: `translate(calc(-50% + ${Math.round(Math.cos(angle) * dist)}px), calc(-50% + ${Math.round(Math.sin(angle) * dist)}px)) scale(0.2)`, opacity: 0 }],
-            { duration: 640 + (i % 4) * 60, easing: ELO_GLIDE });
+            { duration: eloMs('--dur-6', 640) + (i % 4) * 2 * eloMs('--stagger-step', 28), easing: '--ease-out' });
         if (a) a.finished.then(() => spark.remove(), () => spark.remove()); else spark.remove();
     }
 }
@@ -1293,9 +1310,11 @@ function eloRenderBoard(data) {
     });
     const list = createEl('ol', { class: 'elo-board-list', tabindex: '-1', 'aria-label': `Ranglijst ${data.scope.title}` }, ...rows);
     eloSetBody(createEl('div', { class: 'elo-board' }, tools, eloBoardHead(data), list));
+    // De ranglijst rijst rij voor rij in (stagger, hooguit --stagger-max rijen apart; de rest samen)
+    const step = eloMs('--stagger-step', 28), cap = Number(eloCurve('--stagger-max', '10')) || 10;
     rows.slice(0, 14).forEach((row, i) => eloAnimate(row, [
-        { opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }],
-        { duration: 320, delay: i * 28, easing: ELO_GLIDE, fill: 'backwards' }));
+        { opacity: 0, transform: `translate3d(0, ${eloPx('--motion-distance-md', 12)}px, 0)` }, { opacity: 1, transform: 'none' }],
+        { spring: 'smooth', delay: Math.min(i, cap) * step, fill: 'backwards' }));
 }
 
 // 'Als album': de bevestiging staat op de knop zelf (een melding rechtsboven zou de knoppen van
@@ -1332,8 +1351,8 @@ function eloAlbumMade(btn, album) {
         onClick: () => { closeElo(); window.albumsShow(album.id, album.filters, album.sort); },
     }, 'Bekijken ', eloIcon('fa-arrow-right')) : null;
     btn.after(...[open, status].filter(Boolean));
-    eloAnimate(btn.querySelector('i'), [{ transform: 'scale(0.3)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }],
-        { duration: 260, easing: ELO_SPRING });
+    eloAnimate(btn.querySelector('i'), [{ transform: 'scale(0.4)', opacity: 0 }, { transform: 'none', opacity: 1 }],
+        { spring: 'bouncy' });
     setTimeout(() => {
         if (!btn.isConnected) return;
         btn.classList.remove('is-done');

@@ -2766,8 +2766,9 @@ function spotifyOtdCover(item, cover, src) {
     };
     img.src = src;   // mislukt het laden, dan blijft het eigen verloop staan
 
-    const calm = () => document.documentElement.dataset.motion !== 'volledig'
-        || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    // Beweging (docs/MOTION.md): alleen in Volledig kantelt de hoes; motion.js volgt ook macOS
+    const calm = () => (window.Motion ? !Motion.full()
+        : window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     let frame = 0;
     item.addEventListener('pointermove', e => {
         if (calm() || !cover.classList.contains('has-art')) return;
