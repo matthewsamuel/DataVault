@@ -230,13 +230,19 @@ def watchdog(seconds: float, proc, workdir: Path, where: dict) -> threading.Time
 
 
 def run(engine: str = "webkit", headed: bool = False) -> int:
-    workdir = Path(tempfile.mkdtemp(prefix="datavault-smoke-"))
+    # (pytest -m smoke points DATAVAULT_SMOKE_TMP at a folder it removes itself, should it have to stop us)
+    workdir = Path(tempfile.mkdtemp(prefix="datavault-smoke-", dir=os.environ.get("DATAVAULT_SMOKE_TMP") or None))
     proc, base, vault = start_server(workdir)
     problems = []
     where = {"step": "start"}
     shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
     shots.mkdir(parents=True, exist_ok=True)
-    guard = watchdog(float(os.environ.get("DATAVAULT_SMOKE_MAX_SECONDS", "1500")) * SLOW, proc, workdir, where)
+    # 1500 s (stretched by SLOW), at most DATAVAULT_SMOKE_WALL_SECONDS of wall-clock time (pytest -m smoke
+    # sets that a minute below its own limit, so this clean-up runs before pytest has to stop us)
+    limit = float(os.environ.get("DATAVAULT_SMOKE_MAX_SECONDS", "1500")) * SLOW
+    if os.environ.get("DATAVAULT_SMOKE_WALL_SECONDS"):
+        limit = min(limit, float(os.environ["DATAVAULT_SMOKE_WALL_SECONDS"]))
+    guard = watchdog(limit, proc, workdir, where)
     try:
         with sync_playwright() as p:
             browser = launch(p, engine, headed)
