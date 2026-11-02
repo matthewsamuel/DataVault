@@ -1,10 +1,11 @@
 """
 DataGatherer - small shared pieces for export connectors (step 3.9c)
 
-    files(raw, wanted)     every wanted file of a raw export: a zip, a single file or a
-                           registered folder, also zips INSIDE a folder or a zip (Takeout
-                           folders hold takeout-*.zip parts, Apple puts zips in its zip);
-                           read in memory, never unpacked to disk
+    files(raw, wanted)     every wanted file of a raw export: a zip, a .tgz/.tar.gz, a single
+                           file or a registered folder, also zips INSIDE a folder or a zip
+                           and tars inside a folder (Takeout folders hold takeout-*.zip or
+                           takeout-*.tgz parts, Apple puts zips in its zip); read in memory
+                           or as a stream, never unpacked to disk
     head(path)             the first bytes of a file (detect() looks at the content)
     PASHA                  the per-source opt-in for the assistant (off by default)
     WATCH_FOLDER           the per-source folder the watcher follows (a synced cloud folder)
@@ -60,12 +61,18 @@ def files(raw_path: Path, wanted: Callable[[str], bool], nested_zips: bool = Tru
     """(name, read) for every wanted file, descending into zips (one level inside a zip)."""
     raw_path = Path(raw_path)
 
+    in_folder = raw_path.is_dir()
+
+    def nested(base: str) -> bool:
+        low = base.lower()
+        return nested_zips and (low.endswith(".zip") or (in_folder and raw_store.is_tar_name(low)))
+
     def want(base: str) -> bool:
-        return wanted(base) or (nested_zips and base.lower().endswith(".zip"))
+        return wanted(base) or nested(base)
 
     for name, read in raw_store.iter_export_files(raw_path, want):
-        if name.lower().endswith(".zip") and nested_zips and not wanted(name.rsplit("/", 1)[-1]):
-            if raw_path.is_dir():
+        if nested(name.rsplit("/", 1)[-1]) and not wanted(name.rsplit("/", 1)[-1]):
+            if in_folder:
                 yield from files(raw_path / name, wanted, nested_zips=depth < 1, depth=depth + 1)
             elif depth < 1:
                 yield from _zip_bytes(read(), wanted, name)

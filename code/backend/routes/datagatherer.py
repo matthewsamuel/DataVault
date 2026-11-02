@@ -380,7 +380,7 @@ async def upload(source_id: str, request: Request, name: str = ""):
             await run_in_threadpool(out.close)
         if size == 0:
             raise HTTPException(status_code=400, detail="Het bestand is leeg")
-        kind = await run_in_threadpool(lambda: connector.detect(temp, raw_store.read_zip_names(temp)))
+        kind = await run_in_threadpool(lambda: connector.detect(temp, raw_store.archive_names(temp, connector.reads_tar)))
         if kind is None:
             raise HTTPException(status_code=400, detail=f"{base} is geen export van {connector.name}")
         response = await run_in_threadpool(_start, WATCH_TYPE, {"source": connector.id, "upload": token, "name": base})

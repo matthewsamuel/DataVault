@@ -6,7 +6,11 @@ real formats. Nothing here reads real personal data.
 """
 import io
 import json
+import os
+import shutil
 import sqlite3
+import tarfile
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -177,6 +181,49 @@ def english_takeout_zip(path: Path) -> Path:
         "Takeout/Calendar/Work.ics": ICS,
         "Takeout/Location History/Records.json": records_json(),
     })
+
+
+def write_tgz(path: Path, members: dict, mode: str = "w:gz") -> Path:
+    """A .tgz/.tar.gz as Takeout makes it: members in archive order, gzip-compressed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(path, mode) as tf:
+        for name, data in members.items():
+            if not isinstance(data, (bytes, str)):
+                data = json.dumps(data)
+            blob = data.encode("utf-8") if isinstance(data, str) else data
+            info = tarfile.TarInfo(name)
+            info.size, info.mtime = len(blob), 1567296000
+            tf.addfile(info, io.BytesIO(blob))
+    return path
+
+
+def dutch_takeout_members() -> dict:
+    """The Dutch Takeout's files (dutch_takeout_folder), as archive members under Takeout/."""
+    root = Path(tempfile.mkdtemp())
+    try:
+        dutch_takeout_folder(root)
+        base = root / "takeout-20190801T000000Z-001"
+        return {str(p.relative_to(base)): p.read_bytes() for p in sorted(base.rglob("*")) if p.is_file()}
+    finally:
+        shutil.rmtree(root)
+
+
+def dutch_takeout_tgz(path: Path) -> Path:
+    """A Dutch Takeout as .tgz, a photo first (as Takeout often starts) and the sidecars."""
+    members = {"Takeout/Google Foto's/Foto's uit 2019/IMG_0.jpg": b"\xff\xd8\xff" + os.urandom(2048)}
+    members.update(dutch_takeout_members())
+    return write_tgz(path, members)
+
+
+def english_takeout_tgz(path: Path) -> Path:
+    """The English Takeout (english_takeout_zip) as .tar.gz, with a './' prefix like GNU tar writes."""
+    zip_path = english_takeout_zip(Path(tempfile.mkdtemp()) / "t.zip")
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            members = {"./" + n: zf.read(n) for n in zf.namelist()}
+    finally:
+        shutil.rmtree(zip_path.parent)
+    return write_tgz(path, members)
 
 
 def chrome_history_db(path: Path, visits) -> Path:

@@ -15,18 +15,22 @@ copy of their data. The rules:
   Streaming History' or 'data/Matthew/RAW_google') are registered IN PLACE as a folder,
   with a fingerprint of their names, sizes and mtimes; nothing in them is moved or changed.
 - Zips stay zipped: importers read them through read_zip_names/open_member, never unpack
-  them into the vault.
+  them into the vault. A .tgz/.tar.gz (Takeout offers it next to .zip) is read the same way:
+  as a stream, member by member, never extracted to disk (iter_export_files, tar_head_names).
 """
 import fnmatch
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import stat
+import tarfile
 import threading
 import time
 import zipfile
+from zlib import error as zlib_error
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, List, Optional, Tuple
@@ -41,6 +45,10 @@ FREE_SPACE_MARGIN = 200 * 1024 * 1024
 MAX_MEMBER_BYTES = 1024 * 1024 * 1024     # one JSON file in an export; more is not an export
 MAX_RATIO = 200                            # uncompressed / compressed: more looks like a zip bomb
 MAX_STREAM_BYTES = 32 * 1024 * 1024 * 1024  # a file a parser reads as it goes (ExportFile.open)
+TAR_SUFFIXES = (".tgz", ".tar.gz", ".tar")
+TAR_HEAD_MEMBERS = 200                      # detect() looks at the first members of a tar only
+TAR_HEAD_BYTES = 512 * 1024 * 1024          # ... and stops after this much decompressed data
+BOMB_FLOOR = 50 * 1024 * 1024               # below this a high compression ratio is no bomb
 
 
 # One export at a time from 'is it new?' to its row: two uploads of the same bytes (or an upload
@@ -282,12 +290,164 @@ def read_zip_names(path: Path) -> Optional[List[str]]:
         return None
 
 
+def is_tar_name(name: str) -> bool:
+    return name.lower().endswith(TAR_SUFFIXES)
+
+
+def _open_tar(path: Path):
+    """(raw file, TarFile) of a .tgz/.tar.gz/.tar, read as a stream (mode 'r|*'): never seeks back."""
+    raw = open(path, "rb")
+    try:
+        return raw, tarfile.open(fileobj=raw, mode="r|*")
+    except (tarfile.TarError, OSError, EOFError):
+        raw.close()
+        raise
+
+
+class _TarGuard:
+    """Whole-archive ratio check while a tar is decompressed: a gzip bomb stops early."""
+
+    def __init__(self, raw, tar: "tarfile.TarFile", name: str):
+        self.raw, self.tar, self.name = raw, tar, name
+
+    def check(self) -> None:
+        done = getattr(self.tar.fileobj, "pos", 0)   # decompressed bytes so far (tarfile._Stream)
+        packed = max(1, self.raw.tell())              # compressed bytes read so far
+        if done > BOMB_FLOOR and done / packed > MAX_RATIO:
+            raise RawStoreError(f"{self.name} is verdacht sterk ingepakt; niet verder ingelezen")
+
+
+class _TarSource:
+    """
+    The current member of a tar stream. A stream cannot go back, but parsers peek at the start
+    and then open again (location_store.parse_export_file): the first REPLAY bytes are
+    kept, so a second open() replays them and continues where the stream is.
+    """
+    REPLAY = 64 * 1024
+
+    def __init__(self, tar: "tarfile.TarFile", info: "tarfile.TarInfo", guard: _TarGuard):
+        self.tar, self.info, self.guard = tar, info, guard
+        self.stream = None
+        self.head = bytearray()   # the first bytes of the member, while pos <= REPLAY
+        self.pos = 0              # bytes taken from the stream
+
+    def open(self) -> "_TarMember":
+        if self.stream is None:
+            if self.tar.members[-1] is not self.info:
+                raise RawStoreError(f"{self.info.name}: het archief is al verder gelezen")
+            self.stream = self.tar.extractfile(self.info)
+        elif self.pos > len(self.head):
+            raise RawStoreError(f"{self.info.name}: het archief is al verder gelezen")
+        return _TarMember(self)
+
+    def pull(self, size: int) -> bytes:
+        try:
+            data = self.stream.read(size)
+        except (tarfile.TarError, EOFError, zlib_error) as e:
+            raise RawStoreError(f"{self.guard.name} is beschadigd of onvolledig: {str(e)[:80]}")
+        if len(self.head) == self.pos and self.pos + len(data) <= self.REPLAY:
+            self.head += data
+        self.pos += len(data)
+        self.guard.check()
+        return data
+
+
+class _TarMember(io.RawIOBase):
+    """One open() of a tar member: a binary stream (replays the kept start, then reads on)."""
+
+    def __init__(self, source: _TarSource):
+        super().__init__()
+        self._src, self._at = source, 0
+
+    def readinto(self, buffer) -> int:
+        data = self.read(len(buffer))
+        buffer[:len(data)] = data
+        return len(data)
+
+    def read(self, size: int = -1) -> bytes:
+        src = self._src
+        out = b""
+        if self._at < len(src.head):
+            end = len(src.head) if size is None or size < 0 else min(len(src.head), self._at + size)
+            out = bytes(src.head[self._at:end])
+            self._at = end
+            if size is not None and 0 <= size <= len(out):
+                return out
+        if self._at != src.pos:
+            raise RawStoreError(f"{src.info.name}: het archief is al verder gelezen")
+        rest = src.pull(-1 if size is None or size < 0 else size - len(out))
+        self._at += len(rest)
+        return out + rest
+
+    def readable(self) -> bool:
+        return True
+
+
+def tar_head_names(path: Path, members: int = TAR_HEAD_MEMBERS, max_bytes: int = TAR_HEAD_BYTES) -> Optional[List[str]]:
+    """
+    The names of the first files of a .tgz/.tar.gz/.tar (None when it is none): enough for
+    detect(). A tar has no central directory, so listing all of a 50 GB Takeout part would
+    mean decompressing all of it; the first members say what it is.
+    """
+    if not is_tar_name(Path(path).name):
+        return None
+    names: List[str] = []
+    try:
+        raw, tar = _open_tar(Path(path))
+    except (tarfile.TarError, OSError, EOFError):
+        return None
+    try:
+        with raw, tar:
+            for info in tar:
+                if info.isfile():
+                    names.append(info.name[2:] if info.name.startswith("./") else info.name)
+                if len(names) >= members or tar.offset > max_bytes:
+                    break
+    except (tarfile.TarError, OSError, EOFError, zlib_error):
+        if not names:
+            return None
+    return names
+
+
+def archive_names(path: Path, tar: bool = False) -> Optional[List[str]]:
+    """read_zip_names, and for a connector that reads tars (tar=True) the first tar members."""
+    names = read_zip_names(path)
+    if names is None and tar:
+        names = tar_head_names(path)
+    return names
+
+
+def _iter_tar(path: Path, wanted: Callable[[str], bool]) -> Iterator[Tuple[str, "ExportFile"]]:
+    try:
+        raw, tar = _open_tar(path)
+    except (tarfile.TarError, OSError, EOFError):
+        return
+    with raw, tar:
+        guard = _TarGuard(raw, tar, path.name)
+        while True:
+            try:
+                info = tar.next()
+            except (tarfile.TarError, EOFError, zlib_error) as e:
+                raise RawStoreError(f"{path.name} is beschadigd of onvolledig: {str(e)[:80]}")
+            if info is None:
+                return
+            tar.members = [info]       # a stream keeps every header otherwise (100.000 photos)
+            guard.check()
+            name = info.name[2:] if info.name.startswith("./") else info.name
+            base = name.rsplit("/", 1)[-1]
+            if not info.isfile() or base.startswith(".") or "__MACOSX/" in name or not wanted(base):
+                continue
+            yield name, ExportFile.of_tar_member(tar, info, guard)
+
+
 def iter_export_files(path: Path, wanted: Callable[[str], bool]) -> Iterator[Tuple[str, Callable[[], bytes]]]:
     """
     (name, read) for every wanted file in a raw export: the members of a zip, the files
-    below a registered folder, or the file itself. read() returns the bytes; a member that
-    is bigger than MAX_MEMBER_BYTES or compressed suspiciously well is refused (zip bomb).
-    Names are data: nothing is ever written to disk from here.
+    below a registered folder, the members of a .tgz/.tar.gz/.tar (in archive order, as a
+    stream), or the file itself. read() returns the bytes; a member that is bigger than
+    MAX_MEMBER_BYTES or compressed suspiciously well is refused (zip bomb). Names are data:
+    nothing is ever written to disk from here. A tar member is read while it is the current
+    one: call read() (or open()) before asking for the next name.
     """
     path = Path(path)
     if path.is_dir():
@@ -299,6 +459,9 @@ def iter_export_files(path: Path, wanted: Callable[[str], bool]) -> Iterator[Tup
                     continue
                 rel = str(full.relative_to(path))
                 yield rel, ExportFile.of_file(full)
+        return
+    if is_tar_name(path.name):
+        yield from _iter_tar(path, wanted)
         return
     names = read_zip_names(path)
     if names is None:
@@ -341,6 +504,23 @@ class ExportFile:
         except OSError:
             size = 0
         return cls(lambda: _read_file(path), opener, size)
+
+    @classmethod
+    def of_tar_member(cls, tar: "tarfile.TarFile", info: "tarfile.TarInfo", guard: _TarGuard) -> "ExportFile":
+        # Valid only while info is the current member of the stream (iter_export_files)
+        source = _TarSource(tar, info, guard)
+
+        def opener():
+            if info.size > MAX_STREAM_BYTES:
+                raise RawStoreError(f"{info.name} in het archief is te groot om in te lezen")
+            return source.open()
+
+        def read() -> bytes:
+            if info.size > MAX_MEMBER_BYTES:
+                raise RawStoreError(f"{info.name} in het archief is te groot om in te lezen")
+            with opener() as member:
+                return member.read(MAX_MEMBER_BYTES + 1)
+        return cls(read, opener, info.size)
 
     @classmethod
     def of_member(cls, zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> "ExportFile":
