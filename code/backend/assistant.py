@@ -454,7 +454,8 @@ def _place_lines(found: List[Tuple[int, float, float]], said: str, place: Option
         if parts["town"] and (parts["km"] or 0) <= NEAR_TOWN_KM:
             name = parts["town"]
         elif parts["sea"]:
-            name = "op zee" if not parts["country"] else f"voor de kust van {parts['region'] or parts['country']}"
+            name = "op zee" if not parts["country"] else \
+                f"voor de kust van {places.with_article(parts['region']) if parts['region'] else parts['country']}"
         else:
             name = parts["region"] or parts["country"]
         if name:

@@ -183,6 +183,9 @@ def test_place_lines_name_at_most_a_sample(monkeypatch):
         "town": "Faro", "km": 1.0, "sea": False, "region": "Faro", "country": "Portugal"})
     lines = assistant._place_lines([(i, 37.0, -7.9) for i in range(799)], "Portugal")
     assert len(calls) <= assistant.PLACE_SAMPLE and lines == ["Faro: ~800 foto's"]
+    monkeypatch.setattr(places, "describe_parts", lambda lat, lon: {
+        "town": None, "km": None, "sea": True, "region": "Zuid-Egeïsche Eilanden", "country": "Griekenland"})
+    assert assistant._place_lines([(1, 36.5, 25.4)], "Griekenland") == ["Voor de kust van de Zuid-Egeïsche Eilanden: 1 foto"]
 
 
 def test_photos_at_a_place_use_the_gps_of_the_index(indexed, fake_ollama):

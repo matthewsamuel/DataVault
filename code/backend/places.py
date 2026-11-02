@@ -494,7 +494,7 @@ def _town_near(d: Dict[str, Any], lat: float, lon: float, code: Optional[str],
 PLURAL_REGIONS = ("eilanden", "balearen", "azoren", "cycladen", "antillen", "canarische eilanden")
 
 
-def _with_article(region: str) -> str:
+def with_article(region: str) -> str:
     """'de Zuid-Egeïsche Eilanden' after 'van': a region named as a group of islands takes 'de'."""
     return f"de {region}" if fold(region).endswith(PLURAL_REGIONS) else region
 
@@ -554,7 +554,7 @@ def describe_parts(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     tail = f", {country}" if country else ""
     if town and country and fold(town["name"]) == fold(country):
         tail = ""               # a city-state: 'Monaco', not 'Monaco, Monaco'
-    of_region = _with_article(region) if region else None
+    of_region = with_article(region) if region else None
     if sea:
         if code and town:
             label = f"Voor de kust bij {town['name']}{tail}"
