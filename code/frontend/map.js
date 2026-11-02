@@ -6,7 +6,9 @@
 // (publiek domein, vendor/naturalearth/), getekend als GeoJSON-laag in de kleuren van het
 // thema (CSS-variabelen --map-*). Een aangeklikt land, en bij ver inzoomen elk land in beeld,
 // krijgt zijn provincies (gestippelde grenzen en namen) en grote steden erbij, uit een klein
-// bestand per land (vendor/naturalearth/regions/, gemaakt door scripts/build_map_regions.py). Alleen als de gebruiker 'Gedetailleerde kaart
+// bestand per land (vendor/naturalearth/regions/, gemaakt door scripts/build_map_regions.py). Vanaf zoom 8
+// komen daar de kleinere plaatsen bij (regions/towns/); een plaats waar foto's genomen zijn, krijgt eerder en
+// met voorrang zijn naam, en ligt er een groep op, dan staat de naam ernaast. Alleen als de gebruiker 'Gedetailleerde kaart
 // (OpenStreetMap, online)' aanzet (standaard uit, bewaard op de server), komen er tegels van
 // OpenStreetMap bij. Zolang dat uit staat verlaat er geen enkel verzoek deze Mac; het
 // tegel-adres staat daarom op precies één plek (OSM_TILES) en wordt alleen dan gebruikt.
@@ -28,6 +30,8 @@
     const REGIONS_V = 2;                // ophogen als scripts/build_map_regions.py de bestanden opnieuw maakt
     const DETAIL_ZOOM = 7;              // vanaf hier krijgt elk land in beeld zijn provincies en steden
     const DETAIL_MAX = 8;               // hoogstens zoveel landen tegelijk
+    const TOWN_ZOOM = 8;                // vanaf hier ook de kleinere plaatsen (vanaf 1.000 inwoners)
+    const PHOTO_CELL = 100;             // rooster van de foto's per plaats: 1/100 graad (~1 km)
     const CHUNK = 10000;
     const CLUSTER_ANIMATE_MAX = 5000;  // meer foto's: groepen zonder zoomanimatie (zie useCluster)
     const NEIGHBOUR_PX = 28;            // foto's binnen zoveel pixels van de aangeklikte horen bij 'deze plek'
@@ -72,6 +76,8 @@
         regionLayers: new Map(), detailCodes: [], detailRegions: [], detailToken: 0, chip: null,
         // Namen op de kaart: landen (punt, voorrang, grootste deel) en de namen die nu staan, per sleutel
         countryLabels: [], labelPool: new Map(), textWidths: new Map(), fonts: null,
+        // Kleinere plaatsen per land, en hoeveel foto's er per rondje van ~1 km liggen (voor 'hier was je')
+        townData: new Map(), detailTowns: [], photoGrid: null, photoGridOf: null, photoGridLen: 0,
         osm: false, osmLoaded: false,
         filters: { year: '', date_from: '', date_to: '', camera: '', album: '' },
         points: [], markers: new Map(), total: 0, withoutGps: 0, version: '', bounds: null,
@@ -342,6 +348,15 @@
         return state.regionData.get(a3);
     }
 
+    async function loadTowns(a3) {
+        if (!state.townData.has(a3)) {
+            state.townData.set(a3, fetch(`${REGIONS_URL}towns/${a3}.json?v=${REGIONS_V}`)
+                .then(res => (res.ok ? res.json() : null))
+                .catch(() => null));
+        }
+        return state.townData.get(a3);
+    }
+
     // Welke landen nu detail tonen: het aangeduide, en bij ver inzoomen elk land in beeld
     function detailWanted() {
         const map = state.map;
@@ -361,10 +376,15 @@
         if (!map) return;
         const token = ++state.detailToken;
         const codes = state.osm ? [] : detailWanted();
-        const data = await Promise.all(codes.map(loadRegion));
+        const towns = map.getZoom() >= TOWN_ZOOM;
+        const [data, townLists] = await Promise.all([
+            Promise.all(codes.map(loadRegion)),
+            Promise.all(codes.map(code => (towns ? loadTowns(code) : null))),
+        ]);
         if (token !== state.detailToken) return;        // intussen verder geschoven
         state.detailCodes = codes.filter((_, i) => data[i]);
         state.detailRegions = data.filter(Boolean);
+        state.detailTowns = townLists.filter(Boolean);
         for (const [code, layer] of state.regionLayers) {
             if (!state.detailCodes.includes(code)) { map.removeLayer(layer); state.regionLayers.delete(code); }
         }
@@ -436,13 +456,61 @@
         return [at.x - 8, at.y - 8, at.x + 6 + textWidth(kind, name) + LABEL_GAP, at.y + 8];
     }
 
-    function labelElement(kind, name, capital) {
+    // Een plaatsnaam naast de groep of speld die op (of vlak naast) de plaats ligt: eronder, rechts, erboven of
+    // links ervan. Het puntje valt dan weg (het zou naast de echte plek staan). Ligt er niets op het puntje,
+    // dan de naam links ervan. Geeft null als er nergens plek is.
+    function besideMarker(style, name, anchor, blocked, free) {
+        const w = textWidth(style, name);
+        const reach = 10;
+        const cover = blocked.find(b => anchor.x >= b[0] - reach && anchor.x <= b[2] + reach && anchor.y >= b[1] - reach && anchor.y <= b[3] + reach);
+        if (!cover) {
+            const box = [anchor.x - 6 - w - LABEL_GAP, anchor.y - 8, anchor.x + 8, anchor.y + 8];
+            return free(box) ? { side: 'dot-left', at: [anchor.x, anchor.y], box } : null;
+        }
+        const cx = (cover[0] + cover[2]) / 2;
+        const cy = (cover[1] + cover[3]) / 2;
+        const spots = [
+            ['below', cx, cover[3], [cx - w / 2 - LABEL_GAP, cover[3], cx + w / 2 + LABEL_GAP, cover[3] + 16]],
+            ['right', cover[2], cy, [cover[2], cy - 8, cover[2] + w + LABEL_GAP, cy + 8]],
+            ['above', cx, cover[1], [cx - w / 2 - LABEL_GAP, cover[1] - 16, cx + w / 2 + LABEL_GAP, cover[1]]],
+            ['left', cover[0], cy, [cover[0] - w - LABEL_GAP, cy - 8, cover[0], cy + 8]],
+        ];
+        const spot = spots.find(([, , , box]) => free(box));
+        return spot && { side: spot[0], at: [spot[1], spot[2]], box: spot[3] };
+    }
+
+    // Hoeveel foto's er rond een plek liggen: het rooster van state.points (opnieuw als die veranderen),
+    // r cellen van ~1 km in elke richting
+    function photosNear(lat, lon, r) {
+        if (state.photoGridOf !== state.points || state.photoGridLen !== state.points.length) {
+            state.photoGrid = new Map();
+            for (const p of state.points) {
+                const key = Math.floor(p[1] * PHOTO_CELL) * 100000 + Math.floor(p[2] * PHOTO_CELL);
+                state.photoGrid.set(key, (state.photoGrid.get(key) || 0) + 1);
+            }
+            state.photoGridOf = state.points;
+            state.photoGridLen = state.points.length;
+        }
+        if (!state.photoGrid.size) return 0;
+        const y = Math.floor(lat * PHOTO_CELL);
+        const x = Math.floor(lon * PHOTO_CELL);
+        let n = 0;
+        for (let dy = -r; dy <= r; dy++) {
+            for (let dx = -r; dx <= r; dx++) n += state.photoGrid.get((y + dy) * 100000 + x + dx) || 0;
+        }
+        return n;
+    }
+
+    function labelElement(kind, name, capital, photos, side) {
         if (kind === 'country') {
             const lines = countryLines(name);
             return createEl('span', { class: 'map-country-label' }, ...lines.map(line => createEl('span', { class: 'map-country-label-line', text: line })));
         }
         if (kind === 'region') return createEl('span', { class: 'map-region', text: name });
-        return createEl('span', { class: 'map-place' + (capital ? ' map-place-capital' : ''), text: name });
+        return createEl('span', {
+            class: 'map-place' + (capital ? ' map-place-capital' : '') + (photos ? ' map-place-visited' : '') + (side ? ` map-place-beside is-${side}` : ''),
+            text: name,
+        });
     }
 
     // Een naam die moet wijken, vervaagt eerst (--dur-3, versnellend) en gaat dan pas van de kaart
@@ -494,24 +562,37 @@
         // één keer, op zijn eigen lengte: een naam op een kopie (lengte ±360) zou in lege zee staan, en alle namen
         // van de wereld meetellen vulde MAX_LABELS met namen buiten beeld (geen Tokio en Peking meer)
         const visible = (lat, lon) => view.contains([lat, lon]);
-        // Steden van de landen met detail; een wereldplaats op (bijna) dezelfde plek valt dan weg
+        // Steden van de landen met detail; een wereldplaats op (bijna) dezelfde plek valt dan weg. Een stad
+        // waar foto's genomen zijn, komt twee zoomstappen eerder; een kleinere plaats ook (anders vanaf zijn zoom).
         const shown = [];
         const near = [];
         for (const region of state.detailRegions) {
             for (const [name, lon, lat, minZoom, capital] of region.cities) {
                 near.push([lon, lat]);
-                if (zoom + 1.5 < minZoom || !visible(lat, lon)) continue;
-                shown.push(['city', name, lon, lat, minZoom, capital]);
+                if (zoom + 3.5 < minZoom || !visible(lat, lon)) continue;
+                const photos = photosNear(lat, lon, 3);
+                if (zoom + (photos ? 3.5 : 1.5) < minZoom) continue;
+                shown.push(['city', name, lon, lat, minZoom, capital, photos]);
+            }
+        }
+        for (const towns of state.detailTowns) {
+            for (const [name, lon, lat, minZoom] of towns) {
+                if (zoom + 2 < minZoom || !visible(lat, lon)) continue;
+                const photos = photosNear(lat, lon, 1);
+                if (zoom + (photos ? 2 : 0) < minZoom) continue;
+                shown.push(['city', name, lon, lat, minZoom, 0, photos]);
             }
         }
         for (const [name, lon, lat, minZoom, capital] of state.placeData) {
             if (zoom + 1.5 < minZoom || (!capital && zoom < 3)) continue;
             if (!visible(lat, lon)) continue;
             if (near.some(([x, y]) => Math.abs(x - lon) < 0.12 && Math.abs(y - lat) < 0.08)) continue;
-            shown.push(['city', name, lon, lat, minZoom, capital]);
+            shown.push(['city', name, lon, lat, minZoom, capital, photosNear(lat, lon, 3)]);
         }
         shown.sort((a, b) => (b[5] - a[5]) || (a[4] - b[4]));
         const capitals = shown.filter(p => p[5]);
+        // Plaatsen met foto's: die met de meeste eerst, vóór de provincies en de andere plaatsen
+        const visited = shown.filter(p => !p[5] && p[6]).sort((a, b) => b[6] - a[6]);
         const provinces = [];
         for (const region of state.detailRegions) {
             for (const [name, lon, lat] of region.labels || []) if (visible(lat, lon)) provinces.push(['region', name, lon, lat, 0, 0]);
@@ -532,8 +613,8 @@
             const row = ['country', c.name, c.lon, c.lat, 0, 0, c.code, c.box];
             (state.detailCodes.includes(c.code) ? later : fit < 0.35 ? small : countries).push(row);
         }
-        // Volgorde = voorrang: landen, hoofdsteden, provincies, landen met detail en dwergstaten, dan de
-        // andere steden. Een naam die over een eerdere heen zou vallen, blijft weg. Hetzelfde voor een naam
+        // Volgorde = voorrang: landen, hoofdsteden, plaatsen met foto's, provincies, landen met detail en
+        // dwergstaten, dan de andere steden en plaatsen. Een naam die over een eerdere heen zou vallen, blijft weg. Hetzelfde voor een naam
         // onder een groep of speld (die liggen erbovenop: 'Fr(134)k'), onder de knoppen en het label van een
         // aangeduid land, of half buiten de kaart. Een landnaam schuift dan eerst nog naar boven, onder of
         // binnen de rand, zolang hij in zijn land blijft.
@@ -544,13 +625,26 @@
         const hits = (box, list) => list.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]);
         const inside = box => box[0] >= EDGE_GAP && box[1] >= EDGE_GAP && box[2] <= size.x - EDGE_GAP && box[3] <= size.y - EDGE_GAP;
         const free = box => inside(box) && !hits(box, boxes) && !hits(box, blocked);
-        const ordered = [...countries, ...capitals, ...provinces, ...later, ...small, ...shown.filter(p => !p[5])];
+        const ordered = [...countries, ...capitals, ...visited, ...provinces, ...later, ...small, ...shown.filter(p => !p[5] && !p[6])];
         const wanted = new Map();
-        for (const [kind, name, lon, lat, , capital, code, countryBox] of ordered) {
+        for (const row of ordered) {
+            const [kind, name, lon, lat, , capital] = row;
+            const [code, countryBox] = kind === 'country' ? row.slice(6) : [];
+            const photos = kind === 'city' ? row[6] : 0;
             if (wanted.size >= MAX_LABELS) break;
             const anchor = map.latLngToContainerPoint([lat, lon]);
             const style = kind === 'city' && capital ? 'capital' : kind;
             let box = labelBox(style, name, anchor);
+            if (!free(box) && photos) {
+                // een plaats met foto's waar de groep bovenop ligt: de naam ernaast
+                const spot = besideMarker(style, name, anchor, blocked, free);
+                if (!spot) continue;
+                boxes.push(spot.box);
+                const ll = map.containerPointToLatLng(spot.at);
+                const key = `${kind}:${name}:${lon}:${lat}:${spot.side}`;
+                if (!wanted.has(key)) wanted.set(key, { kind, name, lon: ll.lng, lat: ll.lat, capital, photos, side: spot.side });
+                continue;
+            }
             if (!free(box)) {
                 if (kind !== 'country' || hits(box, boxes)) continue;
                 // een landnaam: binnen de rand, of net boven of onder de groep die erop ligt
@@ -576,7 +670,7 @@
             }
             boxes.push(box);
             const key = `${kind}:${name}:${lon}:${lat}`;
-            if (!wanted.has(key)) wanted.set(key, { kind, name, lon, lat, capital, code });
+            if (!wanted.has(key)) wanted.set(key, { kind, name, lon, lat, capital, code, photos });
         }
         // Wat blijft, blijft staan; wat weg moet, vervaagt; wat erbij komt, vloeit in (op volgorde)
         for (const [key, marker] of state.labelPool) {
@@ -586,7 +680,7 @@
         for (const [key, w] of wanted) {
             let marker = state.labelPool.get(key);
             if (!marker) {
-                const el = labelElement(w.kind, w.name, w.capital);
+                const el = labelElement(w.kind, w.name, w.capital, w.photos, w.side);
                 el.classList.add('map-label-new');
                 el.style.setProperty('--label-i', String(fresh++));
                 if (w.code) el.dataset.code = w.code;
@@ -600,6 +694,7 @@
                 if (ll.lat !== w.lat || ll.lng !== w.lon) marker.setLatLng([w.lat, w.lon]);
             }
             if (w.kind === 'country') marker.getElement()?.firstElementChild?.classList.toggle('is-selected', w.code === state.selected);
+            if (w.kind === 'city') marker.getElement()?.firstElementChild?.classList.toggle('map-place-visited', !!w.photos);
         }
         state.labelMs = performance.now() - started;
     }

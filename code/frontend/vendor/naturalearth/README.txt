@@ -13,6 +13,9 @@ regions/<ADM0_A3>.json: per country, loaded only when the country is selected on
   cities   - [name, lon, lat, min_zoom, is_capital]: places of 50,000+ inhabitants and province capitals from
              GeoNames cities15000 (https://www.geonames.org, CC BY 4.0, credited in the map attribution),
              Dutch names from ne_10m_populated_places where it has them
+regions/towns/<ADM0_A3>.json: per country, the smaller places for the map from zoom 8: every place of 1,000+
+  inhabitants from GeoNames cities1000 (CC BY 4.0) that is not a city above or within 1.5 km of a larger
+  place, as [name, lon, lat, min_zoom], largest first. A place where photos were taken shows earlier.
 ../../../backend/data/places_detail.json (server only, for the place name of a photo): the provinces as
   shapes, the coast line and every place of 15,000+ inhabitants (GeoNames), coordinates in thousandths
   of a degree, each ring as its first point followed by differences.

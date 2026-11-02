@@ -5,6 +5,7 @@ Bronnen (eenmalig downloaden in een werkmap, niet in de repo):
       ne_50m_admin_0_countries.geojson, ne_10m_admin_1_states_provinces.geojson,
       ne_10m_populated_places.geojson
   - GeoNames cities15000.txt (CC BY 4.0), https://download.geonames.org/export/dump/cities15000.zip
+  - GeoNames cities1000.txt (CC BY 4.0), https://download.geonames.org/export/dump/cities1000.zip
 
 Uitvoer:
   - countries-50m.geojson: landen met n (Nederlandse naam), e (de Engelse Natural Earth-naam, alleen
@@ -14,6 +15,8 @@ Uitvoer:
   - regions/<A3>.json per land: de grenzen tussen provincies (lijnen, zonder de buitengrens),
     plekken voor de provincienamen en de grote steden.
     De kaart laadt zo'n bestand pas als het land aangeduid wordt of in beeld is bij ver inzoomen.
+  - regions/towns/<A3>.json per land: de kleinere plaatsen (vanaf 1.000 inwoners) als [naam, lon, lat, zoom],
+    grootste eerst. De kaart laadt ze pas vanaf zoom 8 en toont een plaats waar foto's genomen zijn eerder.
   - ../../../backend/data/places_detail.json (alleen voor de server, backend/places.describe): de
     provincies als vlakken (met hun soort: provincie, staat, regio, ...), de kustlijn en de plaatsen vanaf 15.000 inwoners, voor 'een plaatsnaam
     bij elke foto' ('12 km ten oosten van Faro, Portugal'). Coördinaten als gehele getallen in
@@ -63,6 +66,14 @@ CITY_NL = {
     'Arlon': 'Aarlen', 'Wavre': 'Waver', 'Louvain': 'Leuven', 'Courtrai': 'Kortrijk', 'Malines': 'Mechelen',
     'Almere Stad': 'Almere',    # GeoNames noemt het centrum zo; iedereen zegt Almere
 }
+# Tweetalige Brusselse gemeenten: GeoNames geeft de Franse naam, de kaart toont de Nederlandse
+TOWN_NL = {('BEL', k): v for k, v in {
+    'Uccle': 'Ukkel', 'Forest': 'Vorst', 'Woluwe-Saint-Lambert': 'Sint-Lambrechts-Woluwe',
+    'Woluwe-Saint-Pierre': 'Sint-Pieters-Woluwe', 'Auderghem': 'Oudergem', 'Ixelles': 'Elsene',
+    'Schaerbeek': 'Schaarbeek', 'Molenbeek-Saint-Jean': 'Sint-Jans-Molenbeek', 'Saint-Gilles': 'Sint-Gillis',
+    'Berchem-Sainte-Agathe': 'Sint-Agatha-Berchem', 'Watermael-Boitsfort': 'Watermaal-Bosvoorde',
+    'Saint-Josse-ten-Noode': 'Sint-Joost-ten-Node',
+}.items()}
 SKIP_FCODES = {'PPLX', 'PPLH', 'PPLQ', 'PPLW', 'PPLCH', 'PPLR'}
 CITY_MIN_POP = 50000
 PROVINCE_SEAT_MIN_POP = 15000
@@ -263,6 +274,61 @@ DETAIL_SCALE = 1000        # coördinaten in duizendsten van een graad
 ISLAND_MIN = 0.0005        # kleinere eilandjes (vierkante graden, ~6 km2) laat de kustlijn weg
 
 
+MAP_TOWN_MIN_POP = 1000
+MAP_TOWN_NEAR_KM = 1.5    # dichter bij een grotere plaats: een wijk of gehucht daarvan
+MAP_TOWN_CELL = 0.05      # graden: het rooster om nabije plaatsen snel te vinden
+
+
+def build_map_towns(src, iso2, cities):
+    """De kleinere plaatsen voor de kaart: alles vanaf MAP_TOWN_MIN_POP inwoners dat niet al een stad op de kaart
+    is of er vlak naast ligt, als [naam, lon, lat, zoom] (zoom 9, 10 of 11 naar inwoners), grootste eerst."""
+    ne_nl = defaultdict(list)
+    for f in json.loads((src / 'ne_10m_populated_places.geojson').read_text())['features']:
+        p = f['properties']
+        if p.get('NAME_NL'):
+            names = {p.get(k) for k in ('NAME', 'NAMEASCII', 'NAME_EN', 'NAMEALT')} - {None, ''}
+            ne_nl[p['ADM0_A3']].append(((p['LONGITUDE'], p['LATITUDE']), names, p['NAME_NL']))
+    raw = defaultdict(list)
+    with open(src / 'cities1000.txt', encoding='utf-8') as fh:
+        for line in fh:
+            c = line.rstrip('\n').split('\t')
+            fcode, pop = c[7], int(c[14] or 0)
+            a3 = iso2.get(c[8])
+            if not a3 or fcode in SKIP_FCODES or pop < MAP_TOWN_MIN_POP:
+                continue
+            raw[a3].append((c[1], float(c[5]), float(c[4]), pop, {c[1], c[2], *c[3].split(',')}))
+    result = {}
+    for a3, rows in raw.items():
+        grid = defaultdict(list)
+
+        def near(at, dist):
+            gx, gy = int(at[0] // MAP_TOWN_CELL), int(at[1] // MAP_TOWN_CELL)
+            return any(km(at, k) < dist for x in (gx - 1, gx, gx + 1) for y in (gy - 1, gy, gy + 1) for k in grid[(x, y)])
+
+        def keep(at):
+            grid[(int(at[0] // MAP_TOWN_CELL), int(at[1] // MAP_TOWN_CELL))].append(at)
+
+        for k in cities.get(a3, []):
+            keep((k[1], k[2]))
+        # de steden zelf: hun deelgemeenten binnen NEAR_KM horen erbij (de kaart toont alleen de stad)
+        city_at = [(k[1], k[2]) for k in cities.get(a3, [])]
+        kept = []
+        for name, lon, lat, pop, names in sorted(rows, key=lambda r: -r[3]):
+            at = (lon, lat)
+            if near(at, MAP_TOWN_NEAR_KM) or any(km(at, c) < 3 for c in city_at):
+                continue
+            if re.search(r' \d{1,2}( |$)', name):
+                continue
+            keep(at)
+            nl = next((n[2] for n in ne_nl.get(a3, []) if n[1] & names and km(at, n[0]) < 15), None)
+            name = TOWN_NL.get((a3, name)) or CITY_NL.get(name, nl or name).removeprefix('District of ')
+            zoom = 9 if pop >= 15000 else 10 if pop >= 5000 else 11
+            kept.append([name, round(lon, 3), round(lat, 3), zoom])
+        if kept:
+            result[a3] = kept
+    return result
+
+
 def encode(coords):
     """Een ring of lijn als [x0, y0, dx1, dy1, ...] in duizendsten van een graad."""
     out, px, py = [], 0, 0
@@ -376,6 +442,17 @@ def main():
         (folder / f'{a3}.json').write_text(body)
         total += len(body)
     print(f'{len(provinces)} landen met provincies, {len(cities)} met steden, {total / 1e6:.1f} MB in {folder}')
+    towns_folder = folder / 'towns'
+    towns_folder.mkdir(exist_ok=True)
+    for old in towns_folder.glob('*.json'):
+        old.unlink()
+    total = 0
+    towns = build_map_towns(src, iso2, cities)
+    for a3, rows in sorted(towns.items()):
+        body = json.dumps(rows, ensure_ascii=False, separators=(',', ':'))
+        (towns_folder / f'{a3}.json').write_text(body)
+        total += len(body)
+    print(f'{sum(map(len, towns.values()))} kleinere plaatsen in {len(towns)} landen, {total / 1e6:.1f} MB in {towns_folder}')
     detail = Path(sys.argv[3]) if len(sys.argv) > 3 else Path(__file__).resolve().parent.parent / 'backend/data'
     build_detail(shapes, build_towns(src, iso2, cities), detail / 'places_detail.json')
 

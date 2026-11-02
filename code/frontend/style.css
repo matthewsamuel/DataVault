@@ -14609,6 +14609,44 @@ html[data-motion="rustig"] .backup-folder-check.is-done .backup-folder-check-ico
     font-weight: var(--fw-semibold);
 }
 
+/* Een plaats waar foto's genomen zijn: een tree sterker, zoals een landnaam. Ligt er een groep of speld
+   bovenop, dan staat de naam ernaast, zonder puntje (map.js, besideMarker) */
+.map-place-visited {
+    color: var(--map-label-country);
+    font-weight: var(--fw-semibold);
+}
+
+.map-place-beside::before {
+    content: none;
+}
+
+.map-place-beside.is-below {
+    transform: translate(-50%, 1px);
+}
+
+.map-place-beside.is-right {
+    transform: translate(2px, -50%);
+}
+
+.map-place-beside.is-above {
+    transform: translate(-50%, calc(-100% - 1px));
+}
+
+.map-place-beside.is-left {
+    transform: translate(calc(-100% - 2px), -50%);
+}
+
+/* Naast een speld die er net naast ligt: de naam links van het puntje */
+.map-place-beside.is-dot-left {
+    transform: translate(calc(-100% - 6px), -50%);
+}
+
+.map-place-beside.is-dot-left::before {
+    content: "";
+    left: auto;
+    right: -9px;
+}
+
 /* Een aangeklikt land: groene rand en een zweem groen; provincies gestippeld, met hun naam */
 .map-canvas .map-country.map-country-selected {
     fill: color-mix(in srgb, var(--accent) 6%, var(--map-land));
@@ -15964,6 +16002,157 @@ button.msg-edited[aria-expanded="true"] .msg-edited-chevron {
 .chat-confirm-status:empty {
     display: none;
 }
+
+/* play_song: het nummer van Spotify op deze dag, gestart in de Spotify-app */
+.chat-play {
+    display: flex;
+    gap: var(--space-lg);
+    align-items: flex-start;
+    min-width: 0;
+}
+
+.chat-play-cover {
+    position: relative;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    aspect-ratio: 1;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, var(--viz-3), var(--viz-2));
+    color: var(--on-media);
+    font-size: var(--icon-xl);
+    box-shadow: var(--shadow-md);
+    animation: chat-play-in var(--spring-bouncy-dur) var(--spring-bouncy) both;
+}
+
+.chat-play-cover-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+@keyframes chat-play-in {
+    from { opacity: 0; transform: scale(0.86) rotate(-4deg); }
+    to { opacity: 1; transform: none; }
+}
+
+.chat-play-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+
+.chat-play-overline {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+.chat-play-overline .fa-spotify {
+    color: var(--accent-text);
+}
+
+.chat-play-track {
+    font-size: var(--fs-md);
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.chat-play-artist {
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.chat-play-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-xs);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.chat-play.is-playing .chat-play-status {
+    color: var(--accent-text);
+}
+
+.chat-play.is-error .chat-play-status {
+    color: var(--danger-text);
+}
+
+.chat-play .chat-confirm-actions {
+    margin-top: var(--space-sm);
+}
+
+.chat-play .chat-confirm-actions:empty {
+    display: none;
+}
+
+/* Drie staafjes: rustig wachtend tijdens het starten, dansend zodra het nummer speelt */
+.chat-play-eq {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: var(--space-2xs);
+    width: var(--icon-sm);
+    height: var(--icon-sm);
+    flex: none;
+}
+
+.chat-play-eq > span {
+    flex: 1;
+    height: 100%;
+    border-radius: var(--radius-full);
+    background: currentColor;
+    transform-origin: bottom;
+    transform: scaleY(0.3);
+    transition: transform var(--duration-base) var(--ease-out);
+}
+
+.chat-play.is-starting .chat-play-eq > span {
+    animation: chat-play-wait 1.2s var(--ease-in-out) infinite;
+}
+
+.chat-play.is-starting .chat-play-eq > span:nth-child(2) { animation-delay: 0.15s; }
+.chat-play.is-starting .chat-play-eq > span:nth-child(3) { animation-delay: 0.3s; }
+
+.chat-play.is-playing .chat-play-eq > span {
+    animation: chat-play-bar 0.9s var(--ease-in-out) infinite alternate;
+}
+
+.chat-play.is-playing .chat-play-eq > span:nth-child(2) { animation-duration: 0.7s; animation-delay: -0.4s; }
+.chat-play.is-playing .chat-play-eq > span:nth-child(3) { animation-duration: 1.1s; animation-delay: -0.2s; }
+
+.chat-play.is-error .chat-play-eq {
+    display: none;
+}
+
+@keyframes chat-play-wait {
+    0%, 100% { transform: scaleY(0.3); opacity: 0.5; }
+    50% { transform: scaleY(0.6); opacity: 1; }
+}
+
+@keyframes chat-play-bar {
+    from { transform: scaleY(0.25); }
+    to { transform: scaleY(1); }
+}
+
+/* Rustig: geen dansende staafjes, wel een stilstaand 'speelt'-teken */
+html[data-motion="rustig"] .chat-play-eq > span {
+    animation: none !important;
+}
+
+html[data-motion="rustig"] .chat-play.is-playing .chat-play-eq > span:nth-child(1) { transform: scaleY(0.6); }
+html[data-motion="rustig"] .chat-play.is-playing .chat-play-eq > span:nth-child(2) { transform: scaleY(1); }
+html[data-motion="rustig"] .chat-play.is-playing .chat-play-eq > span:nth-child(3) { transform: scaleY(0.45); }
 
 /* ==================== DataGatherer 3.9c: Activiteit, Tijdlijn op de kaart ==================== */
 
