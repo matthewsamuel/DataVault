@@ -8,6 +8,8 @@ import os
 import sqlite3
 import time
 
+import pytest
+
 from backend.database import Database
 from test_duplicates_runs import _group, _move, _runs, _migrate_to
 from test_foundation import _make_legacy_db
@@ -53,8 +55,9 @@ def test_a_swapped_file_is_not_restored_and_the_reason_is_shown(client, vault, a
     assert not src.exists()
     assert open(dst, "rb").read() == b"ANDERE b" * 40 and os.path.exists(aside)
     assert app.state.db.get_delete_run(run_id)["remaining"] == 1      # still recorded
-    # undo_last passes it over as well
-    assert client.post("/api/raw_duplicates/undo_last").status_code == 404
+    # undo_last passes it over as well, and says why (the file is still there)
+    r = client.post("/api/raw_duplicates/undo_last")
+    assert r.status_code == 404 and "veranderd of vervangen" in r.json()["error"]["message"]
     assert not src.exists()
 
     # Once the moved file is back under its name, the undo works again
@@ -172,3 +175,41 @@ def test_migration_171_adds_the_columns_and_keeps_every_user_row(tmp_path, monke
     run = db.record_delete_operation(None, "/v/RAW/c.jpg", "/v/RAW_DUPLICATES/c.jpg", dst_ino=5, dst_size=9)
     assert db.get_delete_operations(run)[0]["dst_ino"] == 5
     db.close_all()
+
+
+class _HugeIno:
+    """An lstat result with an inode above 2**63, as macOS gives empty files on FAT32."""
+    def __init__(self, st):
+        self._st = st
+
+    def __getattr__(self, name):
+        if name == "st_ino":
+            return (1 << 64) - 271
+        return getattr(self._st, name)
+
+
+@pytest.fixture
+def huge_inodes(monkeypatch):
+    real = os.lstat
+
+    def lstat(path, *a, **kw):
+        st = real(path, *a, **kw)
+        return _HugeIno(st) if "RAW_DUPLICATES" in os.fspath(path) else st
+    monkeypatch.setattr(os, "lstat", lstat)
+
+
+def test_an_inode_above_2_63_is_recorded_and_the_undo_still_works(client, vault, app, huge_inodes):
+    run_id, src, dst = _moved(client, vault, "e.jpg", b"inhoud e" * 40)
+    [op] = app.state.db.get_delete_operations(run_id)
+    assert op["dst_ino"] == -271 and op["dst_size"] == 320       # stored as signed 64-bit
+    [run] = _runs(client)
+    assert (run["restorable"], run["changed"]) == (1, 0)
+    r = client.post("/api/duplicates/undo", json={"run_id": run_id})
+    assert r.status_code == 200 and r.json()["restored"] == 1, r.text
+    assert src.read_bytes() == b"inhoud e" * 40
+
+
+def test_sqlite_ino_keeps_every_inode_below_2_63():
+    from backend.file_ops import sqlite_ino
+    assert sqlite_ino(2821) == 2821 and sqlite_ino((1 << 63) - 1) == (1 << 63) - 1
+    assert sqlite_ino(1 << 63) == -(1 << 63) and sqlite_ino((1 << 64) - 1) == -1

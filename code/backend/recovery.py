@@ -45,7 +45,7 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tupl
 
 from backend.file_ops import (
     ARCHIVE_LOCK, CrossDeviceError, DestinationExistsError, FileOperationError, ProtectedPathError,
-    move_no_overwrite,
+    move_no_overwrite, sqlite_ino,
 )
 from backend.paths import is_in_vault
 
@@ -148,7 +148,7 @@ def moved_file_state(dst_path: str, ino: Optional[int], size: Optional[int], st:
         return "missing"
     if ino is None or size is None:
         return "unknown"
-    if (st.st_ino, st.st_size) != (ino, size):
+    if (sqlite_ino(st.st_ino), st.st_size) != (ino, size):
         return "other"
     return "ok"
 
@@ -284,7 +284,7 @@ def _fingerprint(path: Path) -> Tuple[Optional[int], Optional[int]]:
         st = os.lstat(path)
     except OSError:
         return None, None
-    return st.st_ino, st.st_size
+    return sqlite_ino(st.st_ino), st.st_size
 
 
 class ActionRecorder:

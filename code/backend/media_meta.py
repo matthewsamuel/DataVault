@@ -26,6 +26,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from backend import media_dates
 from backend.config import RAW_PHOTO_EXTENSIONS, media_type
+from backend.file_ops import sqlite_ino
 
 QUICKTIME_INFO_EXTENSIONS = media_dates.QUICKTIME_EXTENSIONS | {'.m4a'}
 
@@ -333,7 +334,7 @@ def read_metadata(path: Path, st: os.stat_result) -> Dict[str, Any]:
     kind = media_type(path)
     birthtime = getattr(st, "st_birthtime", None)
     row: Dict[str, Any] = {
-        "kind": kind, "ext": ext, "size": st.st_size, "mtime_ns": st.st_mtime_ns, "inode": st.st_ino,
+        "kind": kind, "ext": ext, "size": st.st_size, "mtime_ns": st.st_mtime_ns, "inode": sqlite_ino(st.st_ino),
         "birthtime": birthtime if birthtime and birthtime > 0 else None,
         "taken": None, "taken_source": None, "width": None, "height": None, "orientation": None,
         "camera_make": None, "camera_model": None, "lens": None, "lat": None, "lon": None,

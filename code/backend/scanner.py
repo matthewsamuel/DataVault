@@ -15,6 +15,7 @@ from backend.config import Config, MEDIA_EXTENSIONS, is_media_file
 from backend.paths import ArchiveFilter, scan_dir, walk_archive
 from backend.database import Database
 from backend.jobs import bounded_map
+from backend.file_ops import sqlite_ino
 from datetime import datetime
 
 def get_folders(root_path: Path, archive_filter: ArchiveFilter) -> List[Dict[str, Any]]:
@@ -178,7 +179,7 @@ def hash_file_xxh3(file_path: Path) -> str:
 
 def _fingerprint(st: os.stat_result):
     """What must be unchanged for a cached hash to be trusted (see database.py)."""
-    return (st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+    return (sqlite_ino(st.st_ino), st.st_size, st.st_mtime_ns, st.st_ctime_ns)
 
 try:  # HEIC/HEIF EXIF, same as thumbnail.py
     from pillow_heif import register_heif_opener

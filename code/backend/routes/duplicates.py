@@ -19,7 +19,7 @@ from backend.config import Config
 from backend.scanner import is_hidden
 from backend.paths import resolve_in_vault, is_in_vault, vault_folder_or_none
 from backend.file_ops import (
-    safe_move_with_structure, move_no_overwrite, files_identical, is_inside, ARCHIVE_LOCK,
+    safe_move_with_structure, move_no_overwrite, files_identical, is_inside, ARCHIVE_LOCK, sqlite_ino,
     FileOperationError, CrossDeviceError, ProtectedPathError,
 )
 
@@ -367,7 +367,7 @@ def _dst_fingerprint(dst_path: Path) -> Tuple[Optional[int], Optional[int]]:
         st = os.lstat(dst_path)
     except OSError:
         return None, None
-    return st.st_ino, st.st_size
+    return sqlite_ino(st.st_ino), st.st_size
 
 
 def _record_or_move_back(run_id: Optional[str], src_path: Path, dst_path: Path, folder: Optional[str]) -> str:
@@ -565,7 +565,7 @@ def moved_file_state(op: Dict[str, Any], st: Any = False) -> str:
     ino, size = op.get("dst_ino"), op.get("dst_size")
     if ino is None or size is None:
         return "ok"
-    if st.st_ino != ino:
+    if sqlite_ino(st.st_ino) != ino:
         return "other"
     if st.st_size != size:
         return "changed"
@@ -677,17 +677,17 @@ def undo_last_delete_endpoint() -> Dict[str, Any]:
 
         run_id = None
         operations = []
+        passed_over = []
         for run in runs:
             ops = db.get_delete_operations(run["run_id"])
             if any(_restorable(op) for op in ops):
                 run_id, operations = run["run_id"], ops
                 break
+            passed_over.extend(ops)
 
         if run_id is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Nothing left to restore: the moved files are no longer in RAW_DUPLICATES"
-            )
+            # Says whether the files are gone or changed/swapped (and so stay put)
+            raise HTTPException(status_code=404, detail=_nothing_to_restore(passed_over))
 
         outcome = _restore_ops(operations)
 
