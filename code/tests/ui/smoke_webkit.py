@@ -1874,8 +1874,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("undo toast: trash for a failed undo", lambda: page.evaluate(trash_js), 0.8)
             busy = lambda route: route.fulfill(status=503, json={"error": {"code": "busy", "message": "Even niet bereikbaar"}})
             page.route("**/api/recovery/undo", busy)
+            seen = len(problems)
             step("undo toast: the undo fails with a 503", lambda: page.click("#toast-container .toast-undo .toast-action"), 0.8)
             page.unroute("**/api/recovery/undo", busy)
+            # (the faked 503 and its console error are expected here)
+            problems[seen:] = [p for p in problems[seen:] if "503" not in p and "Even niet bereikbaar" not in p]
             live, toasts = page.evaluate(undo_state)
             expect(not victim.exists() and len(live) == 1 and ["Naar de prullenmand", True] in toasts
                    and page.is_enabled("#toast-container .toast-undo .toast-action"),
