@@ -9,6 +9,27 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Afronding: wat nog bleef liggen
+
+- **Landnamen op de offline kaart.** De kaart zonder internet toont nu de namen van de landen in het
+  Nederlands, midden op het grootste deel van het land (Frankrijk op het vasteland, niet tussen
+  Europa en Frans-Guyana). Namen schuiven nooit over elkaar: de belangrijkste landen eerst, dan de
+  hoofdsteden, de provincies en de andere steden; kleine landen pas als ze er ongeveer in passen en
+  dwergstaten als Monaco pas ver ingezoomd. Bij inzoomen vloeien nieuwe namen op volgorde in en
+  vervagen namen die moeten wijken, volgens je Beweging-instelling. Waar provincies staan, gaan die
+  voor de naam van hun land.
+- **Een plaatsnaam bij elke foto.** Elke foto met GPS krijgt een Nederlandse plaats, ook buiten de
+  grote steden: in een plaats ("Faro, Portugal"), in de buurt met afstand en richting
+  ("4 km ten oosten van Olhão, Portugal"), op het platteland de provincie ("Lapland, Finland"), aan
+  de kust ("Aan de kust van Friesland, Nederland"), op het water ("Voor de kust bij Zandvoort,
+  Nederland") of op zee. De viewer zet de provincie en "aan de kust" er stil onder, ook bij een plek
+  die uit je Tijdlijn geschat is. Alles offline, uit Natural Earth en GeoNames (plaatsen vanaf
+  15.000 inwoners).
+- **Pasha kent meer plaatsen.** Vraag naar foto's in een provincie of regio ("Toscane", "Gelderland",
+  "Limburg" telt beide Limburgen) of bij een kleinere plaats ("Olhão"); onder het antwoord staat
+  waar ze genomen zijn ("Amsterdam: 12 foto's"). Een bezochte plek zonder naam in je
+  locatiegeschiedenis krijgt dezelfde plaatsnaam.
+
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
 - Een foto groeit vanuit zijn miniatuur in de viewer en krimpt bij het sluiten terug naar zijn plek in het raster.

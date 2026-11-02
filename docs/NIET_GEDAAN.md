@@ -32,10 +32,6 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 - **Koude eerste zoekopdracht onder 2 seconden.** Dat lukt met modelbestanden in het OS-geheugen (1,4 s); direct na
   opstarten of van een drukke externe schijf kan het 10 tot 20 s duren. Het model wordt voorgeladen zodra het zoekveld
   focus krijgt.
-- **Landnamen op de offline kaart.** Landen tonen een tooltip; labels vragen botsingsberekening, en middelpunten van
-  samengestelde landen (Frankrijk) staan op de verkeerde plek. Provincies ontbreken ook.
-- **Een plaatsnaam bij elke foto.** Een stad wordt alleen genoemd als er binnen 40 km een grotere stad in de
-  offline gegevens ligt; op een kust of in de natuur blijft alleen het land over.
 - **Video's in Beste uit reeks.** Per video een frame halen kost een ffmpeg-proces; de scan slaat video's over.
 - **Automatisch reeksen zoeken na elke index.** Dat zou veel processorgebruik geven zonder dat je erom vraagt.
 - **Sneller zoeken naar paren bij 100.000 scheve hashes.** 7 tot 10 s in het slechtste geval; het geheugen is wel begrensd.
