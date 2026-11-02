@@ -22,8 +22,10 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 ## Zoeken, reeksen en kaart
 
 - **Woorden die het zoekmodel zwak kent.** Opnieuw gemeten met het echte model (30 nieuwe zoekopdrachten, 87 tot
-  93 procent gevonden, de grens bleef staan). Een woord als "avondeten" zet de goede foto's zelf laag: dat is het
-  model, niet de grens. "Eten" of "dinner" vindt ze wel.
+  93 procent gevonden). Een woord als "avondeten" zet de goede foto's zelf laag: dat is het model, niet de grens.
+  "Eten" of "dinner" vindt ze wel.
+- **De relevantiegrens is bewust niet verlaagd.** De meting laat zien dat 0,045 al het beste evenwicht is: lager kost
+  meer juiste treffers dan het aan gevonden foto's oplevert, en hoger laat zoekopdrachten leeg.
 - **Gebatchte beeldherkenning.** De gebruikte ONNX-export heeft een vaste batchgrootte van 1; 10 tot 70 foto's per
   seconde is genoeg.
 - **Koude eerste zoekopdracht onder 2 seconden.** Dat lukt met modelbestanden in het OS-geheugen (1,4 s); direct na
@@ -47,6 +49,9 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
   Earth marine polys) zitten niet in de offline kaartdata. *Kan later met een extra bestand van ongeveer 1 MB.*
 - **Het land over de datumgrens heen.** De offline kaart tekent elk land één keer; wie voorbij 180 graden schuift
   (Japan naar de Stille Oceaan), ziet daar lege zee en geen namen, tot de kaart terugspringt.
+- **Een plaatsnaam onder een groep foto's wijkt.** Een stadsnaam kan niet opschuiven zonder dat zijn stip naar de
+  verkeerde plek wijst. Ligt een groep van je foto's precies op de stad (Tokio in het voorbeeldarchief), dan
+  verdwijnt de naam en markeert de groep de plek; de landnaam schuift erboven.
 
 ## Assistent (Pasha)
 
@@ -59,6 +64,9 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
   [PASHA_TOOLS.md](PASHA_TOOLS.md).
 - **Ollama's eigen gereedschapsaanroep is alleen gemeten met qwen2.5:3b.** Een ander model kiest zelf het formaat op
   wat Ollama over het model zegt; meten kan met `scripts/bench_pasha_tools.py --model`.
+- **Een antwoord dat een uitkomst noemt zonder te zoeken.** Soms zegt het model "geen foto's gevonden" zonder de
+  zoekactie aan te roepen (1 van 141 keer bij "op deze dag", in beide formaten). De server kan dat niet onderscheiden
+  van een gewoon antwoord zonder te gokken; de meting telt het als fout.
 
 ## DataGatherer
 
@@ -93,10 +101,19 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
   eigen indexeerronde. Dat bestond al; de schrijfacties zijn idempotent.
 - **Alle metingen zijn op gegenereerde archieven** op de interne SSD van de ontwikkelmachine, niet op de externe schijf en
   nooit op het echte archief.
-- **De rooktest draait niet in een gewone pytest-ronde.** Hij duurt vijf tot tien minuten en heeft Playwright met
-  WebKit nodig; `pytest -m smoke` draait hem wel. Onder zware belasting wacht hij nu zelf langer en vraagt hij een
-  verzoek dat door herladen werd afgebroken opnieuw, maar een machine die minutenlang volledig bezet is kan hem nog
-  steeds laten mislukken.
+- **De rooktest draait niet vanzelf in een gewone pytest-ronde.** Hij duurt vijf tot tien minuten en heeft
+  Playwright met WebKit nodig; `pytest -m smoke` draait hem wel. Onder zware belasting wacht hij zelf langer en vraagt
+  hij een verzoek dat door herladen werd afgebroken opnieuw, maar een machine die minutenlang volledig bezet is kan
+  hem nog steeds laten mislukken.
+- **Niet elke vaste pauze in de rooktest wacht op een voorwaarde.** Er zijn er ongeveer 65; alleen de pauzes die
+  echt haperden (het verplaatsvenster en het scrollen in de Keurer, zoeken op bestandsnaam) wachten nu op wat ze
+  nodig hebben. De andere rekken mee met de belasting. Alles in één keer omzetten was te breed om veilig te doen.
+- **Eén onverklaarde mislukking van de loskoppeltest** ("de taak werd niet afgemaakt toen de schijf terug was").
+  Dat gebeurde één keer, met vier rooktests tegelijk, en het logboek liep door dat van een ander proces heen. In
+  ongeveer twaalf schone rondes kwam het niet terug. De foutmelding noemt nu ook de melding van de taak, of de
+  archiefmap bestaat en wat `/api/health` zegt, zodat een herhaling de oorzaak laat zien.
+- **De bewegingsmeting is niet helemaal groen.** Bij het binnenkomen van Spotify (tellers en helix) duurt één frame
+  39 tot 44 ms. Dat was al zo vóór deze ronde (42 ms op de basiscommit) en ligt bij de beweging van dat scherm.
 - **Loskoppelen wordt nagebootst door de archiefmap te hernoemen** (in `tests/test_unplug.py` en de rooktest). Een echte
   USB-schijf die midden in een schrijfactie wegvalt geeft andere fouten (EIO in plaats van 'niet gevonden'); dat is
   niet automatisch te testen zonder de schijf echt los te trekken.
