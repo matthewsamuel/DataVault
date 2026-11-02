@@ -799,3 +799,30 @@ def test_the_scan_message_counts_in_proper_dutch():
     many = {"groups": [{}, {}], "duplicates_found": 3, "errors": 0}
     assert _scan_message(one) == "Klaar: 1 groep, 1 duplicaat (1 leesfout: onvolledig)"
     assert _scan_message(many) == "Klaar: 2 groepen, 3 duplicaten"
+
+
+def test_shutdown_waits_until_a_worker_has_fully_ended(client, monkeypatch):
+    """
+    A worker that has finished its job still prunes old jobs on its own connection. Shutdown must wait
+    for that, else close_all() closes the connection under it (a segmentation fault in sqlite3).
+    """
+    manager = _test_manager(client, lambda ctx: {"klaar": True})
+    pruning, go_on = threading.Event(), threading.Event()
+    real = manager._prune
+
+    def slow_prune(job_type):
+        pruning.set()
+        go_on.wait(5)
+        real(job_type)
+
+    monkeypatch.setattr(manager, "_prune", slow_prune)
+    job, _ = manager.start("proef", {})
+    assert pruning.wait(5)
+    worker = next(iter(manager._workers))
+    assert job["id"] not in manager._live            # the job itself is done and gone from _live
+    threading.Timer(0.3, go_on.set).start()
+    started = time.monotonic()
+    manager.shutdown()
+    assert time.monotonic() - started >= 0.25, "shutdown did not wait for the worker's clean-up"
+    assert not worker.is_alive() and not manager._workers
+    assert manager.get(job["id"])["status"] == jobs.DONE

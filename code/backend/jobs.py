@@ -220,6 +220,9 @@ class JobManager:
         # Jobs that ended while the database was unreachable (vault unplugged): their
         # final state is kept here and written as soon as the database is back
         self._unsaved: Dict[int, _Live] = {}
+        # Every worker thread until it has fully ended (also its last clean-up after the job left
+        # _live): shutdown() waits for these, so close_all() never closes a connection in use
+        self._workers: set = set()
         self._closed = False
 
     # ---------- database ----------
@@ -353,10 +356,10 @@ class JobManager:
             for live in lives:
                 live.stop_reason = "shutdown"
                 live.wake.set()
+            workers = list(self._workers)
         deadline = time.monotonic() + wait
-        for live in lives:
-            if live.thread is not None:
-                live.thread.join(max(0.0, deadline - time.monotonic()))
+        for worker in workers:
+            worker.join(max(0.0, deadline - time.monotonic()))
         self._flush_unsaved()
         for live in lives:
             if live.row["status"] in ACTIVE:
@@ -563,6 +566,7 @@ class JobManager:
         live = queued[0]
         live.thread = threading.Thread(target=self._worker, args=(live,),
                                        name=f"job-{live.row['id']}-{job_type}", daemon=True)
+        self._workers.add(live.thread)
         live.thread.start()
 
     def _update(self, live: _Live, persist: bool = False, **fields) -> None:
@@ -701,10 +705,15 @@ class JobManager:
                     if live.dirty:
                         self._unsaved[job_id] = live
                 live.thread = None
-            self.db.release_thread()
-            self._prune(live.row["type"])
-            with self._lock:
-                self._schedule(live.row["type"])
+            try:
+                # (pruned on this thread's own connection, which it then closes itself)
+                self._prune(live.row["type"])
+                self.db.release_thread()
+                with self._lock:
+                    self._schedule(live.row["type"])
+            finally:
+                with self._lock:
+                    self._workers.discard(threading.current_thread())
 
     def _finish_stopped(self, live: _Live) -> None:
         reason = live.stop_reason or "cancel"
