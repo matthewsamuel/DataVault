@@ -36,6 +36,8 @@ class LastFm(Connector):
     order = 20
     record_label = ("scrobble", "scrobbles")
     description = "Je scrobbles: een vangnet voor wat de Spotify-API niet meer teruggeeft."
+    empty_note = ("Last.fm bewaart alleen wat je na het koppelen van Spotify Scrobbling luistert: speel iets af "
+                  "en klik over een paar minuten weer op Bijwerken.")
     capabilities = frozenset({"api_sync"})
     allowed_hosts = ("ws.audioscrobbler.com",)
     raw_folder = "Last.fm"
@@ -64,15 +66,12 @@ class LastFm(Connector):
     )
     help = (
         HelpOption(
-            title="Scrobbles ophalen", effort="makkelijk",
-            steps=("Klik op Bijwerken: DataVault haalt alle nieuwe scrobbles op.",
-                   "Of zet het schema aan: elk half uur zolang DataVault draait."),
-            note="De eerste keer haalt DataVault je hele geschiedenis op; dat kan even duren."),
-        HelpOption(
-            title="Last.fm koppelen", effort="gemiddeld",
+            title="Koppelen en ophalen", effort="gemiddeld",
             steps=("Maak een Last.fm-account en koppel Spotify-scrobbling.",
-                   "Vraag een API-sleutel aan en vul hem in bij Verbinden."),
-            note="Last.fm kent alleen nummers van na het koppelen."),
+                   "Vraag een API-sleutel aan en vul hem in bij Verbinden.",
+                   "Klik op Bijwerken, of zet het schema aan: elk half uur zolang DataVault draait."),
+            note="Last.fm kent alleen nummers van na het koppelen. De eerste keer haalt DataVault die hele "
+                 "geschiedenis op; dat kan even duren."),
     )
 
     def is_configured(self, ctx: GatherContext) -> bool:

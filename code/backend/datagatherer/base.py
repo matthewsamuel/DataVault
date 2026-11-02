@@ -118,6 +118,7 @@ class Connector:
     order: int = 100                  # place within its category (lower first, then by name)
     record_label: Tuple[str, str] = ("item", "items")   # what one record is called (one, many)
     description: str = ""             # one Dutch sentence: what this source brings in
+    empty_note: str = ""              # why a connected source can still have nothing (one Dutch sentence)
     capabilities: frozenset = frozenset()
     allowed_hosts: Tuple[str, ...] = ()   # every host it may ever contact (exact names, https only)
     exports: Tuple[ExportKind, ...] = ()

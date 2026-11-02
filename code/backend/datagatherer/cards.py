@@ -44,6 +44,7 @@ STATUS = {
     "actueel": ("Actueel", "success"),
     "achter": ("Achter", "warning"),
     "geregistreerd": ("In het archief", "neutral"),
+    "verbonden": ("Verbonden", "neutral"),
     "niet_ingesteld": ("Niet ingesteld", "neutral"),
 }
 KEYCHAIN_NOTE = ("De Sleutelhanger van macOS is niet bereikbaar (vergrendeld, of toegang geweigerd). Ontgrendel hem, "
@@ -185,6 +186,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         status = "toegang_nodig"
     elif request:
         status = "wacht_op_export"
+    elif api and configured and not cov.records and not raws:
+        status = "verbonden"
     elif not cov.records and not raws:
         status = "niet_ingesteld"
     elif not cov.records:
@@ -238,6 +241,12 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
                     "export aan om het gat te vullen.")
         elif hole:
             step = f"Er ontbreken gegevens {hole_text}. Bijwerken haalt alleen je nieuwste op."
+        elif status == "verbonden" and st["last_success_at"]:
+            step = f"Verbonden, maar {name} gaf nog geen {connector.record_label[1]} terug."
+            if connector.empty_note:
+                step += " " + connector.empty_note
+        elif status == "verbonden":
+            step = f"Verbonden. Klik op Bijwerken om je {connector.record_label[1]} op te halen."
         elif status == "actueel" and gap_days is not None and gap_days > connector.stale_days:
             step = (f"Je gegevens zijn bij: {name} op deze Mac heeft niets na {_date(cov.last)}. "
                     f"Bijwerken haalt nieuwe {connector.record_label[1]} op zodra die er zijn.")

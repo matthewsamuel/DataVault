@@ -570,6 +570,20 @@ def test_lastfm_errors_are_explained(client, app, fake_lastfm):
     assert state.get_state(app.state.db, "lastfm")["needs_reconnect"] == 1
 
 
+def test_a_connected_source_without_scrobbles_says_connected_not_unset(client, app):
+    def card():
+        return next(s for s in client.get("/api/datagatherer/sources").json()["sources"] if s["id"] == "lastfm")
+    assert card()["status"] == "niet_ingesteld"
+    fake = FakeLastFm([])
+    net.set_transport_factory(lambda: httpx.MockTransport(fake.handler))
+    _lastfm_ready(client)
+    assert card()["status"] == "verbonden" and card()["primary"]["action"] == "sync"
+    assert _lastfm_sync(client, app)["summary"]["added"] == 0
+    after = card()
+    assert after["status"] == "verbonden" and after["status_label"] == "Verbonden"
+    assert "nog geen scrobbles" in after["next_step"] and "Spotify Scrobbling" in after["next_step"]
+
+
 def test_a_single_scrobble_object_is_read_too(client, app):
     fake = FakeLastFm([(T0, "Band", "Eenling")])
     net.set_transport_factory(lambda: httpx.MockTransport(fake.handler))
