@@ -1,4 +1,13 @@
 Natural Earth 1:50m data (https://www.naturalearthdata.com), public domain ("No permission is needed to use Natural Earth").
-countries-50m.geojson: ne_50m_admin_0_countries, reduced to the country name (n) and coordinates rounded to 2 decimals.
+countries-50m.geojson: ne_50m_admin_0_countries, reduced to the Dutch country name (n), the ADM0_A3 code (a)
+  and coordinates rounded to 2 decimals.
 places-50m.json: ne_50m_populated_places_simple, capitals and places of 300,000+ inhabitants, as
   [name, lon, lat, min_zoom, is_capital]. Used as the offline basemap of the Kaart view.
+regions/<ADM0_A3>.json: per country, loaded only when the country is selected on the map or in view at zoom 7+:
+  borders  - the lines between provinces (ne_10m_admin_1_states_provinces, simplified; FRA, ITA, GBR, SVN,
+             LVA, MLT and PHL merged into their regions), without the outer border
+  labels   - [name, lon, lat] per province, Dutch names where Natural Earth has them
+  cities   - [name, lon, lat, min_zoom, is_capital]: places of 50,000+ inhabitants and province capitals from
+             GeoNames cities15000 (https://www.geonames.org, CC BY 4.0, credited in the map attribution),
+             Dutch names from ne_10m_populated_places where it has them
+Rebuild everything with code/scripts/build_map_regions.py (see its docstring for the source files).
