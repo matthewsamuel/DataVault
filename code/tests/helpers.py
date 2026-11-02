@@ -23,6 +23,8 @@ class FakeOllama:
         self.down = False
         self.models = ["qwen2.5:3b"]
         self.remote = set()         # names that /api/tags lists with a remote_host (Ollama cloud)
+        self.capabilities = {}      # name -> list that /api/tags reports as 'capabilities' (else none)
+        self.refuse_tools = set()   # names whose /api/chat answers 'does not support tools' when tools are sent
         self.chat_status = 200
         self.chat_lines = None      # list of dicts streamed as JSON lines
         self.chat_error = None      # an httpx exception raised for /api/chat
@@ -37,7 +39,8 @@ class FakeOllama:
         if request.url.path == "/api/tags":
             return httpx.Response(200, json={"models": [
                 {"name": m, "size": 1929912432, "details": {"parameter_size": "3.1B"},
-                 **({"remote_host": "https://ollama.com:443", "remote_model": m} if m in self.remote else {})}
+                 **({"remote_host": "https://ollama.com:443", "remote_model": m} if m in self.remote else {}),
+                 **({"capabilities": self.capabilities[m]} if m in self.capabilities else {})}
                 for m in self.models]})
         if request.url.path == "/api/chat":
             if self.chat_error is not None:
@@ -47,6 +50,8 @@ class FakeOllama:
                 return httpx.Response(404, json={"error": f"model '{body['model']}' not found"})
             if self.chat_status != 200:
                 return httpx.Response(self.chat_status, json={"error": "kapot"})
+            if body.get("tools") and body["model"] in self.refuse_tools:
+                return httpx.Response(400, json={"error": f"registry.ollama.ai/library/{body['model']} does not support tools"})
             lines = self.chat_lines if self.chat_lines is not None else [
                 {"message": {"content": "Hallo "}, "done": False},
                 {"message": {"content": "daar, ik ben Pasha."}, "done": False},

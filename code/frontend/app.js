@@ -4933,6 +4933,9 @@ async function sendChat({ inputEl, btn }) {
                     return;
                 }
 
+                // Ollama's eigen gereedschapsaanroep: de geschiedenis bewaart de actie als tag (zie bij 'done')
+                if (typeof event.raw === 'string') { rawText = event.raw; continue; }
+
                 if (typeof event.replace === 'string') { fullText = event.replace; showText(fullText.replace(/<<ACTION[\s\S]*$/, '').trimEnd()); continue; }
 
                 if (typeof event.token === 'string' && event.token) {
