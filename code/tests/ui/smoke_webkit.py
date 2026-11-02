@@ -984,6 +984,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("map: the popup opens the viewer", lambda: page.click(".map-popup .map-popup-open"), 0.8)
             expect(page.evaluate("isViewerOpen() && viewer.items.length >= 1"), "map: Openen did not open the viewer")
             page.wait_for_function("!document.getElementById('btn-show-on-map').hidden", timeout=5000)
+            # Every geotagged photo gets a Dutch place name in the viewer (places.describe, offline)
+            page.wait_for_function("[...document.querySelectorAll('#modal-metadata .metadata-label')].some(e => e.textContent === 'Plaats')", timeout=5000)
+            place = page.evaluate("[...document.querySelectorAll('#modal-metadata .metadata-label')].find(e => e.textContent === 'Plaats').nextElementSibling.textContent")
+            expect(len(place) > 3 and any(w in place for w in ("Nederland", "Frankrijk", "km", "kust", "zee")),
+                   f"map: the viewer's place reads {place!r}")
             step("map: 'Op kaart tonen' goes back to the photo", lambda: page.click("#btn-show-on-map"), 1.5)
             expect(page.evaluate("currentMainView()") == "map" and not page.evaluate("isViewerOpen()"),
                    "map: 'Op kaart tonen' did not return to the map")
@@ -1017,6 +1022,28 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("map: clear the filters again", lambda: page.click("#map-reset"), 1.0)
             expect(page.is_hidden("#map-range-error") and page.text_content("#map-count") == count_before,
                    f"map: clearing left the date message or other counts ({page.text_content('#map-count')!r})")
+            # Country names on the offline basemap: on the largest part of the country (France on the mainland,
+            # not between it and French Guiana), never overlapping another name, and fading with the zoom
+            step("map: country names over Europe", lambda: page.evaluate("mapFocus([36, -12, 62, 32])"), 1.2)
+            labels = page.evaluate("mapView().labels")
+            france = [l for l in labels if l["kind"] == "country" and l["name"] == "Frankrijk"]
+            expect(len([l for l in labels if l["kind"] == "country"]) >= 8 and france
+                   and 42 < france[0]["lat"] < 51 and -5 < france[0]["lon"] < 8,
+                   f"map: country labels {[l['name'] for l in labels if l['kind'] == 'country'][:10]}, France at {france}")
+            overlaps = page.evaluate("""(() => {
+                const r = [...document.querySelectorAll('#map-canvas .map-country-label, #map-canvas .map-region, #map-canvas .map-place')]
+                    .filter(e => !e.classList.contains('map-label-leaving')).map(e => e.getBoundingClientRect());
+                let n = 0;
+                for (let i = 0; i < r.length; i++) for (let j = i + 1; j < r.length; j++)
+                    if (r[i].left < r[j].right - 1 && r[j].left < r[i].right - 1 && r[i].top < r[j].bottom - 1 && r[j].top < r[i].bottom - 1) n++;
+                return n; })()""")
+            expect(overlaps == 0, f"map: {overlaps} pairs of names overlap on the map")
+            expect(page.evaluate("mapView().labelMs") < 50, f"map: placing the names took {page.evaluate('mapView().labelMs')} ms")
+            step("map: zoom in on the Netherlands", lambda: page.evaluate("mapSelectCountry('NLD')"), 2.0)
+            names = [l["name"] for l in page.evaluate("mapView().labels")]
+            expect("Gelderland" in names and "Amsterdam" in names,
+                   f"map: the provinces and cities of the selected country are missing ({names[:12]})")
+            page.evaluate("mapSelectCountry('')")
             # Back and Forward of the browser go between the screens, not out of the app
             step("history: Back from Kaart", lambda: page.go_back(), 1.0)
             expect(page.evaluate("currentMainView()") == "albums" and page.evaluate("location.hash").startswith("#albums"),
