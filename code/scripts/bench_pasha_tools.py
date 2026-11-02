@@ -15,7 +15,9 @@ Every answer goes through assistant.resolve_actions, exactly as in the chat: an 
 as a success when the checked actions it leaves are the expected ones (the right tool with the
 key arguments; extra harmless arguments are allowed). A request where no action belongs
 (a greeting, a sum, 'delete everything') succeeds when no action, or at least no proposal, is
-made. 'follow-up' asks a second question after a first answer that acted, with that answer in the
+made. An answer with nothing in it (no text, no call) is always a miss, also where no action
+belongs, and is counted apart ('empty'); for native, such an answer is asked once more in the tag
+format, as the server does, and 'native+retry' is the rate after that retry. 'follow-up' asks a second question after a first answer that acted, with that answer in the
 history the way the chat keeps it. The two formats run in alternating blocks, each after a warm-up call, so both get
 Ollama's prompt cache the way a conversation does. Printed per format and per set (the
 'tuning' set is the one the prompt examples were written for; 'held-out' is phrased
@@ -117,6 +119,11 @@ CASES = [
     ("follow-up", [("toon mijn video's van 2021", {"action": "library_filter", "year": 2021, "kind": "video"}),
                    "exporteer die maar"], tool("propose_export", eq("year", 2021))),
     ("follow-up", [("foto's uit 2019", {"action": "library_filter", "year": 2019}), "dank je!"], NO_ACTION),
+    # After an action turn, a request for a different action (native once came back empty here often)
+    ("follow-up", [("Laat foto's uit 2019 zien", {"action": "library_filter", "year": 2019}),
+                   "exporteer mijn foto's van 2019"], tool("propose_export", eq("year", 2019))),
+    ("follow-up", [("Laat foto's van het strand zien", {"action": "find_photos", "query": "strand"}),
+                   "wat gebeurde er vroeger op deze dag?"], tool("on_this_day")),
 ]
 
 LEAD_IN = "Hier zijn ze."
@@ -223,13 +230,26 @@ def main():
                                                         question, fmt, assistant.NATIVE_TOOLS)
                         server, page, tried = assistant.resolve_actions(text, calls)
                         actions = server + page
-                        ok = _matches(expected, actions)
+                        empty = not (actions or tried or assistant.strip_actions(text))
+                        ok = not empty and _matches(expected, actions)
+                        retried = ok
+                        if empty and fmt == "native":
+                            # What the server does with an empty native answer (routes/chat.py stream_with_tools)
+                            r_text, r_calls, _, r_total = ask(client, args.model,
+                                                              system_for(last_question(question), "tags"),
+                                                              question, "tags", assistant.NATIVE_TOOLS)
+                            r_server, r_page, r_tried = assistant.resolve_actions(r_text, r_calls)
+                            r_actions = r_server + r_page
+                            retried = bool(r_actions or r_tried or assistant.strip_actions(r_text)) and _matches(expected, r_actions)
+                            total += r_total
                         question = question if isinstance(question, str) else " / ".join(
                             t[0] if isinstance(t, tuple) else t for t in question)
                         rows.append({"round": rnd, "format": fmt, "set": group, "question": question, "ok": ok,
+                                     "empty": empty, "ok_after_retry": retried,
                                      "actions": actions, "text": text, "calls": calls,
                                      "first": round(first, 3), "total": round(total, 3)})
-                        print(f"[{rnd}] {fmt:6} {'ok ' if ok else 'MIS'} {total:5.2f}s  {question}  ->  "
+                        mark = "ok " if ok else ("EMP" if empty else "MIS")
+                        print(f"[{rnd}] {fmt:6} {mark} {total:5.2f}s  {question}  ->  "
                               f"{json.dumps(actions, ensure_ascii=False)[:140]}", flush=True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -242,6 +262,11 @@ def main():
             part = [r for r in mine if group is None or r["set"] == group]
             okay = sum(r["ok"] for r in part)
             print(f"  {group or 'all':9} {okay}/{len(part)} = {100 * okay / len(part):.1f}%")
+        empties = sum(r["empty"] for r in mine)
+        print(f"  empty     {empties}/{len(mine)} (no text, no call: a miss)")
+        if fmt == "native":
+            after = sum(r["ok_after_retry"] for r in mine)
+            print(f"  native+retry {after}/{len(mine)} = {100 * after / len(mine):.1f}% (an empty answer asked again with tags)")
         firsts, totals = [r["first"] for r in mine], [r["total"] for r in mine]
         print(f"  first token/call: median {statistics.median(firsts):.2f}s  p90 {pct(firsts, .9):.2f}s  max {max(firsts):.2f}s")
         print(f"  whole answer:     median {statistics.median(totals):.2f}s  p90 {pct(totals, .9):.2f}s  max {max(totals):.2f}s"

@@ -98,6 +98,36 @@ The prompt changed between runs, so the earlier runs are not the final numbers:
 
 The 3.8 measurement of the tags (85 to 90% on its 20 requests) agrees with the tag numbers here.
 
+## Empty answers (added after review)
+
+qwen2.5:3b sometimes answers a native request with nothing at all: `content` is empty and there
+are no `tool_calls`, after 23 to 55 generated tokens. Most likely it wrote a call that Ollama's
+parser dropped. It happens mostly after an earlier action in the history ("exporteer mijn foto's
+van 2019" after a filter turn), and in the tag format never. The earlier runs above counted an
+empty answer to a no-action request as right (3 of 225 native answers in the final run were
+empty), so their no-action and overall native numbers are slightly too kind.
+
+The bench now scores an empty answer as a miss everywhere and counts it apart. For native, it
+also asks an empty answer again with the tag prompt, as the server does, and reports the rate
+after that retry. Two follow-ups were added that start after an action turn ("exporteer mijn
+foto's van 2019" after "Laat foto's uit 2019 zien", and "wat gebeurde er vroeger op deze dag?"
+after a beach search), so there are now 47 requests. Re-run, three rounds (141 answers per format):
+
+| | Native | Tags |
+| --- | --- | --- |
+| tuning | 60/60 (100%) | 57/60 (95.0%) |
+| held-out | 42/45 (93.3%) | 35/45 (77.8%) |
+| no-action | 15/15 (100%) | 12/15 (80.0%) |
+| follow-up | 19/21 (90.5%) | 20/21 (95.2%) |
+| **all** | **136/141 (96.5%)** | **124/141 (87.9%)** |
+| empty answers | 2/141 | 0/141 |
+| after the tag retry of an empty answer | 137/141 (97.2%) | |
+
+Through the server (a temp vault on a test port, the real local Ollama), the two requests that
+came back empty most often in review ("exporteer mijn foto's van 2019" after a filter turn, and
+"wat gebeurde er vroeger op deze dag?") were asked 6 times each: no empty answer reached the chat,
+12 of 12 had text or a result (11 ran the expected tool, one asked which day was meant).
+
 ## Fallback
 
 - The format is a setting (`app_settings.chat_tool_format`: `native` or `tags`, default native),
@@ -108,6 +138,10 @@ The 3.8 measurement of the tags (85 to 90% on its 20 requests) agrees with the t
 - A model whose Ollama `capabilities` do not include `tools` gets the tags.
 - When Ollama answers "does not support tools", the same question is asked again in the tag
   format, and that model is remembered until the server restarts.
+- An empty native answer (no text, no call, no tried action) is asked once more in the tag format
+  (see "Empty answers" below). When that is empty too, the chat gets "Dat lukte me niet, wil je het
+  anders vragen?" plus `{"notice": "no_answer"}`, and the page leaves that turn out of the history
+  it sends next time. The page never shows an empty bubble, also not from an older server.
 - In a native answer, tags and calls written as text still count.
 - The chat history keeps every action as a tag, whichever format made it (the server sends it as a
   `raw` event), so switching formats never loses what Pasha did.
