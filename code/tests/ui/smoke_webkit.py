@@ -2394,7 +2394,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             busy = lambda route: route.fulfill(status=503, json={"error": {"code": "busy", "message": "Even niet bereikbaar"}})
             page.route("**/api/recovery/undo", busy)
             seen = len(problems)
-            step("undo toast: the undo fails with a 503", lambda: page.click("#toast-container .toast-undo .toast-action"), 0.8)
+            step("undo toast: the undo fails with a 503", lambda: page.click("#toast-container .toast-undo .toast-action"), 0.8,
+                 expected=lambda p: "503" in p or "Even niet bereikbaar" in p)
             page.unroute("**/api/recovery/undo", busy)
             # (the faked 503 and its console error are expected here)
             problems[seen:] = [p for p in problems[seen:] if "503" not in p and "Even niet bereikbaar" not in p]
