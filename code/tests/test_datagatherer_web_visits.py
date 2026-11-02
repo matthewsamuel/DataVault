@@ -149,8 +149,28 @@ def test_two_visits_in_the_same_window_pair_one_to_one(app):
     ids = dict(_rows(app, "SELECT event_key, id FROM activity_events"))
     assert rows["t-1"] == ids["c-1"] and rows["t-2"] == ids["c-2"] and rows["t-3"] is None
     assert activity_store.link_web_visits(db) == 0                         # idempotent
-    # A range only touches what starts inside it
+    # A range only touches clusters with a row inside it
     assert activity_store.link_web_visits(db, T * 1000 + 5000, T * 1000 + 7000) == 0
+
+
+def test_a_visit_whose_other_copy_is_just_before_the_new_import_is_linked(client, app, tmp_path, monkeypatch):
+    # My Activity rounds to whole seconds, so its copy is often a little earlier than Chrome's:
+    # the cluster starts before the Chrome import's first visit, and is still linked
+    _upload_takeout(client, app, fx.write_zip(tmp_path / "takeout-20240101T000000Z-001.zip", {
+        "Takeout/My Activity/Chrome/MyActivity.json": [
+            {"header": "Chrome", "title": "Visited Voorbeeld", "time": _iso(T), "titleUrl": "https://voorbeeld.be/"}]}))
+    root = tmp_path / "Chrome"
+    fx.chrome_history_db(root / "Default" / "History", [(T + 0.6, "https://voorbeeld.be/", "Voorbeeld")])
+    monkeypatch.setenv("DATAVAULT_CHROME_DIR", str(root))
+    _sync_chrome(client, app)
+    shown = _visits(client)
+    assert [(e["source"], [a["source"] for a in e["also"]]) for e in shown] == [("chrome_history", ["google_takeout"])]
+    # And a range link touches a cluster that only ends inside it
+    db = app.state.db
+    with db._connect() as conn:
+        conn.execute("UPDATE activity_events SET duplicate_of = NULL")
+    assert activity_store.link_web_visits(db, T * 1000 + 500, T * 1000 + 700) == 1
+    assert len(_visits(client)) == 1
 
 
 def test_migration_195_links_what_is_stored_and_keeps_every_user_row(tmp_path, monkeypatch):

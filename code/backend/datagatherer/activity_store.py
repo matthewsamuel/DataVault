@@ -150,14 +150,15 @@ def link_web_visits_conn(conn, lo_ms: Optional[int] = None, hi_ms: Optional[int]
     of a URL plus the rows of OTHER origins within WEB_VISIT_WINDOW_MS of it (one per origin,
     so two real visits a second apart stay two). The row of the most direct origin (Chrome on
     this Mac, then BrowserHistory.json, then My Activity; then the oldest id) is shown; the
-    others get duplicate_of = its id. Only clusters that start inside the range are written,
-    the window around it is read for context. Returns how many rows changed.
+    others get duplicate_of = its id. Only clusters with a row inside the range are written (a
+    My Activity copy, rounded to whole seconds, often starts the cluster just before it); the
+    window around it is read for context. Returns how many rows changed.
     """
     w = WEB_VISIT_WINDOW_MS
     where, args = "", []
     if lo_ms is not None:
         where += " AND ts_ms >= ?"
-        args.append(lo_ms - 2 * w)
+        args.append(lo_ms - 3 * w)
     if hi_ms is not None:
         where += " AND ts_ms <= ?"
         args.append(hi_ms + 2 * w)
@@ -169,7 +170,7 @@ def link_web_visits_conn(conn, lo_ms: Optional[int] = None, hi_ms: Optional[int]
     updates: List[tuple] = []
 
     def finish(cluster: dict) -> None:
-        if (lo_ms is not None and cluster["at"] < lo_ms) or (hi_ms is not None and cluster["at"] > hi_ms):
+        if (lo_ms is not None and cluster["last"] < lo_ms) or (hi_ms is not None and cluster["at"] > hi_ms):
             return
         members = cluster["rows"]
         keep = min(members, key=lambda m: (m[0], m[1]))[1]
@@ -198,8 +199,9 @@ def link_web_visits_conn(conn, lo_ms: Optional[int] = None, hi_ms: Optional[int]
             finish(clusters.pop(0))
         target = next((c for c in clusters if origin not in c["origins"]), None)
         if target is None:
-            target = {"at": ts, "origins": set(), "rows": []}
+            target = {"at": ts, "last": ts, "origins": set(), "rows": []}
             clusters.append(target)
+        target["last"] = ts
         target["origins"].add(origin)
         target["rows"].append((origin, row_id, current))
     for clusters in open_clusters.values():
