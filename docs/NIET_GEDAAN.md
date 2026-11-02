@@ -54,8 +54,11 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
   veiliger dan ze bewaren.
 - **Exact dubbele bestanden als apart voorstel.** De duplicatenscan heeft geen blijvend resultaat om uit voor te stellen;
   Pasha opent daarom de scan.
-- **Ollama's eigen gereedschapsaanroep** is niet vergeleken met het eigen JSON-formaat, dat bij qwen2.5:3b in 85 tot
-  90 procent van de tests lukt.
+- **Het resultaat van een actie terug naar het model** (een tweede antwoord na de actie). Pasha toont het resultaat
+  zelf als strook met een knop; een tweede ronde zou elke vraag twee keer zo lang laten duren. Zie
+  [PASHA_TOOLS.md](PASHA_TOOLS.md).
+- **Ollama's eigen gereedschapsaanroep is alleen gemeten met qwen2.5:3b.** Een ander model kiest zelf het formaat op
+  wat Ollama over het model zegt; meten kan met `scripts/bench_pasha_tools.py --model`.
 
 ## DataGatherer
 
@@ -79,8 +82,6 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 
 - **Een eigen tekstonderdeel in het menu voor Berichten, DataGatherer en Reeksen en een overloopmenu "Meer".** Er is geen ruimte in het
   menu bij 1024 px; de onderdelen zitten daarom in andere schermen (Reeksen bij Duplicaten; DataGatherer is een icoon in de menubalk). *Goede volgende stap.*
-- **Een album als bereik in Welke is mooier?** De haak (`elo.register_scope`) bestaat; een album-scope is nog niet
-  geregistreerd.
 - **Lange titels in het takenpaneel inkorten.** Ze worden netjes afgekapt met een beletselteken.
 - **Een keuze voor de back-upmap in de interface.** Ze staat in `config.json`.
 - **Een melding met "Ongedaan maken" na bepaalde acties.** De gedeelde melding heeft geen knop.

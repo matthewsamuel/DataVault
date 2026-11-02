@@ -4553,6 +4553,7 @@ function renderChatModelSelects() {
     else if ((models || []).some(m => m.name === current && m.cloud)) {
         setChatStatus('In de cloud (ollama.com)', 'warning', `Taalmodel: ${current}. Het draait bij ollama.com: je vragen en wat Pasha uit je archief meestuurt gaan naar internet.`);
     } else setChatStatus('Online', 'ok', `Taalmodel: ${current}`);
+    if (typeof renderChatToolFormat === 'function') renderChatToolFormat();   // settings.js
 }
 
 async function loadChatModels() {
@@ -4586,6 +4587,7 @@ async function chooseChatModel(model) {
             body: JSON.stringify(cloud ? { model, allow_cloud: true } : { model }),
         });
         chatModelState.current = data.current;
+        if (data.tool_format_used) chatModelState.tool_format_used = data.tool_format_used;
         showToast('Pasha', data.cloud ? `Gebruikt nu ${data.current}, in de cloud bij ollama.com` : `Gebruikt nu het model ${data.current}`,
             data.cloud ? 'warning' : 'success');
     } catch (e) {
@@ -4670,6 +4672,15 @@ function validateChatAction(json) {
 const CHAT_ACTION_TAG = /<<ACTION:\s*(\{[\s\S]*?\})\s*>>/g;
 
 // Haalt de ACTION-tags uit het antwoord. Alleen de eerste geldige actie wordt uitgevoerd.
+// Wat tijdens het streamen verborgen blijft tot het antwoord af is (de server haalt het dan weg):
+// een ACTION-tag, en een aanroep die het model als tekst schrijft ({"name": ...}, <tool_call>, find_photos(...))
+const CHAT_TOOL_NAMES = ['find_photos', 'library_filter', 'open_smart_album', 'on_this_day', 'photos_at_place',
+    'series_overview', 'job_status', 'recovery_summary', 'search_photos', 'open_folder', 'open_tab', 'open_file',
+    'show_photos', 'scan_duplicates', 'propose_move', 'propose_keep_best', 'propose_export'];
+const CHAT_LIVE_HIDDEN = new RegExp('(?:<<|<\\|)ACTION[\\s\\S]*$|\\{\\s*"action"[^}]*$|<\\/?tool_call>[\\s\\S]*$'
+    + '|\\{\\s*"name"[\\s\\S]*$|\\b(?:' + CHAT_TOOL_NAMES.join('|') + ')\\s*\\([\\s\\S]*$');
+const CHAT_NO_ANSWER = 'Dat lukte me niet, wil je het anders vragen?';
+
 function parseChatReply(text) {
     let action = null;
     const clean = text.replace(CHAT_ACTION_TAG, (_, json) => {
@@ -4895,6 +4906,11 @@ async function sendChat({ inputEl, btn }) {
         bubble.classList.add('message-text');
         bubble.textContent = text;
     };
+    // While streaming: nothing visible yet (whitespace, a hidden call) keeps the loading dots
+    const showLive = (text) => {
+        if (text || bubble.classList.contains('message-text')) showText(text);
+    };
+    let noAnswer = false;   // the server found nothing to say ({notice: 'no_answer'})
     let failed = false;
     let finished = false;
     const showError = (text) => {
@@ -4951,13 +4967,18 @@ async function sendChat({ inputEl, btn }) {
                     return;
                 }
 
-                if (typeof event.replace === 'string') { fullText = event.replace; showText(fullText.replace(/<<ACTION[\s\S]*$/, '').trimEnd()); continue; }
+                // Ollama's eigen gereedschapsaanroep: de geschiedenis bewaart de actie als tag (zie bij 'done')
+                if (typeof event.raw === 'string') { rawText = event.raw; continue; }
+
+                if (event.notice === 'no_answer') { noAnswer = true; continue; }
+
+                if (typeof event.replace === 'string') { fullText = event.replace; showLive(fullText.replace(/<<ACTION[\s\S]*$/, '').trimEnd()); continue; }
 
                 if (typeof event.token === 'string' && event.token) {
                     fullText += event.token;
                     rawText += event.token;
-                    // Een half binnengekomen ACTION-tag niet laten zien
-                    showText(fullText.replace(/(?:<<|<\|)ACTION[\s\S]*$|\{\s*"action"[^}]*$/, '').trimEnd());
+                    // Een half binnengekomen ACTION-tag of een als tekst geschreven aanroep niet laten zien
+                    showLive(fullText.replace(CHAT_LIVE_HIDDEN, '').trimEnd());
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                 }
 
@@ -4965,6 +4986,11 @@ async function sendChat({ inputEl, btn }) {
                     finished = true;
                     const reply = parseChatReply(fullText);
                     fullText = reply.text;
+                    // Niets om te laten zien (een oudere server stuurt geen notice): nooit een lege ballon
+                    if (!fullText && !toolEvents.length && !reply.action) {
+                        noAnswer = true;
+                        fullText = CHAT_NO_ANSWER;
+                    }
                     showText(fullText);
                     // Alleen een actie en geen tekst: de lege ballon weglaten, de resultaten komen eronder
                     if (!fullText && toolEvents.length) {
@@ -4977,7 +5003,13 @@ async function sendChat({ inputEl, btn }) {
                     // Lukte een actie, dan onthoudt de geschiedenis het antwoord mét de tag: zo blijft het
                     // model ook bij de volgende vraag een actie schrijven in plaats van alleen 'Dit vond ik.'
                     const acted = reply.action || toolEvents.some(t => !t.error);
-                    window.chatHistory.push({ role: 'assistant', content: acted && rawText.trim() ? rawText.trim() : fullText });
+                    if (noAnswer) {
+                        // Geen echt antwoord: de vraag telt niet mee, zodat de geschiedenis om en om blijft
+                        const last = window.chatHistory[window.chatHistory.length - 1];
+                        if (last && last.role === 'user' && last.content === message) window.chatHistory.pop();
+                    } else {
+                        window.chatHistory.push({ role: 'assistant', content: acted && rawText.trim() ? rawText.trim() : fullText });
+                    }
                 }
             }
         }

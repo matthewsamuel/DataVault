@@ -35,8 +35,10 @@ def fake_ollama(monkeypatch):
     monkeypatch.setattr(chat, "_http_client", lambda **kw: httpx.Client(transport=transport, **kw))
     monkeypatch.setattr(chat, "_async_http_client", lambda **kw: httpx.AsyncClient(transport=transport, **kw))
     chat.forget_ollama_status()
+    chat._no_native_tools.clear()
     yield fake
     chat.forget_ollama_status()
+    chat._no_native_tools.clear()
 
 
 @pytest.fixture(autouse=True)

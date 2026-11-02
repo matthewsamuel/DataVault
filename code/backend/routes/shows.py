@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import heapq
 import os
 import random
+import re
 import sqlite3
 import stat
 import threading
@@ -327,8 +328,9 @@ class _Scope:
     paths of a registered collection (with its library filter when it has one)."""
 
     def __init__(self, key: str, title: str, folder: Optional[Path] = None, paths: Optional[List[str]] = None,
-                 filters: Optional[Dict[str, Any]] = None):
+                 filters: Optional[Dict[str, Any]] = None, version: Any = None):
         self.key, self.title, self.folder, self.paths, self.filters = key, title, folder, paths, filters
+        self.version = version      # a collection's version (same version, same paths), or None
 
     def info(self) -> Dict[str, Any]:
         return {"key": self.key, "path": str(self.folder) if self.folder is not None else None, "title": self.title}
@@ -360,7 +362,8 @@ def _scope(folder: Optional[str] = None, scope: Optional[str] = None) -> _Scope:
         found = elo.resolve_scope(scope)
         if found is None:
             raise HTTPException(status_code=404, detail="Collectie niet gevonden")
-        return _Scope(found["key"], found["title"], paths=found["paths"], filters=found.get("filters"))
+        return _Scope(found["key"], found["title"], paths=found["paths"], filters=found.get("filters"),
+                      version=found.get("version"))
     target = _scope_folder(folder)
     return _Scope(str(target), _scope_title(target), folder=target)
 
@@ -421,13 +424,29 @@ def _index_candidates(target: Path, disabled: List[str]) -> List[Dict[str, Any]]
     return base
 
 
-def _collection_candidates(paths: List[str]) -> List[Dict[str, Any]]:
+def _collection_candidates(paths: List[str], key: Optional[str] = None, version: Any = None) -> List[Dict[str, Any]]:
     """The photos of a registered collection that may take part (inside the vault, a photo
-    a browser can show, not in a disabled show folder), with what the index knows of them."""
+    a browser can show, not in a disabled show folder), with what the index knows of them.
+    With a version (an album: its selection version), the list is kept until that changes, as
+    for a folder: an album of 10,000 photos is not looked up again for every pair."""
     root = str(config.VAULT_ROOT).rstrip("/") + "/"
     disabled = get_disabled_folders()
+    cache_key = ("collection", version, tuple(disabled), len(paths)) if key and version is not None else None
+    if cache_key:
+        with _candidates_lock:
+            cached = _candidates_cache.get(key)
+        if cached and cached[0] == cache_key and isinstance(cached[2], dict):
+            return cached[2]["base"]
+    enabled: Dict[str, bool] = {}
+
+    def folder_ok(path: str) -> bool:
+        parent = os.path.dirname(path)
+        if parent not in enabled:
+            enabled[parent] = is_folder_enabled(parent, disabled)
+        return enabled[parent]
+
     wanted = sorted({p for p in paths if isinstance(p, str) and p.startswith(root) and elo.is_elo_photo(p)
-                     and is_folder_enabled(Path(p).parent, disabled)})
+                     and folder_ok(p)})
     known: Dict[str, Tuple] = {}
     if db is not None and wanted:
         with db._connect() as conn:
@@ -442,6 +461,10 @@ def _collection_candidates(paths: List[str]) -> List[Dict[str, Any]]:
         media_id, size, taken, source = known.get(path, (None, None, None, None))
         base.append({"path": path, "id": media_id, "size": size, "taken": taken, "taken_source": source})
     elo.mark_series(base)
+    if cache_key:
+        with _candidates_lock:
+            # Next to the album's own entry (its paths): key is '<scope>#base'
+            _candidates_cache[key] = (cache_key, time.monotonic(), {"base": base})
     return base
 
 
@@ -450,7 +473,7 @@ def _scope_candidates(sc: _Scope) -> List[Dict[str, Any]]:
         base = _base_candidates(sc.folder)
         states = elo.states_below(db, str(sc.folder))
     else:
-        base = _collection_candidates(sc.paths)
+        base = _collection_candidates(sc.paths, f"{sc.key}#base" if sc.version is not None else None, sc.version)
         states = elo.states_of(db, [item["path"] for item in base])
     return elo.with_states(base, states)
 
@@ -492,7 +515,8 @@ def _require_db():
 def _album_scope(value: str) -> Optional[Dict[str, Any]]:
     """'album:<id>': the photos of a smart album (a saved filter, asked of the index now)."""
     from backend import library_filters, smart_albums
-    if not value.isdigit() or len(value) > 18 or db is None:
+    # ASCII digits only, without leading zeros: one key per album ('¹' or '٣' is not a number here)
+    if not re.fullmatch(r"[1-9][0-9]{0,17}", value) or db is None:
         return None
     album = smart_albums.get_album(db, int(value))
     if album is None:
@@ -518,7 +542,7 @@ def _album_scope(value: str) -> Optional[Dict[str, Any]]:
         paths = [r["path"] for r in _index_rows(query)]
         with _candidates_lock:
             _candidates_cache[key] = (version, time.monotonic(), paths)
-    return {"title": album["name"], "paths": paths, "filters": album["filters"]}
+    return {"title": album["name"], "paths": paths, "filters": album["filters"], "version": version}
 
 
 _near_pairs: Dict[str, Any] = {"at": 0.0, "pairs": frozenset()}

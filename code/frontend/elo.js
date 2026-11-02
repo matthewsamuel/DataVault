@@ -5,6 +5,7 @@
 // heeft een score en een onzekerheid (Glicko-2, backend/elo.py): een nieuwe foto beweegt veel, een
 // zekere weinig. De score is dezelfde schaal als de duimpjes in de slideshow (1000 om te beginnen).
 // Een collectie (de hele bibliotheek, een show of een album) kies je bovenin; de ranglijst staat ernaast.
+// De laatst gekozen collectie onthoudt deze browser voor de volgende keer.
 //
 // Snel: er staan altijd een paar paren klaar (afbeeldingen al geladen en gedecodeerd). Een keuze
 // wisselt meteen naar het volgende paar; het opslaan loopt erachteraan, in vaste volgorde, en telt
@@ -18,6 +19,7 @@
 // Toetsen (alleen zolang dit venster open is en je niet in een keuzelijst zit):
 //   ← of 1   linker foto        → of 2   rechter foto       spatie   gelijk
 //   s        overslaan          z        terugdraaien (vaker drukken: verder terug)   Esc   sluiten
+//   c        een andere collectie (ook op de ranglijst): typen zoekt, ↑ ↓ en Enter kiezen
 // Een ingedrukt gehouden toets telt één keer, en een keuze binnen ELO_MIN_DWELL_MS nadat een paar
 // verscheen telt niet (een dubbelklik of een toets die stuitert kiest zo nooit een paar dat je niet zag).
 //
@@ -37,7 +39,7 @@ const ELO_BOARD_LIMIT = 50;
 const ELO_UNDO_MAX = 200;
 const ELO_TOP_CHOICES = [10, 25, 50];
 const ELO_GOALS = [10, 20, 50, 100];
-const ELO_SCOPE_CHARS = 30;         // langere namen in de keuzelijst eindigen op '…'
+const ELO_SCOPE_KEY = 'dv-elo-scope'; // de laatst gekozen collectie (alleen in deze browser)
 const ELO_RECENT_PAIRS = 8;         // zoveel getoonde paren hoort de server (recent=), ook nog niet opgeslagen keuzes
 const ELO_RECENT_CHARS = 6000;      // maar nooit meer dan dit in de adresregel
 const ELO_RESULT_MS = 2200;         // zo lang staat de uitslag (+N · −N) onderin
@@ -45,6 +47,7 @@ const ELO_RESULT_MS = 2200;         // zo lang staat de uitslag (+N · −N) ond
 const elo = {
     scope: '',          // pad van de collectie ('' = hele bibliotheek), of 'soort:waarde' (album)
     scopeTitle: 'Hele bibliotheek',
+    swallowClick: false, // de klik na een pointerdown die alleen de kiezer sloot (eloScopeOutsidePointer)
     tab: 'compare',     // 'compare' of 'board'
     pair: null,         // het paar in beeld ([a, b] zoals de server ze gaf); null zonder paar
     queue: [],          // klaarstaande paren (met hun geladen afbeeldingen)
@@ -54,6 +57,7 @@ const elo = {
     resultTimer: 0,     // wanneer de uitslag onderin weer plaatsmaakt voor de voortgang
     notice: '',         // korte melding vooraan in de voortgangsregel
     noticeIcon: 'fa-rotate-left',
+    noticeName: '',     // een naam vóór de melding, die als enige wordt afgekort ('Oud album' is weg)
     stats: null,        // {photos, compared, comparisons, settled}
     progress: null,     // {session, today, streak, best_streak, goal, total}
     undo: [],           // ids van vergelijkingen in deze ronde, nieuwste laatst
@@ -63,7 +67,9 @@ const elo = {
     chain: Promise.resolve(),   // opslaan en terugdraaien, één voor één
     pending: 0,         // keuzes die nog opgeslagen worden
     shownAt: 0,         // wanneer het paar in beeld verscheen (performance.now)
-    albums: [],         // slimme albums voor de keuzelijst
+    albums: [],         // slimme albums voor de collectiekiezer
+    shows: null,        // de shows, als het scherm Shows ze nog niet geladen had
+    scopeActive: '',    // de oplichtende keuze in de open collectiekiezer (value)
     board: null,        // de laatst getoonde ranglijst
     boardYear: '',
     topN: 25,
@@ -121,10 +127,7 @@ function eloToken() {
 }
 
 function eloBuild() {
-    const scopeSelect = createEl('select', {
-        id: 'elo-scope', class: 'select select-sm elo-scope', 'aria-label': 'Collectie',
-        onChange: (e) => eloSetScope(e.target.value),
-    });
+    const scopePicker = eloScopePicker();
     const tabs = createEl('div', { class: 'segmented elo-tabs', role: 'group', 'aria-label': 'Weergave' },
         createEl('button', { type: 'button', id: 'elo-tab-compare', dataset: { tab: 'compare' }, 'aria-pressed': 'true',
             onClick: () => eloShowTab('compare') }, eloIcon('fa-scale-balanced'), ' Vergelijken'),
@@ -153,7 +156,7 @@ function eloBuild() {
                 createEl('div', { class: 'elo-heading' },
                     createEl('h2', { id: 'elo-title', class: 'modal-title' }, eloIcon('fa-scale-balanced'), ' Welke is mooier?'),
                     createEl('p', { class: 'elo-subtitle', title: ELO_SUBTITLE, text: ELO_SUBTITLE })),
-                createEl('div', { class: 'elo-controls' }, scopeSelect, tabs, close)),
+                createEl('div', { class: 'elo-controls' }, scopePicker, tabs, close)),
             createEl('div', { id: 'elo-body', class: 'elo-body' }),
             createEl('div', { id: 'elo-footer', class: 'elo-footer' },
                 createEl('div', { class: 'elo-meters' },
@@ -185,6 +188,8 @@ function eloBuild() {
         if (e.key === 'Tab' || e.key === 'Enter') overlay.classList.add('is-keyboard');
     }, true);
     overlay.addEventListener('pointerdown', () => overlay.classList.remove('is-keyboard'), true);
+    overlay.addEventListener('pointerdown', eloScopeOutsidePointer, true);
+    overlay.addEventListener('click', eloScopeSwallowClick, true);
     document.body.appendChild(overlay);
     return overlay;
 }
@@ -211,33 +216,260 @@ function eloRing() {
 
 // ==================== COLLECTIES ====================
 
-// De collecties in de keuzelijst: de hele bibliotheek, elke show en elk slim album
-function eloFillScopes() {
-    const select = document.getElementById('elo-scope');
-    const shows = (typeof _lastShowsData !== 'undefined' && _lastShowsData && _lastShowsData.shows) || [];
-    const options = [eloOption('', 'Hele bibliotheek')];
-    const showOptions = [...shows].sort((a, b) => a.title.localeCompare(b.title, 'nl')).map(show => eloOption(show.path, show.title));
-    if (showOptions.length) options.push(createEl('optgroup', { label: 'Shows' }, ...showOptions));
-    const known = new Set(['', ...shows.map(s => s.path)]);
-    const groups = [];
-    if (elo.albums.length) {
-        groups.push({ label: 'Albums', items: elo.albums.map(a => ({ value: `album:${a.id}`, text: a.name })) });
-    }
+// De collectiekiezer: een knop met de huidige collectie, en eronder een lijst om in te zoeken
+// (de hele bibliotheek, elke show, elk slim album met foto's, en wat registerEloScopes aanbiedt).
+// c opent hem vanuit het duel of de ranglijst; typen zoekt, ↑ en ↓ kiezen, Enter neemt hem en
+// geeft de toetsen meteen terug aan het duel; Esc of ernaast klikken sluit alleen de kiezer.
+function eloScopePicker() {
+    const button = createEl('button', {
+        type: 'button', id: 'elo-scope', class: 'btn btn-secondary btn-sm elo-scope',
+        'aria-haspopup': 'listbox', 'aria-expanded': 'false', 'aria-controls': 'elo-scope-pop',
+        onClick: () => (eloScopeIsOpen() ? eloScopeClose(true) : eloScopeOpen()),
+        onKeydown: (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); eloScopeOpen(); }
+        },
+    },
+        createEl('i', { id: 'elo-scope-icon', class: 'fas fa-photo-film elo-scope-icon', 'aria-hidden': 'true' }),
+        createEl('span', { id: 'elo-scope-label', class: 'elo-scope-label', text: 'Hele bibliotheek' }),
+        createEl('i', { class: 'fas fa-caret-down elo-scope-chevron', 'aria-hidden': 'true' }),   // dezelfde pijl als de keuzelijsten
+        createEl('kbd', { text: 'c' }));
+    const filter = createEl('input', {
+        id: 'elo-scope-filter', class: 'input input-sm', type: 'text', placeholder: 'Zoek een collectie',
+        autocomplete: 'off', spellcheck: 'false', role: 'combobox', 'aria-label': 'Zoek een collectie',
+        'aria-controls': 'elo-scope-list', 'aria-expanded': 'true', 'aria-autocomplete': 'list',
+        onInput: () => { document.getElementById('elo-scope-pop').classList.remove('is-entering'); eloScopeRenderList(true); },
+        onKeydown: eloScopeKey,
+    });
+    const pop = createEl('div', { id: 'elo-scope-pop', class: 'popover elo-scope-pop', hidden: true },
+        createEl('div', { class: 'search-field elo-scope-search' }, eloIcon('fa-magnifying-glass'), filter),
+        createEl('div', { id: 'elo-scope-list', class: 'elo-scope-list', role: 'listbox', 'aria-label': 'Collecties',
+            onScroll: eloScopeFades }));
+    const wrap = createEl('div', { class: 'elo-scope-wrap' }, button, pop);
+    wrap.addEventListener('focusout', (e) => {
+        if (eloScopeIsOpen() && !wrap.contains(e.relatedTarget)) eloScopeClose(false);
+    });
+    return wrap;
+}
+
+// Alle collecties: [{value, title, group, icon}], in de volgorde van de lijst
+function eloScopeOptions() {
+    const loaded = typeof _lastShowsData !== 'undefined' && _lastShowsData && _lastShowsData.shows;
+    const shows = loaded || elo.shows || [];
+    const options = [{ value: '', title: 'Hele bibliotheek', group: '', icon: 'fa-photo-film' }];
+    [...shows].sort((a, b) => a.title.localeCompare(b.title, 'nl'))
+        .forEach(show => options.push({ value: show.path, title: show.title, group: 'Shows', icon: 'fa-film' }));
+    // Albums met te weinig foto's om te vergelijken (minder dan 2) komen achteraan, gedimd
+    const few = (a) => typeof a.count === 'number' && a.count < 2;
+    [...elo.albums.filter(a => !few(a)), ...elo.albums.filter(few)].forEach(a => options.push({
+        value: `album:${a.id}`, title: a.name, group: 'Albums', icon: a.icon || 'fa-images',
+        count: typeof a.count === 'number' ? a.count : null, few: few(a),
+    }));
     eloScopeProviders.forEach(({ label, list }) => {
         let items = [];
         try { items = list() || []; } catch (_) { items = []; }
-        if (items.length) groups.push({ label, items });
+        items.forEach(item => options.push({ value: item.value, title: item.text, group: label, icon: item.icon || 'fa-layer-group' }));
     });
-    groups.forEach(({ label, items }) => {
-        items.forEach(item => known.add(item.value));
-        options.push(createEl('optgroup', { label }, ...items.map(item => eloOption(item.value, item.text))));
-    });
-    if (elo.scope && !known.has(elo.scope)) {
-        options.push(eloOption(elo.scope, elo.scopeTitle));
+    // Geopend op een map die geen show is (of een album dat nog laadt): die staat er ook in
+    if (elo.scope && !options.some(o => o.value === elo.scope)) {
+        options.push({ value: elo.scope, title: elo.scopeTitle, group: 'Nu gekozen', icon: elo.scope.startsWith('/') ? 'fa-folder' : 'fa-images' });
     }
-    select.replaceChildren(...options);
-    select.value = elo.scope;
-    eloScopeTitle();
+    return options;
+}
+
+function eloScopeOption(value) {
+    return eloScopeOptions().find(o => o.value === value) || null;
+}
+
+// De knop: icoon en naam van de huidige collectie (de hele naam in de title)
+function eloFillScopes() {
+    const label = document.getElementById('elo-scope-label');
+    if (!label) return;
+    const current = eloScopeOption(elo.scope);
+    label.textContent = elo.scopeTitle;
+    document.getElementById('elo-scope-icon').className = `fas ${current ? current.icon : 'fa-images'} elo-scope-icon`;
+    const button = document.getElementById('elo-scope');
+    button.title = `Collectie: ${elo.scopeTitle} (c)`;
+    button.setAttribute('aria-label', `Collectie: ${elo.scopeTitle}`);
+    if (eloScopeIsOpen()) eloScopeRenderList(false);
+}
+
+function eloScopeIsOpen() {
+    const pop = document.getElementById('elo-scope-pop');
+    return !!pop && !pop.hidden && !pop.classList.contains('is-leaving');
+}
+
+// De lijst, gefilterd op wat er getypt is (hoofdletters en accenten tellen niet).
+// resetActive: na typen licht de eerste treffer op, anders blijft de keuze staan.
+function eloScopeRenderList(resetActive) {
+    const list = document.getElementById('elo-scope-list');
+    const filter = document.getElementById('elo-scope-filter');
+    if (!list || !filter) return;
+    const fold = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const words = fold(filter.value).split(/\s+/).filter(Boolean);
+    const shown = eloScopeOptions().filter(o => words.every(w => fold(`${o.title} ${o.group}`).includes(w)));
+    if (resetActive || !shown.some(o => o.value === elo.scopeActive)) {
+        elo.scopeActive = resetActive || !shown.some(o => o.value === elo.scope)
+            ? (shown[0] ? shown[0].value : null) : elo.scope;
+    }
+    const nodes = [];
+    let group = null;
+    shown.forEach((o, i) => {
+        if (o.group !== group) {
+            group = o.group;
+            if (group) nodes.push(createEl('div', { class: 'elo-scope-group', role: 'presentation', text: group }));
+        }
+        const selected = o.value === elo.scope;
+        nodes.push(createEl('div', {
+            id: `elo-scope-opt-${i}`,
+            class: `elo-scope-option${o.value === elo.scopeActive ? ' is-active' : ''}${o.few ? ' is-few' : ''}`,
+            role: 'option', 'aria-selected': String(selected), dataset: { value: o.value },
+            title: o.few ? `${o.title}: te weinig foto's om te vergelijken` : o.title,
+            onPointerdown: (e) => e.preventDefault(),      // de focus blijft in het zoekveld
+            onClick: () => eloScopeChoose(o.value),
+            onPointermove: () => eloScopeSetActive(o.value, false),
+        },
+            createEl('i', { class: `fas fa-fw ${o.icon} elo-scope-option-icon`, 'aria-hidden': 'true' }),
+            createEl('span', { class: 'elo-scope-option-name', text: o.title }),
+            typeof o.count === 'number' ? createEl('span', { class: 'elo-scope-option-count', text: formatNumberNl(o.count) }) : null,
+            createEl('i', { class: 'fas fa-check elo-scope-option-check', 'aria-hidden': 'true' })));
+    });
+    if (!shown.length) {
+        nodes.push(createEl('div', { class: 'elo-scope-empty', role: 'presentation' },
+            eloIcon('fa-magnifying-glass'), createEl('span', { text: 'Geen collectie met die naam' })));
+    }
+    // Niets veranderd (de albums kwamen na het openen nog eens binnen): de rijen blijven staan
+    const key = JSON.stringify([elo.scope, shown.map(o => [o.value, o.title, o.icon, o.count])]);
+    if (list.dataset.key !== key || !list.childElementCount) {
+        list.dataset.key = key;
+        list.replaceChildren(...nodes);
+    }
+    eloScopeSetActive(elo.scopeActive, true);
+    eloScopeFades();
+}
+
+// Een zachte rand onder (en boven) de lijst zolang er nog meer staat dan je ziet
+function eloScopeFades() {
+    const list = document.getElementById('elo-scope-list');
+    if (!list) return;
+    const more = list.scrollHeight - list.clientHeight - list.scrollTop;
+    list.classList.toggle('has-more-below', more > 1);
+    list.classList.toggle('has-more-above', list.scrollTop > 1);
+}
+
+function eloScopeSetActive(value, scroll) {
+    elo.scopeActive = value;
+    const list = document.getElementById('elo-scope-list');
+    const filter = document.getElementById('elo-scope-filter');
+    let active = null;
+    list.querySelectorAll('.elo-scope-option').forEach(el => {
+        const on = el.dataset.value === value;
+        el.classList.toggle('is-active', on);
+        if (on) active = el;
+    });
+    if (active) {
+        filter.setAttribute('aria-activedescendant', active.id);
+        if (scroll) active.scrollIntoView({ block: 'nearest' });
+    } else {
+        filter.removeAttribute('aria-activedescendant');
+    }
+}
+
+function eloScopeOpen() {
+    const pop = document.getElementById('elo-scope-pop');
+    if (!pop || eloScopeIsOpen()) return;
+    clearTimeout(pop._eloLeave);
+    pop.classList.remove('is-leaving');
+    pop.inert = false;
+    const filter = document.getElementById('elo-scope-filter');
+    filter.value = '';
+    elo.scopeActive = elo.scope;
+    // De rijen schuiven bij het openen even achter elkaar in (niet bij typen)
+    const list = document.getElementById('elo-scope-list');
+    list.dataset.key = '';
+    pop.classList.add('is-entering');
+    clearTimeout(pop._eloEnter);
+    pop._eloEnter = setTimeout(() => pop.classList.remove('is-entering'), 600);
+    pop.hidden = false;
+    document.getElementById('elo-scope').setAttribute('aria-expanded', 'true');
+    eloScopeRenderList(false);
+    filter.focus({ preventScroll: true });
+    // Albums kunnen intussen veranderd zijn (een nieuw 'Als album'): stil bijwerken
+    eloLoadAlbums();
+}
+
+// Dicht: kort vervagen (zoals de andere menu's), behalve bij Beweging Uit.
+// toDuel: de focus terug naar het duel of de ranglijst; anders naar de knop (Esc) of laten (Tab, klik ernaast).
+function eloScopeClose(toButton, toDuel = false) {
+    const pop = document.getElementById('elo-scope-pop');
+    if (!pop || pop.hidden) return;
+    document.getElementById('elo-scope').setAttribute('aria-expanded', 'false');
+    const hide = () => { pop.hidden = true; pop.classList.remove('is-leaving'); pop.inert = false; };
+    if (window.Motion && !Motion.off()) {
+        pop.classList.add('is-leaving');
+        pop.inert = true;
+        clearTimeout(pop._eloLeave);
+        pop._eloLeave = setTimeout(hide, Motion.ms('--dur-3', 200) + 40);
+    } else {
+        hide();
+    }
+    const overlay = document.getElementById('elo-overlay');
+    if (toDuel && overlay) eloFocusInBody(overlay);
+    else if (toButton) document.getElementById('elo-scope').focus({ preventScroll: true });
+}
+
+// Een klik naast de open kiezer sluit alleen de kiezer: bijna alles ernaast is een foto, en die
+// klik mag nooit ook een keuze in het duel zijn. De pointerdown en de klik erna worden opgevangen.
+function eloScopeOutsidePointer(e) {
+    elo.swallowClick = false;
+    const wrap = document.querySelector('.elo-scope-wrap');
+    if (!eloScopeIsOpen() || !wrap || wrap.contains(e.target)) return;
+    e.preventDefault();      // ook geen focuswissel (die zou de kiezer via focusout sluiten)
+    e.stopPropagation();
+    elo.swallowClick = true;
+    eloScopeClose(false, true);
+}
+
+function eloScopeSwallowClick(e) {
+    if (!elo.swallowClick) return;
+    elo.swallowClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+function eloScopeKey(e) {
+    const values = [...document.querySelectorAll('#elo-scope-list .elo-scope-option')].map(el => el.dataset.value);
+    const at = values.indexOf(elo.scopeActive);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!values.length) return;
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        eloScopeSetActive(values[at < 0 ? 0 : (at + step + values.length) % values.length], true);
+    } else if ((e.key === 'PageDown' || e.key === 'PageUp') && values.length) {
+        e.preventDefault();
+        eloScopeSetActive(values[e.key === 'PageDown' ? values.length - 1 : 0], true);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (at >= 0) eloScopeChoose(values[at]);
+    } else if (e.key === 'Escape') {
+        // Alleen de kiezer dicht, niet het hele venster
+        e.preventDefault();
+        e.stopPropagation();
+        eloScopeClose(true);
+    } else if (e.key === 'Tab') {
+        eloScopeClose(false);
+    }
+    // Wat hier getypt wordt is voor het zoekveld, nooit een keuze in het duel
+    e.stopPropagation();
+}
+
+// Gekozen: de toetsen meteen terug naar het duel (of de ranglijst). Eerst de focus op het venster,
+// dan pas laden: zo zet eloSetBody hem op het nieuwe paar zodra dat er staat.
+function eloScopeChoose(value) {
+    const option = eloScopeOption(value);
+    if (!option || value === elo.scope) { eloScopeClose(false, true); return; }
+    document.getElementById('elo-overlay').focus({ preventScroll: true });
+    eloScopeClose(false);
+    eloSetScope(value, option.title);
 }
 
 function eloAlbumHasPhotos(album) {
@@ -246,36 +478,55 @@ function eloAlbumHasPhotos(album) {
     return (Array.isArray(kind) ? kind : [kind]).includes('photo');
 }
 
+// De albums (en de shows, als het scherm Shows nog niet open was geweest) voor de kiezer
 async function eloLoadAlbums() {
+    const showsLoaded = typeof _lastShowsData !== 'undefined' && _lastShowsData && _lastShowsData.shows;
+    const [albums, stories] = await Promise.allSettled([
+        fetchJSON(`${API_BASE}/api/library/albums?with_hidden=false`),
+        showsLoaded ? Promise.resolve(null) : fetchJSON(`${API_BASE}/api/shows/stories`),
+    ]);
+    // Alleen albums waar foto's in kunnen: een album met alleen video's (of audio) doet niet mee.
+    // Lukt een van beide niet, dan blijft de lijst bij wat er wel is.
+    if (albums.status === 'fulfilled') elo.albums = (albums.value.albums || []).filter(a => !a.hidden && eloAlbumHasPhotos(a));
+    if (stories.status === 'fulfilled' && stories.value) elo.shows = stories.value.shows || [];
+    eloFillScopes();
+}
+
+// De laatst gekozen collectie, voor de volgende keer dat het venster opengaat (alleen een gemak:
+// zonder opslag in de browser begint het gewoon bij de hele bibliotheek)
+function eloRememberScope() {
+    try { localStorage.setItem(ELO_SCOPE_KEY, JSON.stringify({ value: elo.scope, title: elo.scopeTitle })); } catch (_) { /* geen opslag */ }
+}
+
+function eloRememberedScope() {
     try {
-        const data = await fetchJSON(`${API_BASE}/api/library/albums?with_hidden=false`);
-        // Alleen albums waar foto's in kunnen: een album met alleen video's (of audio) doet niet mee
-        elo.albums = (data.albums || []).filter(a => !a.hidden && eloAlbumHasPhotos(a));
-        const select = document.getElementById('elo-scope');
-        if (select && document.activeElement !== select) eloFillScopes();
-    } catch (_) {
-        // Zonder albums blijft de lijst bij de bibliotheek en de shows
-    }
+        const saved = JSON.parse(localStorage.getItem(ELO_SCOPE_KEY) || 'null');
+        if (saved && typeof saved.value === 'string' && typeof saved.title === 'string' && saved.value) return saved;
+    } catch (_) { /* geen opslag */ }
+    return null;
 }
 
-function eloOption(value, title) {
-    const short = title.length > ELO_SCOPE_CHARS ? `${title.slice(0, ELO_SCOPE_CHARS - 1).trimEnd()}…` : title;
-    return createEl('option', { value, text: short, title, dataset: { full: title } });
+// Een collectie die er niet meer is (een verwijderd album, een verplaatste map): terug naar de hele bibliotheek
+function eloScopeGone(err) {
+    if (!err || err.status !== 404 || !elo.scope) return false;
+    const gone = elo.scopeTitle;
+    eloSetScope('', 'Hele bibliotheek');
+    // Onderin past alleen kort (de naam wordt zo nodig afgekort); de uitleg staat in de melding
+    elo.notice = 'is weg';
+    elo.noticeName = `'${gone}'`;
+    elo.noticeIcon = 'fa-circle-info';
+    showToast('Collectie niet gevonden', `'${gone}' bestaat niet meer. Je vergelijkt nu de hele bibliotheek.`, 'info');
+    eloUpdateProgress();
+    return true;
 }
 
-function eloOptionTitle(option) {
-    return option ? (option.dataset.full || option.textContent) : '';
-}
-
-function eloScopeTitle() {
-    const select = document.getElementById('elo-scope');
-    if (select) select.title = eloOptionTitle(select.selectedOptions[0]);
-}
-
+// scope: een map of 'album:7' (vanuit Shows of Albums); zonder: de collectie van de vorige keer
 function openElo(scope = '', title = '') {
     const overlay = document.getElementById('elo-overlay') || eloBuild();
-    elo.scope = scope || '';
-    elo.scopeTitle = title || 'Hele bibliotheek';
+    const remembered = scope ? null : eloRememberedScope();
+    elo.scope = scope || (remembered ? remembered.value : '');
+    elo.scopeTitle = title || (remembered ? remembered.title : '') || 'Hele bibliotheek';
+    if (scope) eloRememberScope();
     eloResetRound();
     elo.last = null;
     eloFillScopes();
@@ -292,6 +543,7 @@ function openElo(scope = '', title = '') {
 function closeElo() {
     const overlay = document.getElementById('elo-overlay');
     if (!overlay) return;
+    eloScopeClose(false);
     overlay.classList.remove('active');
     elo.seq++;
     eloDropQueue();
@@ -315,14 +567,13 @@ function eloDropQueue() {
     elo.fetching = null;
 }
 
-function eloSetScope(value) {
+function eloSetScope(value, title) {
     elo.scope = value;
-    const select = document.getElementById('elo-scope');
-    const option = select && select.selectedOptions[0];
-    elo.scopeTitle = option ? eloOptionTitle(option) : 'Hele bibliotheek';
+    elo.scopeTitle = value ? (title || elo.scopeTitle) : 'Hele bibliotheek';
+    eloRememberScope();
     eloResetRound();
     elo.seq++;
-    eloScopeTitle();
+    eloFillScopes();
     eloUpdateActions();
     if (elo.tab === 'board') eloLoadBoard(); else eloLoadPair();
 }
@@ -537,6 +788,7 @@ async function eloLoadPair() {
     } catch (err) {
         if (seq !== elo.seq || elo.tab !== 'compare') return;
         elo.pair = null;
+        if (eloScopeGone(err)) return;
         eloSetBody(errorState('Geen foto\'s geladen', err, () => eloLoadPair()));
     }
     eloUpdateProgress();
@@ -573,7 +825,7 @@ async function eloAdvance(direction) {
 
 function eloRenderEmpty(reason) {
     const few = reason === 'too_few';
-    const toLibrary = { label: 'Hele bibliotheek', onClick: () => { document.getElementById('elo-scope').value = ''; eloSetScope(''); } };
+    const toLibrary = { label: 'Hele bibliotheek', onClick: () => eloSetScope('') };
     const toBoard = { label: 'Ranglijst bekijken', onClick: () => eloShowTab('board') };
     const state = emptyState({
         icon: few ? 'fa-images' : 'fa-check',
@@ -1005,6 +1257,7 @@ async function eloUndo() {
         if (elo.pair && !elo.pair.some(p => back.has(p.path))) elo.queue.unshift(elo.pair);
         eloHideResult(true);
         elo.notice = 'Teruggedraaid, kies opnieuw';
+        elo.noticeName = '';
         elo.noticeIcon = 'fa-rotate-left';
         eloShowPair(eloPreload(pair), 'back');
         elo.shownAt = 0;            // een teruggedraaid paar ken je al: meteen te kiezen
@@ -1023,7 +1276,10 @@ async function eloUndo() {
 
 function eloKeydown(e) {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (isTypingTarget(e.target) || elo.tab !== 'compare') return;
+    if (isTypingTarget(e.target)) return;
+    // c: een andere collectie (ook vanuit de ranglijst)
+    if ((e.key === 'c' || e.key === 'C') && !e.repeat) { e.preventDefault(); eloScopeOpen(); return; }
+    if (elo.tab !== 'compare') return;
     // Spatie en Enter op een knop (Sluiten, Terugdraaien, de tabbladen) doen wat die knop doet
     const onControl = e.target.closest && e.target.closest('button, a[href], summary') && !e.target.closest('.elo-choice');
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -1053,8 +1309,11 @@ function eloUpdateProgress() {
         // 'vergeleken' = in een duel geweest; stemmen in de slideshow tellen hier niet mee (de ranglijst zegt 'met een score')
         text = `${formatNumberNl(elo.stats.compared)} van ${formatNumberNl(elo.stats.photos)} ${photos} vergeleken`;
     }
+    if (!elo.notice) elo.noticeName = '';
     const notice = elo.notice ? createEl('span', { class: 'elo-notice' },
-        eloIcon(elo.noticeIcon), ` ${elo.notice}`) : null;
+        eloIcon(elo.noticeIcon), ' ',
+        elo.noticeName ? createEl('span', { class: 'elo-notice-name', text: elo.noticeName }) : null,
+        `${elo.noticeName ? ' ' : ''}${elo.notice}`) : null;
     box.replaceChildren(...[notice, notice && text ? ' · ' : null, text ? createEl('span', { text }) : null].filter(Boolean));
     box.title = [elo.scopeTitle, box.textContent].filter(Boolean).join(' · ');
     eloUpdateMeters();
@@ -1126,6 +1385,7 @@ function eloCelebrateGoal(before) {
     const p = elo.progress;
     if (!p || before >= p.goal || p.session < p.goal) return;
     elo.notice = `Sessiedoel gehaald: ${formatNumberNl(p.goal)} vergelijkingen`;
+    elo.noticeName = '';
     elo.noticeIcon = 'fa-trophy';
     const ring = document.getElementById('elo-goal');
     if (!ring) return;
@@ -1173,6 +1433,7 @@ async function eloLoadBoard() {
         eloRenderBoard(data);
     } catch (err) {
         if (seq !== elo.seq || elo.tab !== 'board') return;
+        if (eloScopeGone(err)) return;
         eloSetBody(errorState('Ranglijst laden mislukt', err, eloLoadBoard));
     }
 }
@@ -1376,4 +1637,5 @@ addShortcutGroup('Welke is mooier? (Shows)', [
     [['spatie'], 'Even mooi (gelijk)'],
     [['s'], 'Dit paar overslaan'],
     [['z'], 'Terugdraaien (vaker: verder terug)'],
+    [['c'], 'Een andere collectie kiezen (ook een album)'],
 ]);

@@ -36,7 +36,7 @@ def test_the_model_is_chosen_in_the_ui_and_remembered(client, fake_ollama, app):
     assert data["current"] == "qwen2.5:3b" and data["default"] == "qwen2.5:3b" and data["reachable"]
     assert [m["name"] for m in data["models"]] == ["llama3.2:3b", "qwen2.5:3b"]
     assert client.post("/api/chat/model", json={"model": "llama3.2:3b"}).json() == {"current": "llama3.2:3b",
-                                                                                    "cloud": False}
+                                                                                    "cloud": False, "tool_format_used": "native"}
     assert client.get("/api/chat/models").json()["current"] == "llama3.2:3b"
     _events(client)
     assert json.loads(fake_ollama.requests[-1].content)["model"] == "llama3.2:3b"
@@ -67,7 +67,7 @@ def test_an_ollama_cloud_model_is_marked_and_needs_an_explicit_choice(client, fa
                    for r in fake_ollama.requests if r.url.path == "/api/chat")
     # With the confirmation it is used, and the health check says it is not local
     r = client.post("/api/chat/model", json={"model": "gpt-oss:120b-cloud", "allow_cloud": True})
-    assert r.json() == {"current": "gpt-oss:120b-cloud", "cloud": True}
+    assert r.json() == {"current": "gpt-oss:120b-cloud", "cloud": True, "tool_format_used": "native"}
     _events(client)
     assert json.loads(fake_ollama.requests[-1].content)["model"] == "gpt-oss:120b-cloud"
     assert client.get("/api/health").json()["capabilities"]["chat"]["model_cloud"] is True

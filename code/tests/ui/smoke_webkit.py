@@ -1175,6 +1175,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             def comparisons():
                 return page.evaluate("(async () => (await fetchJSON(`${API_BASE}/api/shows/compare/pair`)).stats.comparisons)()")
 
+            def choose_scope(name, label):
+                """The collection picker with the keyboard only: c, type, Enter."""
+                step(f"elo: c, {label}", lambda: (page.keyboard.press("c"), page.wait_for_timeout(250),
+                                                  page.keyboard.type(name), page.wait_for_timeout(150),
+                                                  page.keyboard.press("Enter")), 1.2)
+
             try:
                 step("elo: open from Shows", lambda: (
                     page.click(".nav-tab[data-view='shows']"), page.click("#btn-elo"),
@@ -1261,10 +1267,31 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"elo: new pairs were asked for before the pick was saved, or without it ({order})")
             page.wait_for_timeout(600)
             count = comparisons()
-            page.focus("#elo-scope")
+            # c opens the collection picker; what is typed there filters it and never picks a photo;
+            # Escape closes only the picker (the window stays, the focus goes to the picker's button)
+            page.focus("#elo-overlay")
+            step("elo: c opens the collection picker", lambda: page.keyboard.press("c"), 0.4)
+            expect(page.is_visible("#elo-scope-pop") and page.evaluate("document.activeElement.id") == "elo-scope-filter",
+                   "elo: c did not open the collection picker with the focus in its search field")
             page.keyboard.press("1")
             page.wait_for_timeout(400)
-            expect(comparisons() == count, "elo: a key in the collection list picked a photo")
+            expect(comparisons() == count, "elo: a key in the collection picker picked a photo")
+            expect(page.is_visible(".elo-scope-empty"), "elo: a filter without matches does not say so")
+            step("elo: Escape closes only the picker", lambda: page.keyboard.press("Escape"), 0.5)
+            expect(not page.is_visible("#elo-scope-pop") and page.is_visible("#elo-overlay")
+                   and page.evaluate("document.activeElement.id") == "elo-scope",
+                   "elo: Escape in the collection picker did not close just the picker")
+            # A click next to the open picker (nearly always on a photo) only closes the picker
+            page.wait_for_timeout(400)
+            step("elo: c opens the picker again", lambda: page.keyboard.press("c"), 0.4)
+            step("elo: a click on a photo closes only the picker",
+                 lambda: page.click("#elo-body .elo-stage:not(.is-leaving) .elo-choice[data-side='0']"), 0.6)
+            expect(not page.is_visible("#elo-scope-pop") and comparisons() == count,
+                   f"elo: a click next to the open picker also picked a photo ({comparisons()} vs {count})")
+            # (that the next click picks again is checked after the album below: a pick here would
+            # make the album's two photos 'recent')
+            expect(not page.evaluate("elo.swallowClick"),
+                   "elo: the click after closing the picker is still being swallowed")
 
             # Double picks: a key that bounces (again within the dwell time after the new pair
             # appeared) and a held key pick nothing more; neither does a key while no pair is ready
@@ -1383,11 +1410,56 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # A collection with too few photos: Overslaan is off and the round counter starts again
             familie = str((vault / "library" / "Familie").resolve())
-            step("elo: Familie", lambda: page.select_option("#elo-scope", familie), 1.0)
+            page.focus("#elo-overlay")
+            choose_scope("Familie", "Familie")
+            expect(page.evaluate("elo.scope") == familie, f"elo: the picker did not choose Familie ({page.evaluate('elo.scope')})")
             expect(page.is_disabled("#elo-skip") and page.is_disabled("#elo-draw"), "elo: Overslaan or Gelijk looks usable without a pair")
             expect("in deze ronde" not in (page.text_content("#elo-progress") or ""),
                    f"elo: the round counter of another collection is shown ({page.text_content('#elo-progress')})")
-            step("elo: back to the library", lambda: page.select_option("#elo-scope", ""), 1.0)
+            choose_scope("hele bib", "back to the library")
+            expect(page.evaluate("elo.scope") == "", "elo: the picker did not go back to the whole library")
+
+            # A smart album as the range: the keys go straight back to the duel after Enter, a pick
+            # counts in the album, the Ranglijst is the album's, c works there too, and the choice is
+            # remembered for the next time the window opens
+            italy = str((vault / "library" / "Reis Italië").resolve())
+            album_id = page.evaluate("""async (folder) => (await fetchJSON(`${API_BASE}/api/library/albums`, {method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: 'Rooktest Italië', filters: {folder}})})).id""", italy)
+            album_key = f"album:{album_id}"
+
+            def album_comparisons():
+                return page.evaluate("""async (key) => (await fetchJSON(
+                    `${API_BASE}/api/shows/compare/pair?scope=${encodeURIComponent(key)}`)).stats.comparisons""", album_key)
+
+            in_album = album_comparisons()
+            choose_scope("rooktest itali", "an album")
+            pair = shown_pair()
+            expect(page.evaluate("elo.scope") == album_key and len(pair) == 2 and all(p.startswith(italy + "/") for p in pair)
+                   and "Rooktest Italië" in (page.text_content("#elo-scope") or ""),
+                   f"elo: choosing the album did not show a pair of the album ({page.evaluate('elo.scope')}, {pair})")
+            step("elo: ← in the album", lambda: page.keyboard.press("ArrowLeft"), 1.4)
+            expect(album_comparisons() == in_album + 1, "elo: after choosing an album, ← did not count a comparison in it")
+            step("elo: Ranglijst of the album", lambda: page.click("#elo-tab-board"), 1.0)
+            expect(page.text_content(".elo-board-title") == "Rooktest Italië",
+                   f"elo: the Ranglijst is not the album's ({page.text_content('.elo-board-title')})")
+            step("elo: c on the Ranglijst", lambda: page.keyboard.press("c"), 0.4)
+            expect(page.is_visible("#elo-scope-pop"), "elo: c did not open the collection picker on the Ranglijst")
+            step("elo: Escape on the Ranglijst picker", lambda: page.keyboard.press("Escape"), 0.4)
+            step("elo: back to Vergelijken", lambda: page.click("#elo-tab-compare"), 1.0)
+            # (two photos, just compared: the album may show 'Geen nieuw paar' instead of a pair)
+            pair_or_done = "#elo-body .elo-choice:not(.is-loading), #elo-body .empty-state"
+            step("elo: reopen", lambda: (page.evaluate("closeElo()"), page.wait_for_timeout(300), page.evaluate("openElo()"),
+                                         page.wait_for_selector(pair_or_done, timeout=10000)), 0.6)
+            expect(page.evaluate("elo.scope") == album_key, "elo: the window did not reopen on the album chosen last time")
+            page.focus("#elo-overlay")
+            choose_scope("hele bib", "back to the library again")
+            # With the picker closed, a click on a photo picks it
+            page.wait_for_timeout(400)
+            count = comparisons()
+            step("elo: a click on a photo picks it",
+                 lambda: page.click("#elo-body .elo-stage:not(.is-leaving) .elo-choice[data-side='0']"), 1.0)
+            expect(comparisons() == count + 1, f"elo: a click on a photo did not pick it ({comparisons()} vs {count})")
             page.focus("#elo-overlay")
             expect_focus_trapped("elo-overlay", "elo: window")
             step("elo: Ranglijst", lambda: page.click("#elo-tab-board"), 1.0)
@@ -1429,6 +1501,17 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 renderShows(before); return r; })()""")
             expect(empty_shows == {"elo": True, "empty": True, "shuffle": False},
                    f"shows: without shows 'Welke is mooier?' cannot be reached ({empty_shows})")
+            # An open album has 'Welke is mooier?' with itself as the range
+            step("albums: Welke is mooier? of an album", lambda: (
+                page.evaluate("switchMainView('albums')"), page.wait_for_timeout(900),
+                page.click(".albums-side-item:has-text('Rooktest Italië')"), page.wait_for_timeout(700),
+                page.click("#albums-elo"), page.wait_for_selector(pair_or_done, timeout=10000)), 0.6)
+            expect(page.evaluate("elo.scope") == album_key and "Rooktest Italië" in (page.text_content("#elo-scope") or ""),
+                   f"albums: 'Welke is mooier?' did not open on the album ({page.evaluate('elo.scope')})")
+            step("albums: close Welke is mooier?", lambda: page.keyboard.press("Escape"), 0.5)
+            expect(page.evaluate("document.activeElement.id") == "albums-elo",
+                   "albums: closing Welke is mooier? did not return to its button")
+            page.evaluate("localStorage.removeItem('dv-elo-scope')")     # the next opening starts at the library again
 
             # Spotify: both top lists show everything the export has (never cut to the shorter one),
             # the shorter one ends with a quiet closing line, and the stat labels in a row line up

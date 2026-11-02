@@ -517,6 +517,14 @@
         } else if (album) {
             buttons.push(createEl('button', { type: 'button', class: 'btn btn-secondary', id: 'albums-edit', onClick: () => openAlbumDialog(album) },
                 createEl('i', { class: 'fas fa-pen', 'aria-hidden': 'true' }), 'Album bewerken'));
+            // Welke is mooier? met dit album als bereik (alleen een album waar foto's in kunnen)
+            if (typeof openElo === 'function' && (typeof eloAlbumHasPhotos !== 'function' || eloAlbumHasPhotos(album))) {
+                buttons.push(createEl('button', {
+                    type: 'button', class: 'btn btn-secondary', id: 'albums-elo',
+                    title: "De foto's van dit album twee aan twee vergelijken; de ranglijst gaat dan ook over dit album",
+                    onClick: () => openElo(`album:${album.id}`, album.name),
+                }, createEl('i', { class: 'fas fa-scale-balanced', 'aria-hidden': 'true' }), 'Welke is mooier?'));
+            }
         } else {
             const any = Object.keys(state.spec).length > 0;
             buttons.push(createEl('button', {

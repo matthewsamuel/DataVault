@@ -17,6 +17,7 @@ is the only place where such a tag gets a meaning on the server:
   in the library or the folder list of the vault, and every path goes through
   paths.resolve_in_vault. There is no tool that deletes.
 """
+import ast
 import json
 import math
 import re
@@ -31,8 +32,9 @@ from fastapi import HTTPException
 
 from backend import library_filters, media_index, near_dups, places, semantic
 
-# qwen2.5:3b mostly writes <<ACTION: {...}>>, but sometimes <|ACTION: {...}|> or just the bare JSON object
-TAG = re.compile(r"(?:<<|<\|)\s*ACTION:?\s*(\{[\s\S]*?\})\s*(?:>>|\|>)")
+# qwen2.5:3b mostly writes <<ACTION: {...}>>, but sometimes <|ACTION: {...}|>, <<ACTION: "job_status">>
+# (only the name) or just the bare JSON object
+TAG = re.compile(r'(?:<<|<\|)\s*ACTION:?\s*(\{[\s\S]*?\}|"[A-Za-z_]+")\s*(?:>>|\|>)')
 BARE = re.compile(r'\{[^{}]*"action"\s*:[^{}]*\}')
 UNFINISHED = re.compile(r'(?:<<|<\|)\s*ACTION[\s\S]*$|\{\s*"action"[^}]*$')
 PENDING_TTL = 600.0
@@ -49,6 +51,8 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f<>  ]")
 
 NOT_RUN = ("Dat kon ik niet uitvoeren. Probeer het anders te vragen, bijvoorbeeld \"foto's uit 2019\" "
            "of \"foto's van het strand\".")
+# The model gave nothing at all (no text, no action), also after the retry in the tag format
+NO_ANSWER = "Dat lukte me niet, wil je het anders vragen?"
 
 
 class ToolError(Exception):
@@ -130,7 +134,8 @@ def clean_action(data: Any) -> Optional[Dict[str, Any]]:
     _, spec, required = TOOLS[data["action"]]
     out: Dict[str, Any] = {"action": data["action"]}
     for key, check in spec.items():
-        if key in data and data[key] is not None:
+        # An empty value is a field the model left blank ("date_from": ""), not a wrong one
+        if key in data and data[key] is not None and data[key] != "":
             try:
                 out[key] = check(data[key])
             except (ValueError, TypeError):
@@ -142,7 +147,7 @@ def clean_action(data: Any) -> Optional[Dict[str, Any]]:
 
 def strip_actions(text: str) -> str:
     """The answer without its action tags or bare action objects (what the user reads)."""
-    text = TAG.sub("", text or "")
+    text = TAG.sub("", _without_text_calls(text or ""))
     text = BARE.sub("", text)
     return UNFINISHED.sub("", text).strip()
 
@@ -232,25 +237,195 @@ def client_action(data: Any) -> Optional[Dict[str, Any]]:
     return out
 
 
-def resolve_actions(text: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], bool]:
+# ---------- Ollama's own tool calling ----------
+#
+# The same actions, offered as Ollama 'tools' (the 'tools' field of /api/chat). The model then
+# answers with message.tool_calls instead of a <<ACTION>> tag; every call is turned into the same
+# {'action', ...} object and goes through the same allowlist (clean_action, _near_miss,
+# client_action) as a tag. Nothing here runs anything, and a proposal still only makes a card.
+# Which format is the default, and why, is measured in docs/PASHA_TOOLS.md.
+
+_STR, _INT, _BOOL = {"type": "string"}, {"type": "integer"}, {"type": "boolean"}
+
+
+def _p(base: Dict[str, Any], description: str, **extra) -> Dict[str, Any]:
+    return {**base, "description": description, **extra}
+
+
+_FILTER_PROPS = {
+    "year": _p(_INT, "jaar, bijv. 2019"),
+    "month": _p(_INT, "maand 1-12 (alleen met year)"),
+    "kind": _p(_STR, "alleen foto's of alleen video's", enum=["photo", "video"]),
+    "camera_contains": _p(_STR, "deel van de cameranaam, bijv. iPhone"),
+    "folder": _p(_STR, "mapnaam"),
+    "min_rating": _p(_INT, "minimale score (1000 = neutraal)"),
+    "has_gps": _p(_BOOL, "alleen met locatie"),
+    "orientation": _p(_STR, "liggend, staand of vierkant", enum=["landscape", "portrait", "square"]),
+    "date_from": _p(_STR, "vanaf datum YYYY-MM-DD"),
+    "date_to": _p(_STR, "tot en met datum YYYY-MM-DD"),
+    "period": _p(_STR, "een vaste periode", enum=["this_year", "last_year", "this_month", "last_30_days"]),
+}
+
+# name -> (description, properties, required). Only names of TOOLS or CLIENT_ACTIONS (a test checks it).
+# Not offered: show_photos (one day). As a tool the model took it for whole months ('juli 2019' ->
+# 2019-07-01); a day is library_filter with date_from = date_to. As a tag it still works.
+_NATIVE: Dict[str, Tuple[str, Dict[str, Any], Tuple[str, ...]]] = {
+    "find_photos": ("Foto's zoeken op wat erop staat (strand, hond, verjaardagstaart, zonsondergang).",
+                    {"query": _p(_STR, "wat er op de foto staat, in de woorden van de gebruiker"),
+                     "year": _p(_INT, "jaar, alleen als de gebruiker het noemt"),
+                     "kind": _FILTER_PROPS["kind"]}, ("query",)),
+    "library_filter": ("Bestanden tonen op jaar, maand (juli 2019: year en month), periode, soort, camera, map, "
+                       "score, stand of locatie. "
+                       "Niet voor wat er op de foto staat en niet voor plaatsen.", dict(_FILTER_PROPS), ()),
+    "open_smart_album": ("Een bestaand slim album openen op naam.", {"name": _p(_STR, "naam van het album")}, ("name",)),
+    "on_this_day": ("Foto's van vandaag in eerdere jaren.", {}, ()),
+    "photos_at_place": ("Foto's gemaakt in een stad of land (een echte plaatsnaam, zoals Parijs of Spanje).",
+                        {"place": _p(_STR, "stad of land"), "year": _p(_INT, "jaar, alleen als genoemd")}, ("place",)),
+    "series_overview": ("Overzicht van reeksen bijna-dezelfde foto's.", {}, ()),
+    "job_status": ("Welke achtergrondtaken er lopen.", {}, ()),
+    "recovery_summary": ("De laatste verplaatsingen en wat terug te zetten is.", {}, ()),
+    "search_photos": ("Een bestand zoeken op bestandsnaam, bijv. IMG_1234.",
+                      {"query": _p(_STR, "(deel van de) bestandsnaam")}, ("query",)),
+    "open_folder": ("Een map in het archief openen.", {"target": _p(_STR, "mapnaam")}, ("target",)),
+    "open_tab": ("Een scherm van de app openen.", {"target": _p(_STR, "het scherm", enum=list(CHAT_VIEWS))}, ("target",)),
+    "scan_duplicates": ("De scan naar exact dubbele bestanden openen. Alleen als de gebruiker om dubbele bestanden vraagt.",
+                        {}, ()),
+    "propose_move": ("Voorstel: bestanden naar een bestaande map verplaatsen. De gebruiker bevestigt zelf.",
+                     {"query": _p(_STR, "bestandsnaam of zoekwoord"), "folder": _p(_STR, "naam van de bestaande doelmap"),
+                      "limit": _p(_INT, f"hoogstens zoveel bestanden (1-{MOVE_MAX})")}, ("folder",)),
+    "propose_keep_best": ("Voorstel: van de grootste reeksen alleen de beste foto houden (de rest gaat naar een map en is "
+                          "terug te zetten). De gebruiker bevestigt zelf.",
+                          {"count": _p(_INT, f"aantal reeksen (1-{SERIES_MAX})")}, ()),
+    "propose_export": ("Voorstel: bestanden exporteren (kopiëren naar een map die de gebruiker kiest).",
+                       {**{k: _FILTER_PROPS[k] for k in ("year", "month", "kind", "folder", "date_from", "date_to")},
+                        "query": _p(_STR, "wat er op de foto's staat")}, ()),
+}
+
+NATIVE_TOOLS: List[Dict[str, Any]] = [
+    {"type": "function", "function": {"name": name, "description": description,
+                                      "parameters": {"type": "object", "properties": props, "required": list(required)}}}
+    for name, (description, props, required) in _NATIVE.items()
+]
+
+
+# A tool call the model wrote as text instead of as a call (qwen2.5 sometimes drops the
+# <tool_call> wrapper, and then Ollama passes it on as content): {"name": ..., "arguments": {...}}
+NAMED_CALL = re.compile(r'(?:<tool_call>\s*)?\{\s*"name"\s*:\s*"[A-Za-z_]+"\s*,\s*"(?:arguments|parameters)"\s*:')
+_CALL_END = re.compile(r"\s*(?:</tool_call>)?")
+
+
+# ... or in the style of the prompt's examples: find_photos(query="kat")
+CODE_CALL = re.compile(r"\b(" + "|".join(_NATIVE) + r")\(([^()]*)\)")
+
+
+def _code_call_args(raw: str) -> Optional[Dict[str, Any]]:
+    """The keyword arguments of 'query="kat", year=2019' as literals (never evaluated as code), else None."""
+    try:
+        tree = ast.parse(f"f({raw})", mode="eval")
+        call = tree.body
+        if not isinstance(call, ast.Call) or call.args:
+            return None
+        return {kw.arg: ast.literal_eval(kw.value) for kw in call.keywords if kw.arg}
+    except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
+        return None
+
+
+def _text_calls(text: str) -> Tuple[List[Dict[str, Any]], List[Tuple[int, int]]]:
+    """The tool calls written as text, as Ollama calls, and where they stand (to strip them)."""
+    calls, spans = [], []
+    for m in CODE_CALL.finditer(text):
+        args = _code_call_args(m.group(2)[:500])
+        if args is not None:
+            calls.append({"function": {"name": m.group(1), "arguments": args}})
+            spans.append((m.start(), m.end()))
+    for m in NAMED_CALL.finditer(text):
+        start = text.index("{", m.start())
+        try:
+            obj, end = json.JSONDecoder().raw_decode(text, start)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            end += _CALL_END.match(text, end).end() - end
+            calls.append({"function": {"name": obj.get("name"), "arguments": obj.get("arguments", obj.get("parameters"))}})
+            spans.append((m.start(), end))
+    return calls, spans
+
+
+def _without_text_calls(text: str) -> str:
+    for start, end in reversed(_text_calls(text)[1]):
+        text = text[:start] + text[end:]
+    return text
+
+
+def call_to_action(call: Any) -> Any:
+    """One Ollama tool call ({'function': {'name', 'arguments'}}) as the object a tag would hold, else None."""
+    fn = call.get("function") if isinstance(call, dict) else None
+    if not isinstance(fn, dict) or not isinstance(fn.get("name"), str):
+        return None
+    args = fn.get("arguments")
+    if isinstance(args, str):           # some models send the arguments as a JSON string
+        args = _decode(args)
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        return None
+    return {**{k: v for k, v in args.items() if k != "action"}, "action": fn["name"]}
+
+
+def as_tags(text: str, actions: List[Dict[str, Any]]) -> str:
+    """The answer with its (checked) actions as <<ACTION>> tags: how the chat history keeps a native call."""
+    tags = [f"<<ACTION: {json.dumps(a, ensure_ascii=False)}>>" for a in actions]
+    body = TAG.sub("", text or "").strip()
+    return "\n".join([body] + tags if body else tags)
+
+
+def native_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    The conversation for Ollama's own tool calling: an earlier answer of Pasha that acted (the chat
+    keeps it with <<ACTION>> tags) becomes an assistant message with tool_calls, the way the model
+    itself would have written it. With the tags left in, the model starts writing tags in its text
+    (measured in docs/PASHA_TOOLS.md). Only goes to the model; nothing here runs.
+    """
+    out = []
+    for msg in messages:
+        content = msg.get("content")
+        if msg.get("role") == "assistant" and isinstance(content, str) and TAG.search(content):
+            calls = []
+            for raw in _candidates(content):
+                data = _decode(raw)
+                if isinstance(data, dict) and isinstance(data.get("action"), str):
+                    calls.append({"function": {"name": data["action"],
+                                               "arguments": {k: v for k, v in data.items() if k != "action"}}})
+            if calls:
+                # The model's template shows the calls only when the text is empty
+                out.append({"role": "assistant", "content": "", "tool_calls": calls})
+                continue
+        out.append(msg)
+    return out
+
+
+def resolve_actions(text: str, calls: Any = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], bool]:
     """
     The answer's actions: (server actions, at most 2), (actions for the page, at most 1),
     and whether the model tried an action at all. When it tried but nothing is left, the chat
-    must say so instead of showing only the model's 'Hier zijn ze.'.
+    must say so instead of showing only the model's 'Hier zijn ze.'. calls: Ollama's own tool
+    calls (message.tool_calls); they come first, then any tags in the text.
     """
     text = text or ""
     server: List[Dict[str, Any]] = []
     client: List[Dict[str, Any]] = []
+    calls = (calls if isinstance(calls, list) else []) + _text_calls(text)[0]
     raws = _candidates(text)
-    for raw in raws:
-        data = _decode(raw)
+    for data in [call_to_action(c) for c in calls] + [_decode(raw) for raw in raws]:
+        if isinstance(data, str) and (data in TOOLS or data in CLIENT_ACTIONS):
+            data = {"action": data}          # <<ACTION: "job_status">>: just the name
         action = clean_action(data) or clean_action(_near_miss(data))
         page = None if action else client_action(data)
         if action:
             server.append(action)
         elif page:
             client.append(page)
-    tried = bool(raws) or bool(UNFINISHED.search(text)) or is_bare_claim(text)
+    tried = bool(calls) or bool(raws) or bool(UNFINISHED.search(text)) or is_bare_claim(text)
     return server[:2], client[:1], tried
 
 
