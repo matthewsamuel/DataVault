@@ -1061,8 +1061,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"map: over the date line {names[:10]}, cut off {found['out'][:5]}, under photos {found['under'][:5]}")
             step("map: zoom in on the Netherlands", lambda: page.evaluate("mapSelectCountry('NLD')"), 2.0)
             names = [l["name"] for l in page.evaluate("mapView().labels")]
-            expect("Gelderland" in names and "Amsterdam" in names,
+            # (Amsterdam itself can be under the photos taken there: then its name rightly gives way)
+            dutch_cities = {"Amsterdam", "Rotterdam", "Den Haag", "Utrecht", "Eindhoven", "Groningen", "Zwolle", "Arnhem", "Nijmegen"}
+            expect("Gelderland" in names and len(dutch_cities & set(names)) >= 3,
                    f"map: the provinces and cities of the selected country are missing ({names[:12]})")
+            found = page.evaluate(label_check)
+            expect(not found["out"] and not found["under"], f"map: in the Netherlands names cut off {found['out'][:5]} or under photos {found['under'][:5]}")
             page.evaluate("mapSelectCountry('')")
             # Back and Forward of the browser go between the screens, not out of the app
             step("history: Back from Kaart", lambda: page.go_back(), 1.0)
