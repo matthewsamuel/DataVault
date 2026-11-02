@@ -47,6 +47,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -199,10 +200,30 @@ def launch(p, engine: str, headed: bool):
     return browser_type.launch(headless=not headed, executable_path=exe)
 
 
+def watchdog(seconds: float, proc, workdir: Path, where: dict) -> threading.Timer:
+    """
+    A Playwright call that never returns (an evaluate awaiting a promise that never settles) would hang
+    the smoke for good. After `seconds` this says where it was, stops the test server, removes the temp
+    folder and ends the run with exit code 2.
+    """
+    def fire():
+        print(f"\nFAILED: the smoke hung for {seconds:.0f} s; the last step was {where.get('step')!r}", flush=True)
+        proc.kill()
+        shutil.rmtree(workdir, ignore_errors=True)
+        os._exit(2)
+
+    timer = threading.Timer(seconds, fire)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 def run(engine: str = "webkit", headed: bool = False) -> int:
     workdir = Path(tempfile.mkdtemp(prefix="datavault-smoke-"))
     proc, base, vault = start_server(workdir)
     problems = []
+    where = {"step": "start"}
+    guard = watchdog(float(os.environ.get("DATAVAULT_SMOKE_MAX_SECONDS", "1500")) * SLOW, proc, workdir, where)
     try:
         with sync_playwright() as p:
             browser = launch(p, engine, headed)
@@ -246,7 +267,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             def on_failed(r):
                 inflight.pop(r, None)
                 if r.url.startswith(origin) and navigating():
-                    cut_off.append((r.method, r.url, f"request failed: {r.failure}"))
+                    cut_off.append((r.method, r.url, f"{r.method} {r.url.replace(origin, '')} {r.failure}"))
 
             page.on("request", on_request)
             page.on("requestfinished", lambda r: inflight.pop(r, None))
@@ -322,6 +343,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 """expected(problem) -> True for what this step causes on purpose (a refused request)."""
                 before = len(problems)
                 started = time.monotonic()
+                where["step"] = name
                 action()
                 extra, waited_for = settle(wait)
                 if expected:
@@ -335,6 +357,22 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             run_started = time.monotonic()
             navigate(lambda: page.goto(base), "open the app")
             print(f"{engine} against {base} (time-outs x{SLOW})", flush=True)
+
+            # The harness itself: a fetch that a reload cuts off is asked again and only printed (the
+            # route holds it until the reload cancels it; the retry does not go through the route)
+            held = []
+            page.route("**/api/health?cut-off", lambda route: held.append(route))
+            page.evaluate("() => { fetch('/api/health?cut-off').catch(() => {}); }")   # (not awaited)
+            page.wait_for_timeout(200)
+            navigate(page.reload, "reload with a fetch on its way")
+            for route in held:
+                try:
+                    route.abort()       # already cancelled; this only ends the handler quietly
+                except PlaywrightError:
+                    pass
+            page.unroute("**/api/health?cut-off")
+            if not any("/api/health?cut-off" in t and "retried, 200" in t for t in transient):
+                problems.append(f"smoke: a fetch cut off by a reload was not asked again ({transient})")
 
             # Every tab, by clicking it like a user
             # (Berichten has no button of its own in the menu: it opens from the DataGatherer page)
@@ -2325,6 +2363,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 for text in transient:
                     print(f"  - {text}")
     finally:
+        guard.cancel()
         proc.terminate()
         try:
             proc.wait(10)
