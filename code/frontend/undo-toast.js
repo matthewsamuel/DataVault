@@ -111,8 +111,20 @@ const UndoToast = (() => {
             outcome = entry.onUndone ? await entry.onUndone(data) : defaultOutcome(data);
             refreshRecovery();
         } catch (err) {
-            done(toast);
             toastFetchError('Ongedaan maken mislukt', err);
+            // De schijf even weg of de server niet bereikbaar: de knop blijft, nog eens proberen mag.
+            // Kan de stap echt niet (meer) terug (404/409/410 en dergelijke), dan gaat de knop weg.
+            if (retryable(err) && toast.isConnected && !toast._leaving && toast._undo === entry) {
+                entry.busy = false;
+                used.delete(entry.key);
+                live.set(entry.key, toast);
+                button.disabled = false;
+                button.classList.remove('is-loading');
+                button.querySelector('.toast-action-label').textContent = 'Ongedaan maken';
+                linger(toast, UNDO_TOAST_MS);
+                return;
+            }
+            done(toast);
             return;
         }
         if (!outcome) { done(toast); return; }
@@ -123,13 +135,41 @@ const UndoToast = (() => {
         toast._undo = null;
         toast.classList.remove('toast-undo');
         retitle(toast, outcome.title || 'Teruggezet', outcome.message || '', outcome.type || 'success');
-        toastSchedule(toast, TOAST_MS[outcome.type || 'success'] || TOAST_MS.success);
-        restartToastTimer(toast);
+        linger(toast, TOAST_MS[outcome.type || 'success'] || TOAST_MS.success);
         // De focus stond op de knop die nu weg is: naar de melding zelf, niet naar <body>
         if (hadFocus) {
             toast.tabIndex = -1;
             toast.focus({ preventScroll: true });
         }
+    }
+
+    // Een verzoek dat later wel kan lukken: geen antwoord (netwerk), of de server/schijf even weg
+    function retryable(err) {
+        const status = err && err.status;
+        return !status || status === 502 || status === 503 || status === 504;
+    }
+
+    // Nieuwe tijd voor de melding; staat de muis of de focus erop, dan begint die pas bij weggaan
+    // (Safari geeft een geklikte knop geen focus, dus 'focusin' alleen is niet genoeg). Krimpt de
+    // melding onder de muis weg (de knop verdwijnt), dan komt er soms geen mouseleave: daarom kijkt
+    // hij zelf elke halve seconde of de muis en de focus er nog zijn.
+    function linger(toast, duration) {
+        toast._duration = duration;
+        toast.style.setProperty('--toast-ms', `${duration}ms`);
+        const held = () => toast.matches(':hover') || toast.contains(document.activeElement);
+        clearTimeout(toast._hideTimer);
+        if (!held()) {
+            toastSchedule(toast, duration);
+            restartToastTimer(toast);
+            return;
+        }
+        const watch = () => {
+            if (toast._leaving || !toast.isConnected) return;
+            if (held()) { toast._hideTimer = setTimeout(watch, 500); return; }
+            toastSchedule(toast, duration);
+            restartToastTimer(toast);
+        };
+        toast._hideTimer = setTimeout(watch, 500);
     }
 
     function done(toast) {

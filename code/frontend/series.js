@@ -43,6 +43,7 @@ const seriesState = {
     handled: 0,            // daarvan sinds het openen van het tabblad: voor 'Alles bekeken'
     moved: 0,              // en daarvan met verplaatste foto's
     lastKept: null,        // {key, title}: de laatste 'Alles behouden', ongedaan te maken
+    undoingKeep: null,     // key van de 'Alles behouden' die nu wordt teruggedraaid
     job: null,             // de vergelijking die nu loopt (voor het lege scherm)
     keep: new Map(),       // reeks-sleutel -> Set van foto-id's die blijven
     skipped: new Set(),    // reeks-sleutels die in deze sessie overgeslagen zijn
@@ -1112,10 +1113,17 @@ function seriesMovedBack(data) {
 // toont de uitkomst en meldt een fout); elk van beide haalt de ander weg
 async function seriesUndoKeepAll(fromToast = false, kept = null) {
     const last = kept || seriesState.lastKept;
-    if (!last) return null;
-    if (seriesState.lastKept && seriesState.lastKept.key === last.key) seriesState.lastKept = null;
-    undoToastDone(`series-keep:${last.key}`);
-    seriesRenderLastKept();
+    if (!last || seriesState.undoingKeep === last.key) return null;
+    // Bezig: de link staat even uit (geen dubbele klik); link en melding blijven tot het lukt
+    seriesState.undoingKeep = last.key;
+    const link = document.getElementById('btn-series-undo-keep');
+    if (link && seriesState.lastKept && seriesState.lastKept.key === last.key) link.disabled = true;
+    // Gelukt, of kan echt niet meer (404: al terug): beide wegen terug verdwijnen
+    const forget = () => {
+        if (seriesState.lastKept && seriesState.lastKept.key === last.key) seriesState.lastKept = null;
+        undoToastDone(`series-keep:${last.key}`);
+        seriesRenderLastKept();
+    };
     let note = null;
     try {
         await fetchJSON(`${API_BASE}/api/series/reviews/undo`, {
@@ -1123,10 +1131,22 @@ async function seriesUndoKeepAll(fromToast = false, kept = null) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: last.key }),
         });
-        seriesState.handled = Math.max(0, seriesState.handled - 1);
-        note = { title: 'Weer in de lijst', message: `${last.title} staat weer tussen de reeksen.`, type: 'success' };
-        if (!fromToast) showToast(note.title, note.message, note.type);
-        seriesLoadStatus();
+    } catch (err) {
+        seriesState.undoingKeep = null;
+        if ([404, 409, 410].includes(err.status)) forget();
+        // De schijf even weg of geen verbinding: de link blijft, nog eens proberen mag
+        else seriesRenderLastKept();
+        if (fromToast) throw err;
+        toastFetchError('Ongedaan maken mislukt', err);
+        return null;
+    }
+    seriesState.undoingKeep = null;
+    forget();
+    seriesState.handled = Math.max(0, seriesState.handled - 1);
+    note = { title: 'Weer in de lijst', message: `${last.title} staat weer tussen de reeksen.`, type: 'success' };
+    if (!fromToast) showToast(note.title, note.message, note.type);
+    seriesLoadStatus();
+    try {
         await seriesLoad(true);
         const back = seriesState.items.find(s => s.key === last.key);
         if (back && currentMainView() === 'series') {
@@ -1134,8 +1154,7 @@ async function seriesUndoKeepAll(fromToast = false, kept = null) {
             seriesFocusCursor();
         }
     } catch (err) {
-        if (fromToast) throw err;
-        toastFetchError('Ongedaan maken mislukt', err);
+        toastFetchError('Reeksen laden mislukt', err);
     }
     return note;
 }

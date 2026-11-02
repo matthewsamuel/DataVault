@@ -1868,6 +1868,26 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.on("request", lambda r: scans.append(r.url) if "/api/timeline/scan" in r.url else None)
 
             def fake_first_page(change_total):
+            # The server is briefly away (503): the button stays and a second try works; the
+            # outcome stays while the mouse is on the toast (Safari gives a clicked button no focus)
+            page.evaluate("document.querySelectorAll('#toast-container .toast').forEach(t => t.remove())")
+            step("undo toast: trash for a failed undo", lambda: page.evaluate(trash_js), 0.8)
+            busy = lambda route: route.fulfill(status=503, json={"error": {"code": "busy", "message": "Even niet bereikbaar"}})
+            page.route("**/api/recovery/undo", busy)
+            step("undo toast: the undo fails with a 503", lambda: page.click("#toast-container .toast-undo .toast-action"), 0.8)
+            page.unroute("**/api/recovery/undo", busy)
+            live, toasts = page.evaluate(undo_state)
+            expect(not victim.exists() and len(live) == 1 and ["Naar de prullenmand", True] in toasts
+                   and page.is_enabled("#toast-container .toast-undo .toast-action"),
+                   f"undo toast: after a 503 the button should stay for another try ({live}, {toasts})")
+            step("undo toast: the second try works", lambda: (
+                page.click("#toast-container .toast-undo .toast-action"), page.wait_for_timeout(600),
+                page.hover("#toast-container .toast .toast-body")), 4.5)
+            live, toasts = page.evaluate(undo_state)
+            expect(victim.exists() and live == [] and ["Teruggezet", False] in toasts,
+                   f"undo toast: the second try did not put it back, or the outcome left under the mouse ({live}, {toasts})")
+            step("undo toast: the mouse leaves", lambda: page.mouse.move(400, 600), 4.5)
+            expect(["Teruggezet", False] not in page.evaluate(undo_state)[1], "undo toast: the outcome stayed after the mouse left")
                 faked = []
 
                 def handle(route):
