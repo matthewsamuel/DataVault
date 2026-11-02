@@ -44,7 +44,9 @@ How a backup is made (make_backup):
    names are ever removed, never anything else.
 
 The backup folder is ~/Library/Application Support/DataVault/backups unless config.json
-says otherwise ("backup_folder", "backup_keep_daily", "backup_keep_weekly"). With
+says otherwise ("backup_folder", "backup_keep_daily", "backup_keep_weekly"), or a folder was
+chosen in Instellingen > Back-ups (app_settings 'backup_folder', checked by
+paths.check_backup_folder; restore_backup.py reads it from the database or gets --map). With
 DATAVAULT_TESTING=1 it defaults to <cache>/backups, so a test never writes outside the
 temp directory. DATAVAULT_AUTO_BACKUP=0 turns the automatic backups off (tests).
 
@@ -122,8 +124,59 @@ def _say(message: str) -> None:
 
 # ==================== WHERE AND WHICH ====================
 
+# The folder chosen in Instellingen (app_settings, key SETTING_KEY) wins over config.json. The
+# one from config.json (or the default) stays known as BACKUP_FOLDER_DEFAULT, for 'Standaardmap'.
+SETTING_KEY = "backup_folder"
+
+
 def folder_of(config) -> Path:
     return Path(config.BACKUP_FOLDER)
+
+
+def use_folder(config, folder: Optional[Path]) -> None:
+    """Make folder (from Instellingen, already checked) the backup folder; None: back to the
+    folder from config.json (or the default)."""
+    if not hasattr(config, "BACKUP_FOLDER_DEFAULT"):
+        config.BACKUP_FOLDER_DEFAULT = Path(config.BACKUP_FOLDER)
+    config.BACKUP_FOLDER = Path(folder) if folder is not None else config.BACKUP_FOLDER_DEFAULT
+    config.BACKUP_FOLDER_CHOSEN = folder is not None
+
+
+def load_chosen_folder(config, db) -> None:
+    """On start: the folder chosen in Instellingen, when there is one. It is not checked for
+    existence here (a disk can be connected later); make_backup refuses a missing one."""
+    from backend.paths import backup_folder_problem
+    value = db.get_setting(SETTING_KEY)
+    if not isinstance(value, str) or not value.startswith("/"):
+        use_folder(config, None)
+        return
+    problem = backup_folder_problem(Path(os.path.realpath(value)), config)
+    if problem:
+        _say(f"De gekozen back-upmap {value} wordt niet gebruikt: {problem}")
+        use_folder(config, None)
+        return
+    use_folder(config, Path(value))
+
+
+def chosen_folder_in(db_path: Path) -> Optional[str]:
+    """The backup folder chosen in Instellingen, read straight from a database file (read-only,
+    for restore_backup.py while the app is stopped), or None when there is none or it is unreadable."""
+    try:
+        conn = sqlite3.connect(_ro_uri(Path(db_path)), uri=True, timeout=2)
+    except sqlite3.Error:
+        return None
+    try:
+        row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (SETTING_KEY,)).fetchone()
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+    try:
+        import json
+        value = json.loads(row[0]) if row else None
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, str) and value.startswith("/") else None
 
 
 def _stamp(now: Optional[float] = None) -> str:
@@ -246,7 +299,7 @@ def last_error() -> Optional[Dict[str, Any]]:
 
 def _not_writable(folder: Path) -> BackupError:
     return BackupError(f"De back-upmap {folder} is niet schrijfbaar. Maak hem schrijfbaar, of kies een "
-                       "andere map in config.json (backup_folder).", 500)
+                       "andere map in Instellingen > Back-ups.", 500)
 
 
 def _writable(folder: Path) -> bool:
@@ -440,12 +493,17 @@ def _preflight(config) -> Tuple[Path, Path, int]:
     """The quick checks before a backup: the folder can be made and written, there is room."""
     folder = folder_of(config)
     db_path = Path(config.DB_PATH)
+    # A folder chosen in Instellingen must be there: on a disk that is not connected, mkdir
+    # would make an empty look-alike under /Volumes on the Mac's own disk
+    if getattr(config, "BACKUP_FOLDER_CHOSEN", False) and not folder.is_dir():
+        raise BackupError(f"De gekozen back-upmap {folder} is niet bereikbaar. Is de schijf aangesloten? "
+                          "Of kies een andere map in Instellingen > Back-ups.", 503)
     try:
         folder.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         if e.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
             raise BackupError(f"De back-upmap {folder} kon niet worden aangemaakt: geen schrijfrechten. "
-                              "Kies een andere map in config.json (backup_folder).", 500)
+                              "Kies een andere map in Instellingen > Back-ups.", 500)
         raise _reason(e, folder)
     if not _writable(folder):
         raise _not_writable(folder)
@@ -558,7 +616,10 @@ def status(config, auto_enabled: bool = False, next_check_at: Optional[float] = 
     return {
         "folder": str(folder),
         "folder_exists": folder.is_dir(),
-        "folder_note": getattr(config, "BACKUP_FOLDER_NOTE", None),
+        "folder_note": None if getattr(config, "BACKUP_FOLDER_CHOSEN", False) else getattr(config, "BACKUP_FOLDER_NOTE", None),
+        # Chosen in Instellingen (else config.json or the default), and that other folder
+        "folder_chosen": bool(getattr(config, "BACKUP_FOLDER_CHOSEN", False)),
+        "default_folder": str(getattr(config, "BACKUP_FOLDER_DEFAULT", folder)),
         "auto": auto_enabled,
         "max_age_hours": MAX_AGE // 3600,
         "keep_daily": getattr(config, "BACKUP_KEEP_DAILY", KEEP_DAILY),
@@ -589,6 +650,10 @@ def restore_command(config=None) -> str:
         config_path = Path(os.path.abspath(config_path))
         if config_path.resolve() != DEFAULT_CONFIG_PATH.resolve():
             command += f" --config {shlex.quote(str(config_path))}"
+    # A folder chosen in Instellingen is not in config.json: the command names it, so it works
+    # even when the database itself cannot be read
+    if getattr(config, "BACKUP_FOLDER_CHOSEN", False):
+        command += f" --map {shlex.quote(str(folder_of(config)))}"
     return command
 
 

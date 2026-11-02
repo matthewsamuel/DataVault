@@ -1059,6 +1059,40 @@
         </div>
     </div>
 
+    <!-- Instellingen > Back-ups: een andere map voor de back-ups kiezen (backup-settings.js, /api/backup/folders) -->
+    <div class="modal" id="modal-backup-folder" role="dialog" aria-modal="true" aria-labelledby="backup-folder-title">
+        <div class="modal-container folder-selector-container backup-folder-container">
+            <div class="modal-header">
+                <h2 class="modal-title" id="backup-folder-title"><i class="fas fa-shield-halved" aria-hidden="true"></i> Map voor de back-ups</h2>
+                <button class="modal-close" onclick="backupFolderClose()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body backup-folder-body">
+                <p class="picker-intro backup-folder-intro">Een eigen map op deze Mac of op een andere schijf, zoals de T7 naast
+                    het archief. Niet in het archief zelf. De back-ups die er al zijn, blijven waar ze staan.</p>
+                <div class="folder-tree-container backup-folder-tree" id="backup-folder-tree" aria-label="Mappen"></div>
+                <div class="backup-folder-new">
+                    <label class="backup-folder-new-label" for="backup-folder-new-name">Nieuwe map in de gekozen map</label>
+                    <div class="backup-folder-new-row">
+                        <input type="text" class="input" id="backup-folder-new-name" value="DataVault-backups" spellcheck="false" autocomplete="off">
+                        <button type="button" class="btn btn-secondary" id="backup-folder-create" onclick="backupFolderCreate()" disabled>
+                            <i class="fas fa-folder-plus" aria-hidden="true"></i> Map maken
+                        </button>
+                    </div>
+                </div>
+                <div class="backup-folder-check" id="backup-folder-check" role="status" aria-live="polite"></div>
+            </div>
+            <div class="modal-footer backup-folder-footer">
+                <button type="button" class="btn btn-ghost backup-folder-default" id="backup-folder-default" onclick="backupFolderUseDefault()" hidden>
+                    Standaardmap gebruiken
+                </button>
+                <button type="button" class="btn btn-secondary" id="backup-folder-cancel" onclick="backupFolderClose()">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="backup-folder-use" onclick="backupFolderUse()" disabled>
+                    Gebruiken en testen
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Dynamic modals are handled by app.js -->
 
     <!-- Side-by-Side Comparison Modal -->
@@ -1663,7 +1697,7 @@
     <script src="datagatherer.js?v=9"></script>
     <script src="activity.js?v=6"></script>
     <script src="elo.js?v=11"></script>
-    <script src="backup-settings.js?v=6"></script>
+    <script src="backup-settings.js?v=7"></script>
     <script src="search.js?v=6"></script>
     <script src="messages.js?v=3"></script>
     <!-- Beweging van de gegevensschermen: na de schermen die het aanroept (docs/MOTION.md) -->

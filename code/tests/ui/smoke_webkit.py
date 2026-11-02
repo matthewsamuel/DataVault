@@ -206,6 +206,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     page.click("#nav-more-btn")
                     page.click(f"#nav-more-menu [data-more-view='{view}']")
 
+            # Screenshots of every screen (and some windows) to look at, in both themes
+            shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
+            shots.mkdir(parents=True, exist_ok=True)
+
             page.goto(base)
             page.wait_for_load_state("networkidle")
             print(f"{engine} against {base}")
@@ -526,6 +530,52 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    "settings: the restore command does not name the config the app runs with")
             expect(page.evaluate("getComputedStyle(document.querySelector('.nav-tab-settings.active'), '::after').content") != "none",
                    "settings: the gear has no active indicator")
+            # Back-ups: another folder, chosen in a folder browser (only the temp folder in this test);
+            # a folder in the archive is refused with its reason, 'Map maken' makes one, and
+            # 'Gebruiken en testen' stores it and makes a test backup there, shown in the window
+            bf_parent = Path(tempfile.mkdtemp(prefix="dv-backupmap-smoke-")).resolve()
+            step("backups: open the folder window", lambda: (
+                page.click("#settings-backup-folder"),
+                page.wait_for_selector(f"#backup-folder-tree .folder-item[data-path='{bf_parent}']", timeout=10000)), 0.3)
+            expect_focus_trapped("modal-backup-folder", "backups: folder window")
+            vault_row = f"#backup-folder-tree .folder-item[data-path='{vault.resolve()}']"
+            if page.query_selector(vault_row):
+                step("backups: the archive is refused", lambda: (
+                    page.click(vault_row), page.wait_for_selector("#backup-folder-check.is-error", timeout=5000)), 0.2)
+                expect("archief" in page.text_content("#backup-folder-check") and page.is_disabled("#backup-folder-use"),
+                       f"backups: choosing the archive was not refused ({page.text_content('#backup-folder-check')!r})")
+            step("backups: Map maken", lambda: (
+                page.click(f"#backup-folder-tree .folder-item[data-path='{bf_parent}']"),
+                page.fill("#backup-folder-new-name", "DataVault-backups"),
+                page.click("#backup-folder-create"),
+                page.wait_for_selector("#backup-folder-check.is-ok, #backup-folder-check.is-warn", timeout=5000)), 0.3)
+            made = bf_parent / "DataVault-backups"
+            expect(made.is_dir() and page.evaluate("backupFolder.selected") == str(made) and page.is_enabled("#backup-folder-use"),
+                   f"backups: 'Map maken' did not make and choose {made} ({page.evaluate('backupFolder.selected')})")
+            for theme in ("light", "dark"):
+                page.evaluate(f"setTheme('{theme}')")
+                page.wait_for_timeout(300)
+                page.screenshot(path=str(shots / f"backup-folder_{theme}.png"))
+                page.add_script_tag(path=str(A11Y_CHECKS))
+                for fail in page.evaluate("__contrastFailures()"):
+                    problems.append(f"contrast {theme} backup-folder: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+            page.evaluate("setTheme('auto')")
+            step("backups: Gebruiken en testen", lambda: (
+                page.click("#backup-folder-use"),
+                page.wait_for_selector("#backup-folder-check.is-done", timeout=30000)), 0.3)
+            expect(len(list(made.glob("datavault-*-handmatig.db.gz"))) == 1 and page.text_content("#backup-folder-use").strip() == "Klaar",
+                   f"backups: the test backup did not land in {made} ({sorted(p.name for p in made.iterdir())})")
+            step("backups: Klaar", lambda: page.click("#backup-folder-use"), 0.8)
+            location = page.text_content("#settings-backups .settings-row-value:has(.backup-folder-btn)") or ""
+            expect(not page.is_visible("#modal-backup-folder") and str(made) in location and "Zelf gekozen" in location,
+                   f"backups: the Locatie row does not show the chosen folder ({location!r})")
+            step("backups: Escape closes the window", lambda: (
+                page.click("#settings-backup-folder"), page.wait_for_selector("#modal-backup-folder.active"),
+                page.wait_for_timeout(600), page.keyboard.press("Escape")), 0.5)
+            expect(not page.is_visible("#modal-backup-folder"), "backups: Escape did not close the folder window")
+            page.evaluate("""fetchJSON(`${API_BASE}/api/backup/folder`, {method: 'PUT', headers: {'Content-Type': 'application/json'},
+                                                                         body: JSON.stringify({path: null})})""")
+            shutil.rmtree(bf_parent, ignore_errors=True)
             step("settings: dark theme", lambda: page.check("input[data-theme-choice='dark']"), 0.3)
             expect(page.evaluate("document.documentElement.dataset.theme") == "dark", "settings: theme not set")
             page.check("input[data-theme-choice='auto']")
@@ -1052,8 +1102,6 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
             # and a screenshot to look at
-            shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
-            shots.mkdir(parents=True, exist_ok=True)
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
                 for view in VIEWS + ["activity"]:    # Activiteit has no menu tab of its own (it hangs under DataGatherer)
@@ -1403,7 +1451,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                         parseFloat(getComputedStyle(document.querySelector('.main-content')).paddingBottom)]; })()""")
             expect(dock[1] >= dock[0], f"job dock: {dock[0]} px high, but only {dock[1]} px kept free under the page")
             # ... except on pages that are exactly as high as the window: they keep it free inside
-            for view in ("keurer", "duplicates"):
+            for view in ("keurer", "duplicates", "series"):
                 page.evaluate(f"switchMainView('{view}')")
                 page.wait_for_timeout(300)
                 extra = page.evaluate("document.documentElement.scrollHeight - innerHeight")
@@ -1519,7 +1567,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("!document.getElementById('section-spotify').classList.contains('hidden')")
                    and page.evaluate("seriesState.items.length") == 2,
                    "series: 'g s' on a photo tile skipped the series instead of opening Spotify")
-            step("series: back to the tab", lambda: (page.evaluate("switchMainView('duplicates')"),
+            step("series: back to Reeksen", lambda: (page.evaluate("switchMainView('series')"),
                                                      page.wait_for_selector(".series-card")), 0.8)
             page.focus(".series-photo[tabindex='0']")
             first = tile_state()
