@@ -10,7 +10,10 @@ DATAVAULT_GATHER_DAEMON=0) that wakes every INTERVAL seconds and:
    mtime changed since the last look), recognises an export by its CONTENT (the
    connector's detect(): the members of a zip, the start of a JSON file) and starts a
    'datagatherer.watch' job that COPIES it into the vault and reads it. The original is
-   never touched: the card tells the user it may be removed from Downloads.
+   never touched: the card tells the user it may be removed from Downloads. A folder
+   counts too: Safari unpacks a downloaded zip and removes it, so the export arrives as
+   a folder; detect() gets its file names as if it were a zip, and the job packs it into
+   the vault as one zip (raw_store.archive_folder).
 2. Schedules, ONLY for connectors whose schedule the user switched on (off by default):
    a sync job with trigger 'schedule' once the interval has passed (not while Spotify asked
    to wait (Retry-After) or the source must be connected again).
@@ -25,7 +28,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.datagatherer import raw_store, registry, state
 
@@ -33,6 +36,8 @@ INTERVAL = 30.0
 STABLE_AGE = 60.0                  # a file untouched this long is complete, also on the first look
 DOWNLOADING_SUFFIXES = (".crdownload", ".download", ".part", ".partial", ".opdownload")
 EXPORT_SUFFIXES = (".zip", ".json", ".tgz", ".tar.gz", ".txt", ".csv", ".sqlite", ".db")
+FOLDER_MAX_FILES = 200_000        # an unpacked export with more files is left alone (a Takeout stays a zip)
+FOLDER_CACHE_SECONDS = 5.0        # one walk of a folder per tick, however many sources look
 
 
 def _testing() -> bool:
@@ -100,6 +105,7 @@ class _Seen:
         self.sizes: Dict[str, tuple] = {}
         self.kinds: Dict[tuple, Optional[str]] = {}
         self.started: set = set()
+        self.folders: Dict[str, tuple] = {}
 
 
 _seen = _Seen()
@@ -134,7 +140,18 @@ def candidates(config, db, connector, now: Optional[float] = None,
         names = {e.name for e in entries}
         for entry in sorted(entries, key=lambda e: e.name):
             lower = entry.name.lower()
-            if entry.name.startswith(".") or _downloading(entry, names) or not lower.endswith(EXPORT_SUFFIXES):
+            if entry.name.startswith(".") or _downloading(entry, names):
+                continue
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+            except OSError:
+                continue
+            if is_dir:
+                cand = _folder_candidate(db, connector, entry, now)
+                if cand is not None:
+                    found.append(cand)
+                continue
+            if not lower.endswith(EXPORT_SUFFIXES):
                 continue
             if not any(fnmatch.fnmatch(lower, p) for p in patterns):
                 continue
@@ -170,6 +187,64 @@ def candidates(config, db, connector, now: Optional[float] = None,
     return found
 
 
+def folder_names(path: str) -> Optional[Tuple[List[Tuple[str, Path, os.stat_result]], float]]:
+    """
+    (files, last change) of a folder in a watch folder, the files as raw_store.folder_files
+    lists them; None when it has more than FOLDER_MAX_FILES. Last change also counts ctimes:
+    unpacking keeps the mtimes from the zip, so only the ctime says a file just arrived.
+    Remembered for FOLDER_CACHE_SECONDS, so the sources that look in the same tick walk it once.
+    """
+    now = time.monotonic()
+    with _seen_lock:
+        hit = _seen.folders.get(path)
+        if hit and now - hit[0] < FOLDER_CACHE_SECONDS:
+            return hit[1]
+    try:
+        files = raw_store.folder_files(Path(path), limit=FOLDER_MAX_FILES)
+        changed = os.stat(path).st_ctime
+    except OSError:
+        files = None
+    result = None
+    if files is not None:
+        result = (files, max([changed] + [max(st.st_mtime, st.st_ctime) for _, _, st in files]))
+    with _seen_lock:
+        _seen.folders[path] = (now, result)
+    return result
+
+
+def _folder_candidate(db, connector, entry: os.DirEntry, now: float) -> Optional[Dict[str, Any]]:
+    """An unpacked export (Safari unpacks a downloaded zip into a folder and removes the zip)."""
+    summary = folder_names(entry.path)
+    if summary is None or not summary[0]:
+        return None
+    files, last_change = summary
+    size = sum(st.st_size for _, _, st in files)
+    mtime = max(st.st_mtime for _, _, st in files)
+    key = (entry.path, size, mtime)
+    kind_key = (connector.id, *key)
+    with _seen_lock:
+        previous = _seen.sizes.get(entry.path)
+        _seen.sizes[entry.path] = (len(files), size, last_change)
+        cached = kind_key in _seen.kinds
+        kind = _seen.kinds.get(kind_key)
+    if previous != (len(files), size, last_change) and now - last_change < STABLE_AGE:
+        return None    # still being unpacked: look again next time
+    if not cached:
+        try:
+            kind = connector.detect(Path(entry.path), [rel for rel, _, _ in files])
+        except (OSError, ValueError):
+            kind = None
+        with _seen_lock:
+            _seen.kinds[kind_key] = kind
+    if kind is None:
+        return None
+    with db._connect() as conn:
+        already = conn.execute("SELECT 1 FROM dg_raw_imports WHERE original_path = ? AND fingerprint = ?",
+                               (entry.path, raw_store.files_fingerprint(files))).fetchone() is not None
+    return {"path": entry.path, "name": entry.name, "size": size, "mtime": mtime, "kind": kind,
+            "stable": True, "already": already, "folder": True}
+
+
 def _already(db, path: str, size: int) -> bool:
     with db._connect() as conn:
         return conn.execute("SELECT 1 FROM dg_raw_imports WHERE original_path = ? AND size = ?",
@@ -181,6 +256,7 @@ def forget_seen() -> None:
         _seen.sizes.clear()
         _seen.kinds.clear()
         _seen.started.clear()
+        _seen.folders.clear()
 
 
 class Daemon:

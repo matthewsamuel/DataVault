@@ -306,10 +306,35 @@ def is_inside(path: Path, folder: Path) -> bool:
 
 
 COPY_CHUNK = 4 * 1024 * 1024
-# The temporary name of copy_no_overwrite: '.<name>.datavault-partial-<8 hex>'. Only this
-# function ever makes such a file (exclusive create) and it never keeps that name.
+# The temporary name of copy_no_overwrite (and raw_store.archive_folder): '.<name>.datavault-partial-<8 hex>'.
+# Only those functions ever make such a file (exclusive create) and they never keep that name.
 PARTIAL_MARK = ".datavault-partial-"
 PARTIAL_NAME = re.compile(r"^\..+\.datavault-partial-[0-9a-f]{8}$", re.DOTALL)
+
+
+def partial_path(dst: Path) -> Path:
+    """A fresh temporary name next to dst for a file that becomes dst once complete."""
+    import uuid
+    return dst.parent / f".{dst.name}{PARTIAL_MARK}{uuid.uuid4().hex[:8]}"
+
+
+def claim_name(temp: Path, dst: Path) -> Path:
+    """
+    Give the complete temporary file temp its real name dst with an exclusive rename, never
+    overwriting: when dst is taken, 'name 2.ext', 'name 3.ext', ... Returns the name it got.
+    """
+    candidate, counter = dst, 1
+    while True:
+        try:
+            _exclusive_rename(temp, candidate)
+            return candidate
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise FileOperationError(f"Failed to name {temp} -> {candidate}: {e}") from e
+            counter += 1
+            if counter > MAX_CONFLICT_SUFFIX:
+                raise FileOperationError(f"Too many conflicting files for {dst}") from e
+            candidate = dst.parent / f"{dst.stem} {counter}{dst.suffix}"
 
 
 def copy_no_overwrite(src: Path, dst: Path, expected_sha256: Optional[str] = None,
@@ -329,7 +354,6 @@ def copy_no_overwrite(src: Path, dst: Path, expected_sha256: Optional[str] = Non
     Returns (final path, sha256, size). The mtime of the source is kept.
     """
     import hashlib
-    import uuid
     src, dst = Path(src), Path(dst)
     src_st = os.stat(src)
     if not stat.S_ISREG(src_st.st_mode):
@@ -338,7 +362,7 @@ def copy_no_overwrite(src: Path, dst: Path, expected_sha256: Optional[str] = Non
         protected = protected_path_for(path)
         if protected is not None:
             raise ProtectedPathError(f"Refusing to copy into {protected}: {dst}")
-    temp = dst.parent / f".{dst.name}{PARTIAL_MARK}{uuid.uuid4().hex[:8]}"
+    temp = partial_path(dst)
     digest = hashlib.sha256()
     size = 0
     fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
@@ -359,18 +383,7 @@ def copy_no_overwrite(src: Path, dst: Path, expected_sha256: Optional[str] = Non
         if expected_sha256 is not None and sha != expected_sha256:
             raise FileOperationError(f"{src} changed while it was being copied")
         os.utime(temp, ns=(src_st.st_atime_ns, src_st.st_mtime_ns))
-        candidate, counter = dst, 1
-        while True:
-            try:
-                _exclusive_rename(temp, candidate)
-                return candidate, sha, size
-            except OSError as e:
-                if e.errno != errno.EEXIST:
-                    raise FileOperationError(f"Failed to copy {src} -> {candidate}: {e}") from e
-                counter += 1
-                if counter > MAX_CONFLICT_SUFFIX:
-                    raise FileOperationError(f"Too many conflicting files for {dst}") from e
-                candidate = dst.parent / f"{dst.stem} {counter}{dst.suffix}"
+        return claim_name(temp, dst), sha, size
     except BaseException:
         # Only the partial copy this call made itself (exclusive create above); never an archive file
         try:

@@ -756,7 +756,7 @@ async function dgOpenDownloads(id) {
             return;
         }
         list.replaceChildren(createEl('ul', { class: 'dg-candidate-list' }, ...data.candidates.map(c => createEl('li', { class: 'dg-candidate' },
-            createEl('i', { class: 'fas fa-file-zipper dg-candidate-icon', 'aria-hidden': 'true' }),
+            createEl('i', { class: `fas ${c.folder ? 'fa-folder' : 'fa-file-zipper'} dg-candidate-icon`, 'aria-hidden': 'true' }),
             createEl('div', { class: 'dg-candidate-text' },
                 createEl('span', { class: 'dg-candidate-name', text: c.name, title: c.path }),
                 createEl('span', { class: 'dg-candidate-meta' },

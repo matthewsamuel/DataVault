@@ -17,6 +17,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from backend import file_ops
 from backend.datagatherer import (base, cards, daemon, keychain, launchd, net, raw_store, registry, state)
 from backend.datagatherer.base import Connector, ExportKind, HelpOption
 from fake_services import FakeSpotify, extended_play, write_export_zip
@@ -532,6 +533,50 @@ def test_only_a_reported_candidate_can_be_imported(client, downloads):
                        json={"path": "/etc/passwd"}).status_code == 404
     r = client.post("/api/datagatherer/sources/spotify/candidates/import", json={"path": str(zip_path)})
     assert r.status_code == 201 and r.json()["job"]["type"] == "datagatherer.watch"
+
+
+def test_an_export_safari_unpacked_into_a_folder_is_packed_into_the_vault(app, client, config, downloads):
+    """Safari unpacks a downloaded zip and removes it: the export arrives as a folder."""
+    import zipfile
+    db = app.state.db
+    connector = registry.get("spotify")
+    with zipfile.ZipFile(_zip(downloads.parent, "tmp.zip")) as zf:
+        zf.extractall(downloads / "my_spotify_data")
+    (downloads / "tmp.zip").unlink()
+    (downloads / "Vakantie").mkdir()
+    (downloads / "Vakantie" / "foto.jpg").write_bytes(b"jpg")
+    unpacked = downloads / "my_spotify_data"
+    before = sorted((p.relative_to(unpacked), p.read_bytes()) for p in unpacked.rglob("*") if p.is_file())
+    now = time.time()
+    assert daemon.candidates(config, db, connector, now) == []          # just unpacked: not stable yet
+    daemon._seen.folders.clear()                                        # the next tick walks it again
+    found = daemon.candidates(config, db, connector, now + 30)
+    assert [(c["name"], c["kind"], c["folder"], c["already"]) for c in found] == [
+        ("my_spotify_data", "extended", True, False)]
+    # The watcher packs it into the vault as one zip and reads it; the folder stays as it is
+    client.post("/api/datagatherer/sources/spotify/request-export", json={"kind": "extended"})
+    gather = daemon.Daemon(config, db, lambda: app.state.jobs)
+    assert gather.tick()["watch"] == [str(unpacked)]
+    jobs = app.state.jobs
+    watch_job = next(j for j in jobs.list(10) if j["type"] == "datagatherer.watch")
+    assert jobs.wait(watch_job["id"], timeout=20)["status"] == "done"
+    import_job = next(j for j in jobs.list(10) if j["type"] == "datagatherer.import.spotify")
+    assert jobs.wait(import_job["id"], timeout=20)["status"] == "done"
+    raw = state.get_raw(db, jobs.result(watch_job["id"])["raw_import_id"])
+    packed = Path(raw["path"])
+    today = time.strftime("%Y-%m-%d")
+    assert packed == config.VAULT_ROOT / "data" / "Matthew" / "Spotify" / f"{today} Extended streaming history" / "my_spotify_data.zip"
+    assert raw["status"] == "imported" and raw["original_path"] == str(unpacked) and raw["records_added"] == 1
+    with zipfile.ZipFile(packed) as zf:
+        assert sorted(zf.namelist()) == sorted(str(rel) for rel, _ in before)
+    assert sorted((p.relative_to(unpacked), p.read_bytes()) for p in unpacked.rglob("*") if p.is_file()) == before
+    assert not [p for p in packed.parent.iterdir() if file_ops.PARTIAL_MARK in p.name]
+    # Not started again, shown as read, and packing the same folder again stores nothing new
+    assert gather.tick()["watch"] == []
+    assert [c["already"] for c in daemon.candidates(config, db, connector, now + 120)] == [True]
+    again, created = raw_store.archive_folder(config, db, connector, "extended", unpacked, "manual")
+    assert not created and again["id"] == raw["id"]
+    assert sorted(p.name for p in packed.parent.iterdir()) == ["datavault-import.json", "my_spotify_data.zip"]
 
 
 # ---------- schedules ----------

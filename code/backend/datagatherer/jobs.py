@@ -320,20 +320,38 @@ def watch_type(config, db, get_jobs: Callable[[], Any]) -> JobType:
         else:
             src = Path(ctx.params["path"])
             origin = "downloads"
-            if not src.is_file():
+            if src.is_symlink() or not (src.is_file() or src.is_dir()):
                 raise GatherFailed("Het bestand staat niet meer in Downloads")
-        names = raw_store.archive_names(src, connector.reads_tar)
-        kind = connector.detect(src, names)
-        if kind is None:
-            raise GatherFailed(f"{src.name} is geen export van {connector.name}")
-        size = src.stat().st_size
+        if src.is_dir():
+            # An unpacked export (Safari): packed into the vault as one zip
+            summary = daemon.folder_names(str(src))
+            files = summary[0] if summary else []
+            kind = connector.detect(src, [rel for rel, _, _ in files]) if files else None
+            if kind is None:
+                raise GatherFailed(f"{src.name} is geen export van {connector.name}")
+            size = sum(st.st_size for _, _, st in files)
 
-        def check(done: int) -> None:
-            ctx.check()
-            ctx.progress(done, size * 2, f"Kopiëren naar het archief: {src.name}")
+            def check(done: int) -> None:
+                ctx.check()
+                ctx.progress(done, size * 2, f"Inpakken in het archief: {src.name}")
 
-        raw, created = raw_store.archive_file(config, db, connector, kind, src, origin, check=check,
-                                              original_name=src.name)
+            try:
+                raw, created = raw_store.archive_folder(config, db, connector, kind, src, origin, check=check)
+            except raw_store.RawStoreError as e:
+                raise GatherFailed(str(e))
+        else:
+            names = raw_store.archive_names(src, connector.reads_tar)
+            kind = connector.detect(src, names)
+            if kind is None:
+                raise GatherFailed(f"{src.name} is geen export van {connector.name}")
+            size = src.stat().st_size
+
+            def check(done: int) -> None:
+                ctx.check()
+                ctx.progress(done, size * 2, f"Kopiëren naar het archief: {src.name}")
+
+            raw, created = raw_store.archive_file(config, db, connector, kind, src, origin, check=check,
+                                                  original_name=src.name)
         state.close_requests(db, connector.id, "arrived", raw_import_id=raw["id"])
         import_job = None
         if raw["status"] != "imported":

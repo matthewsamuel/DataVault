@@ -93,10 +93,13 @@ def sha256_file(path: Path, check: Optional[Callable[[int], None]] = None) -> Tu
     return digest.hexdigest(), size
 
 
-def folder_fingerprint(folder: Path, patterns: Tuple[str, ...] = ("*",)) -> Tuple[str, int, int]:
-    """(fingerprint, files, bytes) of the matching files below folder: names, sizes and mtimes."""
-    lines = []
-    total = 0
+def folder_files(folder: Path, patterns: Tuple[str, ...] = ("*",),
+                 limit: Optional[int] = None) -> Optional[List[Tuple[str, Path, os.stat_result]]]:
+    """
+    The matching regular files below folder as (name relative to folder, path, lstat), in a
+    fixed order; no hidden files or folders, no symlinks. None when there are more than limit.
+    """
+    found = []
     for root, dirs, files in os.walk(folder):
         dirs[:] = sorted(d for d in dirs if not d.startswith("."))
         for name in sorted(files):
@@ -107,11 +110,22 @@ def folder_fingerprint(folder: Path, patterns: Tuple[str, ...] = ("*",)) -> Tupl
                 st = path.lstat()
             except OSError:
                 continue
-            if not os.path.isfile(path) or path.is_symlink():
+            if not stat.S_ISREG(st.st_mode):
                 continue
-            total += st.st_size
-            lines.append(f"{path.relative_to(folder)}\t{st.st_size}\t{st.st_mtime_ns}")
-    return hashlib.sha256("\n".join(lines).encode()).hexdigest(), len(lines), total
+            found.append((path.relative_to(folder).as_posix(), path, st))
+            if limit is not None and len(found) > limit:
+                return None
+    return found
+
+
+def files_fingerprint(files: List[Tuple[str, Path, os.stat_result]]) -> str:
+    return hashlib.sha256("\n".join(f"{rel}\t{st.st_size}\t{st.st_mtime_ns}" for rel, _, st in files).encode()).hexdigest()
+
+
+def folder_fingerprint(folder: Path, patterns: Tuple[str, ...] = ("*",)) -> Tuple[str, int, int]:
+    """(fingerprint, files, bytes) of the matching files below folder: names, sizes and mtimes."""
+    files = folder_files(folder, patterns)
+    return files_fingerprint(files), len(files), sum(st.st_size for _, _, st in files)
 
 
 STALE_PARTIAL_SECONDS = 10 * 60     # a copy in progress writes its partial file every few MB
@@ -202,6 +216,81 @@ def archive_file(config, db, connector, kind: str, src: Path, origin: str,
             "received_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "parser_version": connector.parser_version,
         })
+    return state.get_raw(db, raw_id), True
+
+
+# Already compressed: stored as they are in a packed folder, the rest is deflated
+STORED_SUFFIXES = (".jpg", ".jpeg", ".heic", ".png", ".gif", ".webp", ".mp4", ".mov", ".m4v", ".m4a", ".mp3",
+                   ".aac", ".ogg", ".opus", ".webm", ".zip", ".gz", ".tgz")
+
+
+def archive_folder(config, db, connector, kind: str, src: Path, origin: str,
+                   check: Optional[Callable[[int], None]] = None) -> Tuple[dict, bool]:
+    """
+    An unpacked export folder (Safari unpacks a downloaded zip and removes it) into the vault
+    as one zip, '<folder>.zip', so it is read and kept like any zip export. The zip is the
+    same bytes for the same files (fixed order, the files' own mtimes), so packing the same
+    folder twice is stored once. The folder itself is only read. check(bytes) gets the packed
+    and then the hashed bytes: 2 x the folder's size in total. Returns (raw row, created).
+    """
+    files = folder_files(src)
+    if not files:
+        raise RawStoreError(f"De map {src.name} is leeg")
+    fingerprint = files_fingerprint(files)
+    total = sum(st.st_size for _, _, st in files)
+    export = connector.export_kind(kind)
+    folder = target_folder(config, connector, export.folder_label if export else kind)
+    sweep_partials(config, [connector])
+    _make_folder(config, folder)
+    if shutil.disk_usage(folder).free < total + FREE_SPACE_MARGIN:
+        raise RawStoreError(f"Te weinig vrije ruimte in het archief voor deze export ({total // (1024 * 1024)} MB nodig)")
+    dst = folder / f"{src.name}.zip"
+    temp = file_ops.partial_path(dst)
+    try:
+        done = 0
+        with open(temp, "xb") as out:
+            with zipfile.ZipFile(out, "w") as zf:
+                for rel, path, st in files:
+                    info = zipfile.ZipInfo(rel, time.localtime(max(st.st_mtime, 315532800))[:6])
+                    info.compress_type = zipfile.ZIP_STORED if rel.lower().endswith(STORED_SUFFIXES) \
+                        else zipfile.ZIP_DEFLATED
+                    info.external_attr = 0o644 << 16
+                    info.file_size = st.st_size
+                    with open(path, "rb") as f, zf.open(info, "w") as member:
+                        while chunk := f.read(HASH_CHUNK):
+                            member.write(chunk)
+                            done += len(chunk)
+                            if check is not None:
+                                check(done)
+            out.flush()
+            os.fsync(out.fileno())
+        if files_fingerprint(folder_files(src)) != fingerprint:
+            raise RawStoreError(f"De map {src.name} veranderde tijdens het inpakken; probeer het zo opnieuw")
+        packed = max(1, os.path.getsize(temp))
+        sha, size = sha256_file(temp, None if check is None else (lambda n: check(total + n * total // packed)))
+        with _archive_lock:
+            existing = state.raw_by_sha(db, sha)
+            if existing is not None:
+                os.unlink(temp)
+                return existing, False
+            final = file_ops.claim_name(temp, dst)
+            raw_id = state.insert_raw(db, source_id=connector.id, kind=kind, path=str(final), is_folder=0,
+                                      sha256=sha, size=size, fingerprint=fingerprint, origin=origin,
+                                      original_path=str(src), parser_version=connector.parser_version)
+            _write_manifest(folder, {
+                "file": final.name, "sha256": sha, "size": size, "source": connector.id, "kind": kind,
+                "origin": origin, "original_path": str(src), "original_name": src.name, "packed_from_folder": True,
+                "received_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "parser_version": connector.parser_version,
+            })
+    except BaseException:
+        # Only the partial zip this call made itself (exclusive create above); never an archive file
+        try:
+            if temp.exists():
+                os.unlink(temp)
+        except OSError:
+            pass
+        raise
     return state.get_raw(db, raw_id), True
 
 
