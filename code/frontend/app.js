@@ -192,7 +192,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== VIEW SWITCHING ====================
 
-const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map', 'berichten', 'activity'];
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map', 'berichten', 'activity', 'series'];
 
 function currentMainView() {
     return MAIN_VIEWS.find(v => {
@@ -205,20 +205,26 @@ function currentMainView() {
 const VIEW_TITLES = {
     home: 'Home', viewer: 'Bestanden', duplicates: 'Duplicaten', spotify: 'Spotify', shows: 'Shows', keurer: 'Keurer',
     timeline: 'Tijdlijn', recovery: 'Herstelcentrum', settings: 'Instellingen', albums: 'Albums', datagatherer: 'DataGatherer',
-    map: 'Kaart', berichten: 'Berichten', activity: 'Activiteit',
+    map: 'Kaart', berichten: 'Berichten', activity: 'Activiteit', series: 'Reeksen',
 };
 
 // Het scherm waar een melding bij hoort: info en succes blijven niet hangen op een ander scherm
 let activeMainView = 'home';
 
-// Het menu-element van een onderdeel (Berichten en Activiteit horen bij DataGatherer)
+// Het menu-element van een onderdeel (Activiteit hoort bij DataGatherer). Staat het onderdeel
+// in het menu Meer (smal venster, nav-more.js), dan is dat de knop Meer.
 function navEntryFor(view) {
-    return [...document.querySelectorAll('.top-nav [data-view]')].find(tab =>
-        tab.dataset.view === view || (tab.dataset.also || '').split(' ').includes(view)) || null;
+    const tab = [...document.querySelectorAll('.top-nav [data-view]')].find(t =>
+        t.dataset.view === view || (t.dataset.also || '').split(' ').includes(view)) || null;
+    if (tab && tab.classList.contains('is-overflow')) return document.getElementById('nav-more-btn');
+    return tab;
 }
 
 // Hoeveel de groene streep binnen een menu-element begint (zie .nav-tab.active::after)
 function navIndicatorInset(tab) {
+    // Het streepje zelf weet het (smaller venster: kleinere marge); anders de standaardmarge
+    const left = parseFloat(getComputedStyle(tab, '::after').left);
+    if (Number.isFinite(left)) return left;
     return Motion.px(tab.classList.contains('nav-icon-btn') ? '--space-sm' : '--space-md');
 }
 
@@ -254,7 +260,7 @@ function navIsRestoring() {
 function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
     const previousView = activeMainView;
-    const previousTab = document.querySelector('.top-nav [data-view].active');
+    const previousTab = navEntryFor(previousView);
     if (view !== activeMainView) {
         document.querySelectorAll('#toast-container .toast[data-view]').forEach(t => {
             if (t.dataset.view !== view) { clearTimeout(t._hideTimer); t.remove(); }
@@ -265,7 +271,7 @@ function switchMainView(view) {
     document.title = view === 'home' ? 'DataVault' : `${VIEW_TITLES[view]} · DataVault`;
     // Update tabs (ook de tandwielknop van Instellingen)
     document.querySelectorAll('.top-nav [data-view]').forEach(tab => {
-        // data-also: een onderdeel zonder eigen knop in het menu (Berichten hoort bij DataGatherer)
+        // data-also: een onderdeel zonder eigen knop in het menu (Activiteit hoort bij DataGatherer)
         const on = tab.dataset.view === view || (tab.dataset.also || '').split(' ').includes(view);
         tab.classList.toggle('active', on);
         if (on) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current');
@@ -278,6 +284,9 @@ function switchMainView(view) {
             }
         }
     });
+
+    // Staat het onderdeel in Meer, dan krijgt Meer het groene streepje (nav-more.js)
+    if (window.NavMore) NavMore.sync(view);
 
     // Update sections
     MAIN_VIEWS.forEach(v => {
@@ -349,6 +358,8 @@ function switchMainView(view) {
         if (typeof msgInit === 'function') msgInit();
     } else if (view === 'activity') {
         if (typeof activityInit === 'function') activityInit();
+    } else if (view === 'series') {
+        if (typeof seriesInit === 'function') seriesInit();
     }
 }
 

@@ -929,6 +929,4 @@ function duplicatesInit() {
     loadDuplicateRuns();
     document.getElementById('dup-rule').value = dupState.rule;
     restoreLatestScan();
-    // Het tweede tabblad, Beste uit reeks (series.js), als dat het laatst gekozen was
-    if (typeof seriesOnShow === 'function') seriesOnShow();
 }

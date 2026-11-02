@@ -1,4 +1,4 @@
-// DataVault Dashboard - Beste uit reeks (tabblad op de pagina Duplicaten)
+// DataVault Dashboard - Reeksen: de beste uit foto's die op elkaar lijken (een eigen onderdeel)
 // Note: API_BASE is defined in app.js
 //
 // Foto's die op elkaar lijken: een verkleinde of opnieuw opgeslagen kopie, een bewerking, of
@@ -63,60 +63,6 @@ try {
     const sort = localStorage.getItem('seriesSort');
     if (sort === 'size' || sort === 'recent') seriesState.sort = sort;
 } catch (e) { /* geen opslag: standaard */ }
-
-// ==================== TABBLADEN OP DE PAGINA DUPLICATEN ====================
-
-const DUP_SUBTITLES = {
-    exact: 'Kies een map, zoek byte voor byte identieke bestanden en bepaal per groep welke kopie blijft. '
-        + 'De andere kopieën gaan naar RAW_DUPLICATES: er wordt niets gewist en elke actie is terug te zetten.',
-    series: 'Foto\'s die op elkaar lijken: verkleinde of bewerkte kopieën en bursts. Kies per reeks wat blijft; '
-        + 'de rest gaat naar RAW_DUPLICATES/near-duplicates en is in het Herstelcentrum terug te zetten.',
-};
-
-function dupCurrentTab() {
-    const tab = document.querySelector('.dup-tabs [aria-selected="true"]');
-    return tab ? tab.dataset.tab : 'exact';
-}
-
-function dupShowTab(name, focus = false) {
-    if (name !== 'exact' && name !== 'series') return;
-    document.querySelectorAll('.dup-tabs [role="tab"]').forEach(tab => {
-        const on = tab.dataset.tab === name;
-        tab.classList.toggle('active', on);
-        tab.setAttribute('aria-selected', on ? 'true' : 'false');
-        tab.tabIndex = on ? 0 : -1;
-        if (on && focus) tab.focus();
-    });
-    document.getElementById('dup-panel-exact').hidden = name !== 'exact';
-    document.getElementById('dup-panel-series').hidden = name !== 'series';
-    document.getElementById('dup-subtitle').textContent = DUP_SUBTITLES[name];
-    try { localStorage.setItem('dupTab', name); } catch (e) { /* geen opslag */ }
-    if (name === 'series') seriesInit();
-}
-
-// Pijltjes, Home en End binnen de tabbladen (zoals elke tablist)
-function dupTabsKeydown(e) {
-    const tabs = [...document.querySelectorAll('.dup-tabs [role="tab"]')];
-    const i = tabs.indexOf(document.activeElement);
-    if (i < 0) return;
-    let next = null;
-    if (e.key === 'ArrowRight') next = tabs[(i + 1) % tabs.length];
-    else if (e.key === 'ArrowLeft') next = tabs[(i - 1 + tabs.length) % tabs.length];
-    else if (e.key === 'Home') next = tabs[0];
-    else if (e.key === 'End') next = tabs[tabs.length - 1];
-    if (!next) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dupShowTab(next.dataset.tab, true);
-}
-
-// Bij het openen van de pagina Duplicaten (duplicatesInit): het laatst gekozen tabblad
-function seriesOnShow() {
-    let saved = 'exact';
-    try { saved = localStorage.getItem('dupTab') || 'exact'; } catch (e) { /* geen opslag */ }
-    if (saved !== dupCurrentTab()) dupShowTab(saved);
-    else if (saved === 'series') seriesInit();
-}
 
 // ==================== STAND EN VERGELIJKEN ====================
 
@@ -370,7 +316,7 @@ function seriesWatchMore(button) {
     if (!seriesMoreObserver) {
         seriesMoreObserver = new IntersectionObserver(entries => {
             if (entries.some(e => e.isIntersecting) && !seriesState.loading && seriesState.nextOffset !== null
-                && !document.getElementById('dup-panel-series').hidden) seriesLoad(false);
+                && currentMainView() === 'series') seriesLoad(false);
         }, { rootMargin: '0px 0px 400px 0px' });
     }
     seriesMoreObserver.disconnect();
@@ -1179,7 +1125,6 @@ async function seriesResetReviews() {
 }
 
 function seriesInitPage() {
-    document.querySelector('.dup-tabs').addEventListener('keydown', dupTabsKeydown);
     document.getElementById('series-list').addEventListener('keydown', seriesKeydown);
     registerOverlayCloser('modal-series-confirm', seriesCloseConfirm);
     registerOverlayCloser('modal-series-compare', seriesCloseCompare);
@@ -1197,7 +1142,7 @@ function seriesInitPage() {
 function addShortcutGroupLater() {
     const add = () => {
         if (typeof addShortcutGroup !== 'function') return;
-        addShortcutGroup('Beste uit reeks (Duplicaten)', [
+        addShortcutGroup('Reeksen', [
             [['←', '→'], 'Vorige of volgende foto in de reeks'],
             [['↑', '↓'], 'Vorige of volgende reeks'],
             [['Home', 'End'], 'Eerste of laatste foto in de reeks'],

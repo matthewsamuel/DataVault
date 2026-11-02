@@ -35,6 +35,7 @@ const SHORTCUT_VIEWS = [
     { view: 'map', key: null, g: 'm', label: 'Kaart' },
     { view: 'berichten', key: null, g: 'e', label: 'Berichten' },
     { view: 'activity', key: null, g: 'c', label: 'Activiteit' },
+    { view: 'series', key: null, g: 'n', label: 'Reeksen' },
 ];
 
 const SHORTCUT_GROUPS = [
@@ -45,6 +46,7 @@ const SHORTCUT_GROUPS = [
             [['1', '…', '9'], 'Naar een onderdeel: ' + SHORTCUT_VIEWS.filter(v => v.key).map(v => `${v.key} ${v.label}`).join(', ')],
             [['g', 'letter'], 'Naar een onderdeel: ' + SHORTCUT_VIEWS.map(v => `${v.g} ${v.label}`).join(', ')],
             [['/'], 'Naar het zoekveld; Enter zoekt in de hele bibliotheek (s opent het zoekvenster)'],
+            [['↓'], 'Op Meer in de menubalk: de onderdelen die niet passen; pijltjes kiezen, Esc sluit'],
             [['t'], 'Thema wisselen: Auto, Licht, Donker'],
             [['?'], 'Dit overzicht'],
             [['Esc'], 'Bovenste venster sluiten, of uit een invoerveld'],

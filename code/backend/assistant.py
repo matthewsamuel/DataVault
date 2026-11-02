@@ -451,7 +451,7 @@ def tool_series_overview(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
     _need_library(ctx.db)
     info = near_dups.counts(ctx.db)
     if not info.get("analysed"):
-        raise ToolError("De reeksen zijn nog niet berekend. Open Duplicaten, kies Beste uit reeks en start de vergelijking.")
+        raise ToolError("De reeksen zijn nog niet berekend. Open Reeksen en start de vergelijking.")
     data = near_dups.page(ctx.db, near_dups.DEFAULT_STRICTNESS, "size", 0, 6)
     series = data["items"]
     if not series:
@@ -584,7 +584,7 @@ def propose_move(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
 def propose_keep_best(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
     _need_library(ctx.db)
     if not near_dups.counts(ctx.db).get("analysed"):
-        raise ToolError("De reeksen zijn nog niet berekend. Open Duplicaten, kies Beste uit reeks en start de vergelijking.")
+        raise ToolError("De reeksen zijn nog niet berekend. Open Reeksen en start de vergelijking.")
     data = near_dups.page(ctx.db, near_dups.DEFAULT_STRICTNESS, "size", 0, a.get("count", 1))
     groups, preview, loose, copies = [], [], 0, 0
     to = "RAW_DUPLICATES/near-duplicates"

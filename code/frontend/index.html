@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=87">
+    <link rel="stylesheet" href="style.css?v=88">
     <!-- Beweging: als eerste, zodat html[data-motion] klopt vóór de eerste weergave (docs/MOTION.md) -->
     <script src="motion.js?v=2"></script>
 </head>
@@ -34,38 +34,53 @@
                 <span class="nav-brand-name">DataVault</span>
             </button>
 
+            <!-- Onderdelen die niet passen, schuiven van achteren naar het menu Meer (nav-more.js) -->
             <div class="nav-tabs" aria-label="Onderdelen">
-                <button class="nav-tab active" data-view="home" onclick="switchMainView('home')" title="Home (1)">
+                <button type="button" class="nav-tab active" data-view="home" data-icon="fas fa-house" onclick="switchMainView('home')" title="Home (1)">
                     Home
                 </button>
-                <button class="nav-tab" data-view="viewer" onclick="switchMainView('viewer')" title="Bestanden (2)">
+                <button type="button" class="nav-tab" data-view="viewer" data-icon="fas fa-folder-open" onclick="switchMainView('viewer')" title="Bestanden (2)">
                     Bestanden
                 </button>
-                <button class="nav-tab" data-view="duplicates" onclick="switchMainView('duplicates')" title="Duplicaten (3)">
-                    Duplicaten
-                </button>
-                <button class="nav-tab" data-view="spotify" onclick="switchMainView('spotify')" title="Spotify (4)">
-                    Spotify
-                </button>
-                <button class="nav-tab" data-view="shows" onclick="switchMainView('shows')" title="Shows (5)">
-                    Shows
-                </button>
-                <button class="nav-tab" data-view="keurer" onclick="switchMainView('keurer')" title="Keurer (6)">
-                    Keurer
-                </button>
-                <button class="nav-tab" data-view="timeline" onclick="switchMainView('timeline')" title="Tijdlijn (7)">
+                <button type="button" class="nav-tab" data-view="timeline" data-icon="fas fa-stream" onclick="switchMainView('timeline')" title="Tijdlijn (7)">
                     Tijdlijn
                 </button>
-                <button class="nav-tab" data-view="albums" onclick="switchMainView('albums')" title="Albums: filters, slimme albums en op deze dag (g a)">
-                    Albums
-                </button>
-                <button class="nav-tab" data-view="map" onclick="switchMainView('map')" title="Kaart: foto's op de plek waar ze genomen zijn (g m)">
+                <button type="button" class="nav-tab" data-view="map" data-icon="fas fa-map-location-dot" onclick="switchMainView('map')" title="Kaart: foto's op de plek waar ze genomen zijn (g m)">
                     Kaart
                 </button>
-                <button class="nav-tab" data-view="recovery" onclick="switchMainView('recovery')" title="Herstelcentrum: alles terugzetten wat de app verplaatste (8)">
+                <button type="button" class="nav-tab" data-view="albums" data-icon="fas fa-photo-film" onclick="switchMainView('albums')" title="Albums: filters, slimme albums en op deze dag (g a)">
+                    Albums
+                </button>
+                <button type="button" class="nav-tab" data-view="series" data-icon="fas fa-images" onclick="switchMainView('series')" title="Reeksen: kies de beste uit foto's die op elkaar lijken (g n)">
+                    Reeksen
+                </button>
+                <button type="button" class="nav-tab" data-view="duplicates" data-icon="fas fa-clone" onclick="switchMainView('duplicates')" title="Duplicaten: byte voor byte gelijke kopieën (3)">
+                    Duplicaten
+                </button>
+                <button type="button" class="nav-tab" data-view="keurer" data-icon="fas fa-layer-group" onclick="switchMainView('keurer')" title="Keurer (6)">
+                    Keurer
+                </button>
+                <button type="button" class="nav-tab" data-view="shows" data-icon="fas fa-film" onclick="switchMainView('shows')" title="Shows (5)">
+                    Shows
+                </button>
+                <button type="button" class="nav-tab" data-view="spotify" data-icon="fab fa-spotify" onclick="switchMainView('spotify')" title="Spotify (4)">
+                    Spotify
+                </button>
+                <button type="button" class="nav-tab" data-view="berichten" data-icon="fas fa-comments" onclick="switchMainView('berichten')" title="Berichten: je gesprekken doorzoeken (g e)">
+                    Berichten
+                </button>
+                <button type="button" class="nav-tab" data-view="datagatherer" data-also="activity" data-icon="fas fa-cloud-arrow-down" onclick="switchMainView('datagatherer')" title="DataGatherer: je gegevens bijwerken (g v)">
+                    DataGatherer
+                </button>
+                <button type="button" class="nav-tab" data-view="recovery" data-icon="fas fa-clock-rotate-left" onclick="switchMainView('recovery')" title="Herstelcentrum: alles terugzetten wat de app verplaatste (8)">
                     Herstelcentrum
                 </button>
+                <button type="button" class="nav-tab nav-more-btn" id="nav-more-btn" aria-haspopup="menu" aria-expanded="false"
+                    aria-controls="nav-more-menu" title="Meer onderdelen" hidden>
+                    Meer <i class="fas fa-chevron-down nav-more-caret" aria-hidden="true"></i>
+                </button>
             </div>
+            <div class="menu nav-more-menu" id="nav-more-menu" role="menu" aria-label="Meer onderdelen" hidden></div>
 
             <div class="nav-actions">
                 <div class="search-field nav-search search-elsewhere">
@@ -100,10 +115,6 @@
                 <button type="button" class="nav-icon-btn" onclick="toggleShortcutHelp()" title="Sneltoetsen (?)"
                     aria-label="Sneltoetsen tonen">
                     <i class="fas fa-keyboard" aria-hidden="true"></i>
-                </button>
-                <button type="button" class="nav-icon-btn nav-tab-gather" data-view="datagatherer" data-also="berichten activity" onclick="switchMainView('datagatherer')"
-                    title="DataGatherer: je gegevens bijwerken (g v)" aria-label="DataGatherer">
-                    <i class="fas fa-cloud-arrow-down" aria-hidden="true"></i>
                 </button>
                 <button type="button" class="nav-icon-btn nav-tab-settings" data-view="settings" onclick="switchMainView('settings')"
                     title="Instellingen (9)" aria-label="Instellingen">
@@ -306,25 +317,14 @@
                 <div class="page-header">
                     <div>
                         <h1 class="page-title"><i class="fas fa-clone" aria-hidden="true"></i> Duplicaten</h1>
-                        <div class="page-subtitle" id="dup-subtitle">Kies een map, zoek byte voor byte identieke bestanden en
+                        <p class="page-subtitle" id="dup-subtitle">Kies een map, zoek byte voor byte identieke bestanden en
                             bepaal per groep welke kopie blijft. De andere kopieën gaan naar RAW_DUPLICATES: er wordt
-                            niets gewist en elke actie is terug te zetten.</div>
+                            niets gewist en elke actie is terug te zetten. Foto's die alleen op elkaar lijken, vind je bij
+                            <button type="button" class="link-button" onclick="switchMainView('series')">Reeksen</button>.</p>
                     </div>
                 </div>
 
-                <!-- Twee soorten: byte voor byte gelijke kopieën, en foto's die op elkaar lijken (series.js) -->
-                <div class="tabs dup-tabs" role="tablist" aria-label="Soort duplicaten">
-                    <button type="button" class="tab active" role="tab" id="dup-tab-exact" aria-selected="true"
-                        aria-controls="dup-panel-exact" data-tab="exact" onclick="dupShowTab('exact')">
-                        <i class="fas fa-clone" aria-hidden="true"></i> Exacte kopieën
-                    </button>
-                    <button type="button" class="tab" role="tab" id="dup-tab-series" aria-selected="false" tabindex="-1"
-                        aria-controls="dup-panel-series" data-tab="series" onclick="dupShowTab('series')">
-                        <i class="fas fa-layer-group" aria-hidden="true"></i> Beste uit reeks
-                    </button>
-                </div>
-
-                <div class="dup-panel" id="dup-panel-exact" role="tabpanel" aria-labelledby="dup-tab-exact">
+                <div class="dup-panel" id="dup-panel-exact">
                 <!-- Folder Selection -->
                 <div class="folder-selection-panel">
                     <div class="folder-selection-header">
@@ -424,8 +424,22 @@
                 <div class="dup-sentinel" id="dup-sentinel"></div>
                 </div>
 
+            </div>
+        </div>
+        <!-- REEKSEN: foto's die op elkaar lijken (bijna-duplicaten en bursts; series.js, /api/series) -->
+        <div id="section-series" class="section hidden">
+            <div class="series-container" id="series-container">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="series-page-title" tabindex="-1"><i class="fas fa-images" aria-hidden="true"></i> Reeksen</h1>
+                        <p class="page-subtitle">Foto's die op elkaar lijken: verkleinde of bewerkte kopieën en bursts. Kies per reeks wat
+                            blijft; de rest gaat naar RAW_DUPLICATES/near-duplicates en is in het Herstelcentrum terug te zetten.
+                            Byte voor byte gelijke kopieën vind je bij <button type="button" class="link-button" onclick="switchMainView('duplicates')">Duplicaten</button>.</p>
+                    </div>
+                </div>
+
                 <!-- Beste uit reeks: bijna-duplicaten en bursts (series.js, /api/series) -->
-                <div class="dup-panel" id="dup-panel-series" role="tabpanel" aria-labelledby="dup-tab-series" hidden>
+                <div class="series-panel" id="series-panel">
                     <div class="series-toolbar">
                         <div class="series-status">
                             <div class="series-status-text" id="series-status-text">Even kijken…</div>
@@ -1629,11 +1643,12 @@
     <script src="media-motion.js?v=3"></script>
     <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
     <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
-    <script src="app.js?v=83"></script>
-    <script src="pasha-tools.js?v=2"></script>
+    <script src="app.js?v=84"></script>
+    <script src="nav-more.js?v=1"></script>
+    <script src="pasha-tools.js?v=3"></script>
     <script src="jobs.js?v=18"></script>
-    <script src="duplicates.js?v=30"></script>
-    <script src="series.js?v=4"></script>
+    <script src="duplicates.js?v=31"></script>
+    <script src="series.js?v=5"></script>
     <script src="keurer.js?v=24"></script>
     <script src="timeline.js?v=18"></script>
     <script src="wave-background.js?v=5"></script>
@@ -1641,7 +1656,7 @@
     <script src="recovery.js?v=10"></script>
     <script src="settings.js?v=6"></script>
     <script src="map.js?v=13"></script>
-    <script src="shortcuts.js?v=9"></script>
+    <script src="shortcuts.js?v=10"></script>
     <script src="export.js?v=7"></script>
     <script src="library.js?v=9"></script>
     <script src="datagatherer.js?v=9"></script>

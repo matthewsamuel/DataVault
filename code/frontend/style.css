@@ -2401,6 +2401,100 @@ button.nav-brand {
     background: var(--accent);
 }
 
+/* ---------- Meer: de onderdelen die niet passen (nav-more.js) ---------- */
+/* Van achteren naar voren schuiven onderdelen naar het menu Meer; Meer zelf is een gewoon
+   menu-onderdeel (zelfde hoogte, zwevende vlek en groen streepje als het open onderdeel erin staat) */
+
+.nav-tab.is-overflow,
+.nav-more-btn[hidden] {
+    display: none;
+}
+
+.nav-more-btn {
+    gap: var(--space-xs);
+}
+
+.nav-more-caret {
+    font-size: var(--icon-xs);
+    color: var(--text-tertiary);
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy), color var(--dur-2) var(--ease-out);
+}
+
+.nav-more-btn[aria-expanded="true"] {
+    color: var(--text-primary);
+}
+
+.nav-more-btn[aria-expanded="true"] .nav-more-caret {
+    color: var(--text-secondary);
+    transform: rotate(180deg);
+}
+
+.nav-more-btn.active .nav-more-caret {
+    color: var(--accent-text);
+}
+
+/* Net onder de balk (het groene streepje onder Meer blijft zichtbaar), links gelijk met Meer
+   (left zet nav-more.js) */
+.menu.nav-more-menu {
+    position: absolute;
+    top: calc(var(--nav-h) + var(--space-xs));
+    min-width: 248px;
+    padding: var(--space-xs);
+    transform-origin: top left;
+}
+
+.nav-more-menu .nav-more-item {
+    height: var(--control-h-lg);
+    gap: var(--space-md);
+    padding: 0 var(--space-md);
+    font-size: var(--fs-base);
+}
+
+.nav-more-icon {
+    width: var(--icon-md);
+    font-size: var(--icon-sm);
+    text-align: center;
+    color: var(--text-tertiary);
+    transition: color var(--dur-2) var(--ease-out);
+}
+
+.nav-more-item:hover .nav-more-icon,
+.nav-more-item:focus .nav-more-icon {
+    color: var(--text-secondary);
+}
+
+.nav-more-label {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.nav-more-key {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.nav-more-item .menu-check {
+    width: var(--icon-xs);
+}
+
+.nav-more-item.active {
+    font-weight: var(--fw-semibold);
+}
+
+.nav-more-item.active .nav-more-icon {
+    color: var(--accent-text);
+}
+
+/* Met de muis geopend en dan met pijltjes verder: Safari toont dan geen :focus-visible */
+.nav-more-menu.keyboard .menu-item:focus {
+    background-color: var(--surface-active);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+}
+
 .nav-actions {
     display: flex;
     align-items: center;
@@ -2621,7 +2715,8 @@ button.nav-brand {
 /* Pagina's die zelf precies vensterhoog zijn en binnenin scrollen (Keurer, Duplicaten) houden
    die ruimte zelf vrij, binnen hun eigen hoogte: anders zou het venster 'n stukje gaan scrollen */
 .main-content:has(> #section-keurer.active),
-.main-content:has(> #section-duplicates.active) {
+.main-content:has(> #section-duplicates.active),
+.main-content:has(> #section-series.active) {
     padding-bottom: 0;
 }
 
@@ -4104,9 +4199,8 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
         padding: 0 var(--space-lg);
     }
 
-    /* Ruimte voor het DataGatherer-icoon naast Instellingen (minstens 24 px voor het zoekveld) */
     .search-input {
-        width: 168px;
+        width: 200px;
     }
 }
 
@@ -4118,35 +4212,26 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     }
 }
 
+/* Smaller dan 1200 px: iets compactere onderdelen; wat dan nog niet past, staat in Meer */
 @media (max-width: 1200px) {
     .nav-tab {
-        padding: 0 10px;
+        padding: 0 var(--space-sm);
     }
 
     .nav-tab.active::after {
-        left: 10px;
-        right: 10px;
+        left: var(--space-sm);
+        right: var(--space-sm);
     }
 
     .search-input {
-        width: 144px;
+        width: 184px;
     }
 }
 
-/* Onder 1100 px (tien onderdelen sinds Albums): iets smallere tabs en een kort zoekveld zonder
-   de /-hint (en ruimte voor het DataGatherer-icoon), zodat het hele menu blijft passen (navgap in de smoke-test) */
+/* Onder 1100 px: een kort zoekveld zonder de /-hint */
 @media (max-width: 1100px) {
-    .nav-tab {
-        padding: 0 5px;
-    }
-
-    .nav-tab.active::after {
-        left: 5px;
-        right: 5px;
-    }
-
     .search-input {
-        width: 120px;
+        width: 168px;
         padding-right: var(--space-md);
     }
 
@@ -4171,12 +4256,6 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
 
     .nav-search .search-kbd {
         display: none;
-    }
-
-    /* Het menu schuift: zachte randen laten zien dat er meer is (alleen de dekking telt) */
-    .nav-tabs {
-        -webkit-mask-image: linear-gradient(to right, transparent, var(--text-primary) 12px, var(--text-primary) calc(100% - 12px), transparent);
-        mask-image: linear-gradient(to right, transparent, var(--text-primary) 12px, var(--text-primary) calc(100% - 12px), transparent);
     }
 
     #modal-viewer > .modal-container {
@@ -4222,7 +4301,8 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
 }
 /* ==================== DUPLICATEN ==================== */
 
-.duplicates-container {
+.duplicates-container,
+.series-container {
     height: calc(100vh - var(--nav-h));
     overflow-y: auto;
     overflow-x: hidden;
@@ -4863,35 +4943,7 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
         width: 90vw;
     }
 }
-/* ---- Tabbladen: Exacte kopieën | Beste uit reeks ---- */
-
-.dup-tabs {
-    margin: 0 0 var(--space-xl);
-}
-
-.dup-tabs .tab {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-sm);
-    font-size: var(--fs-base);
-}
-
-.dup-tabs .tab i {
-    font-size: var(--fs-sm);
-    color: var(--text-tertiary);
-}
-
-.dup-tabs .tab[aria-selected="true"] i {
-    color: var(--accent-text);
-}
-
-.dup-tabs .tab:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
-    border-radius: var(--radius-xs);
-}
-
-/* ==================== BESTE UIT REEKS (series.js) ==================== */
+/* ==================== REEKSEN (series.js) ==================== */
 
 .series-toolbar {
     display: flex;
@@ -16009,6 +16061,17 @@ html[data-motion="rustig"] .job-running .job-bar::after {
 .theme-dropdown.open .theme-option:nth-child(n + 4),
 .menu:not([hidden]) > .menu-item:nth-child(n + 4) {
     animation-delay: calc(var(--stagger-step) * 3);
+}
+
+/* Meer: de onderdelen volgen elkaar op de stagger-stap (--i zet nav-more.js, tot 9) */
+.menu.nav-more-menu:not([hidden]) > .menu-item.nav-more-item {
+    animation-delay: calc(var(--stagger-step) * var(--i, 0));
+}
+
+.menu.nav-more-menu.is-leaving[hidden] {
+    display: block;
+    pointer-events: none;
+    animation: shell-menu-out var(--dur-3) var(--ease-exit) forwards;
 }
 
 .theme-dropdown.is-leaving:not(.open) {
