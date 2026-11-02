@@ -62,6 +62,8 @@ def test_two_copies_of_a_video_form_a_series_of_videos_only(client, config, vide
     assert [sorted(m["name"] for m in s["members"]) for s in video_series] == \
         [["zee kopie klein.mkv", "zee origineel.mp4"]]
     series = video_series[0]
+    page = _series(client)
+    assert page["videos"] == 2 and page["photos"] >= 2
     assert {m["kind"] for m in series["members"]} == {"video"}
     assert all(m["duration"] for m in series["members"])
     # The larger, sharper original is the suggested best

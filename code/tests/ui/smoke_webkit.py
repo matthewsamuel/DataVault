@@ -1663,10 +1663,37 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     step("series: v compares the videos", lambda: page.keyboard.press("v"), 0.8)
                     plays = page.evaluate("document.querySelectorAll('#series-compare-grid .series-compare-play').length")
                     expect(plays == 2, f"series: the comparison of two mp4 videos offers {plays} 'Afspelen' buttons")
+                    # Each pane shows the video's own frame at its own size (not the 300 px thumbnail), paused
+                    try:
+                        page.wait_for_function("[...document.querySelectorAll('#series-compare-grid video')]"
+                                               ".every(v => v.readyState >= 2)", timeout=10000)
+                    except PlaywrightError:
+                        pass
+                    frames = page.evaluate("[...document.querySelectorAll('#series-compare-grid video')]"
+                                           ".map(v => [v.videoWidth, v.paused])")
+                    expect(sorted(frames) == [[480, True], [960, True]],
+                           f"series: the compared videos do not show their own frames ({frames})")
+                    hint = page.text_content(".series-compare-hint") or ""
+                    expect("video" in hint and "afspelen" in hint and "foto" not in hint,
+                           f"series: the hint bar of a video comparison is off ({hint.split()})")
+                    step("series: 100% before Afspelen", lambda: page.keyboard.press("d"), 0.4)
                     step("series: Afspelen plays in place", lambda: page.click("#series-compare-grid .series-compare-play"), 1.0)
                     playing = page.evaluate("""(() => { const v = document.querySelector('#series-compare-grid video');
-                        return v && [document.activeElement === v, v.closest('.series-compare-frame').classList.contains('is-playing')]; })()""")
-                    expect(playing == [True, True], f"series: 'Afspelen' did not put a playing video in the pane ({playing})")
+                        const f = v && v.closest('.series-compare-frame');
+                        const r = v && v.getBoundingClientRect(), fr = f && f.getBoundingClientRect();
+                        return v && [document.activeElement === v, f.classList.contains('is-playing'), !v.paused,
+                                     r.left >= fr.left - 1 && r.right <= fr.right + 1 && r.top >= fr.top - 1 && r.bottom <= fr.bottom + 1]; })()""")
+                    expect(playing == [True, True, True, True],
+                           f"series: 'Afspelen' did not play the video in the pane, fitted also on 100% ({playing})")
+                    # WebKit gives a video no keys of its own: k pauses, Escape pauses and goes back to Houden
+                    step("series: k pauses the video", lambda: page.keyboard.press("k"), 0.3)
+                    expect(page.evaluate("document.querySelector('#series-compare-grid video').paused"),
+                           "series: k did not pause the playing video")
+                    step("series: Escape on the video", lambda: page.keyboard.press("Escape"), 0.3)
+                    expect(page.evaluate("!!document.querySelector('#modal-series-compare.active')")
+                           and page.evaluate("document.activeElement.classList.contains('series-compare-keep')"),
+                           "series: Escape on a video closed the comparison instead of going back to Houden")
+                    page.keyboard.press("d")
                     step("series: Escape closes the video comparison", lambda: (
                         page.focus("#series-compare-grid .series-compare-keep"), page.keyboard.press("Escape")), 0.4)
                     expect(not page.evaluate("!!document.querySelector('#modal-series-compare.active')")

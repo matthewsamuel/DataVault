@@ -1434,6 +1434,7 @@ def all_series(db, strictness: str) -> Dict[str, Any]:
     members_of: Dict[int, List[int]] = {}
     rows: Dict[int, Tuple] = {}
     content: Dict[int, Optional[str]] = {}
+    videos: Set[int] = {r[0] for r in analysed if r[11] == "video"}
     looks: Dict[Tuple, List[int]] = {}
     for n, r in enumerate(analysed):
         looks.setdefault((r[1], r[2], r[3], r[11]), []).append(n)
@@ -1511,6 +1512,7 @@ def all_series(db, strictness: str) -> Dict[str, Any]:
                 "copies": {i: copies_of[i] for i in part if copies_of.get(i)},
                 "taken": max(taken) if taken else None,
                 "size": sum(rows[i][3] for i in part),
+                "videos": sum(1 for i in part if i in videos),
                 "part": [start // size + 1, parts] if parts > 1 else None,
             })
     result = {"series": series, "components": components, "copies": copies_of, "rows": rows,
@@ -1646,7 +1648,8 @@ def page(db, strictness: str, sort: str, offset: int, limit: int) -> Dict[str, A
         "strictness": strictness,
         "sort": sort,
         "total": total,
-        "photos": sum(len(s["ids"]) for s in ordered),
+        "photos": sum(len(s["ids"]) for s in ordered),       # photos and videos
+        "videos": sum(s.get("videos", 0) for s in ordered),
         "offset": offset,
         "limit": limit,
         "next_offset": offset + limit if offset + limit < total else None,

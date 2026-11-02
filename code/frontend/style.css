@@ -5450,6 +5450,33 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     transform: translate(calc(var(--compare-x, 50%) * -1), calc(var(--compare-y, 50%) * -1));
 }
 
+/* Een spelende video en een miniatuur (een video die de browser niet afspeelt) blijven op 100%
+   passend: de knoppen van de video blijven in beeld, en een miniatuur opblazen toont niets */
+.series-compare-body.is-detail .series-compare-frame:is(.is-playing, .is-still) {
+    cursor: auto;
+    touch-action: auto;
+}
+
+.series-compare-body.is-detail .series-compare-frame:is(.is-playing, .is-still) .series-compare-img {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    transform: none;
+}
+
+.series-compare-note {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.series-compare-note i {
+    color: var(--text-tertiary);
+}
+
 .series-compare-info {
     display: flex;
     flex-direction: column;

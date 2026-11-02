@@ -38,7 +38,8 @@ const seriesState = {
     items: [],             // reeksen in beeld, in volgorde
     nextOffset: 0,         // null: alles geladen
     total: 0,              // reeksen die de server nog heeft (ook de overgeslagen)
-    photos: 0,
+    photos: 0,             // foto's en video's in de reeksen
+    videos: 0,             // waarvan video's
     gone: 0,               // reeksen die in deze sessie op de server verdwenen (bevestigd of behouden)
     handled: 0,            // daarvan sinds het openen van het tabblad: voor 'Alles bekeken'
     moved: 0,              // en daarvan met verplaatste foto's
@@ -336,6 +337,7 @@ async function seriesLoad(reset) {
         seriesState.nextOffset = data.next_offset === null ? null : Math.max(0, data.next_offset - goneSince);
         seriesState.total = Math.max(0, data.total - goneSince);
         seriesState.photos = data.photos;
+        seriesState.videos = data.videos || 0;
         seriesState.loaded = true;
         seriesState.loading = false;
         // (bijna) alles op deze pagina was overgeslagen: meteen de volgende
@@ -416,10 +418,13 @@ function seriesNotCompared(status) {
 
 function seriesSummaryText(status) {
     if (seriesNotCompared(status)) return '';
-    const { total, photos } = seriesState;
+    const { total, photos, videos } = seriesState;
     const skipped = seriesState.skipped.size;
     if (!total) return 'Geen reeksen';
-    const parts = [`${formatNumberNl(total)} ${total === 1 ? 'reeks' : 'reeksen'}`, `${formatNumberNl(photos)} foto's`];
+    const stills = Math.max(0, photos - videos);
+    const parts = [`${formatNumberNl(total)} ${total === 1 ? 'reeks' : 'reeksen'}`];
+    if (stills || !videos) parts.push(`${formatNumberNl(stills)} ${stills === 1 ? 'foto' : 'foto\'s'}`);
+    if (videos) parts.push(`${formatNumberNl(videos)} ${videos === 1 ? 'video' : 'video\'s'}`);
     if (skipped) parts.push(`${formatNumberNl(skipped)} overgeslagen`);
     return parts.join(' · ');
 }
@@ -619,15 +624,18 @@ function seriesJoin(nodes) {
 }
 
 function seriesPhotoLabel(member, kept) {
-    const video = member.kind === 'video' ? `, video${member.duration ? ` van ${seriesDuration(member.duration)}` : ''}` : '';
+    const video = member.kind === 'video'
+        ? `, video${member.duration ? ` van ${seriesDuration(member.duration)}` : ''}${slidePlaysAsVideo(member) ? '' : ', speelt niet af in de browser'}`
+        : '';
     return `${member.name}${video}: ${kept ? 'blijft' : 'gaat naar RAW_DUPLICATES'}${member.best ? ', voorgesteld als beste' : ''}, score ${member.score}`;
 }
 
-// Een video in de reeks: een afspeelteken met de duur, rechtsonder op het beeld
-function seriesVideoBadge(member, title) {
+// Een video in de reeks: een afspeelteken met de duur, rechtsonder op het beeld. Een formaat dat
+// de browser niet afspeelt (mkv, avi) krijgt een filmstrook in plaats van het afspeelteken
+function seriesVideoBadge(member) {
     if (member.kind !== 'video') return null;
-    return createEl('span', { class: 'series-video-badge', 'aria-hidden': 'true', title: title || null },
-        createEl('i', { class: 'fas fa-play' }),
+    return createEl('span', { class: 'series-video-badge', 'aria-hidden': 'true' },
+        createEl('i', { class: `fas ${slidePlaysAsVideo(member) ? 'fa-play' : 'fa-film'}` }),
         seriesDuration(member.duration) || 'Video');
 }
 
@@ -663,7 +671,7 @@ function seriesPhoto(series, member, kept) {
             createEl('span', { class: 'series-photo-facts', text: size })),
         member.copies && member.copies.length ? createEl('span', {
             class: 'chip series-copies',
-            title: 'Byte voor byte gelijk; gaan mee als deze foto weggaat:\n' + member.copies.map(c => c.path).join('\n'),
+            title: `Byte voor byte gelijk; gaan mee als deze ${seriesNoun(series, 1)} weggaat:\n` + member.copies.map(c => c.path).join('\n'),
         }, `+${member.copies.length} exacte ${member.copies.length === 1 ? 'kopie' : 'kopieën'}`) : null);
 }
 
@@ -838,7 +846,8 @@ function seriesToggleKeep(series, id) {
     const keep = seriesState.keep.get(series.key);
     if (keep.has(id)) {
         if (keep.size === 1) {
-            showToast('Minstens één foto blijft', 'Kies eerst een andere foto om te houden, of sla de reeks over.', 'info');
+            const noun = seriesNoun(series, 1);
+            showToast(`Minstens één ${noun} blijft`, `Kies eerst een andere ${noun} om te houden, of sla de reeks over.`, 'info');
             return;
         }
         keep.delete(id);
@@ -863,6 +872,7 @@ function seriesDone(series, gone) {
         if (seriesState.nextOffset !== null) seriesState.nextOffset = Math.max(0, seriesState.nextOffset - 1);
         seriesState.total = Math.max(0, seriesState.total - 1);
         seriesState.photos = Math.max(0, seriesState.photos - series.count);
+        if (series.media === 'video') seriesState.videos = Math.max(0, seriesState.videos - series.count);
     }
     const next = seriesState.items[index] || seriesState.items[index - 1];
     if (next) seriesState.cursor = { key: next.key, id: next.best };
@@ -989,6 +999,9 @@ async function seriesRunConfirm() {
 // een verkleinde of wazige kopie echt zachter oogt. Slepen verschuift de uitsnede van alle foto's
 // tegelijk. Houden of laten gaan kan hier ook; de kaart in de lijst loopt mee.
 
+const SERIES_VIDEO_FRAME_AT = 1;     // seconden: het moment van de miniatuur (thumbnail.py, near_dups.VIDEO_FRAME_AT)
+const SERIES_VIDEO_STEP = 5;         // seconden per ← of → op een spelende video
+
 const seriesCompareState = { series: null, current: null, detail: false, focus: { x: 50, y: 50 }, drag: null };
 
 function seriesOpenCompare(series, id) {
@@ -996,9 +1009,12 @@ function seriesOpenCompare(series, id) {
     seriesCompareState.current = id || (seriesState.cursor.key === series.key ? seriesState.cursor.id : series.best);
     seriesCompareState.focus = { x: 50, y: 50 };
     document.getElementById('series-compare-title').textContent = seriesTitle(series);
+    document.getElementById('series-compare-hint-noun').textContent = seriesNoun(series, 1);
+    document.getElementById('series-compare-hint-video').hidden = !series.members.some(m => m.kind === 'video' && slidePlaysAsVideo(m));
     const grid = document.getElementById('series-compare-grid');
     grid.style.setProperty('--compare-columns', String(Math.min(series.members.length, 3)));
     grid.replaceChildren(...series.members.map(member => seriesComparePane(series, member)));
+    seriesCompareZoomAvailable();
     seriesCompareZoom(seriesCompareState.detail);
     seriesRenderCompare();
     document.getElementById('modal-series-compare').classList.add('active');
@@ -1013,29 +1029,66 @@ function seriesCloseCompare() {
     seriesCompareState.series = null;
 }
 
-function seriesComparePane(series, member) {
-    const isVideo = member.kind === 'video';
+// De miniatuur als beeld in het venster (een video die de browser niet afspeelt, of een origineel
+// dat hij niet kan tonen). Een miniatuur is klein: op 100% blijft hij passend (is-still)
+function seriesCompareStill(member, frame) {
     const img = createEl('img', { class: 'series-compare-img loading', alt: member.name, draggable: 'false' });
     img.addEventListener('load', () => img.classList.remove('loading'), { once: true });
-    // Kan de browser het origineel niet tonen (HEIC buiten Safari), dan de miniatuur. Een video
-    // toont eerst het beeld waarop hij vergeleken is (de miniatuur); afspelen kan erbij
+    img.addEventListener('error', () => img.classList.remove('loading'), { once: true });
+    img.src = vaultFileUrl('thumb', member.path);
+    frame.classList.add('is-still');
+    return img;
+}
+
+// Het beeld zelf: een foto als origineel, een video die de browser afspeelt als stilstaande video op
+// zijn eigen grootte (hetzelfde moment als de miniatuur), zodat een verkleinde kopie op 100% echt zachter oogt
+function seriesCompareMedia(member, frame) {
+    if (member.kind === 'video') {
+        if (!slidePlaysAsVideo(member)) return seriesCompareStill(member, frame);
+        const video = createEl('video', {
+            class: 'series-compare-img series-compare-video loading', playsinline: true, preload: 'metadata',
+            'aria-label': member.name, src: `${vaultFileUrl('file', member.path)}#t=${SERIES_VIDEO_FRAME_AT}`,
+        });
+        video.muted = true;
+        video.addEventListener('loadeddata', () => video.classList.remove('loading'), { once: true });
+        // Toch niet af te spelen (een codec die de browser mist): de miniatuur, zonder afspeelknop
+        video.addEventListener('error', () => {
+            if (!video.isConnected) return;
+            frame.querySelector('.series-compare-play')?.remove();
+            frame.classList.remove('is-playing');
+            video.replaceWith(seriesCompareStill(member, frame));
+            seriesCompareZoomAvailable();
+        }, { once: true });
+        return video;
+    }
+    const img = createEl('img', { class: 'series-compare-img loading', alt: member.name, draggable: 'false' });
+    img.addEventListener('load', () => img.classList.remove('loading'), { once: true });
+    // Kan de browser het origineel niet tonen (HEIC buiten Safari), dan de miniatuur
     img.addEventListener('error', () => {
         if (img.dataset.fallback) { img.classList.remove('loading'); return; }
         img.dataset.fallback = '1';
+        frame.classList.add('is-still');
         img.src = vaultFileUrl('thumb', member.path);
     });
-    img.src = vaultFileUrl(isVideo ? 'thumb' : 'file', member.path);
+    img.src = vaultFileUrl('file', member.path);
+    return img;
+}
+
+function seriesComparePane(series, member) {
+    const isVideo = member.kind === 'video';
     const playable = isVideo && slidePlaysAsVideo(member);
-    const frame = createEl('div', { class: 'series-compare-frame' },
-        img,
+    const frame = createEl('div', { class: 'series-compare-frame' });
+    frame.append(...[
+        seriesCompareMedia(member, frame),
         member.best ? createEl('span', { class: 'series-best-badge' },
             createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), 'Beste') : null,
         playable ? createEl('button', {
             type: 'button', class: 'btn btn-secondary btn-sm series-compare-play',
             'aria-label': `${member.name} afspelen`,
-            onClick: e => { e.stopPropagation(); seriesComparePlay(frame, member); },
+            onClick: e => { e.stopPropagation(); seriesComparePlay(frame); },
         }, createEl('i', { class: 'fas fa-play', 'aria-hidden': 'true' }), 'Afspelen')
-            : isVideo ? seriesVideoBadge(member, 'Dit formaat speelt de browser niet af; je ziet het beeld waarop vergeleken is') : null);
+            : isVideo ? seriesVideoBadge(member) : null,
+    ].filter(Boolean));
     frame.addEventListener('pointerdown', e => seriesCompareDragStart(e, frame));
     const facts = [
         member.width && member.height ? `${member.width} × ${member.height}` : null,
@@ -1050,6 +1103,9 @@ function seriesComparePane(series, member) {
                 createEl('span', { class: 'series-compare-name', title: member.path, text: member.name }),
                 createEl('span', { class: 'badge series-compare-state' })),
             createEl('div', { class: 'series-compare-facts', text: facts }),
+            isVideo && !playable ? createEl('div', { class: 'series-compare-note' },
+                createEl('i', { class: 'fas fa-circle-info', 'aria-hidden': 'true' }),
+                'Afspelen kan niet in de browser') : null,
             createEl('div', { class: 'series-compare-score' },
                 createEl('span', { class: 'series-compare-score-total', text: `Score ${member.score}` }),
                 ...SERIES_POINTS.map(([key, label, max], i) => createEl('span', { class: 'series-detail-part' },
@@ -1105,6 +1161,7 @@ function seriesCompareFocus(id) {
 
 // Passend of 100%: op 100% krijgt elke foto de breedte (in beeldpunten) van de grootste
 function seriesCompareZoom(detail) {
+    if (detail && !seriesCompareZoomAvailable()) detail = false;
     seriesCompareState.detail = !!detail;
     const series = seriesCompareState.series;
     document.getElementById('btn-series-fit').setAttribute('aria-pressed', detail ? 'false' : 'true');
@@ -1117,6 +1174,23 @@ function seriesCompareZoom(detail) {
     seriesComparePan();
 }
 
+// 100% heeft alleen zin als minstens één beeld op zijn eigen grootte te zien is (geen miniatuur)
+function seriesCompareZoomAvailable() {
+    const frames = [...document.querySelectorAll('#series-compare-grid .series-compare-frame')];
+    const available = !frames.length || frames.some(f => !f.classList.contains('is-still'));
+    const button = document.getElementById('btn-series-detail');
+    button.disabled = !available;
+    button.title = available ? 'Dezelfde uitsnede op ware grootte; slepen verschuift (d)'
+        : 'Geen van deze video\'s speelt af in de browser: er is alleen een miniatuur, dus geen 100%';
+    if (!available && seriesCompareState.detail) {
+        seriesCompareState.detail = false;
+        document.getElementById('series-compare-grid').classList.remove('is-detail');
+        document.getElementById('btn-series-fit').setAttribute('aria-pressed', 'true');
+        button.setAttribute('aria-pressed', 'false');
+    }
+    return available;
+}
+
 function seriesComparePan() {
     const { x, y } = seriesCompareState.focus;
     const grid = document.getElementById('series-compare-grid');
@@ -1124,28 +1198,55 @@ function seriesComparePan() {
     grid.style.setProperty('--compare-y', `${y}%`);
 }
 
-// Slepen op 100%: de uitsnede van alle foto's schuift mee
-// Een video speelt op zijn plek in het venster; een andere video die speelt, pauzeert
-function seriesComparePlay(frame, member) {
-    document.querySelectorAll('#series-compare-grid video').forEach(v => v.pause());
-    const video = createEl('video', {
-        class: 'series-compare-img series-compare-video', controls: true, playsinline: true, preload: 'auto',
-        poster: vaultFileUrl('thumb', member.path), src: vaultFileUrl('file', member.path),
-        'aria-label': member.name,
-    });
-    video.addEventListener('play', () => {
-        document.querySelectorAll('#series-compare-grid video').forEach(v => { if (v !== video) v.pause(); });
-    });
-    frame.querySelector('img')?.replaceWith(video);
-    frame.classList.add('is-playing');
-    frame.querySelector('.series-compare-play')?.remove();
+// Een video speelt op zijn plek in het venster, vanaf het begin en passend (ook op 100%: zo blijven
+// de knoppen van de video in beeld); het stilstaande beeld blijft staan tot het eerste beeld er is.
+// Een andere video die speelt, pauzeert
+function seriesComparePlay(frame) {
+    const video = frame.querySelector('video');
+    if (!video) return;
+    document.querySelectorAll('#series-compare-grid video').forEach(v => { if (v !== video) v.pause(); });
+    if (!frame.classList.contains('is-playing')) {
+        frame.classList.add('is-playing');
+        frame.querySelector('.series-compare-play')?.remove();
+        video.controls = true;
+        video.muted = false;
+        video.preload = 'auto';
+        video.addEventListener('play', () => {
+            document.querySelectorAll('#series-compare-grid video').forEach(v => { if (v !== video) v.pause(); });
+        });
+        try { video.currentTime = 0; } catch (err) { /* nog geen metadata: begint toch vooraan */ }
+    }
     video.play().catch(() => {});
     video.focus({ preventScroll: true });
 }
 
+// Toetsen op een spelende video (WebKit geeft een video zelf geen toetsen): k of spatie speelt of
+// pauzeert, ← → springen 5 s, Esc pauzeert en zet de focus terug op Houden (het venster blijft open)
+function seriesCompareVideoKey(e, video) {
+    if (e.key === ' ' || e.key === 'k') {
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        const step = e.key === 'ArrowRight' ? SERIES_VIDEO_STEP : -SERIES_VIDEO_STEP;
+        const end = Number.isFinite(video.duration) ? video.duration : Infinity;
+        video.currentTime = Math.max(0, Math.min(end, video.currentTime + step));
+    } else if (e.key === 'Escape') {
+        video.pause();
+        const pane = video.closest('.series-compare-pane');
+        pane?.querySelector('.series-compare-keep')?.focus({ preventScroll: true });
+    } else {
+        return false;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+}
+
+// Slepen op 100%: de uitsnede van alle foto's schuift mee (een spelende video en een miniatuur staan passend)
 function seriesCompareDragStart(e, frame) {
-    if (!seriesCompareState.detail || e.button !== 0 || e.target.closest('video, button')) return;
-    const img = frame.querySelector('img, video');
+    if (!seriesCompareState.detail || e.button !== 0 || e.target.closest('button')
+        || frame.classList.contains('is-playing') || frame.classList.contains('is-still')) return;
+    const img = frame.querySelector('.series-compare-img');
     const rect = img.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     e.preventDefault();
@@ -1173,10 +1274,19 @@ function seriesCompareDragStart(e, frame) {
 
 function seriesCompareKeydown(e) {
     if (e.metaKey || e.ctrlKey || e.altKey || !seriesCompareState.series) return;
-    if (e.target instanceof HTMLVideoElement) return;   // pijlen en spatie zijn dan van de video
+    if (e.target instanceof HTMLVideoElement && seriesCompareVideoKey(e, e.target)) return;
     const series = seriesCompareState.series;
     const pos = series.members.findIndex(m => m.id === seriesCompareState.current);
-    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    if (e.key === 'k') {
+        // k speelt of pauzeert de video van het huidige beeld, ook met de focus op Houden
+        const pane = document.querySelector(`#series-compare-grid .series-compare-pane[data-id="${seriesCompareState.current}"]`);
+        const video = pane?.querySelector('video');
+        if (!video) return;
+        const frame = pane.querySelector('.series-compare-frame');
+        if (!frame.classList.contains('is-playing')) seriesComparePlay(frame);
+        else if (video.paused) video.play().catch(() => {});
+        else video.pause();
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         const next = series.members[pos + (e.key === 'ArrowRight' ? 1 : -1)];
         if (next) seriesCompareFocus(next.id);
     } else if (e.key === 'Home' || e.key === 'End') {

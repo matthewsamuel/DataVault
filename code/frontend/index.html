@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=88">
+    <link rel="stylesheet" href="style.css?v=89">
     <!-- Beweging: als eerste, zodat html[data-motion] klopt vóór de eerste weergave (docs/MOTION.md) -->
     <script src="motion.js?v=2"></script>
 </head>
@@ -1153,8 +1153,9 @@
             <div class="modal-body series-compare-body" id="series-compare-grid"></div>
             <div class="modal-footer">
                 <div class="series-compare-hint" aria-hidden="true">
-                    <span><kbd>←</kbd> <kbd>→</kbd> foto</span>
+                    <span><kbd>←</kbd> <kbd>→</kbd> <span id="series-compare-hint-noun">foto</span></span>
                     <span><kbd>spatie</kbd> houden</span>
+                    <span id="series-compare-hint-video" hidden><kbd>k</kbd> afspelen of pauzeren</span>
                     <span><kbd>d</kbd> passend of 100%</span>
                     <span><kbd>Esc</kbd> sluiten</span>
                 </div>
@@ -1633,7 +1634,7 @@
     <script src="pasha-tools.js?v=2"></script>
     <script src="jobs.js?v=18"></script>
     <script src="duplicates.js?v=30"></script>
-    <script src="series.js?v=5"></script>
+    <script src="series.js?v=6"></script>
     <script src="keurer.js?v=24"></script>
     <script src="timeline.js?v=18"></script>
     <script src="wave-background.js?v=5"></script>
