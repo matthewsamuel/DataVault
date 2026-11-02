@@ -133,6 +133,11 @@ reads the tokens, so CSS and JS always agree.
 | `--motion-scale-press` | 0.97 | `.btn:active` |
 | `--motion-scale-out` | 0.98 | End scale of a leaving modal or menu (1 in Rustig and Uit) |
 | `--motion-lift` | -2 px | Hover lift of a photo tile |
+| `--motion-scale-pop` | 0.4 | Starting scale of a reward that pops in (the check badge of a selected tile) |
+| `--motion-scale-hint` | 0.85 | A small control that appears on a photo (the select circle, the Elo trash button) |
+
+Every distance and scale token is neutral (`0px` or `1`) in Rustig and Uit, so a rule that uses
+them only fades there.
 
 ---
 
@@ -345,6 +350,13 @@ so a page without it keeps working. Its CSS is the `BEWEGING: SCHIL` block in `s
   right is the bin, up moves), and a new key press finishes any running animation
   (`anim.finish()`). The winner of a duel may get a `bouncy` pop *after* the next pair is
   already shown.
+  *The duel as built (`elo.js`, `eloAnimate` over `Motion.animate`):* the new pair is there at
+  once from opacity 0.55 and moves `--motion-distance-sm` on the snappy spring. The passed photo,
+  a skipped pair and the vs badge leave in `--dur-2` on `--ease-exit`. The winner keeps its ring,
+  check and +N for a moment, then flies into the result chip in `--spring-smooth-dur`. The
+  check, the result thumbnail, +N, the goal ring and "Album gemaakt" pop on `bouncy`, and the
+  Ranglijst rises row by row on the stagger. The window itself uses the shared overlay motion.
+  In Rustig only the fades remain.
 - **Do** let map markers and clusters fade and scale on `--spring-snappy` when they appear.
   Never animate the map tiles themselves.
 - **Don't** apply parallax, Ken Burns, tilt, blur or colour shifts to photos in a grid or in
