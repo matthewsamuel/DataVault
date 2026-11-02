@@ -24,8 +24,8 @@ DataVault is built for one person with one big archive on an external disk (the 
 - **Background jobs** with progress, pause, cancel and resume. They survive a restart and wait when the disk is unplugged.
 - **Incremental library index** (SQLite): 100,000 files are read once in about 14 seconds. A re-check of an unchanged archive takes 0.03 s, because only changed folders are listed.
 - **Semantic photo search on-device.** A SigLIP 2 model runs through `onnxruntime` (Core ML on Apple Silicon). Search for "a dog on the beach" in Dutch or English. No PyTorch, no GPU server.
-- **Perceptual-hash series.** dHash and pHash group bursts and near-duplicates, then "best of series" picks a keeper using a sharpness and exposure quality score.
-- **Offline map.** Photos with GPS on a Natural Earth basemap, marker clusters and Dutch city labels. Place names are looked up offline. Online map tiles are an off-by-default opt-in.
+- **Perceptual-hash series.** dHash and pHash group bursts and near-duplicates, then "best of series" picks a keeper using a sharpness and exposure quality score. Videos take part with one frame each (through ffmpeg) and only pair with videos of nearly the same length.
+- **Offline map.** Photos with GPS on a Natural Earth basemap, marker clusters and Dutch country and city labels, placed by priority so they never overlap or sit under a photo group. Every photo with GPS gets a Dutch place name, looked up offline ("4 km ten oosten van Olhão, Portugal"). Online map tiles are an off-by-default opt-in.
 - **Local LLM assistant ("Pasha")** through Ollama. It can search, filter and show photos. Anything that changes files is only a *proposal*: nothing happens until you click *Uitvoeren*. Actions use Ollama's own tool calling, with tags in the text as the fallback ([docs/PASHA_TOOLS.md](docs/PASHA_TOOLS.md)).
 - **Schema migrations** (numbered, appended, tested against a legacy database) and automatic compact backups of the database.
 
@@ -41,24 +41,26 @@ DataVault is built for one person with one big archive on an external disk (the 
 - Tijdlijn: virtual-scrolled timeline of the whole archive with a year slider
 - Albums: combined filters (period, folder, camera, type, location, rating), smart albums that update themselves, "Op deze dag"
 - Slim zoeken: search by what is in the photo, "similar photos", file name search
-- Kaart: photos on a map, clusters, year filter, "show on map" from the viewer
+- Kaart: photos on a map, clusters, year filter, country and city names, "show on map" from the viewer, a place name for every photo
 
 **Clean up (always undoable)**
 - Duplicaten: exact copies by content hash, with a byte-for-byte check before anything moves
-- Reeksen ("Beste uit reeks"): bursts and near-identical photos, keep the best, move the rest
+- Reeksen ("Beste uit reeks"): bursts, near-identical photos and video copies, keep the best, move the rest
+- Ongedaan maken: the toast after a move, a Keurer decision or a series offers to undo exactly that action (also ⌘Z)
 - Herstelcentrum: one place to see every move the app made and put it back
 
 **Curate**
 - Keurer: swipe-style keep/move decisions with keyboard shortcuts, streaks and undo
-- Shows: slideshows and "Welke is mooier?" duels that feed an Elo rating per photo, with a leaderboard
+- Shows: slideshows and "Welke is mooier?" duels that feed a rating per photo, with a leaderboard; the range can be the whole library, a show or an album
 - Exporteren: copy a selection or the best photos of a period to a folder outside the archive (originals or resized JPEG, CSV/JSON overview)
 
 **Your own data (DataGatherer, all opt-in)**
-- Spotify (export or API), Last.fm, Google Takeout (location history, activity), Chrome and Safari history, iMessage and WhatsApp, with an activity timeline and photo geotagging from your location history. Nothing goes online unless you click it.
+- Spotify (export or API), Last.fm, Google Takeout as `.zip` or `.tgz` (location history, activity), Chrome and Safari history (a visit in both Chrome and Takeout shows once), iMessage (including edited and unsent messages) and WhatsApp, with an activity timeline and photo geotagging from your location history. Nothing goes online unless you click it.
 
 **Platform**
 - Light and dark theme, full keyboard control, a shortcut overview, a design system with tokens, a style guide page
-- Database back-ups with rotation and a restore script
+- A top bar with a Meer menu for the screens that do not fit next to the search field
+- Database back-ups with rotation, a back-up folder you pick and test in Instellingen, and a restore script
 
 ## Screenshots
 
@@ -137,7 +139,7 @@ flowchart LR
 - **Backend:** FastAPI, built by a factory so tests get a fresh app per vault. One router per feature. A thread-local SQLite connection per thread (WAL). Long work runs as a job, never on the event loop.
 - **Jobs:** `JobManager` persists jobs in SQLite. They report progress, can be paused, cancelled and resumed, are marked "interrupted" after a crash and enter `waiting_for_vault` when the disk disappears.
 - **Library index:** `media` table with capture date, size, camera, GPS and duration, read from file headers without decoding pixels. Folder mtimes decide what to re-read. Albums, timeline, map, export and the assistant all query it.
-- **Migrations:** `migrations.py` holds numbered migrations, numbered in blocks per feature (the latest is 110). Existing ones are never edited. A backup of the database is made before a migration, and tests run each against a legacy database to prove that ratings, decisions, undo data and jobs survive.
+- **Migrations:** `migrations.py` holds numbered migrations, numbered in blocks per feature (the latest is 196). Existing ones are never edited. A backup of the database is made before a migration, and tests run each against a legacy database to prove that ratings, decisions, undo data and jobs survive.
 
 ## Safety design
 
@@ -224,6 +226,8 @@ Measured on an Apple M3 Pro, internal SSD, on synthetic vaults (not the real arc
 | Semantic search, first query after start | 1.4 s with the model files in the OS cache (10 to 20 s when read cold from the external disk) |
 | Image embedding (SigLIP 2) | 71 img/s with Core ML and thumbnails, about 10 img/s on the CPU |
 | Burst and near-duplicate analysis | 391 photos/s end to end (4,026 photos in 10.3 s); 12 MP JPEG 130/s on 4 threads |
+| Pair search for series, 100,000 photos with strongly skewed hashes (worst case) | 6.3 to 6.6 s (was 12 to 24 s), `scripts/bench_near_pairs.py` |
+| "Welke is mooier?" in a 10,000-photo album | next pair 36 ms (was 86 ms), saving a choice 24 ms (was 76 ms) |
 | Recovery list in a worst case (10,000 Keurer moves, 100 runs of 2,000 files) | 223 ms for 50 entries (was 47.9 s) |
 | Database backup, 109 MB database | 6.7 MB gzipped, made in about 1 s |
 
@@ -257,12 +261,12 @@ Measured on an Apple M3 Pro, internal SSD, on synthetic vaults (not the real arc
 - macOS only (launcher, Finder integration, Core ML). The backend itself is portable Python, but this is untested elsewhere.
 - Built for one user on one machine: no accounts, no sharing, no sync. Two servers on one archive are not supported.
 - The UI is in Dutch. There is no language switch.
-- Video has no near-duplicate detection, and capture dates for avi, mkv and mts fall back to the file date.
+- Video series need ffmpeg and compare one frame per video, so a trimmed copy is not recognised. Capture dates for avi, mkv and mts come from ffprobe; an AVCHD `.mts` without a date in its container keeps the file date.
 - RAW thumbnails go through macOS `sips` and are not tested with real camera RAW files.
 - The semantic model needs about 1.7 GB of RAM while loaded and a 970 MB download; the first query after a reboot reads it from disk (10 to 20 s from an external disk).
 - Semantic search does not understand negation: "a beach without people" finds beaches with people. The search window says so.
 - The small local chat model (`qwen2.5:3b`) picks the right action for 97 percent of 45 test requests (92 percent of those phrased differently from its examples), so Pasha still sometimes asks you to rephrase ([docs/PASHA_TOOLS.md](docs/PASHA_TOOLS.md)).
-- The map labels cities, not countries (countries appear as tooltips).
+- The offline map has no sea names and draws each country once, so past the date line there is empty sea until the map wraps back.
 - The test suite and the measurements ran on generated archives, never on the real one.
 - There is no LICENSE file yet.
 
