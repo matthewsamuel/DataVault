@@ -478,6 +478,8 @@ async function keurerSendDecision(decision, file) {
         });
         keurerPushHistory({ id: data.id, decision, folder: keurerFolder, file });
         keurerApplyStats(data.stats);
+        // Naar de prullenmand: één melding met 'Ongedaan maken' die meeloopt (houden heeft ↓ al)
+        if (decision === 'delete') keurerUndoToast(data.id, 'Naar de prullenmand', `${file.name} staat in de prullenmand.`);
         return 'ok';
     } catch (e) {
         if (e.status === 404) {
@@ -493,15 +495,31 @@ function keurerDecideKeep()   { keurerAnimateAndDecide('keep'); }
 function keurerDecideDelete() { keurerAnimateAndDecide('delete'); }
 function keurerDecideMove()   { keurerAnimateUp(); }
 
-async function keurerUndo() {
-    if (keurerIsAnimating || keurerUndoBusy) return;
+// De melding na een beslissing die een bestand verplaatst: in de snelle Keurer één melding die
+// steeds de nieuwste beslissing toont (group), nooit een stapel. ⌘Z of de knop zet precies die
+// beslissing terug; ↓ zet de laatste terug en haalt dan ook de knop weg (undoToastDone).
+function keurerUndoToast(id, title, message) {
+    showUndoToast({
+        title, message, group: 'keurer', key: `keurer:${id}`,
+        undo: () => keurerUndo(id, true), onUndone: (note) => note,
+    });
+}
+
+// targetId: precies die beslissing (vanuit de melding); anders de laatste. fromToast: de melding
+// toont de uitkomst zelf (de beschrijving komt terug), anders een eigen melding.
+async function keurerUndo(targetId = null, fromToast = false) {
+    if (keurerUndoBusy && fromToast) throw new Error('De Keurer is nog bezig met de vorige stap; gebruik ↓ of het Herstelcentrum.');
+    if (keurerUndoBusy || (keurerIsAnimating && !fromToast)) return null;
     keurerUndoBusy = true;
     // Een beslissing die nog onderweg is, hoort eerst op de stapel
     await keurerDecisionChain;
-    if (keurerHistory.length === 0) {
+    const target = targetId === null ? keurerHistory[keurerHistory.length - 1]
+        : keurerHistory.find(e => e.id === targetId);
+    if (!target) {
         keurerUndoBusy = false;
+        if (fromToast) return { title: 'Al ongedaan', message: 'Deze beslissing is al teruggedraaid.', type: 'info' };
         showToast('Ongedaan maken', 'Er is geen actie om ongedaan te maken.', 'info');
-        return;
+        return null;
     }
 
     // De huidige kaart zakt een stukje terug; de teruggezette foto komt er zo overheen
@@ -516,8 +534,9 @@ async function keurerUndo() {
         ], { duration: '--dur-3', easing: '--ease-exit', fill: 'forwards', key: 'undo' });
     }
 
-    const entry = keurerHistory[keurerHistory.length - 1];
+    const entry = target;
     let returned = false;
+    let note = null;
 
     try {
         const data = await fetchJSON(`${API_BASE}/api/keurer/undo`, {
@@ -526,6 +545,7 @@ async function keurerUndo() {
             body: JSON.stringify({ id: entry.id }),
         });
         keurerDropHistory(entry.id);
+        undoToastDone(`keurer:${entry.id}`);
         keurerApplyStats(data.stats);
 
         // Alleen terug in de wachtrij als de beslissing bij de huidige map hoort, en dan als
@@ -545,18 +565,24 @@ async function keurerUndo() {
 
         const label = entry.decision === 'delete' ? 'Prullenmand' : entry.decision === 'move' ? 'Verplaatsing' : 'Bewaren';
         const where = data.folder === keurerFolder ? '' : ` (in ${keurerShortenPath(data.folder)})`;
-        showToast('Ongedaan gemaakt', `${label} teruggedraaid voor ${file.name}${where}`, 'success');
+        note = { title: 'Ongedaan gemaakt', message: `${label} teruggedraaid voor ${file.name}${where}`, type: 'success' };
+        if (!fromToast) showToast(note.title, note.message, note.type);
 
     } catch (e) {
         // 404/409/410: deze stap kan niet (meer) terug; haal hem van de stapel
-        if ([404, 409, 410].includes(e.status)) keurerDropHistory(entry.id);
+        if ([404, 409, 410].includes(e.status)) {
+            keurerDropHistory(entry.id);
+            undoToastDone(`keurer:${entry.id}`);
+        }
         toastFetchError('Ongedaan maken mislukt', e);
     } finally {
         keurerUndoBusy = false;
     }
 
-    // De foto komt terug uit de richting waar hij heen ging (houden links, prullenmand rechts)
-    keurerShowCard(returned ? { from: entry.decision } : {});
+    // De foto komt terug uit de richting waar hij heen ging (houden links, prullenmand rechts),
+    // alleen als hij in deze Keurer staat (anders blijft de huidige kaart staan)
+    if (returned || !fromToast || currentMainView() === 'keurer') keurerShowCard(returned ? { from: entry.decision } : {});
+    return note;
 }
 
 // ==================== VERPLAATS MODAL ====================
@@ -906,7 +932,7 @@ async function keurerConfirmMove() {
 
         const newName = (movedData.dest_path || '').split('/').pop();
         const renamed = newName && newName !== file.name ? ` als ${newName}` : '';
-        showToast('Verplaatst', `Bestand verplaatst naar ${destFolder.split('/').pop()}${renamed}`, 'success');
+        keurerUndoToast(movedData.id, 'Verplaatst', `${file.name} staat nu in ${destFolder.split('/').pop()}${renamed}.`);
         keurerShowCard({ arrive: true });
 
     } catch (e) {

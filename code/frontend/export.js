@@ -119,27 +119,34 @@
             moved.forEach(m => selection.delete(m.path));
             changed();
         }
-        const undo = result.action_id && moved.length ? { label: 'Ongedaan maken', onClick: () => undoAction(result.action_id) } : null;
+        // Eén melding met 'Ongedaan maken' (undo-toast.js): de hele actie terug, zoals in het Herstelcentrum
+        const undo = result.action_id && moved.length ? {
+            key: `action:${result.action_id}`,
+            undo: { url: '/api/recovery/undo', body: { action_id: result.action_id } },
+            onUndone: undone,
+        } : {};
         const skippedText = skipped.length ? ` ${plural(skipped.length)} overgeslagen: ${skipped[0].reason.toLowerCase()}${skipped.length > 1 ? ' …' : ''}.` : '';
         if (result.error) {
-            showToast(trashed ? 'Verwijderen gestopt' : 'Verplaatsen gestopt', `${result.error}.${skippedText}`, 'error', undo);
+            showUndoToast({ title: trashed ? 'Verwijderen gestopt' : 'Verplaatsen gestopt', message: `${result.error}.${skippedText}`, type: 'error', ...undo });
         } else if (!moved.length) {
             showToast(trashed ? 'Niets verwijderd' : 'Niets verplaatst', skippedText.trim() || 'Er was niets om te verplaatsen.', 'warning');
         } else {
-            showToast(trashed ? 'Naar de prullenmand' : 'Verplaatst',
-                `${plural(moved.length)} ${trashed ? 'in de prullenmand' : `naar ${where}`}.${skippedText} Terugzetten kan ook in het Herstelcentrum.`,
-                skipped.length ? 'warning' : 'success', undo);
+            showUndoToast({
+                title: trashed ? 'Naar de prullenmand' : 'Verplaatst',
+                message: `${plural(moved.length)} ${trashed ? 'in de prullenmand' : `naar ${where}`}.${skippedText}`,
+                type: skipped.length ? 'warning' : 'success', ...undo,
+            });
         }
     }
 
-    async function undoAction(actionId) {
-        try {
-            const r = await post('/api/recovery/undo', { action_id: actionId });
-            const back = r.restored || 0;
-            showToast('Teruggezet', `${plural(back)} weer op de oude plek${r.skipped && r.skipped.length ? `, ${r.skipped.length} niet (zie het Herstelcentrum)` : ''}.`,
-                r.skipped && r.skipped.length ? 'warning' : 'success');
-            notify(restoredListeners);
-        } catch (e) { toastFetchError('Terugzetten mislukt', e); }
+    // Na 'Ongedaan maken': de views zetten de bestanden terug; de melding zegt hoeveel
+    function undone(r) {
+        const back = r.restored || 0;
+        notify(restoredListeners);
+        if (typeof jobsLibraryRefresh === 'function') jobsLibraryRefresh();
+        const notBack = r.skipped && r.skipped.length;
+        return { title: 'Teruggezet', type: notBack ? 'warning' : 'success',
+            message: `${plural(back)} weer op de oude plek${notBack ? `, ${r.skipped.length} niet (zie het Herstelcentrum)` : ''}.` };
     }
 
     // Het verplaatsvenster van de viewer, met de hele selectie

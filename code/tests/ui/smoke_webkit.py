@@ -1724,6 +1724,37 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.set_viewport_size({"width": 1400, "height": 900})
             page.wait_for_timeout(400)
 
+            # 'Ongedaan maken' in a toast (undo-toast.js): after a trash action the toast offers the undo;
+            # the time stands still while the focus is on it; ⌘Z puts the file back and the toast becomes
+            # the outcome; it is never offered twice, also not after the Herstelcentrum put it back
+            victim = sorted(p for p in (vault / "RAW" / BIG_FOLDER).iterdir() if p.suffix.lower() == ".jpg")[0]
+            trash_js = f"DVExport.trashFiles([{{path: {json.dumps(str(victim))}, name: {json.dumps(victim.name)}}}])"
+            undo_state = """[UndoToast.live, [...document.querySelectorAll('#toast-container .toast')].map(t =>
+                [t.querySelector('strong').textContent, !!t.querySelector('.toast-action')])]"""
+            page.evaluate("switchMainView('home'); document.querySelectorAll('#toast-container .toast').forEach(t => t.remove())")
+            step("undo toast: trash a file", lambda: page.evaluate(trash_js), 0.8)
+            live, toasts = page.evaluate(undo_state)
+            expect(not victim.exists() and len(live) == 1 and toasts == [["Naar de prullenmand", True]],
+                   f"undo toast: after a trash action expected one toast with 'Ongedaan maken' ({live}, {toasts})")
+            step("undo toast: the focus holds it", lambda: page.focus("#toast-container .toast-action"), 10.6)
+            expect(page.evaluate(undo_state)[0] == live, "undo toast: the toast went away while its button had the focus")
+            step("undo toast: ⌘Z puts it back", lambda: (page.evaluate("document.activeElement.blur()"), page.keyboard.press("Meta+z")), 1.2)
+            live, toasts = page.evaluate(undo_state)
+            expect(victim.exists() and live == [] and toasts == [["Teruggezet", False]],
+                   f"undo toast: ⌘Z did not put the file back and turn the toast into the outcome ({live}, {toasts})")
+            step("undo toast: ⌘Z again does nothing", lambda: page.keyboard.press("Meta+z"), 0.6)
+            expect(victim.exists() and page.evaluate(undo_state)[1] == toasts, "undo toast: a second ⌘Z did something")
+            step("undo toast: trash it again", lambda: page.evaluate(trash_js), 0.8)
+            step("undo toast: put back in the Herstelcentrum", lambda: (
+                nav_click("recovery"), page.wait_for_selector(".recovery-entry .recovery-undo"),
+                page.click(".recovery-entry .recovery-undo >> nth=0"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.5)
+            live, toasts = page.evaluate(undo_state)
+            expect(victim.exists() and live == [] and ["Naar de prullenmand", True] not in toasts,
+                   f"undo toast: after the Herstelcentrum put it back, a toast still offers the undo ({live}, {toasts})")
+            page.evaluate("switchMainView('home')")
+
             # Design pass (3.10): at 1024 px nothing on any main view sticks out of the window
             # (Spotify's cards once did), every view names itself in the tab title, and the
             # favicon is served

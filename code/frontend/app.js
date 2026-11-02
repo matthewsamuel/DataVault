@@ -2173,9 +2173,27 @@ async function confirmMoveFile() {
         return;
     }
 
-    showToast('Verplaatst', `${moved.message || 'Bestand verplaatst'}. Terugzetten kan in het Herstelcentrum.`, 'success');
+    const from = file.path.slice(0, file.path.lastIndexOf('/'));
+    showUndoToast({
+        title: 'Verplaatst', message: `${moved.message || 'Bestand verplaatst'}.`,
+        key: moved.action_id ? `action:${moved.action_id}` : null,
+        undo: { url: '/api/recovery/undo', body: { action_id: moved.action_id } },
+        onUndone: (data) => undoneInFolder(data, from, file.name),
+    });
     btn.replaceChildren(...originalContent);
     finishMoveOut(file);
+}
+
+// Na 'Ongedaan maken' (undo-toast.js) van één bestand uit een map: staat die map open in
+// Bestanden, dan komt het er weer in; de melding zegt waar het weer staat
+function undoneInFolder(data, folder, name) {
+    if (typeof jobsLibraryRefresh === 'function') jobsLibraryRefresh();
+    if (typeof currentFolder !== 'undefined' && currentFolder === folder && typeof loadMedia === 'function') loadMedia(currentFolder);
+    if (data && data.restored === 0) {
+        const reason = (data.skipped && data.skipped[0] && data.skipped[0].reason) || 'Het bestand kon niet terug.';
+        return { title: 'Niet teruggezet', message: reason, type: 'warning' };
+    }
+    return { title: 'Teruggezet', message: `${name} staat weer in ${folder.split('/').pop() || 'het archief'}.`, type: 'success' };
 }
 
 // Het bestand is weg uit deze map (verplaatst of naar de prullenmand): uit de lijst, de show
@@ -2245,8 +2263,9 @@ async function trashMoveTwin() {
     btn.disabled = true;
     confirmBtn.disabled = true;
 
+    let trashed;
     try {
-        await fetchJSON(`${API_BASE}/api/move-twin-trash`, {
+        trashed = await fetchJSON(`${API_BASE}/api/move-twin-trash`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ source_path: file.path, twin_path: twin.path }),
@@ -2263,7 +2282,13 @@ async function trashMoveTwin() {
     }
 
     const folder = twin.path.split('/').slice(-2, -1)[0] || 'het archief';
-    showToast('Naar de prullenmand', `${twin.name} blijft staan in ${folder}. Terugzetten kan in het Herstelcentrum.`, 'success');
+    const from = file.path.slice(0, file.path.lastIndexOf('/'));
+    showUndoToast({
+        title: 'Naar de prullenmand', message: `${file.name} is een kopie; ${twin.name} blijft staan in ${folder}.`,
+        key: trashed.action_id ? `action:${trashed.action_id}` : null,
+        undo: { url: '/api/recovery/undo', body: { action_id: trashed.action_id } },
+        onUndone: (data) => undoneInFolder(data, from, file.name),
+    });
     btn.replaceChildren(...originalContent);
     btn.disabled = false;
     finishMoveOut(file);
@@ -2436,28 +2461,33 @@ const TOAST_ICONS = {
     info: 'fa-circle-info',
 };
 
-// action (optioneel): {label, onClick}, een knop in de melding (bijv. 'Ongedaan maken'); de melding
-// sluit na de klik
-function showToast(title, message, type = 'info', action = null) {
+// action (optioneel): {label, onClick, icon, hint, keepOpen}, een knop in de melding (bijv.
+// 'Ongedaan maken'; zie undo-toast.js). Zonder keepOpen sluit de melding na de klik; met keepOpen
+// krijgt onClick(button, toast) en beslist zelf.
+// options (optioneel): {duration} in ms, {unique: true} stapelt nooit samen met een gelijke
+// melding, {stay: true} blijft staan bij een wissel van onderdeel. Geeft de melding terug.
+function showToast(title, message, type = 'info', action = null, options = {}) {
     const container = document.getElementById('toast-container');
-    const duration = TOAST_MS[type] || TOAST_MS.info;
+    const duration = options.duration || TOAST_MS[type] || TOAST_MS.info;
     // Dezelfde melding nog in beeld (bijv. tien mislukte miniaturen): niet opstapelen, alleen langer tonen
-    const same = [...container.children].find(t => !t._leaving && t.dataset.title === String(title) && t.dataset.message === String(message));
+    const same = options.unique || action ? null : [...container.children].find(t => !t._leaving && !t._unique
+        && t.dataset.title === String(title) && t.dataset.message === String(message));
     if (same) {
         same.style.opacity = '1';
-        clearTimeout(same._hideTimer);
-        same._hideTimer = setTimeout(() => hideToast(same), duration);
+        toastSchedule(same);
         restartToastTimer(same);
         // Dezelfde melding nog eens: een kort knikje in plaats van een tweede melding
         Motion.animate(same, [{ transform: 'none' }, { transform: `translate3d(${-Motion.px('--motion-distance-sm', 6)}px, 0, 0)` }, { transform: 'none' }],
             { spring: 'snappy', key: 'nudge', calm: false });
-        return;
+        return same;
     }
     const toast = document.createElement('div');
     toast.className = `toast ${type} toast-${type}`;
     toast.dataset.title = String(title);
     toast.dataset.message = String(message);
-    if (type === 'info' || type === 'success') toast.dataset.view = activeMainView;
+    toast._duration = duration;
+    toast._unique = !!(options.unique || action);
+    if ((type === 'info' || type === 'success') && !options.stay) toast.dataset.view = activeMainView;
     // Een fout wordt meteen voorgelezen; de rest zegt de container (aria-live polite)
     if (type === 'error') toast.setAttribute('role', 'alert');
     // Titel en melding zijn tekst: ze bevatten vaak bestandsnamen of een foutmelding van de server
@@ -2471,24 +2501,45 @@ function showToast(title, message, type = 'info', action = null) {
         createEl('div', { class: 'toast-timer', 'aria-hidden': 'true' }));
     toast.style.setProperty('--toast-ms', `${duration}ms`);
     if (action) {
+        const button = createEl('button', {
+            type: 'button', class: 'btn btn-secondary btn-sm toast-action',
+            title: action.hint ? `${action.label} (${action.hint})` : null,
+            onClick: () => {
+                if (action.keepOpen) { action.onClick(button, toast); return; }
+                hideToast(toast);
+                action.onClick();
+            },
+        }, action.icon ? createEl('i', { class: `fas ${action.icon}`, 'aria-hidden': 'true' }) : null,
+        createEl('span', { class: 'toast-action-label', text: action.label }));
         toast.append(createEl('div', { class: 'toast-actions' },
-            createEl('button', {
-                type: 'button', class: 'btn btn-secondary btn-sm toast-action', text: action.label,
-                onClick: () => { hideToast(toast); action.onClick(); },
-            })));
+            action.hint ? createEl('kbd', { class: 'toast-hint', 'aria-hidden': 'true', text: action.hint }) : null,
+            button));
     }
 
     container.appendChild(toast);
 
-    // Met de muis erop blijft hij staan, zodat een lange melding uit te lezen is
-    toast._hideTimer = setTimeout(() => hideToast(toast), duration);
-    toast.addEventListener('mouseenter', () => { if (!toast._leaving) { clearTimeout(toast._hideTimer); toast.style.opacity = '1'; } });
-    toast.addEventListener('mouseleave', () => {
-        if (toast._leaving) return;
-        clearTimeout(toast._hideTimer);
-        toast._hideTimer = setTimeout(() => hideToast(toast), duration);
+    // Met de muis erop of de focus erin blijft hij staan, zodat een lange melding uit te lezen is
+    // (en 'Ongedaan maken' met Tab te bereiken); daarna begint de tijd opnieuw
+    toastSchedule(toast);
+    const hold = () => { if (!toast._leaving) { clearTimeout(toast._hideTimer); toast.style.opacity = '1'; } };
+    const release = () => {
+        if (toast._leaving || toast.matches(':hover') || toast.contains(document.activeElement)) return;
+        toastSchedule(toast);
         restartToastTimer(toast);
-    });
+    };
+    toast.addEventListener('mouseenter', hold);
+    toast.addEventListener('focusin', hold);
+    toast.addEventListener('mouseleave', release);
+    toast.addEventListener('focusout', () => setTimeout(release, 0));
+    return toast;
+}
+
+// De melding gaat na zijn eigen tijd weg (opnieuw vanaf nu)
+function toastSchedule(toast, duration = toast._duration || TOAST_MS.info) {
+    clearTimeout(toast._hideTimer);
+    toast._duration = duration;
+    toast.style.setProperty('--toast-ms', `${duration}ms`);
+    toast._hideTimer = setTimeout(() => hideToast(toast), duration);
 }
 
 // De leeglopende lijn opnieuw vol: de melding blijft weer de hele tijd staan

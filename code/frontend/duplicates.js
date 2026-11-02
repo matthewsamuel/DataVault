@@ -825,17 +825,41 @@ async function runCleanup() {
     closeCleanupDialog();
 
     const skipped = cleanup.files - moved.size - failed.size;
+    // 'Ongedaan maken' zet deze hele opruimactie terug, net als 'Terugzetten' onder Herstellen
+    const undo = runId && moved.size ? {
+        key: `duplicates:${runId}`,
+        undo: { url: '/api/duplicates/undo', body: { run_id: runId } },
+        onUndone: duplicatesRunUndone,
+    } : {};
     if (requestError) {
-        showToast('Opruimen afgebroken',
-            `${moved.size} zeker verplaatst; daarna: ${requestError}. Onder Herstellen staat wat al verplaatst is; scan daarna opnieuw.`, 'error');
+        showUndoToast({ title: 'Opruimen afgebroken', type: 'error', ...undo,
+            message: `${moved.size} zeker verplaatst; daarna: ${requestError}. Onder Herstellen staat wat al verplaatst is; scan daarna opnieuw.` });
     } else if (failed.size || skipped) {
-        showToast('Deels opgeruimd',
-            `${moved.size} verplaatst, ${failed.size} niet verplaatst` + (skipped > 0 ? `, ${skipped} niet geprobeerd (gestopt)` : '') +
-            '. De redenen staan bij de bestanden.', 'warning');
+        showUndoToast({ title: 'Deels opgeruimd', type: 'warning', ...undo,
+            message: `${moved.size} verplaatst, ${failed.size} niet verplaatst` + (skipped > 0 ? `, ${skipped} niet geprobeerd (gestopt)` : '')
+                + '. De redenen staan bij de bestanden.' });
     } else {
-        showToast('Opgeruimd', `${moved.size} bestand${moved.size === 1 ? '' : 'en'} naar RAW_DUPLICATES. Terugzetten kan onder Herstellen.`, 'success');
+        showUndoToast({ title: 'Opgeruimd', type: 'success', ...undo,
+            message: `${moved.size} bestand${moved.size === 1 ? '' : 'en'} naar RAW_DUPLICATES.` });
     }
     loadDuplicateRuns();
+}
+
+// Wat er gezegd wordt na het terugzetten van een opruimactie (melding of Herstellen)
+function duplicatesRunMessage(data) {
+    const beside = (data.files || []).filter(f => f.restored_path !== f.src_path).length;
+    let message = `${data.restored} bestand${data.restored === 1 ? '' : 'en'} teruggezet.`;
+    if (beside) message += ` ${beside} kwam${beside === 1 ? '' : 'en'} naast een bestaand bestand (_RESTORED_).`;
+    if (data.errors && data.errors.length) message += ` ${data.errors.length} fout(en): ${data.errors[0]}`;
+    if (dupState.folder) message += ' Scan opnieuw om ze weer als duplicaat te zien.';
+    return message;
+}
+
+// Na 'Ongedaan maken' in de melding (undo-toast.js)
+function duplicatesRunUndone(data) {
+    loadDuplicateRuns();
+    if (typeof jobsLibraryRefresh === 'function') jobsLibraryRefresh();
+    return { title: 'Teruggezet', message: duplicatesRunMessage(data), type: data.errors && data.errors.length ? 'warning' : 'success' };
 }
 
 function applyCleanupResult(moved, failed) {
@@ -912,12 +936,8 @@ async function undoDuplicateRun(run, button) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ run_id: run.run_id }),
         });
-        const beside = (data.files || []).filter(f => f.restored_path !== f.src_path).length;
-        let message = `${data.restored} bestand${data.restored === 1 ? '' : 'en'} teruggezet.`;
-        if (beside) message += ` ${beside} kwam${beside === 1 ? '' : 'en'} naast een bestaand bestand (_RESTORED_).`;
-        if (data.errors && data.errors.length) message += ` ${data.errors.length} fout(en): ${data.errors[0]}`;
-        if (dupState.folder) message += ' Scan opnieuw om ze weer als duplicaat te zien.';
-        showToast('Teruggezet', message, data.errors && data.errors.length ? 'warning' : 'success');
+        undoToastDone(`duplicates:${run.run_id}`);
+        showToast('Teruggezet', duplicatesRunMessage(data), data.errors && data.errors.length ? 'warning' : 'success');
     } catch (error) {
         toastFetchError('Terugzetten mislukt', error);
     } finally {

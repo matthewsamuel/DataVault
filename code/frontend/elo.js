@@ -954,8 +954,12 @@ function eloTrash(side) {
     elo.chain = elo.chain.then(async () => {
         try {
             const result = await eloPost('/api/shows/compare/trash', { path: photo.path });
-            showToast('Naar de prullenmand', `${photo.name} staat in de prullenmand. Terugzetten kan ook later, in het Herstelcentrum.`,
-                'success', { label: 'Terugzetten', onClick: () => eloRestore(result.action_id, photo.name) });
+            showUndoToast({
+                title: 'Naar de prullenmand', message: `${photo.name} staat in de prullenmand.`, group: 'elo',
+                key: result.action_id ? `action:${result.action_id}` : null,
+                undo: { url: '/api/recovery/undo', body: { action_id: result.action_id } },
+                onUndone: (data) => eloRestored(data, photo.name),
+            });
         } catch (err) {
             // Niet verplaatst: het paar komt meteen terug
             toastFetchError('Niet naar de prullenmand', err);
@@ -968,18 +972,11 @@ function eloTrash(side) {
     eloAdvance('trash');
 }
 
-async function eloRestore(actionId, name) {
-    try {
-        const data = await eloPost('/api/recovery/undo', { action_id: actionId });
-        if (data.restored) {
-            showToast('Teruggezet', `${name} staat weer op zijn plek, met zijn score.`, 'success');
-        } else {
-            const reason = (data.skipped && data.skipped[0] && data.skipped[0].reason) || 'Hij kon niet terug.';
-            showToast('Niet teruggezet', reason, 'warning');
-        }
-    } catch (err) {
-        toastFetchError('Terugzetten mislukt', err);
-    }
+// Na 'Ongedaan maken' in de melding (undo-toast.js): wat de melding daarna zegt
+function eloRestored(data, name) {
+    if (data.restored) return { title: 'Teruggezet', message: `${name} staat weer op zijn plek, met zijn score.`, type: 'success' };
+    const reason = (data.skipped && data.skipped[0] && data.skipped[0].reason) || 'Hij kon niet terug.';
+    return { title: 'Niet teruggezet', message: reason, type: 'warning' };
 }
 
 async function eloUndo() {

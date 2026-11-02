@@ -222,6 +222,8 @@ async function recoveryUndo(entry, button) {
         let message = `${restored} bestand${restored === 1 ? '' : 'en'} teruggezet.`;
         if (skipped) message += ` ${skipped} kon${skipped === 1 ? '' : 'den'} niet terug; de reden staat in het Herstelcentrum.`;
         showToast('Teruggezet', message, skipped ? 'warning' : 'success');
+        // Een melding die dezelfde actie nog aanbood, verliest zijn knop (nooit twee keer terug)
+        if (typeof undoToastDone === 'function') undoToastDone(entry.key);
         recoveryAfterUndo(entry);
     } catch (err) {
         toastFetchError('Terugzetten mislukt', err);

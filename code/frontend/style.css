@@ -1828,10 +1828,41 @@ html[data-motion="rustig"] .toast .toast-icon {
     line-height: var(--lh-snug);
 }
 
-/* Een knop in de melding (showToast(..., action)), bijv. 'Ongedaan maken' */
+/* Een knop in de melding (showToast(..., action)), bijv. 'Ongedaan maken' (undo-toast.js), met
+   rechts de sneltoets als rustige hint ervoor */
 .toast-actions {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+
+.toast-action {
+    gap: var(--space-xs);
+}
+
+.toast-action i {
+    font-size: var(--icon-xs);
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+/* Het pijltje terug draait een kwartslag mee als je erop wijst: dit gaat terug (alleen in Volledig) */
+html[data-motion="volledig"] .toast-action:hover i,
+html[data-motion="volledig"] .toast-action:focus-visible i {
+    transform: rotate(-90deg);
+}
+
+.toast-hint {
+    color: var(--text-tertiary);
+    background: transparent;
+    border-color: var(--border-hairline);
+}
+
+/* Na 'Ongedaan maken' is de melding zelf de uitkomst; met de focus erop (de knop is weg) een ring */
+.toast:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
 }
 
 /* ---------- Lege, mislukte en ladende stukken (ui.js) ---------- */
@@ -2417,6 +2448,11 @@ button.nav-brand {
 .nav-more-caret {
     font-size: var(--icon-xs);
     color: var(--text-tertiary);
+    transition: color var(--dur-2) var(--ease-out);
+}
+
+/* Het pijltje draait om als het menu opengaat (in Rustig en Uit staat het meteen goed) */
+html[data-motion="volledig"] .nav-more-caret {
     transition: transform var(--spring-snappy-dur) var(--spring-snappy), color var(--dur-2) var(--ease-out);
 }
 

@@ -71,6 +71,19 @@ def test_a_move_in_the_viewer_is_listed_and_undone(client, vault):
     assert _undo(client, entry).status_code == 404
 
 
+def test_a_viewer_move_answers_its_action_id_for_the_undo_toast(client, vault):
+    """'Ongedaan maken' in the toast (undo-toast.js) undoes by the id the move answered, once."""
+    src = vault / INBOX / "IMG_0002.JPG"
+    moved = _move(client, src, vault / "library")
+    [entry] = _list(client)["entries"]
+    assert entry["key"] == f"action:{moved['action_id']}"
+    r = client.post("/api/recovery/undo", json={"action_id": moved["action_id"]})
+    assert r.status_code == 200 and r.json()["restored"] == 1 and src.exists()
+    # A second undo of the same id (a stale toast, the Herstelcentrum) changes nothing
+    again = client.post("/api/recovery/undo", json={"action_id": moved["action_id"]})
+    assert again.status_code == 404 and src.exists()
+
+
 def test_undo_never_overwrites_and_never_takes_back_another_file(client, vault):
     a = vault / INBOX / "IMG_0002.JPG"
     b = vault / INBOX / "IMG_0003.JPG"

@@ -455,7 +455,7 @@ function seriesRenderLastKept() {
     slot.replaceChildren(
         createEl('i', { class: 'fas fa-check', 'aria-hidden': 'true' }),
         createEl('span', { text: `Behouden: ${last.title}` }),
-        createEl('button', { type: 'button', class: 'link-button', id: 'btn-series-undo-keep', text: 'Ongedaan maken', onClick: seriesUndoKeepAll }));
+        createEl('button', { type: 'button', class: 'link-button', id: 'btn-series-undo-keep', text: 'Ongedaan maken', onClick: () => seriesUndoKeepAll() }));
 }
 
 // Kleine reeksen krijgen grotere foto's: twee foto's van 156 px vergelijk je niet
@@ -812,8 +812,11 @@ async function seriesKeepAll(series) {
         seriesDone(series, true);
         if (seriesState.status) seriesState.status.reviewed += 1;
         seriesRenderStatus();
-        showToast('Alles behouden', `${series.count} foto's blijven staan. Deze reeks komt niet meer terug, tenzij hij verandert; `
-            + 'met \u2018Ongedaan maken\u2019 boven de lijst staat hij er meteen weer.', 'success');
+        showUndoToast({
+            title: 'Alles behouden', message: `${series.count} foto's blijven staan. Deze reeks komt niet meer terug, tenzij hij verandert.`,
+            key: `series-keep:${data.key}`, undo: () => seriesUndoKeepAll(true, { key: data.key, title: seriesTitle(series) }),
+            onUndone: (note) => note,
+        });
     } catch (err) {
         toastFetchError('Behouden mislukt', err);
     } finally {
@@ -883,8 +886,13 @@ async function seriesRunConfirm() {
                 result.failed.map(f => `${f.path ? f.path.split('/').pop() : 'foto'}: ${f.reason}`).join('\n'), 'warning');
             seriesLoad(true);
         } else {
-            showToast(`${moved} ${moved === 1 ? 'foto' : 'foto\'s'} verplaatst`,
-                'Ze staan in RAW_DUPLICATES/near-duplicates. Terugzetten kan in het Herstelcentrum.', 'success');
+            showUndoToast({
+                title: `${moved} ${moved === 1 ? 'foto' : 'foto\'s'} verplaatst`,
+                message: 'Ze staan in RAW_DUPLICATES/near-duplicates.',
+                key: result.action_id ? `action:${result.action_id}` : null,
+                undo: { url: '/api/recovery/undo', body: { action_id: result.action_id } },
+                onUndone: (data) => seriesMovedBack(data),
+            });
             seriesState.moved += 1;
             seriesDone(pending.series, true);
         }
@@ -1088,28 +1096,48 @@ function seriesCompareConfirm() {
     seriesConfirm(series);
 }
 
-async function seriesUndoKeepAll() {
-    const last = seriesState.lastKept;
-    if (!last) return;
+// Na 'Ongedaan maken' van een verplaatste reeks (undo-toast.js): de reeks komt terug in de lijst
+function seriesMovedBack(data) {
+    seriesState.moved = Math.max(0, seriesState.moved - 1);
+    seriesState.handled = Math.max(0, seriesState.handled - 1);
+    seriesLoadStatus();
+    if (currentMainView() === 'series') seriesLoad(true);
+    const back = data.restored || 0;
+    const notBack = (data.skipped || []).length;
+    return { title: 'Teruggezet', type: notBack ? 'warning' : 'success',
+        message: `${back} ${back === 1 ? 'foto staat' : 'foto\'s staan'} weer op de oude plek${notBack ? `, ${notBack} niet (zie het Herstelcentrum)` : ''}.` };
+}
+
+// 'Alles behouden' terugdraaien: met de link boven de lijst of vanuit de melding (fromToast: die
+// toont de uitkomst en meldt een fout); elk van beide haalt de ander weg
+async function seriesUndoKeepAll(fromToast = false, kept = null) {
+    const last = kept || seriesState.lastKept;
+    if (!last) return null;
+    if (seriesState.lastKept && seriesState.lastKept.key === last.key) seriesState.lastKept = null;
+    undoToastDone(`series-keep:${last.key}`);
+    seriesRenderLastKept();
+    let note = null;
     try {
         await fetchJSON(`${API_BASE}/api/series/reviews/undo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: last.key }),
         });
-        seriesState.lastKept = null;
         seriesState.handled = Math.max(0, seriesState.handled - 1);
-        showToast('Weer in de lijst', `${last.title} staat weer tussen de reeksen.`, 'success');
+        note = { title: 'Weer in de lijst', message: `${last.title} staat weer tussen de reeksen.`, type: 'success' };
+        if (!fromToast) showToast(note.title, note.message, note.type);
         seriesLoadStatus();
         await seriesLoad(true);
         const back = seriesState.items.find(s => s.key === last.key);
-        if (back) {
+        if (back && currentMainView() === 'series') {
             seriesMoveCursor(back.key, back.best, false);
             seriesFocusCursor();
         }
     } catch (err) {
+        if (fromToast) throw err;
         toastFetchError('Ongedaan maken mislukt', err);
     }
+    return note;
 }
 
 async function seriesResetReviews() {
