@@ -3,8 +3,10 @@ Measure how well 'Slim zoeken' finds the right photos, with the installed model 
 app's own encoder (backend/semantic.py).
 
 The labelled set is in scripts/semantic_eval/: labels.txt (photo -> tags, checked by
-hand), queries.txt (required tags | Dutch query | English query) and sources.json (where
-each photo comes from, with its licence). The photos themselves are not in git: 149
+hand), queries.txt (required tags | Dutch query | English query), free_queries.txt (20
+Dutch and 10 English free-form queries written after the cut was set: tags | language |
+query), absent_queries.txt (things in none of the photos: Dutch | English) and
+sources.json (where each photo comes from, with its licence). The photos themselves are not in git: 149
 openly licensed photos from Wikimedia Commons (fetch_commons.py downloads them once)
 plus 30 macOS wallpaper thumbnails, in .model-build/eval/images/.
 
@@ -17,8 +19,10 @@ plus 30 macOS wallpaper thumbnails, in .model-build/eval/images/.
 A query counts as found at rank k when a photo with all its tags is at place k. Printed
 per language: recall@1, recall@5 (share of queries with a right photo at 1 / in the top
 5), MRR, precision@5 and mAP (ranked with the app's query vector: hub correction included),
-the recall and precision of the 'strong' set (semantic.relevance_cut), plus the speed of
-the image and text encoders.
+the recall and precision of the 'strong' set (semantic.relevance_cut) for the labelled and
+the free-form queries, how many photos absent things let through, the recall when a concept
+is a fifth or a half of the searched folder (the background stays the whole set), plus the
+speed of the image and text encoders.
 --thumbnails first makes the 300 px thumbnails the embedding job uses (into a temp dir).
 """
 import argparse
@@ -51,6 +55,49 @@ def load_set():
             tags, nl, en = [p.strip() for p in line.split("|")]
             queries.append((set(tags.split()), nl, en))
     return labels, queries
+
+
+def load_extra():
+    """([(tags, language, query)], [(dutch, english)]): the free-form and the absent queries."""
+    free, absent = [], []
+    for line in (HERE / "free_queries.txt").read_text().splitlines():
+        if line.strip() and not line.startswith("#"):
+            tags, lang, text = [p.strip() for p in line.split("|")]
+            free.append((set(tags.split()), lang, text))
+    for line in (HERE / "absent_queries.txt").read_text().splitlines():
+        if line.strip() and not line.startswith("#"):
+            absent.append(tuple(p.strip() for p in line.split("|")))
+    return free, absent
+
+
+def absent_let_through(emb, vectors):
+    """(queries that let a photo through, photos let through) for queries of absent things."""
+    counts = []
+    for vector in vectors:
+        scores = emb @ vector
+        counts.append(int((scores >= semantic.relevance_cut(scores, scores)).sum()))
+    return sum(c > 0 for c in counts), sum(counts)
+
+
+def folder_recall(emb, names, labels, queries, vectors, share, seed=1):
+    """
+    Recall of the strong set when the right photos are `share` of the searched selection
+    (a folder or filter) and the background is the whole set, as in semantic.rank; and the
+    number of those searches that come up empty. Queries with fewer than 4 right photos skip.
+    """
+    rng = np.random.default_rng(seed)
+    total = found = empty = 0
+    for q, vector in zip(queries, vectors):
+        right = np.array([q[0] <= labels[n] for n in names])
+        if right.sum() < 4:
+            continue
+        pos, neg = np.flatnonzero(right), np.flatnonzero(~right)
+        extra = rng.choice(neg, size=min(len(neg), int(round(len(pos) * (1 - share) / share))), replace=False)
+        every = emb @ vector
+        selection = every[np.concatenate([pos, extra])]
+        hits = int((selection[:len(pos)] >= semantic.relevance_cut(selection, every)).sum())
+        total += len(pos); found += hits; empty += hits == 0
+    return found / max(1, total), empty
 
 
 def metrics(emb, names, labels, queries, encoder, lang_index):
@@ -148,11 +195,30 @@ def main() -> int:
         for miss in misses:
             print(f"    {miss}")
         strong_report(emb, names, labels, queries, encoder, index)
+    free, absent = load_extra()
+    reference = encoder.reference_vector()
+    for lang in ("nl", "en"):
+        mine = [(need, None, text) for need, language, text in free if language == lang]
+        vectors = [semantic.corrected(encoder.encode_text(q[2]), reference) for q in mine]
+        recall, precision, empty = strong_set(emb, names, labels, mine, vectors)
+        print(f"{lang} free-form ({len(mine)}): strong set recall {recall:.3f} precision {precision:.3f}; "
+              f"empty although right photos exist: {empty}")
+        gone = [semantic.corrected(encoder.encode_text(pair[0 if lang == "nl" else 1]), reference) for pair in absent]
+        hit, photos = absent_let_through(emb, gone)
+        print(f"{lang} absent ({len(absent)}): {hit} let something through ({photos} photos)")
+        index = 1 if lang == "nl" else 2
+        labelled = [semantic.corrected(encoder.encode_text(q[index]), reference) for q in queries]
+        for share in (0.2, 0.5):
+            recall, empty = folder_recall(emb, names, labels, queries, labelled, share)
+            print(f"{lang} concept is {share:.0%} of the folder: recall {recall:.3f}, empty {empty}")
     if args.save_fixture:
         np.savez_compressed(
             FIXTURE, model=spec.id, names=np.array(names), photos=emb.astype(np.float16),
             nl=np.stack([encoder.encode_text(q[1]) for q in queries]).astype(np.float16),
             en=np.stack([encoder.encode_text(q[2]) for q in queries]).astype(np.float16),
+            free=np.stack([encoder.encode_text(q[2]) for q in free]).astype(np.float16),
+            absent_nl=np.stack([encoder.encode_text(a[0]) for a in absent]).astype(np.float16),
+            absent_en=np.stack([encoder.encode_text(a[1]) for a in absent]).astype(np.float16),
             reference_texts=np.array(semantic.REFERENCE_TEXTS),
             reference=encoder.reference_vector().astype(np.float32))
         print(f"vectors stored in {FIXTURE}")

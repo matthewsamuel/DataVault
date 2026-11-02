@@ -1068,6 +1068,36 @@ def _m161_elo_state_indexes(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_ratings_state ON elo_ratings(path, mu, rd, vol, public, games)")
 
 
+def _m180_media_probe_videos(conn: sqlite3.Connection):
+    """
+    Videos the index now reads with ffprobe (avi, mkv, mts, m2ts, webm, wmv, flv, mpg,
+    mpeg: backend/media_meta.FFPROBE_EXTENSIONS) were indexed with their file date only
+    (meta_status 'none'). They get meta_status 'probe', so the next index pass that can
+    run ffprobe reads their date, duration and dimensions. Only that column of those rows
+    changes; nothing else is touched.
+    """
+    has_media = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media'").fetchone()
+    if not has_media:
+        return
+    exts = ('.avi', '.mkv', '.mts', '.m2ts', '.webm', '.wmv', '.flv', '.mpg', '.mpeg')
+    conn.execute(f"UPDATE media SET meta_status = 'probe' WHERE meta_status = 'none' AND kind = 'video' "
+                 f"AND ext IN ({', '.join('?' * len(exts))})", exts)
+
+
+def _m181_media_photo_stem_index(conn: sqlite3.Connection):
+    """
+    'Beste uit reeks' leaves out the video of a Live Photo: a video with a photo of the same
+    name (without extension) in its folder (backend/near_dups._LIVE_VIDEO). This partial
+    expression index makes that check one lookup per video (100,000 files: 0.68 s -> 0.013 s
+    for the status). Only an index is added; no row changes.
+    """
+    has_media = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media'").fetchone()
+    if not has_media:
+        return
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_photo_stem ON media("
+                 "folder, lower(substr(name, 1, length(name) - length(ext)))) WHERE kind = 'photo' AND missing = 0")
+
+
 # The kinds google_formats.activity_item makes (My Activity and YouTube's own history)
 _ACTIVITY_ITEM_KINDS = ("youtube_watch", "youtube_search", "search", "maps", "web_visit", "activity")
 
@@ -1223,6 +1253,9 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (170, "spotify_covers", _m170_spotify_covers),
     # 171: inode and size of files a duplicates run moved (stream p4-safety)
     (171, "delete_ops_fingerprint", _m171_delete_ops_fingerprint),
+    # 180-189: search and series (video frames, ffprobe for other videos)
+    (180, "media_probe_videos", _m180_media_probe_videos),
+    (181, "media_photo_stem_index", _m181_media_photo_stem_index),
     # 195-199: DataGatherer, what was left (web visits from two sources, edited iMessages)
     (195, "activity_duplicate_of", _m195_activity_duplicate_of),
     (196, "message_edits", _m196_message_edits),

@@ -17,8 +17,13 @@ keeps a small fingerprint (table media_phash, migration 30), computed once by th
 - sharpness (variance of the Laplacian), the share of clipped shadows and highlights,
   and the size in pixels, for the quality score that suggests the best of a series.
 
-Only photos: videos are skipped (a frame would need ffmpeg per video, which is not
-cheap), and so are RAW files Pillow cannot decode (counted as 'undecodable'). JPEGs
+Photos and, when ffmpeg is installed, videos: one representative frame per video (the
+frame at VIDEO_FRAME_AT seconds, else the first; ffmpeg pipes it out at analysis size,
+inside the job, VIDEO_TIMEOUT at most). The fingerprint is stored with the file's size
+and mtime like a photo's, so a video is decoded once. Videos only pair with videos (a
+frame next to a photo says little), and the video of a Live Photo (a video with a photo
+of the same name in its folder) is left out: it belongs to that photo. Without ffmpeg
+videos are simply not counted. RAW files Pillow cannot decode are 'undecodable'. JPEGs
 are decoded at 1/2 to 1/8 of their size (draft mode), HEIC through pillow_heif.
 
 Pairs (table near_dup_pairs) are found with multi-index hashing: the 64 phash bits are
@@ -129,12 +134,123 @@ def _laplacian(g: np.ndarray) -> np.ndarray:
     return 4 * g[1:-1, 1:-1] - g[:-2, 1:-1] - g[2:, 1:-1] - g[1:-1, :-2] - g[1:-1, 2:]
 
 
+VIDEO_FRAME_AT = 1.0          # seconds into a video for its representative frame (as its thumbnail)
+VIDEO_TIMEOUT = 30            # seconds ffmpeg may take for one frame
+VIDEO_LATER_SHARES = (0.1, 0.5)   # of the duration: where to look when the frame at VIDEO_FRAME_AT is flat
+VIDEO_LATER_UNKNOWN = (5.0, 15.0)  # seconds, the same for a video of unknown duration
+VIDEO_LENGTH_SLACK = (1.0, 0.02)   # two videos are copies only within 1 s or 2 % of each other's duration
+
+
+class NoFfmpeg(Exception):
+    """ffmpeg is not (or no longer) installed: the video is left for a later run."""
+
+
+def video_frames_available() -> bool:
+    return thumbnail.have_ffmpeg()
+
+
+def _video_times(duration: Optional[float]) -> List[Optional[float]]:
+    """
+    The moments (seconds, None = the very first frame) tried for a video's frame, in order:
+    VIDEO_FRAME_AT (as its thumbnail), then later moments for a video that opens on a flat
+    frame (black, a fade-in, a plain title card), then the first frame for a very short one.
+    """
+    if duration and duration > 0:
+        later = [t for t in (duration * share for share in VIDEO_LATER_SHARES)
+                 if VIDEO_FRAME_AT + 0.5 <= t < duration - 0.1]
+    else:
+        later = list(VIDEO_LATER_UNKNOWN)
+    return [VIDEO_FRAME_AT, *later, None]
+
+
+def _check_readable(path: str) -> None:
+    """Raises OSError (with an errno) when the file cannot be read now, to its last byte."""
+    st = os.stat(path)
+    with open(path, "rb") as f:
+        if st.st_size:
+            f.seek(st.st_size - 1)
+        f.read(1)
+
+
+def _video_frame(binary: str, path: str, at: Optional[float]) -> Optional[Image.Image]:
+    """The frame at 'at' seconds as RGB, or None when ffmpeg gives none there."""
+    import io
+    import subprocess
+    scale = f"scale={ANALYSE_SIZE}:{ANALYSE_SIZE}:force_original_aspect_ratio=decrease"
+    seek = ["-ss", f"{at:.3f}"] if at is not None else []
+    cmd = [binary, "-nostdin", "-v", "error", "-threads", "1", *seek, "-i", path, "-frames:v", "1",
+           "-vf", scale, "-f", "image2pipe", "-vcodec", "png", "-"]
+    try:
+        result = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=VIDEO_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        _check_readable(path)       # a disk that went away is a read error, tried again next run
+        raise Undecodable("ffmpeg deed er te lang over")
+    if result.returncode != 0 or not result.stdout:
+        return None
+    try:
+        img = Image.open(io.BytesIO(result.stdout))
+        img = img.convert("RGB")
+    except (OSError, ValueError, SyntaxError) as e:
+        raise Undecodable(str(e)) from e
+    if img.width < 8 or img.height < 8:
+        raise Undecodable("te klein")
+    return img
+
+
+def _video_small(path: str, duration: Optional[float] = None) -> Image.Image:
+    """
+    One frame of a video as RGB, upright (ffmpeg applies the rotation), at most
+    ANALYSE_SIZE on a side, piped as PNG (no temporary file). The frame at VIDEO_FRAME_AT,
+    unless that one is flat (nearly one colour): a black opening or a fade-in carries
+    nothing, and two unrelated videos that open alike must not look like copies, so a
+    later moment (VIDEO_LATER_SHARES of the duration) is taken instead. When every frame
+    tried is flat, the first one is returned (and update_pairs leaves the video unpaired).
+
+    Raises NoFfmpeg, OSError (with an errno) when the file cannot be read (also when it
+    went away while ffmpeg read it), Undecodable when ffmpeg gets no frame.
+    """
+    import shutil
+    binary = shutil.which("ffmpeg")
+    if not binary:
+        raise NoFfmpeg()
+    with open(path, "rb") as f:      # a clear read error first (permission, disk)
+        f.read(1)
+    first = None
+    for at in _video_times(duration):
+        if first is not None and at is None:
+            break                     # the first frame is only for a video too short for a seek
+        img = _video_frame(binary, path, at)
+        if img is None:
+            continue
+        if _grey_spread(img) >= FLAT_CONTRAST:
+            return img
+        first = first or img
+    if first is not None:
+        return first
+    _check_readable(path)            # no frame because the disk went away: a read error, not undecodable
+    raise Undecodable("ffmpeg kon geen beeld uit de video halen")
+
+
+def _grey_spread(img: Image.Image) -> float:
+    """The contrast figure of _figures (spread of the grey values)."""
+    return float(np.asarray(img.convert("L"), dtype=np.float32).std())
+
+
 def analyse(path: str) -> Dict[str, Any]:
     """
     The fingerprint and quality figures of one photo. Raises Undecodable for a file that
     is no decodable picture, OSError (with an errno) when it cannot be read.
     """
-    img = _open_small(path)
+    return _figures(_open_small(path))
+
+
+def analyse_video(path: str, duration: Optional[float] = None) -> Dict[str, Any]:
+    """The same for a video's representative frame (duration in seconds, when known); also raises NoFfmpeg."""
+    return _figures(_video_small(path, duration))
+
+
+def _figures(img: Image.Image) -> Dict[str, Any]:
     grey = img.convert("L")
     g = np.asarray(grey, dtype=np.float32)
     lap = _laplacian(np.asarray(_at_analyse_size(grey), dtype=np.float32))
@@ -234,6 +350,7 @@ class HashIndex:
             counts = np.bincount(keys, minlength=size)
             starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
             self.parts.append((keys, order, counts, starts))
+        self._sorted = [self.hashes[order] for _, order, _, _ in self.parts]   # hashes in bucket order, per part
 
     def pairs(self, radius: int, queries: Optional[np.ndarray] = None,
               check: Optional[Callable[[], None]] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -269,6 +386,11 @@ class HashIndex:
                 look = qkeys ^ mask
                 cnt = counts[look]
                 hit = cnt > 0
+                # A full scan meets two buckets that differ by `mask` from both sides: look
+                # only from the bucket without the mask's top bit (each pair comes up once)
+                lower = mask and is_query is None
+                if lower:
+                    hit &= (qkeys & (1 << (int(mask).bit_length() - 1))) == 0
                 if not hit.any():
                     continue
                 hq, hlook, hcnt = q[hit], look[hit], cnt[hit]
@@ -279,32 +401,44 @@ class HashIndex:
                     base = int(ends[begin - 1]) if begin else 0
                     end = max(begin + 1, int(np.searchsorted(ends, base + CANDIDATE_BUDGET, side="right")))
                     self._check_slice(p, per_part, hq[begin:end], starts[hlook[begin:end]], hcnt[begin:end],
-                                      order, is_query, radius, sink)
+                                      order, is_query, radius, sink, lower)
                     begin = end
                     if check is not None and begin < len(hq):
                         check()
 
-    def _check_slice(self, part, per_part, qs, firsts, cnt, order, is_query, radius, sink) -> None:
-        total = int(cnt.sum())
-        qi = np.repeat(qs, cnt)
-        offset = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(cnt) - cnt, cnt)
-        cj = order[np.repeat(firsts, cnt) + offset]
-        # Each unordered pair once: from its lower position, or from the query side
-        if is_query is None:
-            keep = qi < cj
+    def _check_slice(self, part, per_part, qs, firsts, cnt, order, is_query, radius, sink, lower=False) -> None:
+        # Candidate k is query qs[i] against bucket position pos[k] (i from the cumulative
+        # counts); only the hashes are gathered for every candidate, positions only for the
+        # few that are close
+        ends = np.cumsum(cnt)
+        pos = np.repeat(firsts - (ends - cnt), cnt) + np.arange(int(ends[-1]), dtype=np.int64)
+        x = np.repeat(self.hashes[qs], cnt) ^ self._sorted[part][pos]
+        dist = popcount(x)
+        close = np.flatnonzero(dist <= radius)
+        if not len(close):
+            return
+        if len(close) * 8 < len(pos):            # few close: find their query by bisection
+            qi = qs[np.searchsorted(ends, close, side="right")]
         else:
-            keep = (qi != cj) & ((qi < cj) | ~is_query[cj])
-        qi, cj = qi[keep], cj[keep]
-        x = self.hashes[qi] ^ self.hashes[cj]
-        dist = popcount(x).astype(np.int64)
-        close = dist <= radius
+            qi = np.repeat(qs, cnt)[close]
+        cj = order[pos[close]]
+        x, dist = x[close], dist[close]
+        # Each unordered pair once: from its lower position, or from the query side (two
+        # different buckets in a full scan already come up once: see `lower` in scan)
+        if is_query is None:
+            once = None if lower else qi < cj
+        else:
+            once = (qi != cj) & ((qi < cj) | ~is_query[cj])
         # ... and only in the first part where it is within per_part bits
         for earlier in range(part):
             shift = np.uint64(earlier * _PART_BITS)
-            close &= popcount((x >> shift) & np.uint64((1 << _PART_BITS) - 1)) > per_part
-        if close.any():
-            a, b = qi[close], cj[close]
-            sink(np.minimum(a, b), np.maximum(a, b), dist[close])
+            later = popcount((x >> shift) & np.uint64((1 << _PART_BITS) - 1)) > per_part
+            once = later if once is None else once & later
+        if once is not None:
+            if not once.any():
+                return
+            qi, cj, dist = qi[once], cj[once], dist[once]
+        sink(np.minimum(qi, cj), np.maximum(qi, cj), dist.astype(np.int64))
 
 
 # ---------- strictness ----------
@@ -326,6 +460,8 @@ STRICTNESS: Dict[str, Dict[str, Tuple[int, int, float]]] = {
 }
 FLAT_CONTRAST = 10.0          # grey spread below which a photo counts as nearly flat
 FLAT_COLOR = 6.0              # the colour limit (at most) when one of the two is flat
+# A video whose every frame tried is flat (black, one colour) carries nothing to compare: it stays unpaired
+_NOT_FLAT_VIDEO = f"NOT (m.kind = 'video' AND COALESCE(h.contrast, 0) < {FLAT_CONTRAST!r})"
 DEFAULT_STRICTNESS = "normaal"
 LOOSEST = "ruim"
 PAIR_RADIUS = STRICTNESS[LOOSEST]["near"][0]    # = 11: radius // 4 = 2 bits per part (fast)
@@ -388,21 +524,41 @@ def forget_orphans(db) -> int:
     return gone
 
 
+# The video of a Live Photo: a photo with the same name (without extension) in its folder
+_LIVE_VIDEO = ("EXISTS (SELECT 1 FROM media p WHERE p.folder = m.folder AND p.kind = 'photo' AND p.missing = 0 "
+               "AND lower(substr(p.name, 1, length(p.name) - length(p.ext))) = "
+               "lower(substr(m.name, 1, length(m.name) - length(m.ext))))")
+
+
+def _compared() -> str:
+    """SQL condition on media m: the files this module fingerprints (videos only with ffmpeg)."""
+    if not video_frames_available():
+        return "m.kind = 'photo'"
+    return f"(m.kind = 'photo' OR (m.kind = 'video' AND NOT {_LIVE_VIDEO}))"
+
+
 def counts(db) -> Dict[str, int]:
-    """Photos in the index, and how many are analysed, still to do, undecodable or failed."""
+    """
+    Photos (and videos, with ffmpeg) in the index, and how many are analysed, still to do,
+    undecodable or failed. 'photos' counts both; 'videos' how many of them are videos.
+    """
+    compared = _compared()
     with db._connect() as conn:
-        photos = conn.execute("SELECT COUNT(*) FROM media WHERE missing = 0 AND kind = 'photo'").fetchone()[0]
+        photos, videos = conn.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(m.kind = 'video'), 0) FROM media m WHERE m.missing = 0 AND {compared}"
+        ).fetchone()
         rows = conn.execute(
             f"SELECT h.status, COUNT(*) FROM media m JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE m.missing = 0 AND m.kind = 'photo' AND {_CURRENT} GROUP BY h.status",
+            f"WHERE m.missing = 0 AND {compared} AND {_CURRENT} GROUP BY h.status",
             (ALGO_VERSION,)).fetchall()
         unpaired = conn.execute(
             f"SELECT COUNT(*) FROM media m JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE m.missing = 0 AND h.paired = 0 AND h.status = 'ok' AND {_CURRENT}", (ALGO_VERSION,)).fetchone()[0]
+            f"WHERE m.missing = 0 AND h.paired = 0 AND h.status = 'ok' AND {_CURRENT} AND {_NOT_FLAT_VIDEO}",
+            (ALGO_VERSION,)).fetchone()[0]
         pairs = conn.execute("SELECT COUNT(*) FROM near_dup_pairs").fetchone()[0]
         signature = list(conn.execute(
             f"SELECT COUNT(*), COALESCE(SUM(m.id), 0) FROM media m JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE h.status = 'ok' AND {_CURRENT}", (ALGO_VERSION,)).fetchone())
+            f"WHERE h.status = 'ok' AND {_CURRENT} AND {_NOT_FLAT_VIDEO}", (ALGO_VERSION,)).fetchone())
         reviewed = conn.execute("SELECT COUNT(*) FROM near_dup_reviews").fetchone()[0]
     by_status = dict(rows)
     done = by_status.get(OK, 0) + by_status.get(UNDECODABLE, 0)
@@ -412,6 +568,8 @@ def counts(db) -> Dict[str, int]:
         pending = 1   # a photo left the index since the last lookup: the next run looks again
     return {
         "photos": photos,
+        "videos": videos,
+        "video_frames": video_frames_available(),
         "analysed": by_status.get(OK, 0),
         "undecodable": by_status.get(UNDECODABLE, 0),
         "errors": by_status.get(ERROR, 0),
@@ -422,20 +580,25 @@ def counts(db) -> Dict[str, int]:
     }
 
 
-def _todo(db) -> List[Tuple[int, str, int, int]]:
-    """Photos without a current fingerprint (new, changed, older version, or failed last time)."""
+def _todo(db) -> List[Tuple[int, str, int, int, str, Optional[float]]]:
+    """Photos and videos without a current fingerprint (new, changed, older version, or failed last time)."""
     with db._connect() as conn:
         return conn.execute(
-            f"SELECT m.id, m.path, m.size, m.mtime_ns FROM media m "
+            f"SELECT m.id, m.path, m.size, m.mtime_ns, m.kind, m.duration FROM media m "
             f"LEFT JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE m.missing = 0 AND m.kind = 'photo' "
+            f"WHERE m.missing = 0 AND {_compared()} "
             f"AND (h.media_id IS NULL OR NOT ({_CURRENT}) OR h.status = 'error') ORDER BY m.id",
             (ALGO_VERSION,)).fetchall()
 
 
-def _analyse_row(row: Tuple[int, str, int, int]) -> Tuple[str, Optional[Dict[str, Any]], Optional[str]]:
-    """(status, figures, error text) for one photo; 'behind' when the file changed since it was indexed."""
-    _id, path, size, mtime_ns = row
+SKIPPED = "skipped"           # _analyse_row: a video while ffmpeg is gone; nothing is stored
+
+
+def _analyse_row(row: Tuple) -> Tuple[str, Optional[Dict[str, Any]], Optional[str]]:
+    """(status, figures, error text) for one photo or video; 'behind' when the file changed since it was indexed."""
+    _id, path, size, mtime_ns = row[:4]
+    video = len(row) > 4 and row[4] == "video"
+    duration = row[5] if len(row) > 5 else None
     try:
         st = os.lstat(path)
     except FileNotFoundError:
@@ -443,9 +606,11 @@ def _analyse_row(row: Tuple[int, str, int, int]) -> Tuple[str, Optional[Dict[str
     if not stat_module.S_ISREG(st.st_mode) or (st.st_size, st.st_mtime_ns) != (size, mtime_ns):
         return "behind", None, None   # the index is behind the disk: its next pass reads it again
     try:
-        return OK, analyse(path), None
+        return OK, (analyse_video(path, duration) if video else analyse(path)), None
     except Undecodable as e:
         return UNDECODABLE, None, str(e)[:200]
+    except NoFfmpeg:
+        return SKIPPED, None, None
 
 
 _UPSERT = """
@@ -472,10 +637,12 @@ def run_job(ctx, config, db, errors, vault_check) -> Dict[str, Any]:
     """
     from backend.jobs import bounded_map
     started = time.time()
+    vault_present = lambda: config.VAULT_ROOT.is_dir()  # noqa: E731
     forget_orphans(db)
     todo = _todo(db)
     total = len(todo)
-    done = {"analysed": 0, "undecodable": 0, "behind": 0}
+    done = {"analysed": 0, "undecodable": 0, "behind": 0, "skipped": 0, "videos": 0}
+    noun = "Foto's en video's" if any(row[4] == "video" for row in todo) else "Foto's"
     pending: List[Tuple] = []
     last_flush = last_progress = time.monotonic()
 
@@ -488,7 +655,7 @@ def run_job(ctx, config, db, errors, vault_check) -> Dict[str, Any]:
             _bump()
         last_flush = time.monotonic()
 
-    ctx.progress(0, total, f"Foto's vergelijken... 0/{total}")
+    ctx.progress(0, total, f"{noun} vergelijken... 0/{total}")
     processed = 0
     try:
         stop = lambda: ctx.stopping or errors.vault_lost  # noqa: E731
@@ -500,17 +667,21 @@ def run_job(ctx, config, db, errors, vault_check) -> Dict[str, Any]:
                 pending.append(_values(row, ERROR, None, str(error)[:200], now))
             else:
                 status, figures, text = outcome
-                if status == "behind":
-                    done["behind"] += 1
+                if status == UNDECODABLE and row[4] == "video" and (errors.vault_lost or not vault_present()):
+                    # ffmpeg may have failed because the disk went away: tried again next run
+                    pending.append(_values(row, ERROR, None, text, now))
+                elif status in ("behind", SKIPPED):
+                    done[status] += 1
                 else:
                     done["analysed" if status == OK else "undecodable"] += 1
+                    done["videos"] += status == OK and row[4] == "video"
                     pending.append(_values(row, status, figures, text, now))
             tick = time.monotonic()
             if len(pending) >= BATCH or tick - last_flush >= FLUSH_SECONDS:
                 flush()
             if tick - last_progress >= PROGRESS_SECONDS or processed == total:
                 last_progress = tick
-                ctx.progress(processed, total, f"Foto's vergelijken... {processed}/{total}")
+                ctx.progress(processed, total, f"{noun} vergelijken... {processed}/{total}")
     finally:
         flush()
     ctx.check()
@@ -534,7 +705,9 @@ def run_job(ctx, config, db, errors, vault_check) -> Dict[str, Any]:
     series = len(series_structure(db, DEFAULT_STRICTNESS)["series"])
     result = {
         "photos": figures["photos"],
+        "videos": figures["videos"],
         "analysed": done["analysed"],
+        "videos_analysed": done["videos"],
         "undecodable": done["undecodable"],
         "behind": done["behind"] + twins["behind"],
         "copies_hashed": twins["hashed"],
@@ -557,7 +730,17 @@ def run_job(ctx, config, db, errors, vault_check) -> Dict[str, Any]:
 
 def run_message(result: Dict[str, Any]) -> str:
     n = result["series"]
-    text = f"Klaar: {result['analysed']} foto's vergeleken, {n} {'reeks' if n == 1 else 'reeksen'}"
+    videos = result.get("videos_analysed") or 0
+    photos = result["analysed"] - videos
+    photo_word = "foto" if photos == 1 else "foto's"
+    video_word = "video" if videos == 1 else "video's"
+    if not videos:
+        what = f"{photos} foto's"
+    elif not photos:
+        what = f"{videos} {video_word}"
+    else:
+        what = f"{photos} {photo_word} en {videos} {video_word}"
+    text = f"Klaar: {what} vergeleken, {n} {'reeks' if n == 1 else 'reeksen'}"
     if result["undecodable"]:
         text += f", {result['undecodable']} niet te openen"
     if result["errors"]:
@@ -580,12 +763,51 @@ def _color_matrix(blobs: Sequence[Optional[bytes]]) -> np.ndarray:
     return out
 
 
+def same_length(a: Optional[float], b: Optional[float]) -> bool:
+    """Whether two videos last about as long (VIDEO_LENGTH_SLACK); an unknown duration passes."""
+    if not a or not b:
+        return True
+    seconds, share = VIDEO_LENGTH_SLACK
+    return abs(a - b) <= max(seconds, share * max(a, b))
+
+
+def _split_by_length(members: List[int], length: Callable[[int], Optional[float]]) -> List[List[int]]:
+    """
+    Videos that look alike but differ in length are no copies: the members in runs of
+    about the same duration (in their own order within a run), the unknown ones together.
+    """
+    order = {i: n for n, i in enumerate(members)}
+    known = sorted((i for i in members if length(i)), key=lambda i: (length(i), order[i]))
+    runs: List[List[int]] = []
+    for i in known:
+        if runs and same_length(length(runs[-1][-1]), length(i)):
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    unknown = [i for i in members if not length(i)]
+    if unknown:
+        runs.append(unknown)
+    return sorted((sorted(run, key=order.__getitem__) for run in runs), key=lambda run: order[run[0]])
+
+
 def _twins(rows) -> Dict[Tuple, List[int]]:
-    """Positions of rows that look exactly alike to the analysis (same hashes and colours)."""
+    """
+    Positions of rows that look exactly alike to the analysis (same hashes and colours,
+    and the same kind when the rows have one: a photo and a video are never twins).
+    Videos are twins only when they also last about as long (same_length; the duration
+    is r[13] when the rows have it).
+    """
     twins: Dict[Tuple, List[int]] = {}
     for i, r in enumerate(rows):
-        twins.setdefault((r[1], r[2], r[3]), []).append(i)
-    return twins
+        twins.setdefault((r[1], r[2], r[3], r[12] if len(r) > 12 else "photo"), []).append(i)
+    split: Dict[Tuple, List[int]] = {}
+    for key, members in twins.items():
+        if key[3] != "video" or len(members) < 2 or len(rows[members[0]]) <= 13:
+            split[key] = members
+            continue
+        for n, run in enumerate(_split_by_length(members, lambda i: rows[i][13])):
+            split[(*key, n)] = run
+    return split
 
 
 CONTENT_BATCH = 100           # content hashes written per transaction
@@ -695,6 +917,75 @@ def _passes(phash_d: np.ndarray, dhash_d: np.ndarray, color_d: np.ndarray, flat:
     return (phash_d <= p) & (dhash_d <= d) & (color_d <= np.where(flat, min(c, FLAT_COLOR), c))
 
 
+def _roots(label: np.ndarray) -> np.ndarray:
+    """Pointer jumping until every entry points at its root."""
+    while True:
+        up = label[label]
+        if np.array_equal(up, label):
+            return label
+        label = up
+
+
+def spanning_forest(a: np.ndarray, b: np.ndarray, n: int) -> np.ndarray:
+    """
+    Mask of the edges (a[k], b[k]) that Kruskal would keep when it takes them in index
+    order (the first edge that joins two trees wins), computed with Borůvka rounds in
+    numpy: every tree picks its lowest-index edge to another tree. With the index as a
+    unique weight that is the same minimum spanning forest, in O(log n) vector steps
+    instead of a Python loop over every edge.
+    """
+    keep = np.zeros(len(a), dtype=bool)
+    label = np.arange(n, dtype=np.int64)
+    alive = np.arange(len(a), dtype=np.int64)
+    none = np.int64(len(a))
+    while len(alive):
+        la, lb = label[a[alive]], label[b[alive]]
+        apart = la != lb
+        alive, la, lb = alive[apart], la[apart], lb[apart]
+        if not len(alive):
+            break
+        best = np.full(n, none, dtype=np.int64)
+        np.minimum.at(best, la, alive)
+        np.minimum.at(best, lb, alive)
+        chosen = np.unique(best[best < none])
+        keep[chosen] = True
+        # Hook the trees along the chosen edges (a forest, so no cycles), larger root under smaller
+        x, y = label[a[chosen]], label[b[chosen]]
+        while len(x):
+            lo, hi = np.minimum(x, y), np.maximum(x, y)
+            np.minimum.at(label, hi, lo)
+            label = _roots(label)
+            x, y = label[x], label[y]
+            joined = x != y
+            x, y = x[joined], y[joined]
+        label = _roots(label)
+    return keep
+
+
+def _find(parent: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """The roots of x in a union-find parent array (parent[i] <= i), compressing their paths."""
+    root = parent[x]
+    while True:
+        up = parent[root]
+        if np.array_equal(up, root):
+            break
+        root = up
+    parent[x] = root
+    return root
+
+
+def _join(parent: np.ndarray, x: np.ndarray, y: np.ndarray) -> None:
+    """Union the trees of x[k] and y[k] for every k, in place (the smaller root wins)."""
+    rx, ry = _find(parent, x), _find(parent, y)
+    while True:
+        apart = rx != ry
+        if not apart.any():
+            return
+        rx, ry = rx[apart], ry[apart]
+        np.minimum.at(parent, np.maximum(rx, ry), np.minimum(rx, ry))
+        rx, ry = _find(parent, rx), _find(parent, ry)
+
+
 def _forest(found: Dict[str, np.ndarray], n: int) -> Dict[str, np.ndarray]:
     """
     Only the pairs that join photos into series: per strictness, a pair whose two photos
@@ -705,16 +996,8 @@ def _forest(found: Dict[str, np.ndarray], n: int) -> Dict[str, np.ndarray]:
     """
     keep = np.zeros(len(found["a"]), dtype=bool)
     for strictness in STRICTNESS:
-        parent = list(range(n))
         passing = np.flatnonzero(_passes(found["phash_d"], found["dhash_d"], found["color_d"], found["flat"], strictness))
-        for k, a, b in zip(passing.tolist(), found["a"][passing].tolist(), found["b"][passing].tolist()):
-            while parent[a] != a:
-                parent[a] = a = parent[parent[a]]
-            while parent[b] != b:
-                parent[b] = b = parent[parent[b]]
-            if a != b:
-                parent[a] = b
-                keep[k] = True
+        keep[passing[spanning_forest(found["a"][passing], found["b"][passing], n)]] = True
     return {key: value[keep] for key, value in found.items()}
 
 
@@ -748,14 +1031,35 @@ def near_pairs(phashes: np.ndarray, dhashes: np.ndarray, colors: np.ndarray, fla
     found: Dict[str, List[np.ndarray]] = {k: [] for k in ("a", "b", "phash_d", "dhash_d", "color_d", "flat")}
     kept = 0
     compact_at = limit
+    # Once thinned: per strictness (strictest first) a union-find of the series so far. A
+    # new pair that joins nothing new at the strictest setting it passes is dropped right
+    # away, before its dhash and colours are even compared when its phash says enough
+    levels = list(STRICTNESS)
+    level_phash = np.array([STRICTNESS[s]["near"][0] for s in levels])
+    parents: Optional[List[np.ndarray]] = None
 
     def compact() -> None:
-        nonlocal kept, compact_at
+        nonlocal kept, compact_at, parents
         forest = _forest({k: np.concatenate(v) for k, v in found.items()}, n)
         for k, v in forest.items():
             found[k] = [v]
         kept = len(forest["a"])
         compact_at = max(limit, 2 * kept)
+        parents = []
+        for strictness in levels:
+            ok = _passes(forest["phash_d"], forest["dhash_d"], forest["color_d"], forest["flat"], strictness)
+            parent = np.arange(n, dtype=np.int64)
+            _join(parent, forest["a"][ok], forest["b"][ok])
+            parents.append(parent)
+
+    def joins_something(r: np.ndarray, c: np.ndarray, level: np.ndarray) -> np.ndarray:
+        """Whether r[k] and c[k] are still apart at strictness levels[level[k]]."""
+        apart = np.ones(len(r), dtype=bool)
+        for k, parent in enumerate(parents):
+            at = np.flatnonzero(level == k)
+            if len(at):
+                apart[at] = _find(parent, r[at]) != _find(parent, c[at])
+        return apart
     if n >= 2:
         values, value_of = np.unique(phashes, return_inverse=True)
         value_of = value_of.reshape(-1)
@@ -783,17 +1087,24 @@ def near_pairs(phashes: np.ndarray, dhashes: np.ndarray, colors: np.ndarray, fla
         def spread(firsts: np.ndarray, sizes: np.ndarray) -> np.ndarray:
             """firsts[k], firsts[k] + 1, ..., firsts[k] + sizes[k] - 1 for every k."""
             total = int(sizes.sum())
+            if total == len(sizes):                     # one each (most phash values have one photo)
+                return firsts
             return np.repeat(firsts, sizes) + (np.arange(total, dtype=np.int64)
                                                - np.repeat(np.cumsum(sizes) - sizes, sizes))
 
-        def pair_photos(rows: np.ndarray, with_value: np.ndarray, mode: int) -> None:
+        def pair_photos(rows: np.ndarray, with_value: np.ndarray, mode: int, value_d: np.ndarray) -> None:
             nonlocal kept
             sizes = counts[with_value]
+            single = int(sizes.sum()) == len(sizes)
             for begin, end in slices(sizes):
                 if check is not None:
                     check()
-                r = np.repeat(rows[begin:end], sizes[begin:end])
-                c = members[spread(starts[with_value[begin:end]], sizes[begin:end])]
+                if single:
+                    r, c, pd = rows[begin:end], members[starts[with_value[begin:end]]], value_d[begin:end]
+                else:
+                    r = np.repeat(rows[begin:end], sizes[begin:end])
+                    c = members[spread(starts[with_value[begin:end]], sizes[begin:end])]
+                    pd = np.repeat(value_d[begin:end], sizes[begin:end])
                 if mode == _OTHERS:
                     keep = ~is_query[c]                     # query pairs come from the other side
                 elif mode == _SAME:
@@ -801,46 +1112,71 @@ def near_pairs(phashes: np.ndarray, dhashes: np.ndarray, colors: np.ndarray, fla
                 else:
                     keep = None
                 if keep is not None:
-                    r, c = r[keep], c[keep]
-                dd = popcount(dhashes[r] ^ dhashes[c]).astype(np.int64)
+                    r, c, pd = r[keep], c[keep], pd[keep]
+                if parents is not None:      # already together at the strictest setting this phash allows
+                    level = np.zeros(len(pd), dtype=np.int64)
+                    for limit_p in level_phash[:-1]:
+                        level += pd > limit_p
+                    new = joins_something(r, c, level)
+                    r, c, pd = r[new], c[new], pd[new]
+                dd = popcount(dhashes[r] ^ dhashes[c])
                 ok = dd <= loose_d
-                r, c, dd = r[ok], c[ok], dd[ok]
+                r, c, dd, pd = r[ok], c[ok], dd[ok], pd[ok]
                 if not len(r):
                     continue
-                cd = np.abs(colors[r] - colors[c]).mean(axis=1)
+                # The mean colour distance, compared as a sum of 12 integers (exact, no floats)
+                cs = np.abs(colors[r] - colors[c]).sum(axis=1, dtype=np.int32)
                 fl = flat[r] | flat[c]
-                ok = cd <= np.where(fl, flat_c, loose_c)
+                ok = cs <= np.where(fl, 12 * flat_c, 12 * loose_c)
                 if not ok.any():
                     continue
-                r, c = r[ok], c[ok]
+                r, c, pd, dd, cd, fl = r[ok], c[ok], pd[ok], dd[ok], cs[ok] / 12.0, fl[ok]
+                if parents is not None:
+                    strictest = np.full(len(r), len(levels) - 1, dtype=np.int64)
+                    for k in range(len(levels) - 2, -1, -1):
+                        strictest[_passes(pd, dd, cd, fl, levels[k])] = k
+                    new = joins_something(r, c, strictest)
+                    if not new.any():
+                        continue
+                    r, c, pd, dd, cd, fl, strictest = (v[new] for v in (r, c, pd, dd, cd, fl, strictest))
+                    for k, parent in enumerate(parents):
+                        at = strictest <= k
+                        _join(parent, r[at], c[at])
                 kept += len(r)
                 found["a"].append(np.minimum(r, c))
                 found["b"].append(np.maximum(r, c))
-                found["phash_d"].append(popcount(phashes[r] ^ phashes[c]).astype(np.int8))
-                found["dhash_d"].append(dd[ok].astype(np.int8))
-                found["color_d"].append(cd[ok])
-                found["flat"].append(fl[ok])
+                found["phash_d"].append(pd.astype(np.int8))
+                found["dhash_d"].append(dd.astype(np.int8))
+                found["color_d"].append(cd)
+                found["flat"].append(fl)
                 if kept > compact_at:
                     compact()
 
-        def pair_values(x: np.ndarray, y: np.ndarray, mode: int) -> None:
-            """The query photos of value x[k] with the photos of value y[k]."""
+        def pair_values(x: np.ndarray, y: np.ndarray, mode: int, d: np.ndarray) -> None:
+            """The query photos of value x[k] with the photos of value y[k] (phash distance d[k])."""
             sizes = q_counts[x]
             use = (sizes > 0) & (counts[y] > 0)
-            x, y, sizes = x[use], y[use], sizes[use]
+            x, y, sizes, d = x[use], y[use], sizes[use], d[use]
+            single = int(sizes.sum()) == len(sizes)
             for begin, end in slices(sizes):
                 rows = q_members[spread(q_starts[x[begin:end]], sizes[begin:end])]
-                pair_photos(rows, np.repeat(y[begin:end], sizes[begin:end]), mode)
+                if single:
+                    pair_photos(rows, y[begin:end], mode, d[begin:end])
+                else:
+                    pair_photos(rows, np.repeat(y[begin:end], sizes[begin:end]), mode,
+                                np.repeat(d[begin:end], sizes[begin:end]))
 
-        def close_values(u: np.ndarray, v: np.ndarray, _d: np.ndarray) -> None:
-            pair_values(u, v, _ALL)
+        def close_values(u: np.ndarray, v: np.ndarray, d: np.ndarray) -> None:
+            pair_values(u, v, _ALL, d)
             if queries is not None:
-                pair_values(v, u, _OTHERS)
+                pair_values(v, u, _OTHERS, d)
 
         query_values = None if queries is None else np.flatnonzero(q_counts)
         HashIndex(values).scan(PAIR_RADIUS, close_values, query_values, check)
         same = np.flatnonzero((q_counts > 0) & (counts > 1))   # photos with the same phash as each other
-        pair_values(same, same, _SAME)
+        pair_values(same, same, _SAME, np.zeros(len(same), dtype=np.int64))
+        if parents is not None:
+            compact()          # pairs of one slice can still join the same two series
     if not kept:
         return {"a": np.zeros(0, dtype=np.int64), "b": np.zeros(0, dtype=np.int64),
                 "phash_d": np.zeros(0, dtype=np.int8), "dhash_d": np.zeros(0, dtype=np.int8),
@@ -879,9 +1215,10 @@ def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]
     with db._connect() as conn:
         rows = conn.execute(
             f"SELECT m.id, h.phash, h.dhash, h.colors, h.paired, m.size, m.path, m.taken, m.taken_source, "
-            f"m.camera_make, m.camera_model, h.contrast FROM media m "
+            f"m.camera_make, m.camera_model, h.contrast, m.kind, m.duration FROM media m "
             f"JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE h.status = 'ok' AND {_CURRENT} ORDER BY m.id", (ALGO_VERSION,)).fetchall()
+            f"WHERE h.status = 'ok' AND {_CURRENT} AND {_NOT_FLAT_VIDEO} ORDER BY m.id",
+            (ALGO_VERSION,)).fetchall()
     dirty = [r[0] for r in rows if not r[4]]
     # (also when a photo left the index: it may have been the anchor of its group)
     signature = [len(rows), sum(r[0] for r in rows)]
@@ -895,7 +1232,33 @@ def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]
     dhashes = np.array([to_unsigned(rows[i][2]) for i in firsts], dtype=np.uint64)
     colors = _color_matrix([rows[i][3] for i in firsts])
     flat = np.array([(rows[i][11] or 0.0) < FLAT_CONTRAST for i in firsts], dtype=bool)
-    found = near_pairs(phashes, dhashes, colors, flat, None if full else np.array(lookup, dtype=np.int64), check)
+    # Photos pair with photos and videos with videos: one lookup per kind
+    kinds = np.array([rows[i][12] == "video" for i in firsts], dtype=bool)
+    looked = np.zeros(len(firsts), dtype=bool)
+    looked[lookup] = True
+    parts = []
+    for is_video in (False, True):
+        pos = np.flatnonzero(kinds == is_video)
+        queries = None if full else np.flatnonzero(looked[pos])
+        if len(pos) < 2 or (queries is not None and not len(queries)):
+            continue
+        part = near_pairs(phashes[pos], dhashes[pos], colors[pos], flat[pos], queries, check)
+        part["a"], part["b"] = pos[part["a"]], pos[part["b"]]
+        if is_video and len(part["a"]):
+            # Two videos that look alike but differ in length are no copies (an edit, another clip)
+            lengths = [rows[i][13] for i in firsts]
+            keep = np.array([same_length(lengths[a], lengths[b])
+                             for a, b in zip(part["a"].tolist(), part["b"].tolist())], dtype=bool)
+            part = {k: v[keep] for k, v in part.items()}
+        parts.append(part)
+    if len(parts) == 1:
+        found = parts[0]
+    else:
+        found = {k: np.concatenate([p[k] for p in parts]) if parts else np.zeros(0, dtype=dtype)
+                 for k, dtype in (("a", np.int64), ("b", np.int64), ("phash_d", np.int8), ("dhash_d", np.int8),
+                                  ("color_d", np.float64), ("flat", bool))}
+        order = np.lexsort((found["b"], found["a"]))
+        found = {k: v[order] for k, v in found.items()}
     ids = np.array([rows[i][0] for i in firsts], dtype=np.int64)
     near = len(found["a"])
 
@@ -1056,8 +1419,8 @@ def all_series(db, strictness: str) -> Dict[str, Any]:
     with db._connect() as conn:
         analysed = conn.execute(
             f"SELECT m.id, h.phash, h.dhash, h.colors, h.content, m.missing, m.path, m.folder, m.taken, "
-            f"m.size, m.mtime_ns FROM media m JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE h.status = 'ok' AND {_CURRENT}", (ALGO_VERSION,)).fetchall()
+            f"m.size, m.mtime_ns, m.kind, m.duration FROM media m JOIN media_phash h ON h.media_id = m.id "
+            f"WHERE h.status = 'ok' AND {_CURRENT} AND {_NOT_FLAT_VIDEO}", (ALGO_VERSION,)).fetchall()
         pairs = conn.execute(
             "SELECT a, b, kind FROM near_dup_pairs WHERE "
             "(kind = 'near' AND phash_d <= ? AND dhash_d <= ? AND color_d <= CASE WHEN flat THEN ? ELSE ? END) "
@@ -1071,8 +1434,19 @@ def all_series(db, strictness: str) -> Dict[str, Any]:
     members_of: Dict[int, List[int]] = {}
     rows: Dict[int, Tuple] = {}
     content: Dict[int, Optional[str]] = {}
-    for r in analysed:
-        g = group_ids.setdefault((r[1], r[2], r[3]), len(group_ids))
+    videos: Set[int] = {r[0] for r in analysed if r[11] == "video"}
+    looks: Dict[Tuple, List[int]] = {}
+    for n, r in enumerate(analysed):
+        looks.setdefault((r[1], r[2], r[3], r[11]), []).append(n)
+    look_of: Dict[int, Tuple] = {}
+    for key, positions in looks.items():
+        runs = (_split_by_length(positions, lambda n: analysed[n][12])
+                if key[3] == "video" and len(positions) > 1 else [positions])
+        for k, run in enumerate(runs):
+            for n in run:
+                look_of[n] = (*key, k)
+    for n, r in enumerate(analysed):
+        g = group_ids.setdefault(look_of[n], len(group_ids))
         group_of[r[0]] = g
         if r[5] == 0:
             members_of.setdefault(g, []).append(r[0])
@@ -1138,6 +1512,7 @@ def all_series(db, strictness: str) -> Dict[str, Any]:
                 "copies": {i: copies_of[i] for i in part if copies_of.get(i)},
                 "taken": max(taken) if taken else None,
                 "size": sum(rows[i][3] for i in part),
+                "videos": sum(1 for i in part if i in videos),
                 "part": [start // size + 1, parts] if parts > 1 else None,
             })
     result = {"series": series, "components": components, "copies": copies_of, "rows": rows,
@@ -1225,7 +1600,8 @@ def _member_rows(db, ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
             for r in conn.execute(
                 f"SELECT m.id, m.path, m.folder, m.name, m.size, m.width, m.height, m.taken, m.camera_make, "
                 f"m.camera_model, h.sharpness, h.clip_low, h.clip_high, r.rating, r.votes, "
-                f"EXISTS (SELECT 1 FROM keurer_decisions k WHERE k.path = m.path AND k.decision = 'keep') "
+                f"EXISTS (SELECT 1 FROM keurer_decisions k WHERE k.path = m.path AND k.decision = 'keep'), "
+                f"m.kind, m.duration "
                 f"FROM media m LEFT JOIN media_phash h ON h.media_id = m.id "
                 f"LEFT JOIN file_ratings r ON r.path = m.path WHERE m.id IN ({marks})", chunk):
                 out[r[0]] = {
@@ -1234,6 +1610,7 @@ def _member_rows(db, ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
                     "camera": " ".join(x for x in (r[8], r[9]) if x) or None,
                     "sharpness": r[10], "clip_low": r[11], "clip_high": r[12],
                     "rating": r[13], "votes": r[14] or 0, "keurer_keep": bool(r[15]),
+                    "kind": r[16], "duration": r[17],
                 }
     return out
 
@@ -1257,6 +1634,7 @@ def present(db, series: Dict[str, Any]) -> Dict[str, Any]:
         "folder": folders.pop() if len(folders) == 1 else None,
         "part": series.get("part"),
         "best": next(m["id"] for m in members if m["best"]),
+        "media": "video" if members and all(m["kind"] == "video" for m in members) else "photo",
         "members": members,
     }
 
@@ -1270,7 +1648,8 @@ def page(db, strictness: str, sort: str, offset: int, limit: int) -> Dict[str, A
         "strictness": strictness,
         "sort": sort,
         "total": total,
-        "photos": sum(len(s["ids"]) for s in ordered),
+        "photos": sum(len(s["ids"]) for s in ordered),       # photos and videos
+        "videos": sum(s.get("videos", 0) for s in ordered),
         "offset": offset,
         "limit": limit,
         "next_offset": offset + limit if offset + limit < total else None,

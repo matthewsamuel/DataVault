@@ -121,11 +121,18 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   kopieën, bewerkingen, bursts), niet byte voor byte gelijk. `backend/near_dups.py`, routes in
   `backend/routes/series.py`, scherm in `frontend/series.js`; migraties 30 en 31.
 - **Vergelijken** is een achtergrondtaak (`phash`, na een snelle ronde van de bibliotheek). Per foto
-  (alleen foto's; video's en RAW-bestanden die Pillow niet kan openen worden overgeslagen) een klein
-  gedecodeerde versie (JPEG in draft-modus, HEIC via pillow_heif, rechtop volgens EXIF): dHash en
-  pHash (64 bits), de gemiddelde kleur van de vier kwarten, contrast, scherpte (variantie van de
-  Laplaciaan), en afgekapte schaduwen en hoge lichten. Alleen nieuwe of veranderde foto's worden
-  gelezen; pauzeren, hervatten en annuleren verliezen hooguit één stapel van 200.
+  (RAW-bestanden die Pillow niet kan openen worden overgeslagen) een klein gedecodeerde versie (JPEG
+  in draft-modus, HEIC via pillow_heif, rechtop volgens EXIF): dHash en pHash (64 bits), de
+  gemiddelde kleur van de vier kwarten, contrast, scherpte (variantie van de Laplaciaan), en
+  afgekapte schaduwen en hoge lichten. Alleen nieuwe of veranderde foto's worden gelezen; pauzeren,
+  hervatten en annuleren verliezen hooguit één stapel van 200.
+- **Video's** doen mee als ffmpeg er is: per video één beeld (op 1 s, anders het eerste; ffmpeg
+  geeft het als PNG door een pipe, op hooguit 512 px, één thread, hooguit 30 s), in dezelfde taak en
+  net zo bewaard bij grootte en wijzigingstijd, dus één keer per video. Video's vormen alleen reeksen
+  met video's; de video van een Live Photo (een video met een foto van dezelfde naam in de map) doet
+  niet mee. Zonder ffmpeg tellen video's niet mee en wacht er niets. Op het scherm: een afspeelteken
+  met de duur op de tegel, en **Groot bekijken** toont het vergeleken beeld met **Afspelen** (mp4,
+  m4v, mov, webm; andere formaten tonen alleen het beeld).
 - Paren: multi-index hashing (4 delen van 16 bits, nooit alle paren); foto's die precies hetzelfde
   ogen vormen één groep. Bursts: dezelfde camera, EXIF-tijden hooguit 3 s na elkaar, dezelfde map.
 - Strengheid (pHash / dHash / kleur): **Streng** 4/6/10, **Normaal** 8/10/16 (standaard), **Ruim**
@@ -162,7 +169,7 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Snelheid (M3 Pro, 4 threads): 12 MP JPEG ~130 foto's/s; 4.000 foto's van 2 MP via de server in
   10 s (390/s; `/api/health` p95 12 ms tijdens de taak), een tweede ronde zonder nieuwe foto's
   0,2 s. HEIC wordt volledig gedecodeerd (36 MP: ~0,7 s per foto per thread, ~5 per seconde met
-  4 threads). Paren en bursts voor 100.000 foto's: ~3 s bij willekeurige hashes. Foto's met dezelfde
+  4 threads). Paren en bursts voor 100.000 foto's: ~2 s bij willekeurige hashes. Foto's met dezelfde
   phash (scans, screenshots, effen afbeeldingen) worden als één waarde opgezocht en direct tegen de
   dhash- en kleurgrens gehouden, zodat alleen echte paren bewaard worden: 100.000 tweekleurige
   testbeelden (19.268 verschillende phashes, 89 miljoen kandidaten, 1,16 miljoen paren) in ~15 s
@@ -171,7 +178,15 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   foto waarvandaan de paren van een groep zijn opgezocht): 2.000 nieuwe foto's erbij in ~2 s plus
   het wegschrijven. Het geheugen blijft begrensd: de kandidaten worden per ~130.000 gecontroleerd
   (`CANDIDATE_BUDGET`), en boven 4 miljoen paren (`NEAR_PAIR_LIMIT`) blijven alleen de paren over
-  die de reeksen maken (per strengheid een opspannend bos, `_forest`). Werkt ook met
+  die de reeksen maken (per strengheid een opspannend bos, `_forest`, in numpy met Borůvka-rondes).
+  Na dat punt houdt een union-find per strengheid bij wat al samen zit: een nieuw paar dat niets
+  nieuws verbindt valt meteen af, vaak al op de phash-afstand, vóór dhash en kleur. Een volledige
+  ronde bekijkt twee buckets die een masker verschillen maar van één kant (de helft van de
+  kandidaten), en per kandidaat worden alleen de hashes opgehaald. Gemeten op dezelfde synthetische
+  sets van 100.000 (`near_pairs`, M3 Pro, druk systeem): willekeurig 2,6 → 1,3 s; documenten (5.000
+  lay-outs, zipf 2,2, 29 miljoen phash-paren) 12 → 6,3 s en piek 1,2 → 0,9 GB; foto's met 3 miljoen
+  paren 2,7 → 1,8 s; sterk scheve bits 24 → 6,6 s. Langste GIL-pauze bij documenten 101 → 19 ms.
+  Werkt ook met
   numpy ouder dan 2.0 (eigen bittelling als `np.bitwise_count` ontbreekt).
 
 ### Bibliotheek (media-index)
@@ -187,6 +202,15 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   aanmaakdatum (of aan de inhoud als die al bekend was), en gaat de waardering ook mee.
 - Een bestand dat weg is, wordt eerst verborgen en pas aan het eind van een ronde uit de index
   gehaald. De index leest alleen; hij verplaatst of wist nooit een bestand.
+- Video's: mp4, mov, m4v en 3gp leest de index zelf (de QuickTime-boxen). Voor avi, mkv, mts, m2ts,
+  webm, wmv, flv en mpg vraagt de indextaak het aan `ffprobe` (als het er is, hooguit 10 s per
+  bestand): de opnamedatum als de container er een heeft (mkv DateUTC en creation_time als UTC, een
+  AVI-datum als lokale tijd, zoals EXIF), duur, afmetingen en draaiing. Zonder ffprobe, of als een
+  verzoek het bestand leest (een verplaatsing in de app), krijgt de regel `meta_status = 'probe'` en
+  leest de eerste ronde met ffprobe hem opnieuw (migratie 180 zet bestaande regels zo). Camcorder-
+  mts zonder datum in de container houdt de bestandsdatum; de MDPM-datum in de H.264-stroom wordt
+  niet gelezen. De tijdlijn-wandeling (voor de index klaar is) start geen proces per bestand en
+  houdt voor deze formaten de bestandsdatum.
 - `DATAVAULT_AUTO_INDEX=0` zet het automatisch bijwerken uit (de tests doen dat).
 
 ### Albums: filters, slimme albums en op deze dag

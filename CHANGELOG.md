@@ -890,6 +890,37 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Twee foto's die duizenden punten uit elkaar liggen (door veel duimpjes) gaven een fout bij
   vergelijken, en konden de app bij het bijwerken van de database laten vastlopen. Opgelost.
 
+### Afronding: wat nog bleef liggen
+
+- **Slim zoeken opnieuw gemeten met het echte model.** Met 30 nieuwe zoekopdrachten in eigen
+  woorden (20 Nederlands, 10 Engels) vindt Slim zoeken 87 tot 93 procent van de goede foto's,
+  en geen enkele zoekopdracht blijft leeg terwijl er wel goede foto's zijn. Ook als een
+  onderwerp een groot deel van een map is, blijft het gevonden. De relevantiegrens stond al
+  op het beste punt en is niet veranderd.
+- **Sneller reeksen zoeken in een groot archief.** Bij 100.000 foto's met veel gelijkende scans of
+  screenshots duurt het zoeken naar paren nu 6 s in plaats van 12 s, met minder geheugen. Bij
+  gewone foto's is het bijna twee keer zo snel, en de app blijft ondertussen even vlot.
+- **Datum, duur en afmetingen van avi-, mkv- en mts-video's.** Als ffprobe (onderdeel van ffmpeg)
+  geïnstalleerd is, leest de bibliotheek nu ook bij deze video's de opnamedatum, de duur en het
+  formaat. Ze staan daardoor op de juiste plek in de tijdlijn. Video's die al in de bibliotheek
+  stonden worden bij de volgende ronde één keer opnieuw gelezen.
+- **Video's in Beste uit reeks.** Twee kopieën van dezelfde video (bijvoorbeeld het origineel en
+  de verkleinde versie uit WhatsApp) staan nu ook als reeks klaar. Elke tegel toont een afspeelteken
+  met de duur, en in Groot bekijken speel je de video meteen af. Video's komen alleen in een reeks
+  met andere video's, en de video van een Live Photo blijft bij zijn foto. Hiervoor is ffmpeg nodig.
+  Twee verschillende video's die allebei met een zwart beeld of een fade-in beginnen, worden niet
+  meer voor kopieën aangezien: dan vergelijkt de app een later beeld, en video's van een duidelijk
+  andere lengte komen nooit samen in een reeks. Video's die helemaal zwart zijn, blijven erbuiten.
+  Valt de schijf weg terwijl een video wordt gelezen, dan probeert de volgende vergelijking hem
+  gewoon opnieuw.
+- **Video's groot bekijken.** Groot bekijken toont nu het echte beeld van elke video op zijn eigen
+  grootte, zodat je op 100% ziet welke kopie zachter is. Een spelende video blijft passend in beeld
+  met al zijn knoppen, zonder zwarte flits bij het starten. Met k of spatie speel je af of pauzeer
+  je, met ← en → spring je 5 seconden, en Esc zet de video stil zonder het venster te sluiten. Een
+  formaat dat de browser niet afspeelt (zoals mkv) krijgt een filmstrook in plaats van een
+  afspeelteken en de zichtbare regel 'Afspelen kan niet in de browser'. Teksten bij video-reeksen
+  zeggen nu 'video' in plaats van 'foto'.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden

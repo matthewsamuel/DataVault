@@ -5212,6 +5212,51 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     font-size: 10px;
 }
 
+/* Een video in een reeks: afspeelteken en duur, rechtsonder (linksboven staat de ster,
+   rechtsboven het vinkje van wat blijft, linksonder 'Gaat weg') */
+.series-video-badge {
+    position: absolute;
+    z-index: 1;
+    right: var(--space-sm);
+    bottom: var(--space-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    height: 22px;
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-full);
+    background: var(--media-scrim-strong);
+    color: var(--on-media);
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-semibold);
+    font-variant-numeric: tabular-nums;
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+}
+
+.series-video-badge i {
+    font-size: 0.75em;
+}
+
+/* Afspelen in 'Groot bekijken': linksonder op het beeld, boven de video */
+.series-compare-play {
+    position: absolute;
+    z-index: 2;
+    left: var(--space-md);
+    bottom: var(--space-md);
+    box-shadow: var(--shadow-md);
+}
+
+.series-compare-video {
+    background: var(--media-bg);
+}
+
+/* Speelt de video, dan staan de eigen knoppen van de video linksboven: de ster gaat opzij */
+.series-compare-frame.is-playing .series-best-badge {
+    display: none;
+}
+
 .series-photo-name {
     font-size: var(--fs-sm);
     color: var(--text-primary);
@@ -5432,6 +5477,33 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     height: auto;
     object-fit: fill;
     transform: translate(calc(var(--compare-x, 50%) * -1), calc(var(--compare-y, 50%) * -1));
+}
+
+/* Een spelende video en een miniatuur (een video die de browser niet afspeelt) blijven op 100%
+   passend: de knoppen van de video blijven in beeld, en een miniatuur opblazen toont niets */
+.series-compare-body.is-detail .series-compare-frame:is(.is-playing, .is-still) {
+    cursor: auto;
+    touch-action: auto;
+}
+
+.series-compare-body.is-detail .series-compare-frame:is(.is-playing, .is-still) .series-compare-img {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    transform: none;
+}
+
+.series-compare-note {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.series-compare-note i {
+    color: var(--text-tertiary);
 }
 
 .series-compare-info {

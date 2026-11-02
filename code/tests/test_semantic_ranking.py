@@ -169,6 +169,42 @@ def test_dutch_and_english_find_about_as_much():
     assert abs(found["nl"] - found["en"]) <= 0.1 * found["en"], found
 
 
+def test_free_form_queries_written_after_the_cut_find_their_photos():
+    """20 Dutch and 10 English queries in other words than the labelled ones (not used to set the cut)."""
+    evaluation, data, labels, queries = _eval_set()
+    free, _ = evaluation.load_extra()
+    photos = data["photos"].astype(np.float32)
+    names = [str(n) for n in data["names"]]
+    for lang, min_recall, min_precision in (("nl", 0.85, 0.75), ("en", 0.9, 0.8)):
+        mine = [(i, (need, None, text)) for i, (need, language, text) in enumerate(free) if language == lang]
+        vectors = [semantic.corrected(data["free"][i].astype(np.float32), data["reference"]) for i, _ in mine]
+        recall, precision, empty = evaluation.strong_set(photos, names, labels, [q for _, q in mine], vectors)
+        assert recall >= min_recall and precision >= min_precision and empty == 0, (lang, recall, precision, empty)
+
+
+def test_things_that_are_not_there_let_little_through():
+    evaluation, data, labels, queries = _eval_set()
+    _, absent = evaluation.load_extra()
+    photos = data["photos"].astype(np.float32)
+    for lang in ("nl", "en"):
+        vectors = [semantic.corrected(v.astype(np.float32), data["reference"]) for v in data[f"absent_{lang}"]]
+        assert len(vectors) == len(absent)
+        queries_hit, photos_hit = evaluation.absent_let_through(photos, vectors)
+        assert queries_hit <= 3 and photos_hit <= 8, (lang, queries_hit, photos_hit)
+
+
+@pytest.mark.parametrize("share", [0.2, 0.5])
+def test_a_concept_that_fills_much_of_a_folder_keeps_its_recall(share):
+    """The background is the whole index, so a folder full of dogs still finds its dogs."""
+    evaluation, data, labels, queries = _eval_set()
+    photos = data["photos"].astype(np.float32)
+    names = [str(n) for n in data["names"]]
+    for lang in ("nl", "en"):
+        vectors = [semantic.corrected(v.astype(np.float32), data["reference"]) for v in data[lang]]
+        recall, empty = evaluation.folder_recall(photos, names, labels, queries, vectors, share)
+        assert recall >= 0.84 and empty == 0, (lang, share, recall, empty)
+
+
 
 # ---------- the text model that is let go when idle ----------
 

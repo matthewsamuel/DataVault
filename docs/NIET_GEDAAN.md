@@ -21,18 +21,27 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 
 ## Zoeken, reeksen en kaart
 
-- **Echt model opnieuw gemeten na de relevantiegrens.** De grens is getest met synthetische vectoren;
-  `scripts/eval_semantic_search.py` kan hem op de gelabelde set controleren. *Goede volgende stap.*
+- **Woorden die het zoekmodel zwak kent.** Opnieuw gemeten met het echte model (30 nieuwe zoekopdrachten, 87 tot
+  93 procent gevonden, de grens bleef staan). Een woord als "avondeten" zet de goede foto's zelf laag: dat is het
+  model, niet de grens. "Eten" of "dinner" vindt ze wel.
 - **Gebatchte beeldherkenning.** De gebruikte ONNX-export heeft een vaste batchgrootte van 1; 10 tot 70 foto's per
   seconde is genoeg.
 - **Koude eerste zoekopdracht onder 2 seconden.** Dat lukt met modelbestanden in het OS-geheugen (1,4 s); direct na
   opstarten of van een drukke externe schijf kan het 10 tot 20 s duren. Het model wordt voorgeladen zodra het zoekveld
   focus krijgt.
-- **Video's in Beste uit reeks.** Per video een frame halen kost een ffmpeg-proces; de scan slaat video's over.
+- **Video's naast foto's in Beste uit reeks.** Video's vormen alleen reeksen met video's, op één beeld per video (op
+  1 s, of op 10 % of 50 % van de duur als dat beeld vlak is) en alleen bij vrijwel dezelfde lengte. Een ingekorte
+  kopie wordt daardoor niet herkend, en een video die helemaal zwart is doet niet mee.
+- **Een groot beeld van een mkv of avi in Groot bekijken.** Een video die de browser niet afspeelt, toont alleen
+  zijn miniatuur (300 px) en blijft daarom passend op 100%; een groter beeld zou een extra ffmpeg-cache vragen.
+  De miniatuur van een video die zwart begint, is ook nog zwart (de miniatuur blijft op 1 s).
 - **Automatisch reeksen zoeken na elke index.** Dat zou veel processorgebruik geven zonder dat je erom vraagt.
-- **Sneller zoeken naar paren bij 100.000 scheve hashes.** 7 tot 10 s in het slechtste geval; het geheugen is wel begrensd.
-- **Videodata voor avi, mkv en mts, en RAW-miniaturen met echte camerabestanden.** Alleen de QuickTime-familie wordt
-  gelezen; RAW via `sips` is getest met een nagebootste fout, niet met echte RAW. *Goede volgende stap met echte bestanden.*
+- **Paren bij 100.000 sterk scheve hashes nog sneller.** Nu 6 tot 7 s (was 12 tot 24 s) in het slechtste geval
+  van de benchmark (`scripts/bench_near_pairs.py`); verder vraagt het gecompileerde code.
+- **De opnamedatum in camcorder-mts (AVCHD).** Datum, duur en afmetingen van avi, mkv en mts komen nu uit ffprobe;
+  een mts zonder datum in de container houdt de bestandsdatum, want de MDPM-datum in de videostroom wordt niet
+  gelezen (er was geen echt camerabestand om tegen te testen).
+- **RAW-miniaturen met echte camerabestanden.** RAW via `sips` is getest met een nagebootste fout, niet met echte RAW.
 - **Namen van zeeën bij een foto op het water.** Een foto op zee heet "Voor de kust van Zeeland, Nederland" of
   "Op zee, 80 km uit de kust van Portugal", niet "Noordzee" of "Middellandse Zee": de vlakken van de zeeën (Natural
   Earth marine polys) zitten niet in de offline kaartdata. *Kan later met een extra bestand van ongeveer 1 MB.*

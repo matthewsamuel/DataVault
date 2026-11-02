@@ -1682,6 +1682,84 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect("strand klein.jpg" in back and "burst_00.jpg" not in back,
                    f"series: after the undo the series did not come back on the tab, or the skipped one did ({back})")
 
+            # Videos in 'Beste uit reeks' (with ffmpeg): a copy of a clip forms a series of videos,
+            # with a play badge and duration on the tiles and 'Afspelen' in the large comparison
+            if shutil.which("ffmpeg"):
+                clips = vault / "RAW" / "2021" / "video's"
+                clips.mkdir(parents=True, exist_ok=True)
+                codec = ["-c:v", "libx264", "-pix_fmt", "yuv420p"] if "libx264" in subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True).stdout else ["-c:v", "mpeg4"]
+                for name, extra in (("feest.mp4", []), ("feest (WhatsApp).mp4", ["-vf", "scale=480:270"])):
+                    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                                    "testsrc2=size=960x540:rate=25", "-t", "3", *codec, *extra, "-y", str(clips / name)],
+                                   check=True, stdin=subprocess.DEVNULL, timeout=120)
+                step("series: compare again with two videos", lambda: page.click("#btn-series-compare"), 0.5)
+                try:
+                    page.wait_for_function("!!document.querySelector('.series-card .series-video-badge')"
+                                           " && document.getElementById('series-progress').hidden", timeout=120000, polling=250)
+                except PlaywrightError:
+                    problems.append("series: two copies of a video never showed as a series")
+                video_card = page.evaluate("""(() => { const b = document.querySelector('.series-card .series-video-badge');
+                    const c = b && b.closest('.series-card');
+                    return c && { title: c.querySelector('.series-card-title').textContent,
+                                  badges: [...c.querySelectorAll('.series-video-badge')].map(x => x.textContent),
+                                  labels: [...c.querySelectorAll('.series-photo')].map(t => t.getAttribute('aria-label')),
+                                  status: document.getElementById('series-status-text').textContent }; })()""")
+                expect(bool(video_card) and video_card["title"] == "2 video's die op elkaar lijken"
+                       and video_card["badges"] == ["0:03", "0:03"]
+                       and all(", video van 0:03" in label for label in video_card["labels"])
+                       and "foto's en video's vergeleken" in video_card["status"],
+                       f"series: the video series is missing or unclear ({video_card})")
+                if video_card:
+                    for theme in ("light", "dark"):
+                        page.evaluate(f"setTheme('{theme}')")
+                        page.evaluate("document.querySelector('.series-card .series-video-badge').closest('.series-card').scrollIntoView()")
+                        page.wait_for_timeout(300)
+                        page.screenshot(path=str(shots / f"duplicates-series-video_{theme}.png"))
+                        page.add_script_tag(path=str(A11Y_CHECKS))
+                        for fail in page.evaluate("__contrastFailures()"):
+                            problems.append(f"contrast {theme} series videos: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+                    page.evaluate("setTheme('auto')")
+                    page.focus(".series-card:has(.series-video-badge) .series-photo")
+                    step("series: v compares the videos", lambda: page.keyboard.press("v"), 0.8)
+                    plays = page.evaluate("document.querySelectorAll('#series-compare-grid .series-compare-play').length")
+                    expect(plays == 2, f"series: the comparison of two mp4 videos offers {plays} 'Afspelen' buttons")
+                    # Each pane shows the video's own frame at its own size (not the 300 px thumbnail), paused
+                    try:
+                        page.wait_for_function("[...document.querySelectorAll('#series-compare-grid video')]"
+                                               ".every(v => v.readyState >= 2)", timeout=10000)
+                    except PlaywrightError:
+                        pass
+                    frames = page.evaluate("[...document.querySelectorAll('#series-compare-grid video')]"
+                                           ".map(v => [v.videoWidth, v.paused])")
+                    expect(sorted(frames) == [[480, True], [960, True]],
+                           f"series: the compared videos do not show their own frames ({frames})")
+                    hint = page.text_content(".series-compare-hint") or ""
+                    expect("video" in hint and "afspelen" in hint and "foto" not in hint,
+                           f"series: the hint bar of a video comparison is off ({hint.split()})")
+                    step("series: 100% before Afspelen", lambda: page.keyboard.press("d"), 0.4)
+                    step("series: Afspelen plays in place", lambda: page.click("#series-compare-grid .series-compare-play"), 1.0)
+                    playing = page.evaluate("""(() => { const v = document.querySelector('#series-compare-grid video');
+                        const f = v && v.closest('.series-compare-frame');
+                        const r = v && v.getBoundingClientRect(), fr = f && f.getBoundingClientRect();
+                        return v && [document.activeElement === v, f.classList.contains('is-playing'), !v.paused,
+                                     r.left >= fr.left - 1 && r.right <= fr.right + 1 && r.top >= fr.top - 1 && r.bottom <= fr.bottom + 1]; })()""")
+                    expect(playing == [True, True, True, True],
+                           f"series: 'Afspelen' did not play the video in the pane, fitted also on 100% ({playing})")
+                    # WebKit gives a video no keys of its own: k pauses, Escape pauses and goes back to Houden
+                    step("series: k pauses the video", lambda: page.keyboard.press("k"), 0.3)
+                    expect(page.evaluate("document.querySelector('#series-compare-grid video').paused"),
+                           "series: k did not pause the playing video")
+                    step("series: Escape on the video", lambda: page.keyboard.press("Escape"), 0.3)
+                    expect(page.evaluate("!!document.querySelector('#modal-series-compare.active')")
+                           and page.evaluate("document.activeElement.classList.contains('series-compare-keep')"),
+                           "series: Escape on a video closed the comparison instead of going back to Houden")
+                    page.keyboard.press("d")
+                    step("series: Escape closes the video comparison", lambda: (
+                        page.focus("#series-compare-grid .series-compare-keep"), page.keyboard.press("Escape")), 0.4)
+                    expect(not page.evaluate("!!document.querySelector('#modal-series-compare.active')")
+                           and page.evaluate("!!document.activeElement.closest('.series-photo')"),
+                           "series: Escape did not close the video comparison back onto the tile")
             # Duplicates undo checks inode and size (migration 171): a copy that was changed in
             # RAW_DUPLICATES after the cleanup stays there; the run, the toast and the
             # Herstelcentrum say why, and the unchanged copy does go back

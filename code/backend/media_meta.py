@@ -10,7 +10,13 @@ for one photo, video or audio file, as cheaply as possible:
 - QuickTime/MP4 videos and m4a audio: a few small reads of the box headers (moov):
   the creation time, duration, dimensions and rotation, and the GPS position and
   camera an iPhone writes. No ffprobe per file.
-- other videos and audio: size and file date only.
+- other videos (avi, mkv, mts, webm, mpg, ...): ffprobe, when it is installed and only
+  in the index job (probe=True): the recording date when the container has one (mkv
+  DateUTC, an AVI date, a creation_time tag), duration, dimensions and rotation, with a
+  timeout. Without it (or outside the job) the row gets meta_status 'probe' and the
+  next pass that can run ffprobe reads it again. The timeline's walk (before the index
+  is built) keeps the file date for these: it never starts a process per file.
+- audio other than m4a: size and file date only.
 
 The capture date follows the one rule of backend/media_dates.py (EXIF or the video's
 own date, else birthtime, else mtime), so the index and the timeline walk agree.
@@ -22,10 +28,15 @@ import os
 import re
 import struct
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+import shutil
+import subprocess
+import threading
+import time
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend import media_dates
-from backend.config import RAW_PHOTO_EXTENSIONS, media_type
+from backend.config import RAW_PHOTO_EXTENSIONS, VIDEO_EXTENSIONS, media_type
 from backend.file_ops import sqlite_ino
 
 QUICKTIME_INFO_EXTENSIONS = media_dates.QUICKTIME_EXTENSIONS | {'.m4a'}
@@ -34,6 +45,14 @@ QUICKTIME_INFO_EXTENSIONS = media_dates.QUICKTIME_EXTENSIONS | {'.m4a'}
 META_OK = "ok"          # read (whatever the file had)
 META_NONE = "none"      # nothing to read: a format without metadata, or a file Pillow cannot open
 META_ERROR = "error"    # could not be read (I/O, permission): read again next pass
+META_PROBE = "probe"    # a video read without ffprobe: read again by a pass that can run it
+
+# Videos whose details only ffprobe reads (QuickTime ones are parsed above)
+FFPROBE_EXTENSIONS = frozenset(VIDEO_EXTENSIONS - media_dates.QUICKTIME_EXTENSIONS)
+FFPROBE_TIMEOUT = 10.0          # seconds per file; a file that takes longer gets its file date
+_FFPROBE_RECHECK = 60.0         # seconds between looks for the ffprobe binary
+_ffprobe_seen: List[Any] = [None, -1e9]     # [path or None, when looked]
+_ffprobe_lock = threading.Lock()
 
 _MAX_BOXES = 10000
 _MAX_SMALL_BOX = 1 << 20   # udta/meta/keys/ilst payloads read whole only up to 1 MB
@@ -320,13 +339,111 @@ def _apply_meta(info: Dict[str, Any], items: Dict[str, Any]) -> None:
             info[field] = _clean_text(items[key])
 
 
+# ---------- other videos: ffprobe ----------
+
+def ffprobe_path() -> Optional[str]:
+    """The ffprobe binary, or None when it is not installed (looked up at most once a minute)."""
+    with _ffprobe_lock:
+        now = time.monotonic()
+        if now - _ffprobe_seen[1] > _FFPROBE_RECHECK:
+            _ffprobe_seen[:] = [shutil.which("ffprobe"), now]
+        return _ffprobe_seen[0]
+
+
+def _video_date(text: Any) -> Optional[float]:
+    """
+    A container date as an epoch: ISO 8601 with a zone (mkv DateUTC, creation_time) is
+    that moment; without a zone (AVI dates) it is local time, like EXIF. Also the AVI
+    'Mon May 01 12:00:00 2023' form and a bare date (midnight). None when implausible.
+    """
+    text = _clean_text(text)
+    if not text:
+        return None
+    text = text.replace("Z", "+00:00") if text.endswith("Z") else text
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        moment = None
+        for form in ("%Y:%m:%d %H:%M:%S", "%a %b %d %H:%M:%S %Y", "%Y/%m/%d %H:%M:%S", "%Y-%m-%d%H:%M:%S"):
+            try:
+                moment = datetime.strptime(text[:24].strip(), form)
+                break
+            except ValueError:
+                continue
+        if moment is None:
+            return None
+    try:
+        return media_dates._plausible(moment.timestamp())
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def ffprobe_info(path: Path, binary: Optional[str] = None, timeout: float = FFPROBE_TIMEOUT) -> Dict[str, Any]:
+    """
+    created (epoch), duration (s), width, height (as shown) and rotation of a video, by
+    ffprobe. Raises OSError when the file itself cannot be read; a damaged file, an
+    ffprobe that fails or takes longer than `timeout` just gives fewer (or no) fields.
+    """
+    import json
+    binary = binary or ffprobe_path()
+    if not binary:
+        return {}
+    with open(path, "rb") as f:      # a clear error for a file that cannot be read
+        f.read(1)
+    cmd = [binary, "-v", "error", "-print_format", "json", "-select_streams", "v",
+           "-show_entries", "format=duration:format_tags:stream=width,height,duration,disposition:"
+           "stream_tags:stream_side_data=rotation", "--", str(path)]
+    try:
+        result = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {}
+    if result.returncode != 0:
+        return {}
+    try:
+        data = json.loads(result.stdout.decode("utf-8", "replace") or "{}")
+    except ValueError:
+        return {}
+    info: Dict[str, Any] = {}
+    fmt = data.get("format") or {}
+    tags = {str(k).lower(): v for k, v in (fmt.get("tags") or {}).items()}
+    # A cover picture (attached_pic) is a video stream too: the first real one counts
+    streams = [s for s in data.get("streams") or []
+               if not (s.get("disposition") or {}).get("attached_pic") and s.get("width") and s.get("height")]
+    stream = streams[0] if streams else {}
+    stream_tags = {str(k).lower(): v for k, v in (stream.get("tags") or {}).items()}
+    for key in ("creation_time", "date", "date_recorded", "datetimeoriginal"):
+        for source in (tags, stream_tags):
+            created = _video_date(source.get(key))
+            if created is not None:
+                info["created"] = created
+                break
+        if "created" in info:
+            break
+    duration = _number(fmt.get("duration")) or _number(stream.get("duration"))
+    if duration and duration > 0:
+        info["duration"] = round(duration, 3)
+    width, height = stream.get("width"), stream.get("height")
+    if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+        rotation = _number(stream_tags.get("rotate"))
+        for side in stream.get("side_data_list") or []:
+            if rotation is None and _number(side.get("rotation")) is not None:
+                rotation = -_number(side["rotation"])      # display matrix: counter-clockwise
+        rotation = int(round(rotation or 0)) % 360
+        if rotation in (90, 270):
+            width, height = height, width
+        info.update(width=width, height=height, rotation=rotation)
+    return info
+
+
 # ---------- one file ----------
 
-def read_metadata(path: Path, st: os.stat_result) -> Dict[str, Any]:
+def read_metadata(path: Path, st: os.stat_result, probe: bool = False) -> Dict[str, Any]:
     """
     The media row fields of one file (without path, folder and the index's own times):
     kind, ext, size, mtime_ns, inode, birthtime, taken, taken_source, width, height,
     orientation, camera_make, camera_model, lens, lat, lon, altitude, duration, meta_status.
+    probe: may run ffprobe for the videos only it can read (the index job; never a request).
     Raises OSError (with an errno) when the file could not be read.
     """
     path = Path(path)
@@ -358,6 +475,20 @@ def read_metadata(path: Path, st: os.stat_result) -> Dict[str, Any]:
                 row[key] = info[key]
         if info.get("rotation") in (90, 270):
             row["orientation"] = 6 if info["rotation"] == 90 else 8
+    elif ext in FFPROBE_EXTENSIONS and kind == "video":
+        binary = ffprobe_path() if probe else None
+        if binary is None:
+            row["meta_status"] = META_PROBE
+        else:
+            info = ffprobe_info(path, binary)
+            row["meta_status"] = META_OK if info else META_NONE
+            if info.get("created") is not None:
+                row["taken"], row["taken_source"] = info["created"], "video"
+            for key in ("duration", "width", "height"):
+                if info.get(key) is not None:
+                    row[key] = info[key]
+            if info.get("rotation") in (90, 270):
+                row["orientation"] = 6 if info["rotation"] == 90 else 8
     if row["taken"] is None:
         row["taken"], row["taken_source"] = media_dates.file_date(st)
     return row

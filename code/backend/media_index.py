@@ -225,15 +225,17 @@ def _fallback_meta(path: str, st: os.stat_result, status: str) -> Dict[str, Any]
     return meta
 
 
-def read_file(path: str, st: os.stat_result) -> Optional[Dict[str, Any]]:
+def read_file(path: str, st: os.stat_result, probe: bool = True) -> Optional[Dict[str, Any]]:
     """
     The metadata of one file for its row; None when the file is gone (it moved or was
     removed after the listing). A read error gives a row with the file's own dates and
     meta_status 'error', read again on the next pass. Raises OSError only when the
-    error may be the vault going away (the caller checks).
+    error may be the vault going away (the caller checks). probe: ffprobe may run for
+    the videos only it reads (the index job; a request passes False and leaves them to
+    the next pass).
     """
     try:
-        return media_meta.read_metadata(Path(path), st)
+        return media_meta.read_metadata(Path(path), st, probe=probe)
     except FileNotFoundError:
         return None
     except OSError as e:
@@ -278,8 +280,12 @@ class _Pass:
         with self.db._connect() as conn:
             self.known = {path: (mtime_ns, parent, last_scanned) for path, parent, mtime_ns, last_scanned
                           in conn.execute("SELECT path, parent, mtime_ns, last_scanned FROM media_folders")}
+            # Folders with a file to read again: a read error, or a video that waits for ffprobe
+            self.can_probe = media_meta.ffprobe_path() is not None
+            statuses = ("error", media_meta.META_PROBE) if self.can_probe else ("error",)
             self.retry = {row[0] for row in conn.execute(
-                "SELECT DISTINCT folder FROM media WHERE meta_status = 'error' AND missing = 0")}
+                f"SELECT DISTINCT folder FROM media WHERE meta_status IN ({', '.join('?' * len(statuses))}) "
+                "AND missing = 0", statuses)}
         self.children: Dict[str, List[str]] = defaultdict(list)
         for path, (_, parent, _) in self.known.items():
             if parent is not None:
@@ -360,7 +366,8 @@ class _Pass:
             if row is None:
                 self.pending_reads.append((path, fst))
                 self.counts["new"] += 1
-            elif row[0] != fst.st_size or row[1] != fst.st_mtime_ns or row[2] == media_meta.META_ERROR:
+            elif (row[0] != fst.st_size or row[1] != fst.st_mtime_ns or row[2] == media_meta.META_ERROR
+                  or (row[2] == media_meta.META_PROBE and self.can_probe)):
                 self.pending_reads.append((path, fst))
                 self.counts["changed"] += 1
             elif row[3]:
@@ -635,7 +642,7 @@ def record_move(db, config, src, dst) -> None:
     meta = None
     if shown and row is None:
         try:
-            meta = read_file(dst, os.lstat(dst))
+            meta = read_file(dst, os.lstat(dst), probe=False)     # a request: no ffprobe here
         except OSError:
             meta = None
     now = time.time()
