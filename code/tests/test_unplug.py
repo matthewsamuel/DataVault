@@ -215,3 +215,32 @@ def test_unplugged_while_idle_every_polled_route_answers_and_nothing_is_made(liv
         if away.exists() and not root.exists():
             os.rename(away, root)
     assert _until(lambda: client.get("/api/folders").status_code == 200, what="the archive back")
+
+
+def test_a_paused_job_cannot_be_resumed_without_the_disk_and_can_once_it_is_back(live_app, gate, vault):
+    """Its state lives in the database on the disk: 'Hervatten' says why (503), not a 500."""
+    app, client = live_app
+    jobs = app.state.jobs
+    folder = vault / "Pauze"
+    _photos(folder, 16)
+    job_id = client.post("/api/jobs", json={"type": "thumbnails", "params": {"folder": str(folder)}}).json()["job"]["id"]
+    assert gate.unplug_now.wait(20)              # held at its 8th thumbnail
+    client.post(f"/api/jobs/{job_id}/pause")
+    gate.go_on.set()
+    job = jobs.wait(job_id, statuses=("queued", "running"), timeout=20)
+    assert job["status"] == "paused", job
+    root = app.state.config.VAULT_ROOT
+    away = root.with_name("vault_pauze")
+    os.rename(root, away)
+    try:
+        r = client.post(f"/api/jobs/{job_id}/resume")
+        assert r.status_code == 503, r.text
+        assert r.json()["error"]["code"] == "vault_unavailable"
+        assert client.get(f"/api/jobs/{job_id}").status_code in (200, 503)
+        assert not root.exists()
+    finally:
+        if away.exists() and not root.exists():
+            os.rename(away, root)
+    assert client.post(f"/api/jobs/{job_id}/resume").status_code == 200
+    job = jobs.wait(job_id, statuses=("queued", "running"), timeout=20)
+    assert job["status"] == "done" and job["summary"]["complete"], job
