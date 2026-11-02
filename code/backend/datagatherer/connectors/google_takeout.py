@@ -147,6 +147,9 @@ class GoogleTakeout(Connector):
                 continue
             kinds[what] += stats["seen"]
             totals["files"] += 1
+        if kinds.get("chrome") or kinds.get("myactivity"):
+            # Visits Chrome on this Mac also has: shown once (activity_store.link_web_visits)
+            totals["linked"] = activity_store.link_after_import(ctx.db, totals)
         if totals["locations_added"]:
             ctx.location_added = getattr(ctx, "location_added", 0) + totals["locations_added"]
         totals["products"] = dict(sorted(products.items()))

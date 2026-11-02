@@ -15515,6 +15515,12 @@ a.act-title:focus-visible {
     font-size: var(--icon-xs);
 }
 
+/* Eén bezoek uit twee bronnen: de iconen naast elkaar */
+.act-meta-icons {
+    display: inline-flex;
+    gap: var(--space-xs);
+}
+
 .act-more {
     margin: var(--space-md) 0 0;
     color: var(--text-tertiary);

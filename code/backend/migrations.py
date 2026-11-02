@@ -1132,6 +1132,26 @@ def _m170_spotify_covers(conn: sqlite3.Connection):
     """)
 
 
+def _m195_activity_duplicate_of(conn: sqlite3.Connection):
+    """
+    The same website visit from two sources (Chrome's history on this Mac and Google Takeout:
+    BrowserHistory.json or My Activity > Chrome) was two rows in Activiteit. Both rows stay;
+    activity_events.duplicate_of now points a copy at the row that is shown
+    (backend/datagatherer/activity_store.link_web_visits: same URL within a few seconds, one
+    row per origin). The visits already stored are linked here once. Only a new column, a
+    new index and that pointer: no row is removed and no other column changes.
+    """
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'activity_events'").fetchone():
+        return
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(activity_events)")}
+    if "duplicate_of" not in columns:
+        conn.execute("ALTER TABLE activity_events ADD COLUMN duplicate_of INTEGER")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_duplicate ON activity_events(duplicate_of) "
+                 "WHERE duplicate_of IS NOT NULL")
+    from backend.datagatherer import activity_store
+    activity_store.link_web_visits_conn(conn)
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -1169,6 +1189,8 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (161, "elo_state_indexes", _m161_elo_state_indexes),
     # 170-179: Spotify covers on Home
     (170, "spotify_covers", _m170_spotify_covers),
+    # 195-199: DataGatherer, what was left (web visits from two sources, edited iMessages)
+    (195, "activity_duplicate_of", _m195_activity_duplicate_of),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
