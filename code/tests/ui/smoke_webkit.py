@@ -108,13 +108,15 @@ ABORTED = re.compile(r"access control checks|network connection was lost|Load fa
 URL_IN_TEXT = re.compile(r"https?://[^\s'\")]+")
 
 
-def free_port() -> int:
+def free_port(avoid=()) -> int:
     # DATAVAULT_TEST_PORTS=9950-9959 keeps the throwaway server inside a range (when other
     # sessions on this machine own other ports); without it the OS picks a free port.
     span = os.environ.get("DATAVAULT_TEST_PORTS", "")
     if "-" in span:
         low, high = (int(p) for p in span.split("-", 1))
         for port in range(low, high + 1):
+            if port in avoid:
+                continue
             with socket.socket() as s:
                 try:
                     s.bind(("127.0.0.1", port))
@@ -163,25 +165,36 @@ def start_server(workdir: Path):
     fake_exports.dutch_takeout_folder(vault / "data" / "Matthew" / "RAW_google")
     fake_exports.chrome_history_db(workdir / "Chrome" / "Default" / "History",
                                    [(1563091200 + i * 1800, f"https://voorbeeld{i}.be/", f"Pagina {i}") for i in range(12)])
-    port = free_port()
     env = dict(os.environ, DATAVAULT_TESTING="1", DATAVAULT_CONFIG=str(workdir / "vault_config.json"),
                DATAVAULT_LOG_FILE=str(workdir / "server.log"), DATAVAULT_GATHER_HOME=str(workdir / "home"),
                DATAVAULT_CHROME_DIR=str(workdir / "Chrome"))
     log = open(workdir / "uvicorn.log", "w")
-    proc = subprocess.Popen(
-        [python, "-m", "uvicorn", "--factory", "backend.main:create_app",
-         "--host", "127.0.0.1", "--port", str(port)],
-        cwd=CODE_DIR, env=env, stdout=log, stderr=subprocess.STDOUT)
-    base = f"http://127.0.0.1:{port}"
-    for _ in range(60):
-        try:
-            with urllib.request.urlopen(base + "/api/health", timeout=1) as r:
-                if r.status == 200:
-                    return proc, base, vault.resolve()
-        except OSError:
+    tried = set()
+    for _ in range(4):
+        # Two smokes that start together can both find the same port free; the one whose server
+        # cannot bind it would then test the other one's server. So only our own process counts
+        # (its pid in /api/health), and a server that exits (port taken) gets the next port.
+        port = free_port(avoid=tried)
+        tried.add(port)
+        proc = subprocess.Popen(
+            [python, "-m", "uvicorn", "--factory", "backend.main:create_app",
+             "--host", "127.0.0.1", "--port", str(port)],
+            cwd=CODE_DIR, env=env, stdout=log, stderr=subprocess.STDOUT)
+        base = f"http://127.0.0.1:{port}"
+        deadline = time.monotonic() + 60 * SLOW
+        while time.monotonic() < deadline and proc.poll() is None:
+            try:
+                with urllib.request.urlopen(base + "/api/health", timeout=2) as r:
+                    if r.status == 200 and json.loads(r.read()).get("pid") == proc.pid:
+                        return proc, base, vault.resolve()
+            except (OSError, ValueError):
+                pass
             time.sleep(0.5)
-    proc.terminate()
-    raise RuntimeError(f"server did not start, see {workdir / 'uvicorn.log'}")
+        if proc.poll() is None:
+            proc.terminate()
+            raise RuntimeError(f"server did not start, see {workdir / 'uvicorn.log'}")
+        print(f"port {port} was taken; trying another", flush=True)
+    raise RuntimeError(f"no port for the server, see {workdir / 'uvicorn.log'}")
 
 
 def launch(p, engine: str, headed: bool):
@@ -780,6 +793,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("keurer: Enter on Annuleren in the move window", lambda: (
                 page.evaluate("document.activeElement.blur()"), page.keyboard.press("ArrowUp"),
                 page.wait_for_selector("#keurer-move-folder-tree .folder-item", timeout=T(5000)),
+                # The window puts focus in its search field a moment after opening: wait for that,
+                # or it can take the focus back from Annuleren between the focus and the Enter
+                page.wait_for_function("document.activeElement && document.activeElement.id === 'keurer-move-search'",
+                                       timeout=T(5000)),
                 page.keyboard.press("ArrowDown"),
                 page.focus("#modal-keurer-move .modal-footer .btn-secondary"), page.keyboard.press("Enter")), 0.8)
             expect(page.evaluate(keurer_state) == base and Path(current).exists(),
@@ -2056,7 +2073,9 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             summary = done.get("summary") or {}
             expect(done.get("status") == "done" and summary.get("complete") and summary.get("errors") == 0
                    and summary.get("files", 0) >= BIG_FILES,
-                   f"unplug: the job did not finish once the disk was back ({done.get('status')}, {summary})")
+                   f"unplug: the job did not finish once the disk was back ({done.get('status')}, {summary}, "
+                   f"{done.get('message')!r}; vault there: {vault.is_dir()}, health: "
+                   f"{page.evaluate('fetch(`/api/health`).then(r => r.json()).then(h => h.vault_available)')})")
             expect(tree(vault, cache=False) == archive_before, "unplug: the archive itself changed")
             # (the 503s of an unplugged archive are expected here; nothing else is)
             problems[seen:] = [p for p in problems[seen:]
