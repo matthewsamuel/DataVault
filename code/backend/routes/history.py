@@ -86,6 +86,8 @@ def activity_events(request: Request, day: str = Query(...), limit: int = Query(
     names = {c.id: (c.name, c.icon) for c in registry.connectors()}
     for ev in events:
         ev["source_name"], ev["source_icon"] = names.get(ev["source"], (ev["source"], "fas fa-database"))
+        for other in ev.get("also") or []:     # the same visit in another source, shown once
+            other["name"], other["icon"] = names.get(other["source"], (other["source"], "fas fa-database"))
     return {"day": day, "events": events[:limit], "truncated": len(events) > limit}
 
 

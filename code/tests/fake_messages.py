@@ -13,6 +13,7 @@ Nothing here comes from a real Mac, phone or account: every name, number and tex
 """
 import io
 import json
+import plistlib
 import sqlite3
 import zipfile
 from pathlib import Path
@@ -106,12 +107,35 @@ def typedstream(text: str) -> bytes:
             b"\x84\x99\x99\x00\x86\x86\x86")
 
 
+def apple_ns(unix: float) -> int:
+    """A chat.db date (macOS 10.13+): nanoseconds since 2001-01-01."""
+    return int((unix - APPLE_EPOCH) * 1e9)
+
+
+def summary_info(versions=(), unsent_parts=()) -> bytes:
+    """
+    message_summary_info as Messages writes it: a binary plist; 'ec' holds every version of
+    part 0 of an edited message (oldest first, the text as attributedBody, the date in
+    nanoseconds since 2001), 'ep' the edited parts, 'rp' the unsent ones.
+    """
+    info = {"amc": 1, "ust": True}
+    if versions:
+        info["ec"] = {"0": [{"d": apple_ns(ts), "t": typedstream(text), "bcg": f"bcg-{i}"}
+                            for i, (ts, text) in enumerate(versions)]}
+        info["ep"] = [0]
+    if unsent_parts:
+        info["rp"] = list(unsent_parts)
+    return plistlib.dumps(info, fmt=plistlib.FMT_BINARY)
+
+
 def make_chat_db(path: Path, handles: Dict[int, str], chats: List[Dict], messages: List[Dict],
                  attachments: Optional[List[Dict]] = None):
     """
     handles: {rowid: 'id'}; chats: {rowid, guid, name?, style, handles[]}; messages: {rowid, guid,
     chat, handle, me, text?, body? (attributedBody only), ts (unix), seconds? (old date format),
-    assoc?, assoc_type?, emoji?, retracted?}; attachments: {rowid, message, filename, mime, transfer}.
+    assoc?, assoc_type?, emoji?, retracted? (True: a second after ts, or a unix time), edited? (unix),
+    summary? (message_summary_info bytes, see summary_info)}; attachments: {rowid, message, filename,
+    mime, transfer}.
     """
     conn = sqlite3.connect(str(path))
     conn.executescript("""
@@ -126,7 +150,8 @@ def make_chat_db(path: Path, handles: Dict[int, str], chats: List[Dict], message
             date INTEGER, date_read INTEGER, date_delivered INTEGER, is_from_me INTEGER DEFAULT 0,
             item_type INTEGER DEFAULT 0, cache_has_attachments INTEGER DEFAULT 0,
             associated_message_guid TEXT DEFAULT NULL, associated_message_type INTEGER DEFAULT 0,
-            date_edited INTEGER DEFAULT 0, date_retracted INTEGER DEFAULT 0, associated_message_emoji TEXT);
+            date_edited INTEGER DEFAULT 0, date_retracted INTEGER DEFAULT 0, associated_message_emoji TEXT,
+            message_summary_info BLOB);
         CREATE TABLE chat_message_join (chat_id INTEGER REFERENCES chat (ROWID), message_id INTEGER
             REFERENCES message (ROWID), message_date INTEGER DEFAULT 0, PRIMARY KEY (chat_id, message_id));
         CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER, UNIQUE(chat_id, handle_id));
@@ -146,12 +171,15 @@ def make_chat_db(path: Path, handles: Dict[int, str], chats: List[Dict], message
             conn.execute("INSERT INTO chat_handle_join VALUES (?, ?)", (c["rowid"], h))
     for m in messages:
         date = int(m["ts"] - APPLE_EPOCH) if m.get("seconds") else int((m["ts"] - APPLE_EPOCH) * 1e9)
+        retracted = m.get("retracted")
+        retracted = (date + 10 ** 9 if retracted is True else apple_ns(retracted)) if retracted else 0
         conn.execute("INSERT INTO message (ROWID, guid, text, attributedBody, handle_id, service, date, is_from_me, "
-                     "associated_message_guid, associated_message_type, associated_message_emoji, date_retracted) "
-                     "VALUES (?, ?, ?, ?, ?, 'iMessage', ?, ?, ?, ?, ?, ?)",
+                     "associated_message_guid, associated_message_type, associated_message_emoji, date_retracted, "
+                     "date_edited, message_summary_info) "
+                     "VALUES (?, ?, ?, ?, ?, 'iMessage', ?, ?, ?, ?, ?, ?, ?, ?)",
                      (m["rowid"], m["guid"], m.get("text"), m.get("body"), m.get("handle", 0), date,
                       1 if m.get("me") else 0, m.get("assoc"), m.get("assoc_type", 0), m.get("emoji"),
-                      date + 10 ** 9 if m.get("retracted") else 0))
+                      retracted, apple_ns(m["edited"]) if m.get("edited") else 0, m.get("summary")))
         conn.execute("INSERT INTO chat_message_join (chat_id, message_id) VALUES (?, ?)", (m["chat"], m["rowid"]))
     for a in attachments or []:
         conn.execute("INSERT INTO attachment (ROWID, guid, filename, mime_type, transfer_name) VALUES (?, ?, ?, ?, ?)",

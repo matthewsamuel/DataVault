@@ -589,7 +589,8 @@ def test_imessage_reads_attributed_body_dates_tapbacks_and_attachments(client, a
     assert result["added"] == 5
     rows = {r[0]: r[1:] for r in _rows(app, "SELECT msg_key, body, is_me, sent_at_ms, reactions, attachments, sender, "
                                             "kind FROM msg_messages")}
-    assert json.loads(rows["G-1"][3]) == [{"actor": "+32470000001", "reaction": "🎉"}]
+    # 🎉 was taken back (3006): kept as removed, not shown
+    assert json.loads(rows["G-1"][3]) == [{"actor": "+32470000001", "reaction": "🎉", "removed": True}]
     assert "G-6" not in rows and "G-7" not in rows and rows["G-8"][0] is None and rows["G-8"][6] == "unsent"
     assert rows["G-2"][0] == "Ja, kom maar 🙂" and rows["G-2"][1] == 1
     assert rows["G-1"][2] == (T0 + 10) * 1000 and rows["G-5"][2] == (T0 - 86400 * 2000) * 1000

@@ -8,6 +8,11 @@ search and Pasha read one store:
                                               merged_into to the conversation it was merged into)
     insert_messages(db, source, rows)         INSERT OR IGNORE on (source, msg_key): importing
                                               the same export twice adds nothing
+    revise_messages(db, source, rows)         a message edited or unsent since it was stored
+                                              (iMessage): the row is updated, its earlier text
+                                              kept in edits (migration 196), never a second row
+    apply_reactions(db, source, events)       tapbacks in time order: one per person, a tapback
+                                              taken back is marked removed (kept, not shown)
     reconcile_whatsapp(db)                    an 'Export chat' (.txt, minute precision) merged
                                               into the chat from the WhatsApp database: the
                                               conversation is merged, and every .txt message the
@@ -30,7 +35,8 @@ from backend.datagatherer.base import Coverage
 
 BATCH = 2000
 MESSAGE_COLUMNS = ("source", "conv_id", "msg_key", "origin", "sent_at_ms", "tz", "ts_precision", "sender", "is_me",
-                   "body", "kind", "attachments", "reactions", "raw_import_id", "first_seen_at")
+                   "body", "kind", "attachments", "reactions", "raw_import_id", "first_seen_at",
+                   "edited_at_ms", "retracted_at_ms", "edits")
 PASHA_SETTING = "pasha"            # the per-source toggle 'Pasha mag deze berichten lezen' (off by default)
 TXT_PREFIX = "name:"               # the conv_key of a WhatsApp 'Export chat': the chat's name
 HIT_START, HIT_END = "\u0002", "\u0003"   # marks around a search hit in a snippet (the page makes <mark> of it)
@@ -81,7 +87,9 @@ def conversation(db, source: str, conv_key: str, title: Optional[str] = None,
 def message_row(conv_id: int, msg_key: str, origin: str, sent_at_ms: int, *, source: str, ts_precision: str = "s",
                 tz: Optional[str] = None, sender: Optional[str] = None, is_me: Optional[bool] = None,
                 body: Optional[str] = None, kind: str = "text", attachments: Optional[list] = None,
-                reactions: Optional[list] = None, raw_import_id: Optional[int] = None) -> Dict[str, Any]:
+                reactions: Optional[list] = None, raw_import_id: Optional[int] = None,
+                edited_at_ms: Optional[int] = None, retracted_at_ms: Optional[int] = None,
+                edits: Optional[list] = None) -> Dict[str, Any]:
     return {
         "source": source, "conv_id": conv_id, "msg_key": msg_key, "origin": origin, "sent_at_ms": int(sent_at_ms),
         "tz": tz, "ts_precision": ts_precision, "sender": sender, "is_me": None if is_me is None else int(bool(is_me)),
@@ -89,6 +97,8 @@ def message_row(conv_id: int, msg_key: str, origin: str, sent_at_ms: int, *, sou
         "attachments": json.dumps(attachments, ensure_ascii=False) if attachments else None,
         "reactions": json.dumps(reactions, ensure_ascii=False) if reactions else None,
         "raw_import_id": raw_import_id, "first_seen_at": time.time(),
+        "edited_at_ms": edited_at_ms, "retracted_at_ms": retracted_at_ms,
+        "edits": json.dumps(edits, ensure_ascii=False) if edits else None,
     }
 
 
@@ -112,13 +122,110 @@ def insert_messages(db, source: str, rows: Iterable[Dict[str, Any]], check=None)
 
     for row in rows:
         seen += 1
-        batch.append(tuple(row[c] for c in MESSAGE_COLUMNS))
+        batch.append(tuple(row.get(c) for c in MESSAGE_COLUMNS))
         if len(batch) >= BATCH:
             flush()
             if check is not None:
                 check()
     flush()
     return added, seen
+
+
+def _merge_history(stored: Optional[str], new: Optional[str], old_body: Optional[str], old_at: int,
+                   new_body: Optional[str]) -> Optional[str]:
+    """The earlier versions of a message: what was stored, what the source lists, and the text that
+    was stored until now when it differs from the new one. Oldest first, each text once."""
+    history: List[Dict[str, Any]] = []
+    for blob in (stored, new):
+        try:
+            items = json.loads(blob) if blob else []
+        except ValueError:
+            items = []
+        history += [h for h in items if isinstance(h, dict) and h.get("body")]
+    if old_body and old_body != new_body:
+        history.append({"at": old_at, "body": old_body})
+    seen, out = set(), []
+    for h in sorted(history, key=lambda h: h.get("at") or 0):
+        if h["body"] != new_body and h["body"] not in seen:
+            seen.add(h["body"])
+            out.append({"at": h.get("at"), "body": h["body"]})
+    return json.dumps(out, ensure_ascii=False) if out else None
+
+
+def revise_messages(db, source: str, rows: Iterable[Dict[str, Any]]) -> int:
+    """
+    Messages that were edited or unsent after they were stored (rows from message_row with
+    edited_at_ms or retracted_at_ms): the stored row gets the new text, kind and times, and
+    its earlier text goes into edits. A row that already says the same is left alone, so
+    reading again changes nothing. Returns how many rows changed.
+    """
+    changed = 0
+    touched = set()
+    with db._connect() as conn:
+        for row in rows:
+            if row.get("edited_at_ms") is None and row.get("retracted_at_ms") is None:
+                continue
+            cur = conn.execute("SELECT id, conv_id, body, kind, sent_at_ms, edited_at_ms, retracted_at_ms, edits "
+                               "FROM msg_messages WHERE source = ? AND msg_key = ?", (source, row["msg_key"])).fetchone()
+            if cur is None:
+                continue
+            row_id, conv_id, body, kind, sent, edited, retracted, edits = cur
+            if (edited, retracted, body, kind) == (row["edited_at_ms"], row["retracted_at_ms"], row["body"], row["kind"]):
+                continue
+            history = _merge_history(edits, row.get("edits"), body, edited or sent, row["body"])
+            conn.execute("UPDATE msg_messages SET body = ?, kind = ?, edited_at_ms = ?, retracted_at_ms = ?, edits = ? "
+                         "WHERE id = ?", (row["body"], row["kind"], row["edited_at_ms"], row["retracted_at_ms"],
+                                          history, row_id))
+            changed += 1
+            touched.add(conv_id)
+        if changed:
+            refresh_conversations(conn, touched)
+            state.bump_version(conn, source)
+    return changed
+
+
+def apply_reactions(db, source: str, events: Iterable[Dict[str, Any]]) -> int:
+    """
+    Tapbacks in time order ({target, actor, reaction, removed}): one per person per message,
+    so a new one replaces that person's earlier one, and one taken back (removed; reaction
+    None: whichever it was) is marked removed. Marked, not dropped: the list keeps what
+    happened, the views leave removed ones out. The same events twice give the same result.
+    Returns how many messages changed.
+    """
+    by_target: Dict[str, List[Dict[str, Any]]] = {}
+    for ev in events:
+        by_target.setdefault(ev["target"], []).append(ev)
+    changed = 0
+    with db._connect() as conn:
+        for target, items in by_target.items():
+            row = conn.execute("SELECT id, reactions FROM msg_messages WHERE source = ? AND msg_key = ?",
+                               (source, target)).fetchone()
+            if row is None:
+                continue
+            before = row[1] or "[]"
+            current = [r for r in json.loads(before) if isinstance(r, dict)]
+            for ev in sorted(items, key=lambda e: e.get("ts_ms") or 0):
+                mine = [r for r in current if r.get("actor") == ev["actor"]]
+                if ev.get("removed"):
+                    for r in mine:
+                        if ev["reaction"] is None or r.get("reaction") == ev["reaction"]:
+                            r["removed"] = True
+                    continue
+                for r in mine:
+                    if r.get("reaction") != ev["reaction"]:
+                        r["removed"] = True
+                same = next((r for r in mine if r.get("reaction") == ev["reaction"]), None)
+                if same is not None:
+                    same.pop("removed", None)
+                else:
+                    current.append({"actor": ev["actor"], "reaction": ev["reaction"]})
+            after = json.dumps(current, ensure_ascii=False) if current else None
+            if (after or "[]") != before:
+                conn.execute("UPDATE msg_messages SET reactions = ? WHERE id = ?", (after, row[0]))
+                changed += 1
+        if changed:
+            state.bump_version(conn, source)
+    return changed
 
 
 def refresh_conversations(conn, conv_ids: Iterable[int]) -> None:
@@ -284,7 +391,12 @@ def _message_view(row: Dict[str, Any]) -> Dict[str, Any]:
         "attachments": [{"index": i, "name": a.get("name"), "mime": a.get("mime"),
                          "preview": bool(a.get("raw_import_id") and a.get("member") and _is_image(a)),
                          "local": bool(a.get("local"))} for i, a in enumerate(attachments)],
-        "reactions": json.loads(row["reactions"] or "[]"),
+        "reactions": [{"actor": r.get("actor"), "reaction": r.get("reaction")}
+                      for r in json.loads(row["reactions"] or "[]") if isinstance(r, dict) and not r.get("removed")],
+        "edited_at": row["edited_at_ms"] / 1000 if row.get("edited_at_ms") else None,
+        "retracted_at": row["retracted_at_ms"] / 1000 if row.get("retracted_at_ms") else None,
+        "edits": [{"at": e["at"] / 1000 if e.get("at") else None, "body": e.get("body")}
+                  for e in json.loads(row.get("edits") or "[]") if isinstance(e, dict) and e.get("body")],
     }
 
 

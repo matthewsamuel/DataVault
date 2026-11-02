@@ -132,6 +132,7 @@ class Connector:
     launchd: bool = False             # may also run from the optional launchd agent
     parser_version: int = 1
     holds_messages: bool = False      # its id is a message source in the Berichten view (msg_* tables)
+    reads_tar: bool = False           # detect() also gets the first members of a .tgz/.tar.gz (raw_store.archive_names)
     watch_setting: Optional[str] = None   # a setting holding a folder (a synced cloud folder) that the
                                           # watcher always looks in, also without an open request
 
@@ -166,8 +167,9 @@ class Connector:
     def detect(self, path: Path, names: Optional[List[str]]) -> Optional[str]:
         """
         The ExportKind id if path is an export of this source, else None. names is the list
-        of members when path is a zip (read from its central directory), else None. Look at
-        the content, not only the name: Downloads holds many zips.
+        of members when path is a zip (read from its central directory), else None; with
+        reads_tar also the first members of a .tgz/.tar.gz. Look at the content, not only
+        the name: Downloads holds many zips.
         """
         return None
 
@@ -180,6 +182,10 @@ class Connector:
             if folder is not None and folder.is_dir() and not folder.is_symlink():
                 found.append((folder, self.exports[0].id if self.exports else "folder"))
         return found
+
+    def stale_raw(self, raw: Dict[str, Any]) -> bool:
+        """An archived export file that a newer parser should read again (an import job re-reads it)."""
+        return False
 
     def import_raw(self, ctx: "GatherContext", raw: Dict[str, Any]) -> Dict[str, Any]:
         """

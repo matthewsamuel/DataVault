@@ -69,6 +69,8 @@ class ChromeHistory(Connector):
                 with ctx.db._connect() as conn:
                     state.set_cursor(conn, self.id, profile, {"last_ms": max(e["ts_ms"] for e in events),
                                                               "at": time.time()})
+        # The same visits may already be here from Takeout: shown once (activity_store.link_web_visits)
+        totals["linked"] = activity_store.link_after_import(ctx.db, totals)
         return totals
 
     def coverage(self, ctx: GatherContext) -> Coverage:

@@ -114,7 +114,7 @@ def start_server(workdir: Path):
         (big / f"foto_{i:04d}.jpg").write_bytes(sample + str(i).encode())   # distinct bytes, still a JPEG
     # A made-up home folder with a synthetic Messages database (never the real ~/Library/Messages)
     sys.path.insert(0, str(CODE_DIR / "tests"))
-    from fake_messages import T0, make_chat_db, typedstream
+    from fake_messages import T0, make_chat_db, summary_info, typedstream
     messages = workdir / "home" / "Library" / "Messages"
     messages.mkdir(parents=True)
     make_chat_db(messages / "chat.db", {1: "+32470000001", 2: "lotte@example.com"}, [
@@ -122,12 +122,18 @@ def start_server(workdir: Path):
         {"rowid": 2, "guid": "iMessage;+;chat1", "style": 43, "name": "Weekend", "handles": [1, 2]}], [
         {"rowid": 1, "guid": "S-1", "chat": 1, "handle": 1, "text": "Zal ik pasta maken?", "ts": T0},
         {"rowid": 2, "guid": "S-2", "chat": 1, "me": True, "body": typedstream("Ja graag!"), "ts": T0 + 60},
-        {"rowid": 3, "guid": "S-3", "chat": 2, "handle": 2, "text": "Wie rijdt zaterdag?", "ts": T0 + 120}])
+        {"rowid": 3, "guid": "S-3", "chat": 2, "handle": 2, "text": "Wie rijdt zaterdag?", "ts": T0 + 120},
+        # Edited twice (the earlier versions come from message_summary_info) and one unsent
+        {"rowid": 4, "guid": "S-4", "chat": 1, "handle": 1, "text": "Om half 8 dan?", "ts": T0 + 180, "edited": T0 + 240,
+         "summary": summary_info([(T0 + 180, "Om 7 uur dan?"), (T0 + 210, "Om 8 uur dan?"), (T0 + 240, "Om half 8 dan?")])},
+        {"rowid": 5, "guid": "S-5", "chat": 1, "me": True, "ts": T0 + 300, "retracted": True}])
     # DataGatherer 3.9c: an unpacked Dutch Takeout in RAW_google and a Chrome profile (both synthetic)
     sys.path.insert(0, str(CODE_DIR / "tests"))
     import fake_exports
     fake_exports.dutch_takeout_folder(vault / "data" / "Matthew" / "RAW_google")
+    # (the first visit is also in the Takeout's BrowserHistory.json: Activiteit shows it once)
     fake_exports.chrome_history_db(workdir / "Chrome" / "Default" / "History",
+                                   [(1563091200, "https://voorbeeld.be/", "Voorbeeld")] +
                                    [(1563091200 + i * 1800, f"https://voorbeeld{i}.be/", f"Pagina {i}") for i in range(12)])
     port = free_port()
     env = dict(os.environ, DATAVAULT_TESTING="1", DATAVAULT_CONFIG=str(workdir / "vault_config.json"),
@@ -1917,6 +1923,26 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.locator("#msg-thread .msg-row.is-hit").count() == 1, "berichten: the hit is not highlighted in the thread")
             step("berichten: Escape clears the search", lambda: (page.focus("#msg-search"), page.keyboard.press("Escape")), 0.8)
             expect(page.input_value("#msg-search") == "", "berichten: Escape did not clear the search")
+            # An edited iMessage: 'Bewerkt' opens its earlier versions, with the keyboard too
+            step("berichten: the chat with an edited message", lambda: page.click("#msg-list .msg-item:has-text('+32470000001')"), 0.8)
+            edited = "#msg-thread button.msg-edited"
+            expect(page.locator(edited).count() == 1 and page.inner_text(edited).strip() == "Bewerkt",
+                   "berichten: the edited message has no 'Bewerkt'")
+            expect(page.locator("#msg-thread .msg-text-muted:has-text('Bericht ingetrokken')").count() == 1,
+                   "berichten: the unsent message does not say 'Bericht ingetrokken'")
+            step("berichten: Bewerkt with Enter", lambda: (page.focus(edited), page.keyboard.press("Enter")), 0.5)
+            expect(page.get_attribute(edited, "aria-expanded") == "true"
+                   and page.locator("#msg-thread .msg-edits:not([hidden]) .msg-edit").count() == 2,
+                   "berichten: Bewerkt does not show the two earlier versions")
+            if os.environ.get("DATAVAULT_SMOKE_SHOTS"):
+                for theme in ("light", "dark"):
+                    page.evaluate(f"setTheme('{theme}')")
+                    time.sleep(0.3)
+                    page.screenshot(path=str(Path(os.environ["DATAVAULT_SMOKE_SHOTS"]) / f"berichten-edits_{theme}.png"))
+                page.evaluate("setTheme('auto')")
+            step("berichten: Bewerkt closes again", lambda: page.keyboard.press("Space"), 0.4)
+            expect(page.get_attribute(edited, "aria-expanded") == "false" and not page.is_visible("#msg-thread .msg-edits"),
+                   "berichten: Bewerkt does not close the earlier versions")
             step("berichten: Pasha window", lambda: page.click("#section-berichten button:has-text('Pasha en je berichten')"), 0.6)
             expect(page.locator("#msg-pasha input[type=checkbox]:checked").count() == 0, "berichten: Pasha may read messages by default")
             expect_focus_trapped("msg-pasha", "berichten: Pasha window")
@@ -1977,6 +2003,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("activity: Filters wissen", lambda: page.click("#act-reset"), 0.8)
             expect(page.evaluate("document.getElementById('act-reset').offsetParent === null"),
                    "activity: 'Filters wissen' stays visible without filters")
+            # The same visit from Chrome and from Takeout: once, with both sources
+            step("activity: the day with a visit in two sources", lambda: page.evaluate("actSelectDay('2019-07-14')"), 1.0)
+            both = page.evaluate("[...document.querySelectorAll('.act-event')].filter(e => e.querySelector('.act-title')"
+                                 " && e.querySelector('.act-title').textContent === 'Voorbeeld').map(e => e.querySelector('.act-meta').textContent)")
+            expect(len(both) == 1 and "Chrome-geschiedenis en Google Takeout" in both[0],
+                   f"activity: the visit in Chrome and Takeout shows as {both}")
             page.click(".nav-tab[data-view='home']")
             step("activity: g c opens it", lambda: (page.keyboard.press("g"), page.keyboard.press("c")), 0.6)
             expect(page.evaluate(view_now) == "activity", "activity: g c did not open it")

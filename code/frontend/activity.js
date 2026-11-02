@@ -232,7 +232,11 @@ function actEvent(ev) {
     const wholeDay = actWholeDay(ev);
     const time = wholeDay ? 'Hele dag'
         : new Date(ev.ts * 1000).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
-    const meta = [ev.kind_label, ev.source_name];
+    // Hetzelfde bezoek uit twee bronnen (Chrome op deze Mac en Takeout) staat hier één keer, met beide bronnen
+    const also = ev.also || [];
+    const sources = [ev.source_name, ...also.map(a => a.name)];
+    const sourceText = sources.length > 1 ? `${sources.slice(0, -1).join(', ')} en ${sources[sources.length - 1]}` : sources[0];
+    const meta = [ev.kind_label, sourceText];
     Object.entries(ev.details || {}).forEach(([k, v]) => {
         if (ACT_DETAIL_LABELS[k] && v !== null && v !== '' && meta.length < 5) meta.push(`${ACT_DETAIL_LABELS[k]}: ${actDetailText(k, v)}`);
     });
@@ -249,7 +253,10 @@ function actEvent(ev) {
             title: wholeDay ? 'Geen tijdstip bekend, alleen de dag' : undefined, text: time }),
         createEl('span', { class: 'act-icon', 'aria-hidden': 'true' }, createEl('i', { class: `fas ${kind}` })),
         createEl('div', { class: 'act-body' }, title, text,
-            createEl('div', { class: 'act-meta' }, createEl('i', { class: ev.source_icon, 'aria-hidden': 'true' }), ` ${meta.join(' · ')}`)));
+            createEl('div', { class: 'act-meta', title: also.length ? `Staat in ${sourceText}; hier één keer getoond` : undefined },
+                createEl('span', { class: 'act-meta-icons', 'aria-hidden': 'true' },
+                    createEl('i', { class: ev.source_icon }), ...also.map(a => createEl('i', { class: a.icon }))),
+                ` ${meta.join(' · ')}`)));
 }
 
 async function actLoadEvents() {

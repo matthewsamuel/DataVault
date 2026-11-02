@@ -84,6 +84,7 @@
     --radius-modal: var(--radius-xl);
 
     /* Iconen */
+    --icon-2xs: 10px;   /* naast de kleinste tekst (--fs-2xs) */
     --icon-xs: 12px;
     --icon-sm: 14px;
     --icon-md: 16px;
@@ -14974,10 +14975,88 @@ html[data-motion="rustig"] .elo-trash:hover i {
 
 .msg-time {
     display: block;
-    margin-top: 2px;
     color: var(--text-tertiary);
     font-size: var(--fs-2xs);
     text-align: right;
+}
+
+/* Onderaan de bubbel: 'Bewerkt' of 'Eerdere tekst' links van het uur */
+.msg-foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    margin-top: var(--space-2xs);
+}
+
+.msg-edited {
+    color: var(--text-tertiary);
+    font-size: var(--fs-2xs);
+}
+
+button.msg-edited {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: none;
+    font-family: inherit;
+    cursor: pointer;
+    transition: color var(--dur-2) var(--ease-out);
+}
+
+button.msg-edited:hover {
+    color: var(--text-secondary);
+}
+
+button.msg-edited:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.msg-edited-chevron {
+    font-size: var(--icon-2xs);
+    transition: transform var(--dur-3) var(--ease-out);
+}
+
+button.msg-edited[aria-expanded="true"] .msg-edited-chevron {
+    transform: rotate(180deg);
+}
+
+/* De eerdere versies: stil, onder de tekst van nu */
+.msg-edits {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    margin: var(--space-sm) 0 0;
+    padding: var(--space-sm) 0 0;
+    border-top: 1px solid var(--border-hairline);
+    list-style: none;
+}
+
+.msg-edits[hidden] {
+    display: none;
+}
+
+.msg-edit {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+}
+
+.msg-edit-text {
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+    line-height: var(--lh-normal);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.msg-edit-time {
+    color: var(--text-tertiary);
+    font-size: var(--fs-2xs);
 }
 
 .msg-media {
@@ -15513,6 +15592,12 @@ a.act-title:focus-visible {
 
 .act-meta i {
     font-size: var(--icon-xs);
+}
+
+/* Eén bezoek uit twee bronnen: de iconen naast elkaar */
+.act-meta-icons {
+    display: inline-flex;
+    gap: var(--space-xs);
 }
 
 .act-more {

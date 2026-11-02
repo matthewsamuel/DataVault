@@ -159,7 +159,7 @@ def candidates(config, db, connector, now: Optional[float] = None,
                 continue   # still being written: look again next time
             if not cached:
                 path = Path(entry.path)
-                kind = connector.detect(path, raw_store.read_zip_names(path))
+                kind = connector.detect(path, raw_store.archive_names(path, connector.reads_tar))
                 with _seen_lock:
                     _seen.kinds[kind_key] = kind
             if kind is None:

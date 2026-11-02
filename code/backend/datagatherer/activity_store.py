@@ -13,17 +13,26 @@ a TikTok video, a workout, ... Each row has:
 
 The connectors turn their exports into Event dicts and call insert(); the Activiteit view
 (routes/history.py) and the assistant read through days(), events() and facets().
+
+The same website visit can come from two sources: Chrome's own history on this Mac and
+Google Takeout (Chrome's BrowserHistory.json and My Activity > Chrome). Both rows stay
+(each source's import stays idempotent), and link_web_visits() points the extra copies at
+one row with duplicate_of (migration 195): same URL, within WEB_VISIT_WINDOW_MS, at most
+one row per origin. The views show that row once, with the other sources named (also).
 """
 import hashlib
 import json
 import time
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from backend.datagatherer import state
 from backend.datagatherer.base import Coverage
 
 BATCH = 2000
+WEB_VISIT_WINDOW_MS = 5000          # one visit in two sources: the same URL within 5 s
+LINKED_SOURCES = ("chrome_history", "google_takeout")
 
 # kind -> (Dutch label, Font Awesome icon); a kind not listed here shows as 'Activiteit'
 KINDS: Dict[str, Tuple[str, str]] = {
@@ -106,6 +115,120 @@ def insert(db, source: str, raw_import_id: Optional[int], events: Iterable[Dict[
             "covers_until": last / 1000 if last is not None else None}
 
 
+# ---------- the same website visit from two sources ----------
+
+def norm_url(url: Optional[str]) -> Optional[str]:
+    """A URL for matching: Google's redirect unwrapped, scheme and host lower case, no fragment."""
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url.strip())
+        host = (parts.hostname or "").lower()
+        if host in ("www.google.com", "google.com") and parts.path == "/url":
+            target = (parse_qs(parts.query).get("q") or parse_qs(parts.query).get("url") or [None])[0]
+            if target and target.startswith(("http://", "https://")):
+                return norm_url(target)
+        netloc = host
+        if parts.port and not ((parts.scheme == "http" and parts.port == 80) or (parts.scheme == "https" and parts.port == 443)):
+            netloc += f":{parts.port}"
+        return urlunsplit((parts.scheme.lower(), netloc, parts.path or "/", parts.query, ""))
+    except ValueError:
+        return url
+
+
+def _origin(source: str, details: Optional[str]) -> int:
+    """0 Chrome on this Mac (kept as the row to show), 1 Takeout's BrowserHistory.json, 2 My Activity."""
+    if source == "chrome_history":
+        return 0
+    return 1 if details and '"bron":"Takeout"' in details else 2
+
+
+def link_web_visits_conn(conn, lo_ms: Optional[int] = None, hi_ms: Optional[int] = None) -> int:
+    """
+    Link the copies of one website visit (link_web_visits) between lo_ms and hi_ms (all when
+    None) inside an open transaction. Rows are read in time order: a cluster is the first row
+    of a URL plus the rows of OTHER origins within WEB_VISIT_WINDOW_MS of it (one per origin,
+    so two real visits a second apart stay two). The row of the most direct origin (Chrome on
+    this Mac, then BrowserHistory.json, then My Activity; then the oldest id) is shown; the
+    others get duplicate_of = its id. Only clusters with a row inside the range are written (a
+    My Activity copy, rounded to whole seconds, often starts the cluster just before it); the
+    window around it is read for context. Returns how many rows changed.
+    """
+    w = WEB_VISIT_WINDOW_MS
+    where, args = "", []
+    if lo_ms is not None:
+        where += " AND ts_ms >= ?"
+        args.append(lo_ms - 3 * w)
+    if hi_ms is not None:
+        where += " AND ts_ms <= ?"
+        args.append(hi_ms + 2 * w)
+    rows = conn.execute(
+        f"SELECT id, source, ts_ms, url, details, duplicate_of FROM activity_events WHERE kind = 'web_visit' "
+        f"AND source IN ({', '.join('?' * len(LINKED_SOURCES))}) AND url IS NOT NULL{where} ORDER BY ts_ms, id",
+        [*LINKED_SOURCES, *args])
+    open_clusters: Dict[str, List[dict]] = {}
+    updates: List[tuple] = []
+
+    def finish(cluster: dict) -> None:
+        if (lo_ms is not None and cluster["last"] < lo_ms) or (hi_ms is not None and cluster["at"] > hi_ms):
+            return
+        members = cluster["rows"]
+        keep = min(members, key=lambda m: (m[0], m[1]))[1]
+        for _, row_id, current in members:
+            wanted = None if row_id == keep else keep
+            if current != wanted:
+                updates.append((wanted, row_id))
+
+    def sweep(now: int) -> None:
+        for url in list(open_clusters):
+            still = []
+            for cluster in open_clusters[url]:
+                (finish(cluster) if cluster["at"] < now - w else still.append(cluster))
+            if still:
+                open_clusters[url] = still
+            else:
+                del open_clusters[url]
+
+    for n, (row_id, source, ts, url, details, current) in enumerate(rows):
+        if n and n % 20000 == 0:
+            sweep(ts)
+        key_url = norm_url(url)
+        origin = _origin(source, details)
+        clusters = open_clusters.setdefault(key_url, [])
+        while clusters and clusters[0]["at"] < ts - w:
+            finish(clusters.pop(0))
+        target = next((c for c in clusters if origin not in c["origins"]), None)
+        if target is None:
+            target = {"at": ts, "last": ts, "origins": set(), "rows": []}
+            clusters.append(target)
+        target["last"] = ts
+        target["origins"].add(origin)
+        target["rows"].append((origin, row_id, current))
+    for clusters in open_clusters.values():
+        for cluster in clusters:
+            finish(cluster)
+    conn.executemany("UPDATE activity_events SET duplicate_of = ? WHERE id = ?", updates)
+    return len(updates)
+
+
+def link_web_visits(db, lo_ms: Optional[int] = None, hi_ms: Optional[int] = None) -> int:
+    """link_web_visits_conn in its own transaction; the Activiteit caches are refreshed when it changed something."""
+    with db._connect() as conn:
+        changed = link_web_visits_conn(conn, lo_ms, hi_ms)
+        if changed:
+            for source in LINKED_SOURCES:
+                state.bump_version(conn, source)
+    return changed
+
+
+def link_after_import(db, stats: Dict[str, Any]) -> int:
+    """link_web_visits over the span an import covered (its stats' covers_from/until, epoch seconds)."""
+    lo, hi = stats.get("covers_from"), stats.get("covers_until")
+    if lo is None or hi is None:
+        return 0
+    return link_web_visits(db, int(lo * 1000), int(hi * 1000) + 1)
+
+
 def coverage(db, source: str, kinds: Optional[Iterable[str]] = None) -> Coverage:
     where, args = "source = ?", [source]
     if kinds:
@@ -128,6 +251,14 @@ def _filters(sources: Optional[List[str]], kinds: Optional[List[str]], q: Option
     if sources:
         where.append(f"source IN ({', '.join('?' * len(sources))})")
         args += sources
+        # A copy is shown when the row it copies is not among the chosen sources: one copy (the oldest)
+        marks = ", ".join("?" * len(sources))
+        where.append(f"(duplicate_of IS NULL OR (NOT EXISTS (SELECT 1 FROM activity_events c WHERE c.id = "
+                     f"activity_events.duplicate_of AND c.source IN ({marks})) AND id = (SELECT MIN(d.id) FROM "
+                     f"activity_events d WHERE d.duplicate_of = activity_events.duplicate_of AND d.source IN ({marks}))))")
+        args += sources + sources
+    else:
+        where.append("duplicate_of IS NULL")
     if kinds:
         where.append(f"kind IN ({', '.join('?' * len(kinds))})")
         args += kinds
@@ -178,10 +309,30 @@ def events(db, day: str, sources=None, kinds=None, q=None, limit: int = 500) -> 
     where, args = _filters(sources, kinds, q)
     with db._connect() as conn:
         rows = conn.execute(
-            f"SELECT id, source, kind, ts_ms, end_ms, title, url, details FROM activity_events "
-            f"WHERE {where} AND ts_ms >= ? AND ts_ms < ? ORDER BY ts_ms, id LIMIT ?",
+            f"SELECT id, source, kind, ts_ms, end_ms, title, url, details, "
+            f"{_ALSO} "
+            f"FROM activity_events WHERE {where} AND ts_ms >= ? AND ts_ms < ? ORDER BY ts_ms, id LIMIT ?",
             (*args, start, end, limit)).fetchall()
     return [_row(r) for r in rows]
+
+
+# The other rows of the same visit: the copies of a shown row, and for a copy (shown when its
+# own source is filtered on) the row it copies and the other copies, so it names them the same
+_ALSO = ("(SELECT group_concat(x) FROM ("
+         "SELECT d.source || ':' || d.id AS x FROM activity_events d WHERE d.duplicate_of = activity_events.id "
+         "UNION ALL SELECT o.source || ':' || o.id FROM activity_events o WHERE o.id = activity_events.duplicate_of "
+         "UNION ALL SELECT s.source || ':' || s.id FROM activity_events s WHERE s.duplicate_of = activity_events.duplicate_of "
+         "AND s.id != activity_events.id))")
+
+
+def _also(text: Optional[str], own: str) -> List[Dict[str, Any]]:
+    """'google_takeout:12,google_takeout:13' -> the other sources that have this event, once each."""
+    out: Dict[str, List[int]] = {}
+    for part in (text or "").split(","):
+        source, _, row_id = part.rpartition(":")
+        if source and source != own and row_id.isdigit():
+            out.setdefault(source, []).append(int(row_id))
+    return [{"source": s, "ids": sorted(ids)} for s, ids in sorted(out.items())]
 
 
 def _row(r) -> Dict[str, Any]:
@@ -190,14 +341,16 @@ def _row(r) -> Dict[str, Any]:
     except ValueError:
         details = None
     return {"id": r[0], "source": r[1], "kind": r[2], "kind_label": label(r[2]), "ts": r[3] / 1000,
-            "end": r[4] / 1000 if r[4] is not None else None, "title": r[5], "url": r[6], "details": details}
+            "end": r[4] / 1000 if r[4] is not None else None, "title": r[5], "url": r[6], "details": details,
+            "also": _also(r[8] if len(r) > 8 else None, r[1])}
 
 
 def facets(db) -> Dict[str, Any]:
     """{sources: [{id, count}], kinds: [{id, label, icon, count}], first, last}."""
     with db._connect() as conn:
         by_source = conn.execute("SELECT source, COUNT(*) FROM activity_events GROUP BY source ORDER BY 2 DESC").fetchall()
-        by_kind = conn.execute("SELECT kind, COUNT(*) FROM activity_events GROUP BY kind ORDER BY 2 DESC").fetchall()
+        by_kind = conn.execute("SELECT kind, COUNT(*) FROM activity_events WHERE duplicate_of IS NULL "
+                               "GROUP BY kind ORDER BY 2 DESC").fetchall()
         first, last = conn.execute("SELECT MIN(ts_ms), MAX(ts_ms) FROM activity_events").fetchone()
     return {
         "sources": [{"id": s, "count": n} for s, n in by_source],

@@ -5,7 +5,8 @@ Takeout exports are requested on takeout.google.com in the user's own browser, r
 in Downloads (or in the synced folder of a scheduled Takeout) by their content (members
 under 'Takeout/'), copied into data/<owner>/Google/<datum> Takeout/, and the existing
 Takeouts in 'data/<owner>/RAW_google' are registered in place (folders with takeout-*.zip
-parts or unpacked 'Takeout' folders: both are read without unpacking anything).
+or takeout-*.tgz parts or unpacked 'Takeout' folders: all are read without unpacking
+anything; a .tgz is read as a stream, member by member, see raw_store.iter_export_files).
 
 Reading turns what it knows into records (google_formats.route decides per file, by the
 Dutch and English names):
@@ -60,10 +61,11 @@ class GoogleTakeout(Connector):
     capabilities = frozenset({"export_request", "export_watch", "import"})
     raw_folder = "Google"
     existing_folders = ("RAW_google",)
-    folder_patterns = ("*.zip", "*.tgz", "*.json", "*.html", "*.ics")   # what the fingerprint looks at (not every photo)
+    folder_patterns = ("*.zip", "*.tgz", "*.tar.gz", "*.json", "*.html", "*.ics")   # what the fingerprint looks at (not every photo)
     record_label = ("activiteit", "activiteiten")
     stale_days = 120
-    parser_version = 2
+    parser_version = 3            # 3: .tgz/.tar.gz Takeouts are read too (before: only copied)
+    reads_tar = True
     settings = (
         export_kit.watch_setting(
             "Voor Takeout volgens schema: de map waarin Google Drive voor desktop je Takeout-exports zet. "
@@ -74,12 +76,12 @@ class GoogleTakeout(Connector):
     exports = (
         ExportKind(
             id="takeout", label="Takeout", request_url=TAKEOUT_URL,
-            patterns=("takeout-*.zip", "takeout-*.tgz", "*.zip"), folder_label="Takeout", expected_days=(0, 2),
+            patterns=("takeout-*.zip", "takeout-*.tgz", "takeout-*.tar.gz", "*.zip"), folder_label="Takeout", expected_days=(0, 2),
             steps=(
                 "Log in op de pagina die nu opent, in je eigen browser.",
                 "Kies wat je wilt exporteren (Mijn activiteit, YouTube, Chrome, Agenda, Keep) en het formaat JSON waar dat kan.",
-                "Kies 'Eenmalig exporteren', .zip en een grootte, en klik op 'Export maken'.",
-                "Google mailt een downloadlink (minuten tot een dag later); download de zip-bestanden.",
+                "Kies 'Eenmalig exporteren', .zip of .tgz en een grootte, en klik op 'Export maken'.",
+                "Google mailt een downloadlink (minuten tot een dag later); download de bestanden.",
                 "DataVault kopieert ze uit Downloads naar het archief. De originelen mag je daarna weggooien.",
             )),
     )
@@ -87,7 +89,7 @@ class GoogleTakeout(Connector):
         HelpOption(
             title="Takeout aanvragen", effort="makkelijk",
             steps=("Klik op Export aanvragen: Google Takeout opent in je browser.",
-                   "Kies de producten en JSON, en download de zip als Google mailt dat hij klaar is."),
+                   "Kies de producten en JSON, en download de export (.zip of .tgz) als Google mailt dat hij klaar is."),
             note="De downloadlink blijft ongeveer een week geldig."),
         HelpOption(
             title="Takeout volgens schema", effort="gemiddeld",
@@ -103,6 +105,11 @@ class GoogleTakeout(Connector):
         if names and any(_product(n) for n in names[:2000]):
             return "takeout"
         return None
+
+    def stale_raw(self, raw: Dict[str, Any]) -> bool:
+        # A .tgz copied before version 3 was stored but never read: read it now
+        return (not raw["is_folder"] and (raw.get("parser_version") or 0) < 3
+                and raw_store.is_tar_name(Path(raw["path"]).name))
 
     def import_raw(self, ctx: GatherContext, raw: Dict[str, Any]) -> Dict[str, Any]:
         products: Counter = Counter()
@@ -140,6 +147,9 @@ class GoogleTakeout(Connector):
                 continue
             kinds[what] += stats["seen"]
             totals["files"] += 1
+        if kinds.get("chrome") or kinds.get("myactivity"):
+            # Visits Chrome on this Mac also has: shown once (activity_store.link_web_visits)
+            totals["linked"] = activity_store.link_after_import(ctx.db, totals)
         if totals["locations_added"]:
             ctx.location_added = getattr(ctx, "location_added", 0) + totals["locations_added"]
         totals["products"] = dict(sorted(products.items()))

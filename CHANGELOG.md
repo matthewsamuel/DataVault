@@ -9,6 +9,30 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Afronding: wat nog bleef liggen
+- **Google Takeout als `.tgz`** wordt nu gelezen zoals een `.zip`, in het Nederlands en het Engels:
+  stukje voor stukje, zonder het archief uit te pakken. Het bestand zelf wordt gekopieerd en nooit
+  veranderd, en twee keer inlezen voegt niets toe. Een `.tgz` die DataVault eerder alleen kopieerde,
+  wordt bij de volgende keer inlezen alsnog gelezen. Ook `takeout-*.tgz`-delen in `RAW_google` tellen mee.
+  Is een `.tgz` beschadigd, afgebroken tijdens het downloaden of niet meer te vinden, dan zegt
+  DataGatherer dat duidelijk en probeert het later opnieuw, in plaats van hem als ingelezen te tellen.
+  Een verdacht sterk ingepakt archief stopt meteen, ook in een deel dat niet gelezen wordt.
+- **Hetzelfde websitebezoek uit twee bronnen** staat in Activiteit nog één keer. Een bezoek dat zowel
+  in de Chrome-geschiedenis van deze Mac als in Takeout staat (Chrome of Mijn activiteit), wordt
+  herkend aan het adres en het tijdstip (binnen 5 seconden). Onder het bezoek staan dan beide
+  bronnen met hun icoon. Beide rijen blijven bewaard; kies je alleen Google Takeout als bron, dan
+  zie je het bezoek gewoon daar, en ook dan staat Chrome-geschiedenis erbij. Een bezoek dat in Mijn
+  activiteit een fractie eerder staat dan in Chrome, wordt ook herkend.
+- **Bewerkte en ingetrokken iMessages** worden bijgewerkt in plaats van te blijven zoals ze eerst
+  waren. Een bewerkt bericht toont de nieuwe tekst met **Bewerkt**; een klik (of Enter) toont de
+  eerdere versies. Een ingetrokken bericht toont **Bericht ingetrokken**; had DataVault de tekst al,
+  dan staat die achter **Eerdere tekst**. Zoeken vindt alleen de tekst van nu. Ook een bericht dat
+  lang na het versturen bewerkt werd, wordt gevonden, en de eerste keer bijwerken bekijkt alles één keer opnieuw.
+  De eerdere versies schuiven zacht open en dicht, het gesprek eronder schuift mee, en wat je opent
+  blijft in beeld, ook bij het laatste bericht.
+- **Een tapback die iemand terugnam** verdwijnt van het bericht, en een gewijzigde tapback vervangt de
+  vorige van dezelfde persoon.
+
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
 - Een foto groeit vanuit zijn miniatuur in de viewer en krimpt bij het sluiten terug naar zijn plek in het raster.

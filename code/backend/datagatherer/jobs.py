@@ -188,6 +188,11 @@ def register_existing(config, db, connector, gctx) -> int:
         _, is_new = raw_store.register_folder(config, db, connector, kind, folder,
                                               getattr(connector, "folder_patterns", ("*",)))
         changed += int(is_new)
+    # Export files a newer parser reads more of (a Takeout .tgz that was only copied before)
+    for raw in state.list_raw(db, connector.id, limit=10000):
+        if raw["status"] == "imported" and connector.stale_raw(raw):
+            state.update_raw(db, raw["id"], status="pending")
+            changed += 1
     return changed
 
 
@@ -317,7 +322,7 @@ def watch_type(config, db, get_jobs: Callable[[], Any]) -> JobType:
             origin = "downloads"
             if not src.is_file():
                 raise GatherFailed("Het bestand staat niet meer in Downloads")
-        names = raw_store.read_zip_names(src)
+        names = raw_store.archive_names(src, connector.reads_tar)
         kind = connector.detect(src, names)
         if kind is None:
             raise GatherFailed(f"{src.name} is geen export van {connector.name}")
