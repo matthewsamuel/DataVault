@@ -60,6 +60,7 @@
     --input-date-w: 150px;
     --page-gutter: 32px;
     --page-max: 1200px;
+    --keurer-card-max: 480px;    /* de Keurer-kaart; de meldingen staan ernaast */
     --nav-h: 56px;
 
     /* Bediening */
@@ -1702,6 +1703,18 @@ textarea.input {
     gap: var(--space-sm);
 }
 
+/* Keurer: naast de kaart (max. 480 px breed, gecentreerd), op de hoogte van de kaart, zodat de
+   map, de cijfers en 'Andere map' vrij blijven; keurer.js zet --toast-keurer-top */
+#toast-container[data-view="keurer"] {
+    top: var(--toast-keurer-top, calc(var(--nav-h) + var(--space-md)));
+    right: var(--space-md);
+    max-width: calc((100vw - var(--keurer-card-max)) / 2 - var(--space-md) * 2);
+}
+
+#toast-container[data-view="keurer"] .toast {
+    min-width: 0;
+}
+
 .toast {
     --toast-tone: var(--info);
     position: relative;
@@ -1832,10 +1845,41 @@ html[data-motion="rustig"] .toast .toast-icon {
     line-height: var(--lh-snug);
 }
 
-/* Een knop in de melding (showToast(..., action)), bijv. 'Ongedaan maken' */
+/* Een knop in de melding (showToast(..., action)), bijv. 'Ongedaan maken' (undo-toast.js), met
+   rechts de sneltoets als rustige hint ervoor */
 .toast-actions {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+
+.toast-action {
+    gap: var(--space-xs);
+}
+
+.toast-action i {
+    font-size: var(--icon-xs);
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+/* Het pijltje terug draait een kwartslag mee als je erop wijst: dit gaat terug (alleen in Volledig) */
+html[data-motion="volledig"] .toast-action:hover i,
+html[data-motion="volledig"] .toast-action:focus-visible i {
+    transform: rotate(-90deg);
+}
+
+.toast-hint {
+    color: var(--text-tertiary);
+    background: transparent;
+    border-color: var(--border-hairline);
+}
+
+/* Na 'Ongedaan maken' is de melding zelf de uitkomst; met de focus erop (de knop is weg) een ring */
+.toast:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
 }
 
 /* ---------- Lege, mislukte en ladende stukken (ui.js) ---------- */
@@ -2291,14 +2335,19 @@ kbd {
 /* ==================== APP-SCHIL: NAVIGATIE ==================== */
 
 .top-nav {
+    /* Van 1024 tot 1440 px groeien de ruimtes, de onderdelen en het zoekveld vloeiend mee, zonder
+       sprongen bij een breekpunt: zo toont een breder venster nooit minder onderdelen in de balk
+       (nav-more.js). --nav-ramp is 0px bij 1024 px en 1px bij 1440 px. */
+    --nav-ramp: clamp(0px, calc((100vw - 1024px) / 416), 1px);
+    --nav-tab-pad: calc(var(--space-sm) + var(--nav-ramp) * 4);
     position: relative;
     z-index: 100;
     display: flex;
     align-items: center;
-    gap: var(--space-xl);
+    gap: calc(var(--space-md) + var(--nav-ramp) * 12);
     height: var(--nav-h);
     flex: none;
-    padding: 0 var(--space-xl);
+    padding: 0 calc(var(--space-lg) + var(--nav-ramp) * 8);
     background-color: var(--surface-nav);
     -webkit-backdrop-filter: saturate(180%) blur(12px);
     backdrop-filter: saturate(180%) blur(12px);
@@ -2370,7 +2419,7 @@ button.nav-brand {
     display: inline-flex;
     align-items: center;
     height: 32px;
-    padding: 0 var(--space-md);
+    padding: 0 var(--nav-tab-pad, var(--space-md));
     border: none;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -2397,12 +2446,111 @@ button.nav-brand {
 .nav-tab.active::after {
     content: '';
     position: absolute;
-    left: var(--space-md);
-    right: var(--space-md);
+    left: var(--nav-tab-pad, var(--space-md));
+    right: var(--nav-tab-pad, var(--space-md));
     bottom: calc((32px - var(--nav-h)) / 2);
     height: 2px;
     border-radius: var(--radius-full);
     background: var(--accent);
+}
+
+/* ---------- Meer: de onderdelen die niet passen (nav-more.js) ---------- */
+/* Van achteren naar voren schuiven onderdelen naar het menu Meer; Meer zelf is een gewoon
+   menu-onderdeel (zelfde hoogte, zwevende vlek en groen streepje als het open onderdeel erin staat) */
+
+.nav-tab.is-overflow,
+.nav-more-btn[hidden] {
+    display: none;
+}
+
+.nav-more-btn {
+    gap: var(--space-xs);
+}
+
+.nav-more-caret {
+    font-size: var(--icon-xs);
+    color: var(--text-tertiary);
+    transition: color var(--dur-2) var(--ease-out);
+}
+
+/* Het pijltje draait om als het menu opengaat (in Rustig en Uit staat het meteen goed) */
+html[data-motion="volledig"] .nav-more-caret {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy), color var(--dur-2) var(--ease-out);
+}
+
+.nav-more-btn[aria-expanded="true"] {
+    color: var(--text-primary);
+}
+
+.nav-more-btn[aria-expanded="true"] .nav-more-caret {
+    color: var(--text-secondary);
+    transform: rotate(180deg);
+}
+
+.nav-more-btn.active .nav-more-caret {
+    color: var(--accent-text);
+}
+
+/* Net onder de balk (het groene streepje onder Meer blijft zichtbaar), links gelijk met Meer
+   (left zet nav-more.js) */
+.menu.nav-more-menu {
+    position: absolute;
+    top: calc(var(--nav-h) + var(--space-xs));
+    min-width: 248px;
+    padding: var(--space-xs);
+    transform-origin: top left;
+}
+
+.nav-more-menu .nav-more-item {
+    height: var(--control-h-lg);
+    gap: var(--space-md);
+    padding: 0 var(--space-md);
+    font-size: var(--fs-base);
+}
+
+.nav-more-icon {
+    width: var(--icon-md);
+    font-size: var(--icon-sm);
+    text-align: center;
+    color: var(--text-tertiary);
+    transition: color var(--dur-2) var(--ease-out);
+}
+
+.nav-more-item:hover .nav-more-icon,
+.nav-more-item:focus .nav-more-icon {
+    color: var(--text-secondary);
+}
+
+.nav-more-label {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.nav-more-key {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.nav-more-item .menu-check {
+    width: var(--icon-xs);
+}
+
+.nav-more-item.active {
+    font-weight: var(--fw-semibold);
+}
+
+.nav-more-item.active .nav-more-icon {
+    color: var(--accent-text);
+}
+
+/* Met de muis geopend en dan met pijltjes verder: Safari toont dan geen :focus-visible */
+.nav-more-menu.keyboard .menu-item:focus {
+    background-color: var(--surface-active);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 .nav-actions {
@@ -2625,7 +2773,8 @@ button.nav-brand {
 /* Pagina's die zelf precies vensterhoog zijn en binnenin scrollen (Keurer, Duplicaten) houden
    die ruimte zelf vrij, binnen hun eigen hoogte: anders zou het venster 'n stukje gaan scrollen */
 .main-content:has(> #section-keurer.active),
-.main-content:has(> #section-duplicates.active) {
+.main-content:has(> #section-duplicates.active),
+.main-content:has(> #section-series.active) {
     padding-bottom: 0;
 }
 
@@ -4096,61 +4245,24 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     .theme-button .theme-caret {
         display: none;
     }
+}
 
-    .search-input {
-        width: 216px;
+/* Het zoekveld in de balk: 168 px bij 1024 px, vloeiend naar 216 px bij 1440 px (--nav-ramp) */
+@media (max-width: 1440px) and (min-width: 901px) {
+    .top-nav .search-input {
+        width: calc(168px + var(--nav-ramp) * 48);
     }
 }
 
-@media (max-width: 1240px) {
-    .top-nav {
-        gap: var(--space-md);
-        padding: 0 var(--space-lg);
-    }
-
-    /* Ruimte voor het DataGatherer-icoon naast Instellingen (minstens 24 px voor het zoekveld) */
-    .search-input {
-        width: 168px;
-    }
+/* Passen de onderdelen niet, dan gaat eerst het woordmerk weg (alleen het logo blijft) en pas
+   daarna schuiven onderdelen naar Meer (nav-more.js zet .nav-brand-compact) */
+.top-nav.nav-brand-compact .nav-brand-name {
+    display: none;
 }
 
-/* Onder 1280 px alleen het logo, zodat er tussen het menu en het zoekveld altijd minstens
-   --space-xl lucht blijft (zie navgap in de smoke-test) */
-@media (max-width: 1280px) {
-    .nav-brand-name {
-        display: none;
-    }
-}
-
-@media (max-width: 1200px) {
-    .nav-tab {
-        padding: 0 10px;
-    }
-
-    .nav-tab.active::after {
-        left: 10px;
-        right: 10px;
-    }
-
-    .search-input {
-        width: 144px;
-    }
-}
-
-/* Onder 1100 px (tien onderdelen sinds Albums): iets smallere tabs en een kort zoekveld zonder
-   de /-hint (en ruimte voor het DataGatherer-icoon), zodat het hele menu blijft passen (navgap in de smoke-test) */
+/* Onder 1100 px: een kort zoekveld zonder de /-hint */
 @media (max-width: 1100px) {
-    .nav-tab {
-        padding: 0 5px;
-    }
-
-    .nav-tab.active::after {
-        left: 5px;
-        right: 5px;
-    }
-
     .search-input {
-        width: 120px;
         padding-right: var(--space-md);
     }
 
@@ -4175,12 +4287,6 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
 
     .nav-search .search-kbd {
         display: none;
-    }
-
-    /* Het menu schuift: zachte randen laten zien dat er meer is (alleen de dekking telt) */
-    .nav-tabs {
-        -webkit-mask-image: linear-gradient(to right, transparent, var(--text-primary) 12px, var(--text-primary) calc(100% - 12px), transparent);
-        mask-image: linear-gradient(to right, transparent, var(--text-primary) 12px, var(--text-primary) calc(100% - 12px), transparent);
     }
 
     #modal-viewer > .modal-container {
@@ -4226,7 +4332,8 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
 }
 /* ==================== DUPLICATEN ==================== */
 
-.duplicates-container {
+.duplicates-container,
+.series-container {
     height: calc(100vh - var(--nav-h));
     overflow-y: auto;
     overflow-x: hidden;
@@ -4892,35 +4999,7 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
         width: 90vw;
     }
 }
-/* ---- Tabbladen: Exacte kopieën | Beste uit reeks ---- */
-
-.dup-tabs {
-    margin: 0 0 var(--space-xl);
-}
-
-.dup-tabs .tab {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-sm);
-    font-size: var(--fs-base);
-}
-
-.dup-tabs .tab i {
-    font-size: var(--fs-sm);
-    color: var(--text-tertiary);
-}
-
-.dup-tabs .tab[aria-selected="true"] i {
-    color: var(--accent-text);
-}
-
-.dup-tabs .tab:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
-    border-radius: var(--radius-xs);
-}
-
-/* ==================== BESTE UIT REEKS (series.js) ==================== */
+/* ==================== REEKSEN (series.js) ==================== */
 
 .series-toolbar {
     display: flex;
@@ -6215,15 +6294,20 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     gap: var(--space-sm);
 }
 
+/* Een knop (Tab, Enter of spatie kiest het type); de focusring is de gewone :focus-visible */
 .dna-type-item {
     position: relative;
     display: flex;
     align-items: center;
     gap: var(--space-md);
+    width: 100%;
     padding: var(--space-md);
     background: var(--surface-card);
     border: 1px solid var(--border-hairline);
     border-radius: var(--radius-lg);
+    color: inherit;
+    font: inherit;
+    text-align: left;
     cursor: pointer;
     transition: border-color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
 }
@@ -6350,7 +6434,55 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     color: var(--text-secondary);
     font-size: var(--fs-base);
     line-height: var(--lh-normal);
+    max-width: 400px;
+}
+
+/* Wat het voor jou is: een rustig vlak in de Spotify-kleur */
+.insight-modal-result {
+    max-width: 400px;
+    margin-top: var(--space-xs);
+    padding: var(--space-sm) var(--space-lg);
+    border-radius: var(--radius-md);
+    background: var(--spotify-subtle);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    line-height: var(--lh-snug);
+}
+
+.insight-modal-result[hidden] {
+    display: none;
+}
+
+/* Hoe het berekend wordt: kleiner, links uitgelijnd, onder een haarlijn */
+.insight-modal-how-box {
+    max-width: 400px;
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-hairline);
+    text-align: left;
+}
+
+.insight-modal-how-title {
+    margin: 0 0 var(--space-xs);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+}
+
+.insight-modal-how {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.dna-hero-how {
     max-width: 380px;
+    margin: var(--space-lg) auto 0;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
 }
 
 /* Kaart die wegvliegt (verplaatst of verwijderd uit een lijst) */
@@ -8835,7 +8967,7 @@ button.storage-file-thumb:hover .storage-file-play {
 .keurer-card {
     position: relative;
     width: 100%;
-    max-width: 480px;
+    max-width: var(--keurer-card-max);
     height: 100%;
     max-height: 600px;
     border-radius: var(--radius-xl);
@@ -13636,6 +13768,187 @@ html[data-motion="rustig"] .elo-trash:hover i {
     margin-top: var(--space-2xs);
 }
 
+/* ---- Een andere map voor de back-ups (venster, backup-settings.js) ---- */
+
+/* Locatie: het pad (mag afbreken), het label en rechts 'Andere map…' */
+.settings-row-value:has(> .backup-folder-btn) {
+    display: flex;
+    flex: 1;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: var(--space-sm) var(--space-md);
+    min-width: 0;
+}
+
+.settings-row-value:has(> .backup-folder-btn) > .path-label {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.settings-row-value > .backup-kind {
+    margin-left: 0;
+}
+
+.backup-folder-btn {
+    flex: none;
+    margin-left: auto;
+}
+
+.backup-folder-container {
+    width: 640px;
+    max-height: 86vh;
+}
+
+.backup-folder-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-lg);
+    padding: var(--space-lg) var(--space-xl) var(--space-xl);
+    overflow-y: auto;
+}
+
+.backup-folder-body > * {
+    flex: none;
+}
+
+.backup-folder-intro {
+    margin: 0;
+}
+
+.backup-folder-tree {
+    height: min(320px, 36vh);
+    overflow-y: auto;
+    padding: var(--space-xs);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    background-color: var(--surface-sunken);
+}
+
+.backup-folder-tree .folder-item.is-unavailable:not(.selected) {
+    color: var(--text-tertiary);
+}
+
+.backup-folder-tree .folder-item.is-placeholder {
+    color: var(--text-tertiary);
+    cursor: default;
+    pointer-events: none;
+}
+
+.backup-folder-tree .folder-item.is-placeholder .folder-icon {
+    visibility: hidden;
+}
+
+.backup-folder-new {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.backup-folder-new[hidden] {
+    display: none;
+}
+
+.backup-folder-new-label {
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+}
+
+.backup-folder-new-row {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.backup-folder-new-row > .input {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Het oordeel over de gekozen map: rustig grijs, groen als hij kan, rood als niet */
+.backup-folder-check {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    min-height: 56px;
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    background-color: var(--surface-raised);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-snug);
+    transition: background-color var(--dur-3) var(--ease-standard);
+}
+
+.backup-folder-check-icon {
+    flex: none;
+    font-size: var(--icon-md);
+    color: var(--text-tertiary);
+}
+
+.backup-folder-check.is-ok,
+.backup-folder-check.is-done {
+    background-color: var(--success-subtle);
+}
+
+.backup-folder-check.is-ok .backup-folder-check-icon,
+.backup-folder-check.is-done .backup-folder-check-icon {
+    color: var(--success-text);
+}
+
+.backup-folder-check.is-warn {
+    background-color: var(--warning-subtle);
+}
+
+.backup-folder-check.is-warn .backup-folder-check-icon {
+    color: var(--warning-text);
+}
+
+.backup-folder-check.is-error {
+    background-color: var(--danger-subtle);
+}
+
+.backup-folder-check.is-error .backup-folder-check-icon {
+    color: var(--danger-text);
+}
+
+/* Klaar is een beloning: het vinkje springt; de rest komt rustig op */
+.backup-folder-check.is-done .backup-folder-check-icon {
+    animation: dv-icon-pop var(--spring-bouncy-dur) var(--spring-bouncy) both;
+}
+
+html[data-motion="rustig"] .backup-folder-check.is-done .backup-folder-check-icon {
+    animation-name: dv-fade-in;
+}
+
+.backup-folder-check-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+    animation: dv-fade-in var(--dur-2) var(--ease-out) both;
+}
+
+.backup-folder-check-text strong {
+    color: var(--text-primary);
+    font-weight: var(--fw-semibold);
+}
+
+.backup-folder-check-path {
+    color: var(--text-primary);
+    font-size: var(--fs-xs);
+    overflow-wrap: anywhere;
+}
+
+.backup-folder-check-warning {
+    margin-top: var(--space-xs);
+    color: var(--text-secondary);
+}
+
+.backup-folder-footer .backup-folder-default {
+    margin-right: auto;
+}
+
 .backup-restore {
     border: 1px solid var(--border-hairline);
     border-radius: var(--radius-md);
@@ -16452,6 +16765,17 @@ html[data-motion="rustig"] .job-running .job-bar::after {
 .theme-dropdown.open .theme-option:nth-child(n + 4),
 .menu:not([hidden]) > .menu-item:nth-child(n + 4) {
     animation-delay: calc(var(--stagger-step) * 3);
+}
+
+/* Meer: de onderdelen volgen elkaar op de stagger-stap (--i zet nav-more.js, tot 9) */
+.menu.nav-more-menu:not([hidden]) > .menu-item.nav-more-item {
+    animation-delay: calc(var(--stagger-step) * var(--i, 0));
+}
+
+.menu.nav-more-menu.is-leaving[hidden] {
+    display: block;
+    pointer-events: none;
+    animation: shell-menu-out var(--dur-3) var(--ease-exit) forwards;
 }
 
 .theme-dropdown.is-leaving:not(.open) {

@@ -28,7 +28,7 @@ manager = None
 
 MAX_PAGE = 50
 
-recovery.register_kind(near_dups.RECOVERY_KIND, "Beste uit reeks")
+recovery.register_kind(near_dups.RECOVERY_KIND, "Reeksen")
 
 
 def init_router(cfg: Config, database, job_manager=None):

@@ -28,6 +28,7 @@ files or folders (including macOS '._' AppleDouble files) and no symlinks.
 """
 import os
 import stat
+import tempfile
 import threading
 import unicodedata
 from collections import OrderedDict
@@ -327,3 +328,127 @@ def walk_archive(
             continue
         yield root, dirnames, filenames
         stack.extend(os.path.join(root, d) for d in reversed(dirnames))
+
+
+# --- The backup folder chosen in Instellingen (backend/backup.py) -----------------------
+#
+# The database backups may go to any folder of the user's own on the Mac's disk or on another
+# disk (a dedicated folder on the T7 too), but never into the archive (its media folders,
+# TRASH, RAW_DUPLICATES), DataVault's own folders (cache, database, app, models), a system
+# folder, or the root of a disk or the home folder itself: a backup folder is a folder of its own.
+
+# Never a backup folder, itself or anything below it (the real path, symlinks resolved)
+SYSTEM_TREES = ("/System", "/Library", "/usr", "/bin", "/sbin", "/etc", "/dev", "/Applications", "/cores",
+                "/opt", "/private/etc", "/private/var/db", "/private/var/root")
+# Never a backup folder itself (a folder below them is fine)
+SYSTEM_FOLDERS = ("/", "/Users", "/Volumes", "/private", "/private/var", "/home", "/tmp", "/var")
+
+
+class BackupFolderError(ValueError):
+    """A folder that cannot hold the backups; the text is Dutch and for the user."""
+
+
+def _home() -> Path:
+    return Path(os.path.realpath(Path.home()))
+
+
+def _app_support() -> Path:
+    """~/Library/Application Support/DataVault: the default backup folder lives here (allowed)."""
+    return _home() / "Library" / "Application Support" / "DataVault"
+
+
+def _volume_root(real: Path) -> bool:
+    return len(real.parts) == 3 and real.parts[1] == "Volumes"
+
+
+def backup_folder_problem(real: Path, config) -> Optional[str]:
+    """Why real (an absolute, resolved path) cannot be the backup folder, or None. Only looks
+    at where it is, not at the disk (cheap: the folder browser asks this for every folder)."""
+    home = _home()
+    if real in {Path(p) for p in SYSTEM_FOLDERS} or real == home or _volume_root(real):
+        return "Kies of maak een eigen map voor de back-ups, niet de hoofdmap van een schijf of je thuismap"
+    if any(real == Path(t) or real.is_relative_to(t) for t in SYSTEM_TREES) \
+            or (real.is_relative_to(home / "Library") and not real.is_relative_to(_app_support())):
+        return "Dit is een systeemmap; kies of maak een eigen map, bijvoorbeeld op de T7 naast het archief"
+    protected = (
+        ("Back-ups in de cache van DataVault kan niet: dat is dezelfde map als de database", config.CACHE_FOLDER),
+        ("Back-ups in de map van de database kan niet: kies een map ernaast", Path(config.DB_PATH).parent),
+        ("Back-ups in RAW_DUPLICATES kan niet: kies een map buiten het archief", config.DUPLICATES_FOLDER),
+        ("Back-ups in de prullenmand (TRASH) kan niet: kies een map buiten het archief", config.TRASH_FOLDER),
+        ("Back-ups in de RAW-map kan niet: kies een map buiten het archief", config.RAW_FOLDER),
+        ("Back-ups in het archief kan niet: daar staan je foto's en bestanden. Kies een map ernaast", config.VAULT_ROOT),
+        ("Back-ups in de map van de app zelf kan niet", APP_DIR),
+        ("Back-ups in de map met de modellen kan niet", getattr(config, "MODELS_FOLDER", None)),
+    )
+    for message, folder in protected:
+        if folder is not None and is_inside(real, Path(os.path.realpath(folder))):
+            return message
+    if os.environ.get("DATAVAULT_TESTING") == "1":
+        temp_root = Path(os.path.realpath(tempfile.gettempdir()))
+        if not real.is_relative_to(temp_root):
+            return "In de testmodus kan de back-upmap alleen in de tijdelijke map staan"
+    return None
+
+
+def check_backup_folder(raw: Any, config, create: Optional[str] = None) -> Tuple[Path, Optional[str]]:
+    """
+    The backup folder chosen in Instellingen as an absolute real path, plus a warning (or
+    None); BackupFolderError when it cannot be used. The folder must exist (a disk that is not
+    connected is not silently replaced by an empty folder on the Mac) and DataVault must be able
+    to write in it, which is tried with a small file of its own that is removed again.
+    create: the name of a new folder to make inside raw first (one level, never overwrites).
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        raise BackupFolderError("Kies een map voor de back-ups")
+    if "\0" in raw or (create is not None and "\0" in create):
+        raise BackupFolderError("Ongeldig pad")
+    path = Path(raw.strip()).expanduser()
+    if not path.is_absolute():
+        raise BackupFolderError("Geef een volledig pad op (beginnend met / of ~)")
+    try:
+        real = Path(os.path.realpath(path))
+    except (OSError, ValueError):
+        raise BackupFolderError("Ongeldig pad")
+    if create is not None:
+        name = create.strip()
+        if not name or name in (".", "..") or "/" in name or name.startswith("."):
+            raise BackupFolderError("Geef de nieuwe map een gewone naam (zonder / en niet beginnend met een punt)")
+        if len(name.encode("utf-8")) > 255:
+            raise BackupFolderError("Die naam is te lang")
+        if not real.is_dir():
+            raise BackupFolderError(f"De map {real} bestaat niet (meer)")
+        problem = backup_folder_problem(real / name, config)
+        if problem:
+            raise BackupFolderError(problem)
+        target = real / unicodedata.normalize("NFC", name)
+        try:
+            target.mkdir()   # one level, in a folder that exists; an existing folder is fine
+        except FileExistsError:
+            if not target.is_dir() or target.is_symlink():
+                raise BackupFolderError(f"Er staat al een bestand met de naam {name}")
+        except OSError as e:
+            raise BackupFolderError(f"De map kon niet worden gemaakt ({e.strerror or e})")
+        real = Path(os.path.realpath(target))
+    problem = backup_folder_problem(real, config)
+    if problem:
+        raise BackupFolderError(problem)
+    if not real.exists():
+        raise BackupFolderError(f"De map {real} bestaat niet. Is de schijf aangesloten?")
+    if not real.is_dir():
+        raise BackupFolderError("Op die plek staat een bestand, geen map")
+    if not os.access(real, os.W_OK | os.X_OK):
+        raise BackupFolderError(f"In {real} mag DataVault niet schrijven")
+    try:
+        fd, probe = tempfile.mkstemp(prefix=".datavault-schrijftest-", dir=str(real))
+        os.close(fd)
+        os.unlink(probe)   # our own test file, made just now
+    except OSError as e:
+        raise BackupFolderError(f"Schrijven in {real} lukte niet ({e.strerror or e})")
+    warning = None
+    try:
+        if os.stat(real).st_dev == os.stat(Path(config.DB_PATH).parent).st_dev:
+            warning = ("Deze map staat op dezelfde schijf als de database. Gaat die schijf kapot, dan ben je "
+                       "beide kwijt; een map op een andere schijf (zoals deze Mac) is veiliger.")
+    except OSError:
+        pass
+    return real, warning

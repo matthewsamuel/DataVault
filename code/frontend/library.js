@@ -1407,9 +1407,9 @@
                 writeHash();
                 if (album.hidden && !before.hidden && !state.showHidden) {
                     // Verborgen: weg uit de lijst (het album zelf blijft open), met de weg terug
-                    showToast('Album verborgen', `'${album.name}' staat niet meer in de lijst. Je vindt het onder 'Verborgen albums tonen'.`, 'success', {
-                        label: 'Ongedaan maken',
-                        onClick: () => unhideAlbum(album),
+                    showUndoToast({
+                        title: 'Album verborgen', message: `'${album.name}' staat niet meer in de lijst. Je vindt het onder 'Verborgen albums tonen'.`,
+                        key: `album-hidden:${album.id}:${Date.now()}`, undo: () => unhideAlbum(album), onUndone: (note) => note,
                     });
                 }
             }
@@ -1422,16 +1422,13 @@
         }
     };
 
+    // Vanuit 'Ongedaan maken' in de melding (undo-toast.js): die meldt een fout en toont de uitkomst
     async function unhideAlbum(album) {
-        try {
-            await fetchJSON(`${API_BASE}/api/library/albums/${album.id}`, {
-                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden: false }),
-            });
-            await loadAlbums();
-            showToast('Album weer zichtbaar', `'${album.name}' staat weer in de lijst.`, 'success');
-        } catch (e) {
-            toastFetchError('Terugzetten mislukt', e);
-        }
+        await fetchJSON(`${API_BASE}/api/library/albums/${album.id}`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden: false }),
+        });
+        await loadAlbums();
+        return { title: 'Album weer zichtbaar', message: `'${album.name}' staat weer in de lijst.`, type: 'success' };
     }
 
     window.albumsDeleteFromDialog = async function () {

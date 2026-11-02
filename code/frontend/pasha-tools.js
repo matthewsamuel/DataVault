@@ -29,7 +29,7 @@ function chatOpenLink(link) {
             switchMainView('map');
             if (typeof mapFocus === 'function' && Array.isArray(link.bounds)) mapFocus(link.bounds);
             break;
-        case 'series': switchMainView('duplicates'); dupShowTab('series'); break;
+        case 'series': switchMainView('series'); break;
         case 'recovery': switchMainView('recovery'); break;
         default: break;
     }

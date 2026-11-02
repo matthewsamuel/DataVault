@@ -931,6 +931,50 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
   formaat dat de browser niet afspeelt (zoals mkv) krijgt een filmstrook in plaats van een
   afspeelteken en de zichtbare regel 'Afspelen kan niet in de browser'. Teksten bij video-reeksen
   zeggen nu 'video' in plaats van 'foto'.
+- **Reeksen, Berichten en DataGatherer hebben een eigen plek in het menu.** Reeksen ("Beste uit
+  reeks") is nu een eigen onderdeel (sneltoets **g n**) in plaats van een tabblad bij Duplicaten;
+  Berichten en DataGatherer staan als gewone menu-onderdelen naast de rest. Het menu volgt de
+  volgorde Home, Bestanden, Tijdlijn, Kaart, Albums, Reeksen, Duplicaten, Keurer, Shows, Spotify,
+  Berichten, DataGatherer en Herstelcentrum.
+- **Meer.** Past niet alles naast het zoekveld (bij 1024 px, of op een smal venster), dan schuiven
+  de laatste onderdelen naar het menu **Meer**. Dat veert open, de onderdelen komen er een voor een
+  in, met hun icoon en sneltoets. Met het toetsenbord: **↓** op Meer opent het, pijltjes, Home, End
+  of een beginletter kiezen, Enter opent het onderdeel en **Esc** sluit en zet de focus terug. Staat
+  het open onderdeel in Meer, dan krijgt Meer het groene streepje. Het zoekveld is weer breder.
+- **"Ongedaan maken" in de melding.** Na verplaatsen, naar de prullenmand, een Keurer-beslissing
+  (prullenmand of verplaatsen), een reeks of opruimactie bij Duplicaten en de selectiebalk staat er
+  een knop **Ongedaan maken** in de melding; **⌘Z** doet hetzelfde. Hij zet precies die actie terug,
+  zoals het Herstelcentrum. De melding blijft 10 seconden staan, en langer zolang de muis of de focus
+  erop staat, en wordt na de klik zelf de uitkomst ("Teruggezet"). Wat al terug is (ook via het
+  Herstelcentrum of ↓ in de Keurer), wordt nooit nog eens aangeboden. In de Keurer en bij Welke is
+  mooier? loopt één melding mee met de laatste keuze, in plaats van een stapel.
+- **De back-upmap kies je in Instellingen.** Onder Back-ups staat bij Locatie **Andere map…**: een
+  mappenkiezer die mappen pas laadt als je ze opent, met een nieuwe map maken erbij. Bij elke map zie
+  je meteen of hij kan: hij moet bestaan en schrijfbaar zijn, en mag niet in het archief, de
+  prullenmand, RAW_DUPLICATES of de mappen van DataVault zelf liggen. Een eigen map op de T7 kan, met
+  de opmerking dat een andere schijf veiliger is. **Gebruiken en testen** bewaart de keuze en maakt
+  meteen een back-up daar; het venster toont de stappen en de uitkomst. Is de schijf met die map
+  los, dan maakt de app hem niet ergens anders opnieuw aan, maar zegt dat. Het terugzetscript vindt
+  de gekozen map zelf (of met `--map`).
+- **Spotify: de uitleg klopt en is helemaal Nederlands.** Elk inzicht (recorddag, langste reeks,
+  vaste favorieten of brede ontdekker, seizoensstemming) vertelt nu wat het meet, wat het voor jou
+  is en hoe DataVault het uitrekent, met dezelfde grenzen als de berekening zelf. Het luister-DNA zegt
+  hoe je type bepaald wordt.
+- **Back-upmap: ook een tweede keer.** **Gebruiken en testen** bewaart en test ook een tweede of
+  derde map in dezelfde sessie, ook als je het venster na de eerste test met Esc sloot.
+- **Ongedaan maken lukt ook na een hapering.** Is de schijf even los of antwoordt de server niet, dan
+  blijft de knop **Ongedaan maken** staan en kun je het nog eens proberen; bij Reeksen blijven de
+  link en de melding staan tot het lukt. Staat de muis op de melding, dan blijft de uitkomst staan.
+- **Keurer: de melding staat naast de foto.** Zo blijven de map en **Andere map** vrij tijdens een
+  snelle reeks beslissingen. Na meer dan twintig beslissingen zet de knop in de melding de oudere
+  beslissing nog steeds terug; alleen als hij echt al terug is, staat er "Al ongedaan".
+- **Menu: een breder venster toont nooit minder.** Is de ruimte krap, dan gaat eerst het woordmerk
+  DATAVAULT weg en pas daarna schuiven onderdelen naar **Meer**; de ruimtes en het zoekveld groeien
+  vloeiend mee. Wordt het venster breder terwijl je in Meer zit, dan blijft de focus op dat
+  onderdeel in de balk.
+- **Kleine dingen.** Het Herstelcentrum noemt acties uit Reeksen nu ook "Reeksen". **⌘Z** staat in
+  het sneltoetsenoverzicht. In het luister-DNA zijn de typen knoppen (Tab en Enter werken) en de
+  uitleg zegt: "volgens de tijden in je Spotify-export".
 
 ## Fase 2 – Stabiliseren
 

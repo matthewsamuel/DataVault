@@ -1,4 +1,4 @@
-// DataVault Dashboard - Beste uit reeks (tabblad op de pagina Duplicaten)
+// DataVault Dashboard - Reeksen: de beste uit foto's die op elkaar lijken (een eigen onderdeel)
 // Note: API_BASE is defined in app.js
 //
 // Foto's die op elkaar lijken: een verkleinde of opnieuw opgeslagen kopie, een bewerking, of
@@ -44,6 +44,7 @@ const seriesState = {
     handled: 0,            // daarvan sinds het openen van het tabblad: voor 'Alles bekeken'
     moved: 0,              // en daarvan met verplaatste foto's
     lastKept: null,        // {key, title}: de laatste 'Alles behouden', ongedaan te maken
+    undoingKeep: null,     // key van de 'Alles behouden' die nu wordt teruggedraaid
     job: null,             // de vergelijking die nu loopt (voor het lege scherm)
     keep: new Map(),       // reeks-sleutel -> Set van foto-id's die blijven
     skipped: new Set(),    // reeks-sleutels die in deze sessie overgeslagen zijn
@@ -64,60 +65,6 @@ try {
     const sort = localStorage.getItem('seriesSort');
     if (sort === 'size' || sort === 'recent') seriesState.sort = sort;
 } catch (e) { /* geen opslag: standaard */ }
-
-// ==================== TABBLADEN OP DE PAGINA DUPLICATEN ====================
-
-const DUP_SUBTITLES = {
-    exact: 'Kies een map, zoek byte voor byte identieke bestanden en bepaal per groep welke kopie blijft. '
-        + 'De andere kopieën gaan naar RAW_DUPLICATES: er wordt niets gewist en elke actie is terug te zetten.',
-    series: 'Foto\'s die op elkaar lijken: verkleinde of bewerkte kopieën en bursts. Kies per reeks wat blijft; '
-        + 'de rest gaat naar RAW_DUPLICATES/near-duplicates en is in het Herstelcentrum terug te zetten.',
-};
-
-function dupCurrentTab() {
-    const tab = document.querySelector('.dup-tabs [aria-selected="true"]');
-    return tab ? tab.dataset.tab : 'exact';
-}
-
-function dupShowTab(name, focus = false) {
-    if (name !== 'exact' && name !== 'series') return;
-    document.querySelectorAll('.dup-tabs [role="tab"]').forEach(tab => {
-        const on = tab.dataset.tab === name;
-        tab.classList.toggle('active', on);
-        tab.setAttribute('aria-selected', on ? 'true' : 'false');
-        tab.tabIndex = on ? 0 : -1;
-        if (on && focus) tab.focus();
-    });
-    document.getElementById('dup-panel-exact').hidden = name !== 'exact';
-    document.getElementById('dup-panel-series').hidden = name !== 'series';
-    document.getElementById('dup-subtitle').textContent = DUP_SUBTITLES[name];
-    try { localStorage.setItem('dupTab', name); } catch (e) { /* geen opslag */ }
-    if (name === 'series') seriesInit();
-}
-
-// Pijltjes, Home en End binnen de tabbladen (zoals elke tablist)
-function dupTabsKeydown(e) {
-    const tabs = [...document.querySelectorAll('.dup-tabs [role="tab"]')];
-    const i = tabs.indexOf(document.activeElement);
-    if (i < 0) return;
-    let next = null;
-    if (e.key === 'ArrowRight') next = tabs[(i + 1) % tabs.length];
-    else if (e.key === 'ArrowLeft') next = tabs[(i - 1 + tabs.length) % tabs.length];
-    else if (e.key === 'Home') next = tabs[0];
-    else if (e.key === 'End') next = tabs[tabs.length - 1];
-    if (!next) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dupShowTab(next.dataset.tab, true);
-}
-
-// Bij het openen van de pagina Duplicaten (duplicatesInit): het laatst gekozen tabblad
-function seriesOnShow() {
-    let saved = 'exact';
-    try { saved = localStorage.getItem('dupTab') || 'exact'; } catch (e) { /* geen opslag */ }
-    if (saved !== dupCurrentTab()) dupShowTab(saved);
-    else if (saved === 'series') seriesInit();
-}
 
 // ==================== STAND EN VERGELIJKEN ====================
 
@@ -373,7 +320,7 @@ function seriesWatchMore(button) {
     if (!seriesMoreObserver) {
         seriesMoreObserver = new IntersectionObserver(entries => {
             if (entries.some(e => e.isIntersecting) && !seriesState.loading && seriesState.nextOffset !== null
-                && !document.getElementById('dup-panel-series').hidden) seriesLoad(false);
+                && currentMainView() === 'series') seriesLoad(false);
         }, { rootMargin: '0px 0px 400px 0px' });
     }
     seriesMoreObserver.disconnect();
@@ -530,7 +477,7 @@ function seriesRenderLastKept() {
     slot.replaceChildren(
         createEl('i', { class: 'fas fa-check', 'aria-hidden': 'true' }),
         createEl('span', { text: `Behouden: ${last.title}` }),
-        createEl('button', { type: 'button', class: 'link-button', id: 'btn-series-undo-keep', text: 'Ongedaan maken', onClick: seriesUndoKeepAll }));
+        createEl('button', { type: 'button', class: 'link-button', id: 'btn-series-undo-keep', text: 'Ongedaan maken', onClick: () => seriesUndoKeepAll() }));
 }
 
 // Kleine reeksen krijgen grotere foto's: twee foto's van 156 px vergelijk je niet
@@ -902,8 +849,12 @@ async function seriesKeepAll(series) {
         seriesDone(series, true);
         if (seriesState.status) seriesState.status.reviewed += 1;
         seriesRenderStatus();
-        showToast('Alles behouden', `${series.count} ${seriesNoun(series, series.count)} blijven staan. Deze reeks komt niet meer terug, tenzij hij verandert; `
-            + 'met \u2018Ongedaan maken\u2019 boven de lijst staat hij er meteen weer.', 'success');
+        showUndoToast({
+            title: 'Alles behouden',
+            message: `${series.count} ${seriesNoun(series, series.count)} blijven staan. Deze reeks komt niet meer terug, tenzij hij verandert.`,
+            key: `series-keep:${data.key}`, undo: () => seriesUndoKeepAll(true, { key: data.key, title: seriesTitle(series) }),
+            onUndone: (note) => note,
+        });
     } catch (err) {
         toastFetchError('Behouden mislukt', err);
     } finally {
@@ -973,8 +924,13 @@ async function seriesRunConfirm() {
                 result.failed.map(f => `${f.path ? f.path.split('/').pop() : 'foto'}: ${f.reason}`).join('\n'), 'warning');
             seriesLoad(true);
         } else {
-            showToast(`${moved} ${seriesNoun(pending.series, moved)} verplaatst`,
-                'Ze staan in RAW_DUPLICATES/near-duplicates. Terugzetten kan in het Herstelcentrum.', 'success');
+            showUndoToast({
+                title: `${moved} ${seriesNoun(pending.series, moved)} verplaatst`,
+                message: 'Ze staan in RAW_DUPLICATES/near-duplicates.',
+                key: result.action_id ? `action:${result.action_id}` : null,
+                undo: { url: '/api/recovery/undo', body: { action_id: result.action_id } },
+                onUndone: (data) => seriesMovedBack(data, pending.series),
+            });
             seriesState.moved += 1;
             seriesDone(pending.series, true);
         }
@@ -1308,28 +1264,66 @@ function seriesCompareConfirm() {
     seriesConfirm(series);
 }
 
-async function seriesUndoKeepAll() {
-    const last = seriesState.lastKept;
-    if (!last) return;
+// Na 'Ongedaan maken' van een verplaatste reeks (undo-toast.js): de reeks komt terug in de lijst
+function seriesMovedBack(data, series = null) {
+    seriesState.moved = Math.max(0, seriesState.moved - 1);
+    seriesState.handled = Math.max(0, seriesState.handled - 1);
+    seriesLoadStatus();
+    if (currentMainView() === 'series') seriesLoad(true);
+    const back = data.restored || 0;
+    const notBack = (data.skipped || []).length;
+    return { title: 'Teruggezet', type: notBack ? 'warning' : 'success',
+        message: `${back} ${seriesNoun(series, back)} ${back === 1 ? 'staat' : 'staan'} weer op de oude plek${notBack ? `, ${notBack} niet (zie het Herstelcentrum)` : ''}.` };
+}
+
+// 'Alles behouden' terugdraaien: met de link boven de lijst of vanuit de melding (fromToast: die
+// toont de uitkomst en meldt een fout); elk van beide haalt de ander weg
+async function seriesUndoKeepAll(fromToast = false, kept = null) {
+    const last = kept || seriesState.lastKept;
+    if (!last || seriesState.undoingKeep === last.key) return null;
+    // Bezig: de link staat even uit (geen dubbele klik); link en melding blijven tot het lukt
+    seriesState.undoingKeep = last.key;
+    const link = document.getElementById('btn-series-undo-keep');
+    if (link && seriesState.lastKept && seriesState.lastKept.key === last.key) link.disabled = true;
+    // Gelukt, of kan echt niet meer (404: al terug): beide wegen terug verdwijnen
+    const forget = () => {
+        if (seriesState.lastKept && seriesState.lastKept.key === last.key) seriesState.lastKept = null;
+        undoToastDone(`series-keep:${last.key}`);
+        seriesRenderLastKept();
+    };
+    let note = null;
     try {
         await fetchJSON(`${API_BASE}/api/series/reviews/undo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: last.key }),
         });
-        seriesState.lastKept = null;
-        seriesState.handled = Math.max(0, seriesState.handled - 1);
-        showToast('Weer in de lijst', `${last.title} staat weer tussen de reeksen.`, 'success');
-        seriesLoadStatus();
+    } catch (err) {
+        seriesState.undoingKeep = null;
+        if ([404, 409, 410].includes(err.status)) forget();
+        // De schijf even weg of geen verbinding: de link blijft, nog eens proberen mag
+        else seriesRenderLastKept();
+        if (fromToast) throw err;
+        toastFetchError('Ongedaan maken mislukt', err);
+        return null;
+    }
+    seriesState.undoingKeep = null;
+    forget();
+    seriesState.handled = Math.max(0, seriesState.handled - 1);
+    note = { title: 'Weer in de lijst', message: `${last.title} staat weer tussen de reeksen.`, type: 'success' };
+    if (!fromToast) showToast(note.title, note.message, note.type);
+    seriesLoadStatus();
+    try {
         await seriesLoad(true);
         const back = seriesState.items.find(s => s.key === last.key);
-        if (back) {
+        if (back && currentMainView() === 'series') {
             seriesMoveCursor(back.key, back.best, false);
             seriesFocusCursor();
         }
     } catch (err) {
-        toastFetchError('Ongedaan maken mislukt', err);
+        toastFetchError('Reeksen laden mislukt', err);
     }
+    return note;
 }
 
 async function seriesResetReviews() {
@@ -1345,7 +1339,6 @@ async function seriesResetReviews() {
 }
 
 function seriesInitPage() {
-    document.querySelector('.dup-tabs').addEventListener('keydown', dupTabsKeydown);
     document.getElementById('series-list').addEventListener('keydown', seriesKeydown);
     registerOverlayCloser('modal-series-confirm', seriesCloseConfirm);
     registerOverlayCloser('modal-series-compare', seriesCloseCompare);
@@ -1363,7 +1356,7 @@ function seriesInitPage() {
 function addShortcutGroupLater() {
     const add = () => {
         if (typeof addShortcutGroup !== 'function') return;
-        addShortcutGroup('Beste uit reeks (Duplicaten)', [
+        addShortcutGroup('Reeksen', [
             [['←', '→'], 'Vorige of volgende foto in de reeks'],
             [['↑', '↓'], 'Vorige of volgende reeks'],
             [['Home', 'End'], 'Eerste of laatste foto in de reeks'],

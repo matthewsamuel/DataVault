@@ -201,10 +201,11 @@ def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
             # Recorded for the recovery center (Herstelcentrum), which can move it back;
             # if recording fails the file goes straight back and the move is refused
             try:
-                recovery.ActionRecorder(
+                recorder = recovery.ActionRecorder(
                     db, "viewer_move", f"Verplaatst naar {destination_folder.name or 'het archief'}",
                     folder=str(source_path.parent),
-                ).add(source_path, destination_path)
+                )
+                recorder.add(source_path, destination_path)
             except sqlite3.OperationalError:
                 raise   # database gone with the disk: 503 (errors.py)
             except Exception as e:
@@ -221,6 +222,8 @@ def move_file_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "success": True,
         "new_path": str(destination_path),
+        # For 'Ongedaan maken' in the toast: POST /api/recovery/undo {action_id}
+        "action_id": recorder.action_id,
         "message": f"Verplaatst naar {destination_folder.name}/{destination_path.name}"
     }
 

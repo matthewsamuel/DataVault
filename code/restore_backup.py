@@ -7,7 +7,8 @@ Zo gebruik je het (in Terminal, met de app GESTOPT):
     venv/bin/python restore_backup.py                  # toont de back-ups, nieuwste eerst
     venv/bin/python restore_backup.py <naam of pad>    # zet die back-up terug (vraagt eerst 'ja')
 
-Opties: --config <config.json> (anders $DATAVAULT_CONFIG of code/config.json) en --ja
+Opties: --config <config.json> (anders $DATAVAULT_CONFIG of code/config.json), --map <back-upmap>
+(de map die in Instellingen gekozen is; zonder --map leest het script die uit de database) en --ja
 (niet vragen, voor scripts).
 
 Wat er gebeurt:
@@ -50,6 +51,8 @@ def _show_list(config) -> None:
     print(f"Database:   {config.DB_PATH}")
     if not items:
         print("Nog geen back-ups.")
+        if not getattr(config, "BACKUP_FOLDER_CHOSEN", False):
+            print("Koos je in Instellingen een andere back-upmap? Geef die dan op met --map <map>.")
         return
     for item in items:
         when = datetime.fromtimestamp(item["created_at"]).strftime("%d-%m-%Y %H:%M:%S")
@@ -68,10 +71,15 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Zet een back-up van de DataVault-database terug.")
     parser.add_argument("backup", nargs="?", help="naam (uit de lijst) of pad van de back-up")
     parser.add_argument("--config", help="config.json (anders $DATAVAULT_CONFIG of code/config.json)")
+    parser.add_argument("--map", help="de back-upmap (anders de map uit Instellingen, of uit config.json)")
     parser.add_argument("--ja", action="store_true", help="niet om bevestiging vragen")
     args = parser.parse_args(argv)
 
     config = Config(args.config)
+    # De map uit Instellingen staat in de database (niet in config.json); --map gaat voor
+    chosen = args.map or backup.chosen_folder_in(config.DB_PATH)
+    if chosen:
+        backup.use_folder(config, Path(chosen).expanduser())
     if not args.backup:
         _show_list(config)
         return 0

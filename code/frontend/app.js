@@ -192,7 +192,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== VIEW SWITCHING ====================
 
-const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map', 'berichten', 'activity'];
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map', 'berichten', 'activity', 'series'];
 
 function currentMainView() {
     return MAIN_VIEWS.find(v => {
@@ -205,20 +205,26 @@ function currentMainView() {
 const VIEW_TITLES = {
     home: 'Home', viewer: 'Bestanden', duplicates: 'Duplicaten', spotify: 'Spotify', shows: 'Shows', keurer: 'Keurer',
     timeline: 'Tijdlijn', recovery: 'Herstelcentrum', settings: 'Instellingen', albums: 'Albums', datagatherer: 'DataGatherer',
-    map: 'Kaart', berichten: 'Berichten', activity: 'Activiteit',
+    map: 'Kaart', berichten: 'Berichten', activity: 'Activiteit', series: 'Reeksen',
 };
 
 // Het scherm waar een melding bij hoort: info en succes blijven niet hangen op een ander scherm
 let activeMainView = 'home';
 
-// Het menu-element van een onderdeel (Berichten en Activiteit horen bij DataGatherer)
+// Het menu-element van een onderdeel (Activiteit hoort bij DataGatherer). Staat het onderdeel
+// in het menu Meer (smal venster, nav-more.js), dan is dat de knop Meer.
 function navEntryFor(view) {
-    return [...document.querySelectorAll('.top-nav [data-view]')].find(tab =>
-        tab.dataset.view === view || (tab.dataset.also || '').split(' ').includes(view)) || null;
+    const tab = [...document.querySelectorAll('.top-nav [data-view]')].find(t =>
+        t.dataset.view === view || (t.dataset.also || '').split(' ').includes(view)) || null;
+    if (tab && tab.classList.contains('is-overflow')) return document.getElementById('nav-more-btn');
+    return tab;
 }
 
 // Hoeveel de groene streep binnen een menu-element begint (zie .nav-tab.active::after)
 function navIndicatorInset(tab) {
+    // Het streepje zelf weet het (smaller venster: kleinere marge); anders de standaardmarge
+    const left = parseFloat(getComputedStyle(tab, '::after').left);
+    if (Number.isFinite(left)) return left;
     return Motion.px(tab.classList.contains('nav-icon-btn') ? '--space-sm' : '--space-md');
 }
 
@@ -254,18 +260,21 @@ function navIsRestoring() {
 function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
     const previousView = activeMainView;
-    const previousTab = document.querySelector('.top-nav [data-view].active');
+    const previousTab = navEntryFor(previousView);
     if (view !== activeMainView) {
         document.querySelectorAll('#toast-container .toast[data-view]').forEach(t => {
             if (t.dataset.view !== view) { clearTimeout(t._hideTimer); t.remove(); }
         });
     }
     activeMainView = view;
+    // Sommige onderdelen zetten de meldingen op een eigen plek (de Keurer: naast de kaart)
+    const toasts = document.getElementById('toast-container');
+    if (toasts) toasts.dataset.view = view;
     navRecord(view);
     document.title = view === 'home' ? 'DataVault' : `${VIEW_TITLES[view]} · DataVault`;
     // Update tabs (ook de tandwielknop van Instellingen)
     document.querySelectorAll('.top-nav [data-view]').forEach(tab => {
-        // data-also: een onderdeel zonder eigen knop in het menu (Berichten hoort bij DataGatherer)
+        // data-also: een onderdeel zonder eigen knop in het menu (Activiteit hoort bij DataGatherer)
         const on = tab.dataset.view === view || (tab.dataset.also || '').split(' ').includes(view);
         tab.classList.toggle('active', on);
         if (on) tab.setAttribute('aria-current', 'page'); else tab.removeAttribute('aria-current');
@@ -278,6 +287,9 @@ function switchMainView(view) {
             }
         }
     });
+
+    // Staat het onderdeel in Meer, dan krijgt Meer het groene streepje (nav-more.js)
+    if (window.NavMore) NavMore.sync(view);
 
     // Update sections
     MAIN_VIEWS.forEach(v => {
@@ -349,6 +361,8 @@ function switchMainView(view) {
         if (typeof msgInit === 'function') msgInit();
     } else if (view === 'activity') {
         if (typeof activityInit === 'function') activityInit();
+    } else if (view === 'series') {
+        if (typeof seriesInit === 'function') seriesInit();
     }
 }
 
@@ -2180,9 +2194,27 @@ async function confirmMoveFile() {
         return;
     }
 
-    showToast('Verplaatst', `${moved.message || 'Bestand verplaatst'}. Terugzetten kan in het Herstelcentrum.`, 'success');
+    const from = file.path.slice(0, file.path.lastIndexOf('/'));
+    showUndoToast({
+        title: 'Verplaatst', message: `${moved.message || 'Bestand verplaatst'}.`,
+        key: moved.action_id ? `action:${moved.action_id}` : null,
+        undo: { url: '/api/recovery/undo', body: { action_id: moved.action_id } },
+        onUndone: (data) => undoneInFolder(data, from, file.name),
+    });
     btn.replaceChildren(...originalContent);
     finishMoveOut(file);
+}
+
+// Na 'Ongedaan maken' (undo-toast.js) van één bestand uit een map: staat die map open in
+// Bestanden, dan komt het er weer in; de melding zegt waar het weer staat
+function undoneInFolder(data, folder, name) {
+    if (typeof jobsLibraryRefresh === 'function') jobsLibraryRefresh();
+    if (typeof currentFolder !== 'undefined' && currentFolder === folder && typeof loadMedia === 'function') loadMedia(currentFolder);
+    if (data && data.restored === 0) {
+        const reason = (data.skipped && data.skipped[0] && data.skipped[0].reason) || 'Het bestand kon niet terug.';
+        return { title: 'Niet teruggezet', message: reason, type: 'warning' };
+    }
+    return { title: 'Teruggezet', message: `${name} staat weer in ${folder.split('/').pop() || 'het archief'}.`, type: 'success' };
 }
 
 // Het bestand is weg uit deze map (verplaatst of naar de prullenmand): uit de lijst, de show
@@ -2252,8 +2284,9 @@ async function trashMoveTwin() {
     btn.disabled = true;
     confirmBtn.disabled = true;
 
+    let trashed;
     try {
-        await fetchJSON(`${API_BASE}/api/move-twin-trash`, {
+        trashed = await fetchJSON(`${API_BASE}/api/move-twin-trash`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ source_path: file.path, twin_path: twin.path }),
@@ -2270,7 +2303,13 @@ async function trashMoveTwin() {
     }
 
     const folder = twin.path.split('/').slice(-2, -1)[0] || 'het archief';
-    showToast('Naar de prullenmand', `${twin.name} blijft staan in ${folder}. Terugzetten kan in het Herstelcentrum.`, 'success');
+    const from = file.path.slice(0, file.path.lastIndexOf('/'));
+    showUndoToast({
+        title: 'Naar de prullenmand', message: `${file.name} is een kopie; ${twin.name} blijft staan in ${folder}.`,
+        key: trashed.action_id ? `action:${trashed.action_id}` : null,
+        undo: { url: '/api/recovery/undo', body: { action_id: trashed.action_id } },
+        onUndone: (data) => undoneInFolder(data, from, file.name),
+    });
     btn.replaceChildren(...originalContent);
     btn.disabled = false;
     finishMoveOut(file);
@@ -2443,28 +2482,33 @@ const TOAST_ICONS = {
     info: 'fa-circle-info',
 };
 
-// action (optioneel): {label, onClick}, een knop in de melding (bijv. 'Ongedaan maken'); de melding
-// sluit na de klik
-function showToast(title, message, type = 'info', action = null) {
+// action (optioneel): {label, onClick, icon, hint, keepOpen}, een knop in de melding (bijv.
+// 'Ongedaan maken'; zie undo-toast.js). Zonder keepOpen sluit de melding na de klik; met keepOpen
+// krijgt onClick(button, toast) en beslist zelf.
+// options (optioneel): {duration} in ms, {unique: true} stapelt nooit samen met een gelijke
+// melding, {stay: true} blijft staan bij een wissel van onderdeel. Geeft de melding terug.
+function showToast(title, message, type = 'info', action = null, options = {}) {
     const container = document.getElementById('toast-container');
-    const duration = TOAST_MS[type] || TOAST_MS.info;
+    const duration = options.duration || TOAST_MS[type] || TOAST_MS.info;
     // Dezelfde melding nog in beeld (bijv. tien mislukte miniaturen): niet opstapelen, alleen langer tonen
-    const same = [...container.children].find(t => !t._leaving && t.dataset.title === String(title) && t.dataset.message === String(message));
+    const same = options.unique || action ? null : [...container.children].find(t => !t._leaving && !t._unique
+        && t.dataset.title === String(title) && t.dataset.message === String(message));
     if (same) {
         same.style.opacity = '1';
-        clearTimeout(same._hideTimer);
-        same._hideTimer = setTimeout(() => hideToast(same), duration);
+        toastSchedule(same);
         restartToastTimer(same);
         // Dezelfde melding nog eens: een kort knikje in plaats van een tweede melding
         Motion.animate(same, [{ transform: 'none' }, { transform: `translate3d(${-Motion.px('--motion-distance-sm', 6)}px, 0, 0)` }, { transform: 'none' }],
             { spring: 'snappy', key: 'nudge', calm: false });
-        return;
+        return same;
     }
     const toast = document.createElement('div');
     toast.className = `toast ${type} toast-${type}`;
     toast.dataset.title = String(title);
     toast.dataset.message = String(message);
-    if (type === 'info' || type === 'success') toast.dataset.view = activeMainView;
+    toast._duration = duration;
+    toast._unique = !!(options.unique || action);
+    if ((type === 'info' || type === 'success') && !options.stay) toast.dataset.view = activeMainView;
     // Een fout wordt meteen voorgelezen; de rest zegt de container (aria-live polite)
     if (type === 'error') toast.setAttribute('role', 'alert');
     // Titel en melding zijn tekst: ze bevatten vaak bestandsnamen of een foutmelding van de server
@@ -2478,24 +2522,45 @@ function showToast(title, message, type = 'info', action = null) {
         createEl('div', { class: 'toast-timer', 'aria-hidden': 'true' }));
     toast.style.setProperty('--toast-ms', `${duration}ms`);
     if (action) {
+        const button = createEl('button', {
+            type: 'button', class: 'btn btn-secondary btn-sm toast-action',
+            title: action.hint ? `${action.label} (${action.hint})` : null,
+            onClick: () => {
+                if (action.keepOpen) { action.onClick(button, toast); return; }
+                hideToast(toast);
+                action.onClick();
+            },
+        }, action.icon ? createEl('i', { class: `fas ${action.icon}`, 'aria-hidden': 'true' }) : null,
+        createEl('span', { class: 'toast-action-label', text: action.label }));
         toast.append(createEl('div', { class: 'toast-actions' },
-            createEl('button', {
-                type: 'button', class: 'btn btn-secondary btn-sm toast-action', text: action.label,
-                onClick: () => { hideToast(toast); action.onClick(); },
-            })));
+            action.hint ? createEl('kbd', { class: 'toast-hint', 'aria-hidden': 'true', text: action.hint }) : null,
+            button));
     }
 
     container.appendChild(toast);
 
-    // Met de muis erop blijft hij staan, zodat een lange melding uit te lezen is
-    toast._hideTimer = setTimeout(() => hideToast(toast), duration);
-    toast.addEventListener('mouseenter', () => { if (!toast._leaving) { clearTimeout(toast._hideTimer); toast.style.opacity = '1'; } });
-    toast.addEventListener('mouseleave', () => {
-        if (toast._leaving) return;
-        clearTimeout(toast._hideTimer);
-        toast._hideTimer = setTimeout(() => hideToast(toast), duration);
+    // Met de muis erop of de focus erin blijft hij staan, zodat een lange melding uit te lezen is
+    // (en 'Ongedaan maken' met Tab te bereiken); daarna begint de tijd opnieuw
+    toastSchedule(toast);
+    const hold = () => { if (!toast._leaving) { clearTimeout(toast._hideTimer); toast.style.opacity = '1'; } };
+    const release = () => {
+        if (toast._leaving || toast.matches(':hover') || toast.contains(document.activeElement)) return;
+        toastSchedule(toast);
         restartToastTimer(toast);
-    });
+    };
+    toast.addEventListener('mouseenter', hold);
+    toast.addEventListener('focusin', hold);
+    toast.addEventListener('mouseleave', release);
+    toast.addEventListener('focusout', () => setTimeout(release, 0));
+    return toast;
+}
+
+// De melding gaat na zijn eigen tijd weg (opnieuw vanaf nu)
+function toastSchedule(toast, duration = toast._duration || TOAST_MS.info) {
+    clearTimeout(toast._hideTimer);
+    toast._duration = duration;
+    toast.style.setProperty('--toast-ms', `${duration}ms`);
+    toast._hideTimer = setTimeout(() => hideToast(toast), duration);
 }
 
 // De leeglopende lijn opnieuw vol: de melding blijft weer de hele tijd staan
@@ -3197,7 +3262,7 @@ function showDnaExplanation() {
         'Daydreamer ☀️': { icon: 'fa-sun', title: 'Dagdromer', key: 'Daydreamer', desc: 'Je luistert het meest tussen 12:00 en 18:00. Muziek houdt je middag op gang.' },
         'Evening Chiller 🌇': { icon: 'fa-cloud-moon', title: 'Avondgenieter', key: 'Evening Chiller', desc: 'Je luistert het meest tussen 18:00 en 23:00. Muziek is je manier om de dag af te sluiten.' },
         'Night Owl 🦉': { icon: 'fa-moon', title: 'Nachtuil', key: 'Night Owl', desc: 'Je luistert het meest tussen 23:00 en 5:00. De nacht is van jou, met muziek als gezelschap.' },
-        'Balanced Listener': { icon: 'fa-headphones', title: 'Evenwichtige luisteraar', key: 'Balanced Listener', desc: 'Je luistert verspreid over de hele dag, zonder één piekmoment.' }
+        'Balanced Listener': { icon: 'fa-headphones', title: 'Evenwichtige luisteraar', key: 'Balanced Listener', desc: 'Er springt (nog) geen dagdeel uit: in deze periode zijn te weinig nummers afgespeeld om een type te kiezen.' }
     };
 
     const info = dnaTypes[currentDna] || dnaTypes['Balanced Listener'];
@@ -3222,18 +3287,23 @@ function showDnaExplanation() {
         if (isActual) {
             newItem.classList.add('actual-personality');
             if (!newItem.querySelector('.actual-dna-badge')) {
-                newItem.appendChild(createEl('div', { class: 'actual-dna-badge', text: 'Jij' }));
+                newItem.appendChild(createEl('span', { class: 'actual-dna-badge', text: 'Jij' }));
             }
         }
 
         // Initial active state matches the actual DNA
         newItem.classList.toggle('active', info.key === typeName);
+        newItem.setAttribute('aria-pressed', String(info.key === typeName));
 
         // Click listener to view other explanations
         newItem.addEventListener('click', () => {
             // Update active state
-            document.querySelectorAll('.dna-type-item').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.dna-type-item').forEach(el => {
+                el.classList.remove('active');
+                el.setAttribute('aria-pressed', 'false');
+            });
             newItem.classList.add('active');
+            newItem.setAttribute('aria-pressed', 'true');
 
             // Find full type name key
             const fullTypeKey = Object.keys(dnaTypes).find(k => k.includes(typeName)) || 'Balanced Listener';
@@ -3532,6 +3602,34 @@ function closeStorageModal() {
 
 // ==================== GENERIC INSIGHT EXPLANATION ====================
 
+// De lange uitleg bij een inzicht: wat het is, hoe DataVault het uitrekent en wat het voor jou is
+// (uit de laatst getoonde cijfers; spotifyLastStats zet renderSpotifyStats)
+let spotifyLastStats = null;
+
+function spotifyInsightResult(key) {
+    const insights = spotifyLastStats && spotifyLastStats.new_insights;
+    if (!insights) return null;
+    if (key === 'record_day') {
+        const day = insights.record_day;
+        return day ? `Op ${formatDateNl(day.date)} luisterde je ${formatNumberNl(day.hours, 1)} uur.` : null;
+    }
+    if (key === 'top_binge') {
+        const binge = insights.top_binge;
+        return binge ? `${binge.track} van ${binge.artist}: ${binge.count} keer achter elkaar.`
+            : 'In deze periode draaide je geen nummer twee keer direct na elkaar.';
+    }
+    if (key === 'mainstream_score' && insights.mainstream_score) {
+        return `${spotifyLabel(insights.mainstream_score)}: de top 5% van je artiesten is goed voor ${insights.mainstream_percent}% van je luistertijd.`;
+    }
+    if (key === 'seasonal_mood' && insights.seasonal_mood) {
+        const mood = String(insights.seasonal_mood);
+        if (mood.startsWith('Winter')) return 'Jij bent een winterluisteraar: in de winter luister je duidelijk meer.';
+        if (mood.startsWith('Summer')) return 'Jij bent een zomerluisteraar: in de zomer luister je duidelijk meer.';
+        return 'Jij luistert het hele jaar door ongeveer even veel.';
+    }
+    return null;
+}
+
 function showInsightExplanation(insightKey) {
     const modal = document.getElementById('modal-insight-explanation');
 
@@ -3539,22 +3637,28 @@ function showInsightExplanation(insightKey) {
         'record_day': {
             icon: 'fa-trophy',
             title: 'Recorddag',
-            desc: 'De ene dag waarop je het allerlangst naar muziek luisterde.'
+            desc: 'De dag waarop je het langst naar muziek luisterde, in de periode die bovenaan gekozen is.',
+            how: 'DataVault telt per kalenderdag de speeltijd op van alles wat je afspeelde, ook van nummers die je oversloeg, en kiest de dag met de meeste uren.',
         },
         'top_binge': {
             icon: 'fa-repeat',
             title: 'Langste reeks',
-            desc: 'Het nummer dat je het vaakst direct achter elkaar draaide, zonder iets anders ertussen.'
+            desc: 'Het nummer dat je het vaakst direct na elkaar draaide, zonder een ander nummer ertussen.',
+            how: 'Een reeks begint opnieuw zodra er een ander nummer speelt. Eén keer afspelen is nog geen reeks; het nummer moet minstens twee keer achter elkaar komen.',
         },
         'mainstream_score': {
             icon: 'fa-chart-line',
-            title: 'Ontdekker of vaste favorieten',
-            desc: 'Gaat meer dan 75% van je luistertijd naar een handvol topartiesten, dan heb je vaste favorieten. Is het breed verspreid, dan ben je een brede ontdekker.'
+            title: 'Vaste favorieten of brede ontdekker',
+            desc: 'Hoe je luistertijd over je artiesten verdeeld is: vooral steeds dezelfde, of juist veel verschillende.',
+            how: 'DataVault neemt de 5% artiesten naar wie je het langst luisterde en kijkt welk deel van je luistertijd naar hen ging. '
+                + 'Meer dan 75%: vaste favorieten. Minder dan 40%: brede ontdekker. Daartussen: evenwichtige luisteraar.',
         },
         'seasonal_mood': {
             icon: 'fa-cloud-sun',
             title: 'Seizoensstemming',
-            desc: 'Of je in de wintermaanden of juist in de zomermaanden duidelijk meer luistert, op basis van je luistertijd per maand.'
+            desc: 'Of je in de winter of juist in de zomer duidelijk meer muziek luistert.',
+            how: 'DataVault vergelijkt het aantal afgespeelde nummers in december, januari en februari met dat in juni, juli en augustus. '
+                + 'Is het ene seizoen minstens anderhalf keer zo groot, dan ben je een winter- of zomerluisteraar; anders luister je het hele jaar door.',
         }
     };
 
@@ -3564,10 +3668,18 @@ function showInsightExplanation(insightKey) {
     const iconEl = document.getElementById('insight-modal-icon');
     const titleEl = document.getElementById('insight-modal-title');
     const descEl = document.getElementById('insight-modal-description');
+    const howEl = document.getElementById('insight-modal-how');
+    const resultEl = document.getElementById('insight-modal-result');
 
     if (iconEl) iconEl.replaceChildren(createEl('i', { class: `fas ${info.icon}` }));
     if (titleEl) titleEl.textContent = info.title;
     if (descEl) descEl.textContent = info.desc;
+    if (howEl) howEl.textContent = info.how;
+    if (resultEl) {
+        const result = spotifyInsightResult(insightKey);
+        resultEl.hidden = !result;
+        resultEl.textContent = result || '';
+    }
 
     if (modal) modal.classList.add('active');
 }
@@ -4265,6 +4377,7 @@ function stopSpotifyClock() {
 }
 
 function renderSpotifyStats(data) {
+    spotifyLastStats = data;
     // 1. Stats Cards
     updateText('stat-minutes', data.total_minutes.toLocaleString('nl-NL'));
     updateText('stat-top-artist', data.top_artists.length > 0 ? data.top_artists[0].name : '-');

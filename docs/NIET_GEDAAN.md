@@ -80,12 +80,11 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 
 ## Uiterlijk en bediening
 
-- **Een eigen tekstonderdeel in het menu voor Berichten, DataGatherer en Reeksen en een overloopmenu "Meer".** Er is geen ruimte in het
-  menu bij 1024 px; de onderdelen zitten daarom in andere schermen (Reeksen bij Duplicaten; DataGatherer is een icoon in de menubalk). *Goede volgende stap.*
+- **"Ongedaan maken" na een Pasha-voorstel of een Keurer-keuze "houden".** Pasha's verplaatsingen staan in het
+  Herstelcentrum; "houden" verplaatst niets en heeft ↓ al, dus de melding zou alleen ruis geven in de snelle Keurer.
+- **De interne namen van de Spotify-types** (`Early Bird`, `Broad Explorer`) blijven Engels in de API; het scherm
+  vertaalt ze, zodat bestaande gegevens en tests niet veranderen.
 - **Lange titels in het takenpaneel inkorten.** Ze worden netjes afgekapt met een beletselteken.
-- **Een keuze voor de back-upmap in de interface.** Ze staat in `config.json`.
-- **Een melding met "Ongedaan maken" na bepaalde acties.** De gedeelde melding heeft geen knop.
-- **Kopregels en teksten die nog Engels zijn** in de lange uitleg bij Spotify DNA en inzichten.
 - **Een eigen `LICENSE`-bestand.** Er staat nog geen licentie in de repository. *Goede volgende stap.*
 
 ## Software en meten

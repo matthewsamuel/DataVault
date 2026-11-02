@@ -70,7 +70,7 @@ BIG_FOLDER = "Groot"
 BIG_FILES = 1500
 MAX_THUMBS_ON_OPEN = 100
 VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery", "settings", "albums", "datagatherer",
-         "berichten", "map"]   # berichten after datagatherer: it opens from there
+         "berichten", "map", "series"]
 A11Y_CHECKS = Path(__file__).with_name("a11y_checks.js")
 
 
@@ -203,15 +203,26 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 status = "ok" if len(problems) == before else "PROBLEM"
                 print(f"  {status:7} {name}")
 
+            # A menu item as a user reaches it: its own button, or 'Meer' and then the item
+            def nav_click(view):
+                tab = f".top-nav .nav-tab[data-view='{view}']"
+                if view == "settings" or page.is_visible(tab):
+                    page.click(f".top-nav [data-view='{view}']")
+                else:
+                    page.click("#nav-more-btn")
+                    page.click(f"#nav-more-menu [data-more-view='{view}']")
+
+            # Screenshots of every screen (and some windows) to look at, in both themes
+            shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
+            shots.mkdir(parents=True, exist_ok=True)
+
             page.goto(base)
             page.wait_for_load_state("networkidle")
             print(f"{engine} against {base}")
 
-            # Every tab, by clicking it like a user
-            # (Berichten has no button of its own in the menu: it opens from the DataGatherer page)
-            via = {"berichten": "#section-datagatherer .dg-header-actions button:has-text('Berichten')"}
+            # Every tab, by clicking it like a user: in the menu bar, or under Meer when it does not fit
             for view in VIEWS:
-                step(f"tab {view}", lambda: page.click(via.get(view) or f".top-nav [data-view='{view}']"), 1.5)
+                step(f"tab {view}", lambda: nav_click(view), 1.5)
                 if not page.is_visible(f"#section-{view}"):
                     problems.append(f"tab {view}: section not visible")
 
@@ -220,7 +231,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             def grid_folders():
                 return page.evaluate("[...document.querySelectorAll('#media-grid .folder-card-name')].map(e => e.textContent)")
 
-            step("files: the archive root", lambda: page.click(".top-nav [data-view='viewer']"), 0.6)
+            step("files: the archive root", lambda: nav_click("viewer"), 0.6)
             if "RAW" not in grid_folders() or page.text_content("#breadcrumb").strip() != "Archief":
                 problems.append(f"files: the first page shows {grid_folders()} instead of the archive folders")
             step("files: RAW and misc from the grid", lambda: (
@@ -251,7 +262,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Files: a folder with a subfolder, open a file, browse, move dialog, close
             folder = str(vault / "RAW" / "misc")
-            step("viewer: open folder", lambda: (page.click(".nav-tab[data-view='viewer']"),
+            step("viewer: open folder", lambda: (nav_click("viewer"),
                                                  page.evaluate(f"selectFolder({json.dumps(folder)})")))
             # A photo tile shows its name on hover (burst shots look alike); list rows line up
             step("files: hover a photo", lambda: page.hover("#media-grid .media-card:not(.folder-card):not(.other-card)"), 0.4)
@@ -290,7 +301,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 problems.append("big folder: scrolling down rendered no more cards")
 
             # Home: chat full screen open and closed, theme switch
-            step("home: chat full screen", lambda: (page.click(".nav-tab[data-view='home']"),
+            step("home: chat full screen", lambda: (nav_click("home"),
                                                     page.click("#section-home .chat-fullscreen-toggle")), 0.5)
             # The messages fill the window, the input sits at the bottom, the example questions come along
             chat = page.evaluate("""(() => {
@@ -344,7 +355,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # Pasha's tools: a result strip with a link, and a confirmation card that does nothing
             # until 'Uitvoeren' (the server is asked to confirm a forged id: a clear message, no move)
             step("chat: tool result and confirmation card", lambda: (
-                page.click(".nav-tab[data-view='home']"),
+                nav_click("home"),
                 page.evaluate("""(photo) => {
                     chatRenderToolEvent({tool: 'library_filter', result: {title: '3 bestanden: je selectie', total: 3,
                         items: [{path: photo, name: 'foto.jpg'}], link: {view: 'albums', filters: {year: 2019}, label: 'Alles bekijken'}}});
@@ -364,7 +375,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("""(() => { const s = document.querySelector('#chat-messages .chat-confirm-status');
                 return s.classList.contains('is-error') && !!s.querySelector('.fa-triangle-exclamation'); })()"""),
                    "chat tools: the expired message is not shown as an inline error")
-            page.click(".nav-tab[data-view='home']")
+            nav_click("home")
             for theme in ("light", "dark", "auto"):
                 step(f"theme {theme}", lambda: (page.click(".theme-button"),
                                                  page.click(f".theme-option[data-theme='{theme}']")), 0.3)
@@ -373,7 +384,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # keeps Tab inside and gives focus back, and the Files grid works with arrows and Enter
             view_now = "currentMainView()"
             active_id = "document.activeElement && (document.activeElement.id || document.activeElement.className)"
-            page.click(".nav-tab[data-view='home']")
+            nav_click("home")
             step("keys: 7 opens the timeline", lambda: page.keyboard.press("7"), 0.6)
             expect(page.evaluate(view_now) == "timeline", "keys: 7 did not open the timeline")
             step("keys: g b opens Bestanden", lambda: (page.keyboard.press("g"), page.keyboard.press("b")), 0.6)
@@ -525,6 +536,73 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    "settings: the restore command does not name the config the app runs with")
             expect(page.evaluate("getComputedStyle(document.querySelector('.nav-tab-settings.active'), '::after').content") != "none",
                    "settings: the gear has no active indicator")
+            # Back-ups: another folder, chosen in a folder browser (only the temp folder in this test);
+            # a folder in the archive is refused with its reason, 'Map maken' makes one, and
+            # 'Gebruiken en testen' stores it and makes a test backup there, shown in the window
+            bf_parent = Path(tempfile.mkdtemp(prefix="dv-backupmap-smoke-")).resolve()
+            step("backups: open the folder window", lambda: (
+                page.click("#settings-backup-folder"),
+                page.wait_for_selector(f"#backup-folder-tree .folder-item[data-path='{bf_parent}']", timeout=10000)), 0.3)
+            expect_focus_trapped("modal-backup-folder", "backups: folder window")
+            vault_row = f"#backup-folder-tree .folder-item[data-path='{vault.resolve()}']"
+            if page.query_selector(vault_row):
+                step("backups: the archive is refused", lambda: (
+                    page.click(vault_row), page.wait_for_selector("#backup-folder-check.is-error", timeout=5000)), 0.2)
+                expect("archief" in page.text_content("#backup-folder-check") and page.is_disabled("#backup-folder-use"),
+                       f"backups: choosing the archive was not refused ({page.text_content('#backup-folder-check')!r})")
+            step("backups: Map maken", lambda: (
+                page.click(f"#backup-folder-tree .folder-item[data-path='{bf_parent}']"),
+                page.fill("#backup-folder-new-name", "DataVault-backups"),
+                page.click("#backup-folder-create"),
+                page.wait_for_selector("#backup-folder-check.is-ok, #backup-folder-check.is-warn", timeout=5000)), 0.3)
+            made = bf_parent / "DataVault-backups"
+            expect(made.is_dir() and page.evaluate("backupFolder.selected") == str(made) and page.is_enabled("#backup-folder-use"),
+                   f"backups: 'Map maken' did not make and choose {made} ({page.evaluate('backupFolder.selected')})")
+            for theme in ("light", "dark"):
+                page.evaluate(f"setTheme('{theme}')")
+                page.wait_for_timeout(300)
+                page.screenshot(path=str(shots / f"backup-folder_{theme}.png"))
+                page.add_script_tag(path=str(A11Y_CHECKS))
+                for fail in page.evaluate("__contrastFailures()"):
+                    problems.append(f"contrast {theme} backup-folder: {fail['ratio']}:1 {fail['key']} ({fail['text']!r})")
+            page.evaluate("setTheme('auto')")
+            step("backups: Gebruiken en testen", lambda: (
+                page.click("#backup-folder-use"),
+                page.wait_for_selector("#backup-folder-check.is-done", timeout=30000)), 0.3)
+            expect(len(list(made.glob("datavault-*-handmatig.db.gz"))) == 1 and page.text_content("#backup-folder-use").strip() == "Klaar",
+                   f"backups: the test backup did not land in {made} ({sorted(p.name for p in made.iterdir())})")
+            step("backups: Klaar", lambda: page.click("#backup-folder-use"), 0.8)
+            location = page.text_content("#settings-backups .settings-row-value:has(.backup-folder-btn)") or ""
+            expect(not page.is_visible("#modal-backup-folder") and str(made) in location and "Zelf gekozen" in location,
+                   f"backups: the Locatie row does not show the chosen folder ({location!r})")
+            step("backups: Escape closes the window", lambda: (
+                page.click("#settings-backup-folder"), page.wait_for_selector("#modal-backup-folder.active"),
+                page.wait_for_timeout(600), page.keyboard.press("Escape")), 0.5)
+            expect(not page.is_visible("#modal-backup-folder"), "backups: Escape did not close the folder window")
+            # A second and third folder in the same session: after 'Klaar' and after Escape on the
+            # success state, 'Gebruiken en testen' still saves and tests the new folder
+            for round_name, close_key in (("DataVault-backups-2", "Escape"), ("DataVault-backups-3", None)):
+                step(f"backups: again with {round_name}", lambda: (
+                    page.click("#settings-backup-folder"),
+                    page.wait_for_selector(f"#backup-folder-tree .folder-item[data-path='{bf_parent}']", timeout=10000),
+                    page.click(f"#backup-folder-tree .folder-item[data-path='{bf_parent}']"),
+                    page.fill("#backup-folder-new-name", round_name),
+                    page.click("#backup-folder-create"),
+                    page.wait_for_selector("#backup-folder-check.is-ok, #backup-folder-check.is-warn", timeout=5000),
+                    page.click("#backup-folder-use"),
+                    page.wait_for_selector("#backup-folder-check.is-done", timeout=30000)), 0.3)
+                again = bf_parent / round_name
+                saved_folder = page.evaluate("fetchJSON(`${API_BASE}/api/backup/status`).then(s => s.folder)")
+                expect(saved_folder == str(again) and len(list(again.glob("datavault-*-handmatig.db.gz"))) == 1,
+                       f"backups: a later 'Gebruiken en testen' did not save {again} (status says {saved_folder!r})")
+                if close_key:
+                    step(f"backups: {close_key} on the success state", lambda: page.keyboard.press(close_key), 0.5)
+                else:
+                    step("backups: Klaar again", lambda: page.click("#backup-folder-use"), 0.5)
+                expect(not page.is_visible("#modal-backup-folder"), f"backups: the window did not close ({round_name})")
+            page.evaluate("""fetchJSON(`${API_BASE}/api/backup/folder`, {method: 'PUT', headers: {'Content-Type': 'application/json'},
+                                                                         body: JSON.stringify({path: null})})""")
+            shutil.rmtree(bf_parent, ignore_errors=True)
             step("settings: dark theme", lambda: page.check("input[data-theme-choice='dark']"), 0.3)
             expect(page.evaluate("document.documentElement.dataset.theme") == "dark", "settings: theme not set")
             page.check("input[data-theme-choice='auto']")
@@ -592,6 +670,27 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"keurer: Space on Houden did not keep ({pressed} vs {base})")
             step("keurer: undo the keep", lambda: page.keyboard.press("ArrowDown"), 1.0)
             expect(page.evaluate(keurer_state)[1] == base[1], "keurer: ArrowDown did not undo the keep")
+            # A trash decision: the undo toast stands beside the card, clear of the folder bar and
+            # 'Andere map'; its button still undoes the decision after it fell off the local
+            # 20-step stack (simulated by emptying keurerHistory): the server decides
+            trashed = page.evaluate("keurerFileQueue[keurerIndex].path")
+            page.evaluate("document.activeElement.blur(); document.querySelectorAll('#toast-container .toast').forEach(t => t.remove())")
+            step("keurer: ArrowRight trashes", lambda: page.keyboard.press("ArrowRight"), 1.2)
+            overlap = page.evaluate("""(() => { const t = document.querySelector('#toast-container .toast-undo');
+                const a = t && t.getBoundingClientRect(), b = document.querySelector('.keurer-folder-bar').getBoundingClientRect();
+                const c = document.getElementById('keurer-card').getBoundingClientRect();
+                return !t ? 'no toast' : [a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top,
+                                          a.left < c.right - 1 && a.right > c.left && a.top < c.bottom && a.bottom > c.top]; })()""")
+            expect(overlap == [False, False] and not Path(trashed).exists(),
+                   f"keurer: the undo toast covers the folder bar or the card ([folder bar, card] = {overlap})")
+            step("keurer: the toast undoes a decision no longer on the local stack", lambda: (
+                page.evaluate("keurerHistory = []"), page.click("#toast-container .toast-undo .toast-action")), 1.2)
+            toast_title = page.evaluate("(document.querySelector('#toast-container .toast strong') || {}).textContent")
+            expect(Path(trashed).exists() and toast_title == "Ongedaan gemaakt",
+                   f"keurer: the toast did not undo the older decision ({toast_title!r}, back: {Path(trashed).exists()})")
+            step("keurer: the mouse leaves the outcome", lambda: page.mouse.move(10, 600), 4.5)
+            expect(not page.evaluate("[...document.querySelectorAll('#toast-container .toast')].some(t => !t._leaving)"),
+                   "keurer: the undo outcome stayed after the mouse left it")
             # Move window: a highlighted folder and Enter on Annuleren: closed, nothing moved
             base = page.evaluate(keurer_state)
             current = page.evaluate("keurerFileQueue[keurerIndex].path")
@@ -1106,8 +1205,6 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
             # and a screenshot to look at
-            shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
-            shots.mkdir(parents=True, exist_ok=True)
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
                 for view in VIEWS + ["activity"]:    # Activiteit has no menu tab of its own (it hangs under DataGatherer)
@@ -1141,7 +1238,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.evaluate("switchMainView('home')")
 
             # Shows: Manage Sources and the Feeling Lucky slideshow
-            step("shows: manage sources", lambda: (page.click(".nav-tab[data-view='shows']"),
+            step("shows: manage sources", lambda: (nav_click("shows"),
                                                    page.click("text=Bronnen beheren")), 1.0)
             expect_focus_trapped("modal-show-settings", "shows: sources window")
             step("shows: close sources", lambda: page.evaluate("closeSettingsModal()"), 0.3)
@@ -1183,7 +1280,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             try:
                 step("elo: open from Shows", lambda: (
-                    page.click(".nav-tab[data-view='shows']"), page.click("#btn-elo"),
+                    nav_click("shows"), page.click("#btn-elo"),
                     page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=10000)), 0.6)
             except PlaywrightError:
                 problems.append("elo: the window showed no pair")
@@ -1516,9 +1613,21 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    "albums: closing Welke is mooier? did not return to its button")
             page.evaluate("localStorage.removeItem('dv-elo-scope')")     # the next opening starts at the library again
 
+            # Spotify: every insight window says what it measures, your own result and how it is
+            # worked out, in Dutch (no English server labels such as 'Broad Explorer')
+            for key in ("record_day", "top_binge", "mainstream_score", "seasonal_mood"):
+                step(f"spotify: uitleg {key}", lambda: (nav_click("spotify"), page.wait_for_timeout(900),
+                                                        page.evaluate(f"showInsightExplanation('{key}')")), 0.4)
+                parts = page.evaluate("""['insight-modal-title', 'insight-modal-description', 'insight-modal-result', 'insight-modal-how']
+                    .map(id => { const e = document.getElementById(id); return e && e.getClientRects().length ? e.textContent.trim() : ''; })""")
+                english = [w for w in ("Explorer", "Repeater", "Listener", "Hibernator", "Vibes", "Consistent", "Balanced")
+                           if any(w in p for p in parts)]
+                expect(all(parts) and not english, f"spotify: the {key} window misses a part or shows English ({parts})")
+                page.evaluate("closeInsightModal()")
+
             # Spotify: both top lists show everything the export has (never cut to the shorter one),
             # the shorter one ends with a quiet closing line, and the stat labels in a row line up
-            step("spotify: top lists", lambda: (page.click(".nav-tab[data-view='spotify']"), page.wait_for_timeout(1200)), 0)
+            step("spotify: top lists", lambda: (nav_click("spotify"), page.wait_for_timeout(1200)), 0)
             lists = page.evaluate("""(async () => {
                 const year = document.getElementById('spotify-year-select').value;
                 const d = await fetchJSON(`${API_BASE}/api/spotify/stats?year=${encodeURIComponent(year)}`);
@@ -1532,10 +1641,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    and all(n == 1 for n in lists["labelRows"]), f"spotify: top lists or stat labels ({lists})")
 
             # Spotify year switch, timeline back again
-            step("spotify: year", lambda: (page.click(".nav-tab[data-view='spotify']"),
+            step("spotify: year", lambda: (nav_click("spotify"),
                                            page.select_option("#spotify-year-select", index=page.evaluate(
                                                "document.getElementById('spotify-year-select').options.length - 1"))), 1.5)
-            step("timeline again", lambda: page.click(".nav-tab[data-view='timeline']"), 1.0)
+            step("timeline again", lambda: nav_click("timeline"), 1.0)
 
             # The job dock floats over the page: the page keeps that much room free at the bottom
             dock = page.evaluate("""(() => { const d = document.getElementById('job-dock');
@@ -1543,7 +1652,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                         parseFloat(getComputedStyle(document.querySelector('.main-content')).paddingBottom)]; })()""")
             expect(dock[1] >= dock[0], f"job dock: {dock[0]} px high, but only {dock[1]} px kept free under the page")
             # ... except on pages that are exactly as high as the window: they keep it free inside
-            for view in ("keurer", "duplicates"):
+            for view in ("keurer", "duplicates", "series"):
                 page.evaluate(f"switchMainView('{view}')")
                 page.wait_for_timeout(300)
                 extra = page.evaluate("document.documentElement.scrollHeight - innerHeight")
@@ -1609,17 +1718,15 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             })()""")
             expect(tiny["tiny"] and tiny["width"] <= 96, f"job dock: the idle dock is not a small icon ({tiny})")
 
-            # Beste uit reeks (second tab of Duplicaten): compare, decide with the keyboard, move one
+            # Reeksen (its own menu item, g n): compare, decide with the keyboard, move one
             # series after the confirmation and put it back from the Herstelcentrum
-            page.evaluate("switchMainView('duplicates')")
-            page.focus("#dup-tab-exact")
-            step("series: ArrowRight opens the tab", lambda: page.keyboard.press("ArrowRight"), 0.5)
-            expect(page.is_visible("#dup-panel-series") and not page.is_visible("#dup-panel-exact")
-                   and page.evaluate("document.activeElement.id") == "dup-tab-series",
-                   "series: ArrowRight on the tabs did not open 'Beste uit reeks'")
+            page.evaluate("switchMainView('home')")
+            step("series: g n opens Reeksen", lambda: (page.keyboard.press("g"), page.keyboard.press("n")), 0.5)
+            expect(page.is_visible("#section-series") and page.title() == "Reeksen · DataVault",
+                   f"series: g n did not open Reeksen ({page.evaluate(view_now)}, {page.title()!r})")
             # Before the first comparison there is one primary action, in the empty state
             before = page.evaluate("""[document.getElementById('btn-series-compare').getClientRects().length,
-                [...document.querySelectorAll('#dup-panel-series .btn-primary')].filter(b => b.getClientRects().length).map(b => b.textContent.trim())]""")
+                [...document.querySelectorAll('#series-panel .btn-primary')].filter(b => b.getClientRects().length).map(b => b.textContent.trim())]""")
             expect(before[0] == 0 and before[1] == ["Foto's vergelijken"],
                    f"series: before comparing, expected one primary 'Foto's vergelijken' (in the empty state), got {before}")
             step("series: compare", lambda: page.click("#series-list .empty-state-action"), 0.5)
@@ -1661,7 +1768,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("!document.getElementById('section-spotify').classList.contains('hidden')")
                    and page.evaluate("seriesState.items.length") == 2,
                    "series: 'g s' on a photo tile skipped the series instead of opening Spotify")
-            step("series: back to the tab", lambda: (page.evaluate("switchMainView('duplicates')"),
+            step("series: back to Reeksen", lambda: (page.evaluate("switchMainView('series')"),
                                                      page.wait_for_selector(".series-card")), 0.8)
             page.focus(".series-photo[tabindex='0']")
             first = tile_state()
@@ -1755,14 +1862,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(empty == ["Alle reeksen overgeslagen", "Overgeslagen tonen"],
                    f"series: after the last decision the list did not say the rest was skipped ({empty})")
             step("series: undo in the Herstelcentrum", lambda: (
-                page.click(".top-nav [data-view='recovery']"),
+                nav_click("recovery"),
                 page.wait_for_selector(".recovery-entry"),
-                page.click(".recovery-entry:has-text('Beste uit reeks') .recovery-undo"),
+                page.click(".recovery-entry:has-text('Reeksen') .recovery-undo"),
                 page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
                 page.click("#modal-dv-confirm .btn-primary")), 1.5)
             expect(klein.exists() and not (holding / "2022" / "bursts" / "strand klein.jpg").exists(),
                    "series: the Herstelcentrum did not put the resized photo back")
-            step("series: back on the tab", lambda: page.click(".top-nav [data-view='duplicates']"), 1.0)
+            step("series: back on Reeksen", lambda: nav_click("series"), 1.0)
             back = page.evaluate("[...document.querySelectorAll('.series-photo-name')].map(n => n.textContent)")
             # (the burst was skipped: that holds for this session)
             expect("strand klein.jpg" in back and "burst_00.jpg" not in back,
@@ -1902,7 +2009,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.evaluate(f"localStorage.setItem('timeline_folders', JSON.stringify([{json.dumps(str(vault))}]))")
             page.reload()
             page.wait_for_load_state("networkidle")
-            step("timeline: whole vault", lambda: (page.click(".nav-tab[data-view='timeline']"),
+            step("timeline: whole vault", lambda: (nav_click("timeline"),
                                                    page.wait_for_selector(".tl-photo-card")), 1.5)
             drawn = page.evaluate("document.querySelectorAll('.tl-photo-card').length")
             total = page.text_content(".tl-info-count") or ""
@@ -1936,24 +2043,148 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 expect(abs(narrow["tile"][0] - narrow["tile"][1]) <= 1 and narrow["cardX"] == narrow["headerX"]
                        and narrow["navRight"] <= narrow["searchLeft"] and not narrow["scrollsSideways"],
                        f"narrow window {width}px: {narrow}")
-            # From 1024 px up the whole menu fits, with at least 24 px before the search field
-            for width in (1024, 1150, 1240, 1400):
+            # From 1024 px up the menu fits, with at least 24 px before the search field: what does
+            # not fit moves (from the end) under 'Meer', and every view is reachable either way
+            for width in (1024, 1150, 1240, 1400, 1920):
                 page.set_viewport_size({"width": width, "height": 900})
                 page.wait_for_timeout(200)
-                gap = page.evaluate("""(() => { const tabs = [...document.querySelectorAll('.top-nav .nav-tab')];
+                gap = page.evaluate("""(() => { const tabs = [...document.querySelectorAll('.top-nav .nav-tab')].filter(t => t.offsetWidth);
                     const t = document.querySelector('.nav-tabs');
+                    const shown = tabs.filter(b => b.dataset.view).map(b => b.dataset.view);
+                    const more = [...document.querySelectorAll('#nav-more-menu [data-more-view]')].map(b => b.dataset.moreView);
                     return [Math.round(document.querySelector('.nav-search').getBoundingClientRect().left
-                                       - tabs[tabs.length - 1].getBoundingClientRect().right), t.scrollWidth > t.clientWidth + 1]; })()""")
+                                       - tabs[tabs.length - 1].getBoundingClientRect().right), t.scrollWidth > t.clientWidth + 1,
+                            shown, more, !document.getElementById('nav-more-btn').hidden]; })()""")
                 expect(gap[0] >= 24 and not gap[1], f"menu at {width}px: {gap[0]} px before the search field, scrolls: {gap[1]}")
+                expect(len(gap[2]) + len(gap[3]) == 13 and not set(gap[2]) & set(gap[3]) and gap[4] == bool(gap[3]),
+                       f"menu at {width}px: in the bar {gap[2]}, under Meer {gap[3]} (Meer shown: {gap[4]})")
+                if width == 1024:
+                    expect(len(gap[3]) >= 1 and gap[2][:5] == ["home", "viewer", "timeline", "map", "albums"],
+                           f"menu at 1024px: expected the first five in the bar and the rest under Meer ({gap[2]} | {gap[3]})")
+                if width == 1920:
+                    expect(not gap[3], f"menu at 1920px: everything should fit, but {gap[3]} is under Meer")
+            # A wider window never shows fewer items in the bar (the wordmark goes first, the spacing is fluid)
+            counts = []
+            for width in range(1024, 1761, 16):
+                page.set_viewport_size({"width": width, "height": 900})
+                page.wait_for_timeout(80)
+                counts.append((width, len(page.evaluate("NavMore.overflow")),
+                               page.evaluate("document.querySelector('.nav-brand-name').offsetWidth > 0")))
+            fewer = [(a[0], b[0]) for a, b in zip(counts, counts[1:]) if b[1] > a[1]]
+            expect(not fewer, f"menu: a wider window puts more items under Meer at {fewer}")
+            expect(all(n == 0 for _, n, brand in counts if brand), f"menu: the wordmark shows while items are under Meer ({counts})")
+            # Widening the window while an item in Meer has the focus: the focus goes to its tab, not <body>
+            page.set_viewport_size({"width": 1024, "height": 768})
+            page.wait_for_timeout(300)
+            page.focus("#nav-more-btn")
+            page.keyboard.press("ArrowDown")
+            page.wait_for_timeout(200)
+            held = page.evaluate("document.activeElement.dataset.moreView")
+            page.set_viewport_size({"width": 1920, "height": 900})
+            page.wait_for_timeout(300)
+            now = page.evaluate("[document.activeElement.tagName, document.activeElement.dataset.view || '']")
+            expect(now == ["BUTTON", held], f"menu: widening with {held} focused in Meer left the focus on {now}")
+            page.evaluate("document.activeElement.blur()")
+
+            # 'Meer' with the keyboard: ↓ opens on the first item, arrows go round, Escape closes and
+            # gives the focus back; choosing an item opens it and lights up Meer; a click next to it closes
+            page.set_viewport_size({"width": 1024, "height": 768})
+            page.wait_for_timeout(300)
+            page.evaluate("switchMainView('home')")
+            page.focus("#nav-more-btn")
+            step("meer: ↓ opens the menu", lambda: page.keyboard.press("ArrowDown"), 0.3)
+            first = page.evaluate("[...document.querySelectorAll('#nav-more-menu .menu-item')].map(i => i.dataset.moreView)")
+            expect(page.is_visible("#nav-more-menu") and page.get_attribute("#nav-more-btn", "aria-expanded") == "true"
+                   and page.evaluate("document.activeElement.dataset.moreView") == first[0],
+                   f"meer: ↓ did not open the menu on its first item ({page.evaluate('document.activeElement.outerHTML.slice(0, 80)')})")
+            ring = page.evaluate("getComputedStyle(document.activeElement).outlineStyle")
+            expect(ring != "none", f"meer: the focused item has no focus ring ({ring})")
+            step("meer: ↑ goes round to the last", lambda: page.keyboard.press("ArrowUp"), 0.1)
+            expect(page.evaluate("document.activeElement.dataset.moreView") == first[-1], "meer: ↑ on the first item did not go to the last")
+            step("meer: Escape closes", lambda: page.keyboard.press("Escape"), 0.4)
+            expect(not page.is_visible("#nav-more-menu") and page.evaluate("document.activeElement.id") == "nav-more-btn"
+                   and page.evaluate(view_now) == "home",
+                   "meer: Escape did not close the menu and give the focus back to Meer (or it closed something else)")
+            target = "berichten" if "berichten" in first else first[-1]
+            step(f"meer: Enter on {target}", lambda: (page.keyboard.press("Enter"),
+                                                       page.wait_for_selector("#nav-more-menu:not([hidden])"),
+                                                       page.evaluate(f"document.querySelector(\"#nav-more-menu [data-more-view='{target}']\").focus()"),
+                                                       page.keyboard.press("Enter")), 0.8)
+            lit = page.evaluate("""[currentMainView(), document.getElementById('nav-more-btn').classList.contains('active'),
+                getComputedStyle(document.getElementById('nav-more-btn'), '::after').content,
+                (document.querySelector('#nav-more-menu [aria-current="page"]') || {dataset: {}}).dataset.moreView,
+                document.activeElement.id, document.title]""")
+            expect(lit[0] == target and lit[1] and lit[2] != "none" and lit[3] == target and lit[4] == "nav-more-btn"
+                   and lit[5].startswith(page.evaluate(f"VIEW_TITLES['{target}']")),
+                   f"meer: choosing {target} did not open it with Meer lit and the focus back on Meer ({lit})")
+            step("meer: a click next to the menu closes it", lambda: (page.click("#nav-more-btn"), page.mouse.click(500, 500)), 0.4)
+            expect(not page.is_visible("#nav-more-menu"), "meer: a click next to the menu left it open")
+            step("meer: a menu tab turns Meer off", lambda: nav_click("home"), 0.4)
+            expect(not page.evaluate("document.getElementById('nav-more-btn').classList.contains('active')"),
+                   "meer: Meer stays lit after going back to Home")
             page.set_viewport_size({"width": 1400, "height": 900})
             page.wait_for_timeout(400)
+
+            # 'Ongedaan maken' in a toast (undo-toast.js): after a trash action the toast offers the undo;
+            # the time stands still while the focus is on it; ⌘Z puts the file back and the toast becomes
+            # the outcome; it is never offered twice, also not after the Herstelcentrum put it back
+            victim = sorted(p for p in (vault / "RAW" / BIG_FOLDER).iterdir() if p.suffix.lower() == ".jpg")[0]
+            trash_js = f"DVExport.trashFiles([{{path: {json.dumps(str(victim))}, name: {json.dumps(victim.name)}}}])"
+            undo_state = """[UndoToast.live, [...document.querySelectorAll('#toast-container .toast')].map(t =>
+                [t.querySelector('strong').textContent, !!t.querySelector('.toast-action')])]"""
+            page.evaluate("switchMainView('home'); document.querySelectorAll('#toast-container .toast').forEach(t => t.remove())")
+            step("undo toast: trash a file", lambda: page.evaluate(trash_js), 0.8)
+            live, toasts = page.evaluate(undo_state)
+            expect(not victim.exists() and len(live) == 1 and toasts == [["Naar de prullenmand", True]],
+                   f"undo toast: after a trash action expected one toast with 'Ongedaan maken' ({live}, {toasts})")
+            step("undo toast: the focus holds it", lambda: page.focus("#toast-container .toast-action"), 10.6)
+            expect(page.evaluate(undo_state)[0] == live, "undo toast: the toast went away while its button had the focus")
+            step("undo toast: ⌘Z puts it back", lambda: (page.evaluate("document.activeElement.blur()"), page.keyboard.press("Meta+z")), 1.2)
+            live, toasts = page.evaluate(undo_state)
+            expect(victim.exists() and live == [] and toasts == [["Teruggezet", False]],
+                   f"undo toast: ⌘Z did not put the file back and turn the toast into the outcome ({live}, {toasts})")
+            step("undo toast: ⌘Z again does nothing", lambda: page.keyboard.press("Meta+z"), 0.6)
+            expect(victim.exists() and page.evaluate(undo_state)[1] == toasts, "undo toast: a second ⌘Z did something")
+            # The server is briefly away (503): the button stays and a second try works; the
+            # outcome stays while the mouse is on the toast (Safari gives a clicked button no focus)
+            page.evaluate("document.querySelectorAll('#toast-container .toast').forEach(t => t.remove())")
+            step("undo toast: trash for a failed undo", lambda: page.evaluate(trash_js), 0.8)
+            busy = lambda route: route.fulfill(status=503, json={"error": {"code": "busy", "message": "Even niet bereikbaar"}})
+            page.route("**/api/recovery/undo", busy)
+            seen = len(problems)
+            step("undo toast: the undo fails with a 503", lambda: page.click("#toast-container .toast-undo .toast-action"), 0.8)
+            page.unroute("**/api/recovery/undo", busy)
+            # (the faked 503 and its console error are expected here)
+            problems[seen:] = [p for p in problems[seen:] if "503" not in p and "Even niet bereikbaar" not in p]
+            live, toasts = page.evaluate(undo_state)
+            expect(not victim.exists() and len(live) == 1 and ["Naar de prullenmand", True] in toasts
+                   and page.is_enabled("#toast-container .toast-undo .toast-action"),
+                   f"undo toast: after a 503 the button should stay for another try ({live}, {toasts})")
+            step("undo toast: the second try works", lambda: (
+                page.click("#toast-container .toast-undo .toast-action"), page.wait_for_timeout(600),
+                page.hover("#toast-container .toast .toast-body")), 4.5)
+            live, toasts = page.evaluate(undo_state)
+            expect(victim.exists() and live == [] and ["Teruggezet", False] in toasts,
+                   f"undo toast: the second try did not put it back, or the outcome left under the mouse ({live}, {toasts})")
+            step("undo toast: the mouse leaves", lambda: page.mouse.move(400, 600), 4.5)
+            expect(["Teruggezet", False] not in page.evaluate(undo_state)[1], "undo toast: the outcome stayed after the mouse left")
+            step("undo toast: trash it again", lambda: page.evaluate(trash_js), 0.8)
+            step("undo toast: put back in the Herstelcentrum", lambda: (
+                nav_click("recovery"), page.wait_for_selector(".recovery-entry .recovery-undo"),
+                page.click(".recovery-entry .recovery-undo >> nth=0"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary")), 1.5)
+            live, toasts = page.evaluate(undo_state)
+            expect(victim.exists() and live == [] and ["Naar de prullenmand", True] not in toasts,
+                   f"undo toast: after the Herstelcentrum put it back, a toast still offers the undo ({live}, {toasts})")
+            page.evaluate("switchMainView('home')")
 
             # Design pass (3.10): at 1024 px nothing on any main view sticks out of the window
             # (Spotify's cards once did), every view names itself in the tab title, and the
             # favicon is served
             page.set_viewport_size({"width": 1024, "height": 768})
             for view in ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline", "recovery",
-                         "settings", "albums", "datagatherer", "map", "berichten", "activity"]:
+                         "settings", "albums", "datagatherer", "map", "berichten", "activity", "series"]:
                 page.evaluate(f"switchMainView('{view}')")
                 page.wait_for_timeout(900)
                 outside = page.evaluate("""(() => { const W = document.documentElement.clientWidth; const out = [];
@@ -2049,7 +2280,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # Nothing here goes online: the test server refuses every request of the network guard.
             page.reload()
             page.wait_for_load_state("networkidle")
-            page.click(".nav-tab[data-view='home']")
+            nav_click("home")
             step("datagatherer: g v opens it", lambda: (page.keyboard.press("g"), page.keyboard.press("v")), 0.6)
             expect(page.evaluate(view_now) == "datagatherer", "datagatherer: g v did not open the tab")
             spotify_card = ".dg-card[data-source='spotify']"
@@ -2158,7 +2389,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(bool(until), "datagatherer: after Inlezen the card shows no 'Gegevens t/m'")
             expect((vault / "data" / "Matthew" / "Spotify Extended Streaming History").is_dir(),
                    "datagatherer: the existing export folder moved")
-            step("datagatherer: the Spotify chip", lambda: page.click(".nav-tab[data-view='spotify']"), 1.2)
+            step("datagatherer: the Spotify chip", lambda: nav_click("spotify"), 1.2)
             chip = page.evaluate("(document.getElementById('spotify-coverage') || {}).textContent || ''")
             expect(chip.startswith("Bijgewerkt t/m") and "null" not in chip, f"datagatherer: the Spotify chip says {chip!r}")
             page.evaluate("switchMainView('datagatherer')")
@@ -2167,7 +2398,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect_focus_trapped("dg-network", "datagatherer: network log")
             step("datagatherer: Escape closes the log", lambda: page.keyboard.press("Escape"), 0.4)
             expect(not page.is_visible("#dg-network"), "datagatherer: Escape did not close the network log")
-            step("datagatherer: Instellingen", lambda: page.click(".top-nav [data-view='settings']"), 0.8)
+            step("datagatherer: Instellingen", lambda: nav_click("settings"), 0.8)
             expect(page.is_visible("#settings-datagatherer"), "datagatherer: no section in Instellingen")
 
             # Berichten: read the synthetic Messages database, then the list, the thread, search and Pasha
@@ -2247,8 +2478,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 problems.append("chrome: after Bijwerken the card shows no 'Gegevens t/m'")
             step("activity: the switch in the header", lambda: page.click("#section-datagatherer .dg-switch [data-view='activity']"), 0.6)
             expect(page.evaluate(view_now) == "activity", "activity: the header switch did not open it")
-            expect(page.evaluate("document.querySelector(\".top-nav [data-view='datagatherer']\").classList.contains('active')"),
-                   "activity: the DataGatherer menu button is not lit")
+            expect(page.evaluate("navEntryFor('activity').classList.contains('active')"),
+                   "activity: the DataGatherer menu entry (or Meer, when it is under Meer) is not lit")
             try:
                 page.wait_for_selector(".act-event", timeout=10000)
             except PlaywrightError:
@@ -2280,10 +2511,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                  " && e.querySelector('.act-title').textContent === 'Voorbeeld').map(e => e.querySelector('.act-meta').textContent)")
             expect(len(both) == 1 and "Chrome-geschiedenis en Google Takeout" in both[0],
                    f"activity: the visit in Chrome and Takeout shows as {both}")
-            page.click(".nav-tab[data-view='home']")
+            nav_click("home")
             step("activity: g c opens it", lambda: (page.keyboard.press("g"), page.keyboard.press("c")), 0.6)
             expect(page.evaluate(view_now) == "activity", "activity: g c did not open it")
-            step("map: the Tijdlijn layer", lambda: page.click(".top-nav [data-view='map']"), 1.2)
+            step("map: the Tijdlijn layer", lambda: nav_click("map"), 1.2)
             try:
                 page.wait_for_selector("#map-layers:not([hidden]) #map-track", timeout=10000)
             except PlaywrightError:

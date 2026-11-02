@@ -196,6 +196,9 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         # newest backup is older than a day, then daily (DATAVAULT_AUTO_BACKUP=0: tests). While
         # the app has the database open it holds a lock, so restore_backup.py waits for a stop.
         db.when_ready(lambda: backup.hold_app_lock(config))
+        # The backup folder chosen in Instellingen (app_settings) wins over config.json
+        backup.use_folder(config, None)
+        db.when_ready(lambda: backup.load_chosen_folder(config, db))
         if os.environ.get("DATAVAULT_AUTO_BACKUP", "1") != "0":
             app.state.auto_backup = backup.AutoBackup(config, db)
 
@@ -214,7 +217,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
         recovery.init_router(config, db)
         series.init_router(config, db, job_manager)
         datagatherer.init_router(config, db, job_manager)
-        backup_routes.init_router(config, app.state.auto_backup, job_manager)
+        backup_routes.init_router(config, app.state.auto_backup, job_manager, db)
         search.init_router(config, db, job_manager)
         geo.init_router(config, db)
         ui.init_router(config, db)

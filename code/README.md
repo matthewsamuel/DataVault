@@ -79,7 +79,8 @@ Optioneel voor de back-ups van de database (zie hieronder): `"backup_folder"` (s
 `~/Library/Application Support/DataVault/backups`), `"backup_keep_daily"` (7) en
 `"backup_keep_weekly"` (4). Een pad met `~/` begint in je thuismap. Een relatief pad (zonder `/` of
 `~/` vooraan) gebruikt de app niet, omdat het zou afhangen van de map waarin de app start: dan blijft
-de standaardmap in gebruik en zegt Instellingen > Back-ups waarom.
+de standaardmap in gebruik en zegt Instellingen > Back-ups waarom. Een map die je in Instellingen >
+Back-ups kiest (**Andere map…**), gaat voor `backup_folder`.
 
 Optioneel: `"models_folder"` (waar het zoekmodel van Slim zoeken staat; standaard `code/models`).
 
@@ -117,7 +118,7 @@ cp config.example.json config.json   # en daarna de paden aanpassen
 - Elke opruimactie is in één keer terug te zetten (Herstellen, of in het Herstelcentrum)
 
 ### Beste uit reeks (bijna-duplicaten en bursts)
-- Tweede tabblad op **Duplicaten**: foto's die op elkaar *lijken* (verkleinde of opnieuw opgeslagen
+- Het onderdeel **Reeksen** in het menu (`g n`; view `series`): foto's die op elkaar *lijken* (verkleinde of opnieuw opgeslagen
   kopieën, bewerkingen, bursts), niet byte voor byte gelijk. `backend/near_dups.py`, routes in
   `backend/routes/series.py`, scherm in `frontend/series.js`; migraties 30 en 31.
 - **Vergelijken** is een achtergrondtaak (`phash`, na een snelle ronde van de bibliotheek). Per foto
@@ -491,7 +492,18 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
   (`fsync`) en met sha256 vergeleken (`backup._copy_new`). De `media`-tabel zelf blijft erin: albums
   en andere gegevens wijzen naar `media.id`. `gunzip -k` geeft een gewone SQLite-database.
 - Fouten zijn Nederlandse zinnen (`backup._reason`): een back-upmap zonder schrijfrechten wordt vóór
-  het kopiëren gemeld, met de map en de sleutel `backup_folder`.
+  het kopiëren gemeld, met de map en de plek om een andere te kiezen (Instellingen > Back-ups).
+- **Een andere map kiezen** (Instellingen > Back-ups > Andere map…): `GET /api/backup/folders` geeft de
+  beginplekken (thuismap en aangesloten schijven; in de testmodus alleen de tijdelijke map) of de
+  submappen van één map, alleen namen, zonder verborgen mappen en zonder `~/Library`. `POST
+  /api/backup/folder/check` beoordeelt een map met `paths.check_backup_folder`: hij moet bestaan en een
+  schrijftest doorstaan, en mag niet in het archief (ook TRASH, RAW_DUPLICATES), de cache of de map van
+  de database, de app of de modellen liggen, en geen systeemmap, thuismap of hoofdmap van een schijf
+  zijn. Op dezelfde schijf als de database komt er een waarschuwing bij. `POST /api/backup/folder/create`
+  maakt één nieuwe map, `PUT /api/backup/folder` bewaart de keuze in `app_settings` (`backup_folder`;
+  `{path: null}` gaat terug naar config.json). Een gekozen map die er niet is (schijf los), wordt nooit
+  opnieuw aangemaakt: de back-up meldt dat (503). Het venster maakt na het kiezen meteen een
+  test-back-up (de taak `backup`).
 - Waarom compact: met een index van 100.000 foto's is de database 109 MB; de back-up is 62 MB zonder
   de caches en 6,7 MB gecomprimeerd (gemeten: 1 s om te maken, 0,25 s om uit te pakken en te
   controleren). Elf back-ups passen zo ruim op een volle interne schijf.
@@ -509,7 +521,9 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
   ```
   Draait de app met een andere config dan `code/config.json` (`DATAVAULT_CONFIG`), zet er dan
   `--config <pad>` achter; Instellingen toont de opdracht al zo (`backup.restore_command(config)`),
-  zodat hij nooit bij een andere database uitkomt.
+  zodat hij nooit bij een andere database uitkomt. Een in Instellingen gekozen back-upmap leest het
+  script uit de database; Instellingen zet hem er ook als `--map <map>` bij, voor als de database zelf
+  niet te lezen is.
   Het script controleert de back-up (integrity_check, bekend schema), weigert zolang er een
   DataVault-server draait of de app de database open heeft (een gedeelde vergrendeling naast de
   database), bewaart de huidige database helemaal als `datavault-voor-herstel-….db.gz` en zet pas
