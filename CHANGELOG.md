@@ -9,6 +9,13 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Afronding: wat nog bleef liggen
+- Terugzetten van een duplicatenrun controleert nu of het bestand in RAW_DUPLICATES nog precies het verplaatste bestand is (zelfde bestandsnummer en grootte). Is het intussen veranderd of vervangen, dan blijft het staan. Duplicaten toont dat bij de actie met een waarschuwing en in de melding na het terugzetten, en het Herstelcentrum noemt per bestand de reden. Acties van vóór deze versie werken zoals altijd.
+- Exporteren neemt de aanmaakdatum (de 'Aanmaakdatum' in Finder) nu exact over van het origineel, tot op de nanoseconde, ook als die later ligt dan de wijzigingsdatum. Een test bewijst het op APFS.
+- De twee oudere duplicaat-opdrachten (`delete_single`, `scan_folder`) nemen hun pad alleen nog in de JSON-body, nooit meer in de URL. Een pad in de URL wordt geweigerd met een duidelijke melding.
+- Een verzoek met een vreemde `Host` (DNS-rebinding) krijgt nu dezelfde JSON-foutmelding als de rest van de app (code `invalid_host`) in plaats van platte tekst.
+- `start.sh` opent Safari als er in config.json geen `browser` staat. Voorheen werd de foutmelding van plutil als browsernaam gebruikt en lukte het openen niet.
+
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
 - Een foto groeit vanuit zijn miniatuur in de viewer en krimpt bij het sluiten terug naar zijn plek in het raster.
