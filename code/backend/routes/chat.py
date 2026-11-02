@@ -608,6 +608,9 @@ async def stream_with_tools(ollama_messages: list, model: str, fmt: str = "tags"
     fmt 'native': Ollama's own tool calling (assistant.NATIVE_TOOLS); tags in the text still
     count. When Ollama says the model cannot call tools, the request starts again with the tag
     prompt (tag_messages(), built in the threadpool) and the model is remembered.
+    An answer with nothing in it (no visible text, no action, no tried action; qwen2.5 sometimes
+    writes a call that Ollama's parser drops) is asked once more in the tag format; when that is
+    empty too, the chat gets assistant.NO_ANSWER plus {'notice': 'no_answer'}, never an empty bubble.
     """
     native = fmt == "native"
     calls: list = []
@@ -631,6 +634,18 @@ async def stream_with_tools(ollama_messages: list, model: str, fmt: str = "tags"
             if event.get("done"):
                 ctx = assistant.Context(config, db, manager)
                 actions, page_actions, tried = assistant.resolve_actions(text, calls)
+                if not (actions or page_actions or tried or assistant.strip_actions(text)):
+                    if text:
+                        yield _sse({"replace": ""})   # only whitespace or a stray tag fragment came
+                    if native and tag_messages is not None:
+                        fallback = await run_in_threadpool(tag_messages)
+                        async for again in stream_with_tools(fallback, model, "tags"):
+                            yield again
+                        return
+                    yield _sse({"token": assistant.NO_ANSWER})
+                    yield _sse({"notice": "no_answer"})
+                    yield chunk
+                    return
                 if actions or page_actions:
                     # The model wrote the action in its own spelling: the chat shows the answer without it,
                     # plus the one action the page runs itself, in the spelling the page reads

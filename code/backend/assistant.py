@@ -50,6 +50,8 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f<>  ]")
 
 NOT_RUN = ("Dat kon ik niet uitvoeren. Probeer het anders te vragen, bijvoorbeeld \"foto's uit 2019\" "
            "of \"foto's van het strand\".")
+# The model gave nothing at all (no text, no action), also after the retry in the tag format
+NO_ANSWER = "Dat lukte me niet, wil je het anders vragen?"
 
 
 class ToolError(Exception):

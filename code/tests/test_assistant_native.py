@@ -157,3 +157,50 @@ def test_a_bare_action_name_and_blank_arguments_are_understood():
     found = assistant.resolve_actions('<<ACTION: {"action": "propose_export", "date_from": "", "kind": "video", "year": 2021}>>')
     assert found[0] == [{"action": "propose_export", "kind": "video", "year": 2021}]
     assert assistant.resolve_actions('<<ACTION: {"action": "find_photos", "query": ""}>>')[0] == []
+
+
+EMPTY = [{"message": {"content": ""}, "done": False}, {"done": True}]
+
+
+def test_an_empty_native_answer_is_asked_again_in_the_tag_format(indexed, fake_ollama):
+    # qwen2.5 sometimes writes a call Ollama's parser drops: content "" and no tool_calls
+    fake_ollama.chat_queue = [EMPTY, [{"message": {"content": 'Ik kijk het na. <<ACTION: {"action": "job_status"}>>'},
+                                       "done": False}, {"done": True}]]
+    events = _post(indexed)
+    first, second = _chat_bodies(fake_ollama)[-2:]
+    assert "tools" in first and "tools" not in second and "<<ACTION" in second["messages"][0]["content"]
+    assert "result" in _tool(events)
+    assert {"notice": "no_answer"} not in events and events[-1] == {"done": True}
+    assert sum(1 for e in events if e.get("done")) == 1
+    # Not remembered as a model without tools: the next question is native again
+    fake_ollama.requests.clear()
+    _post(indexed)
+    assert ["tools" in b for b in _chat_bodies(fake_ollama)] == [True]
+
+
+@pytest.mark.parametrize("native_lines", [EMPTY, [{"message": {"content": "\n "}, "done": False}, {"done": True}]])
+def test_empty_twice_gives_a_short_dutch_line_never_an_empty_bubble(indexed, fake_ollama, native_lines):
+    fake_ollama.chat_queue = [native_lines, EMPTY]
+    events = _post(indexed)
+    assert len(_chat_bodies(fake_ollama)) == 2
+    text = "".join(e.get("token", "") for e in events if "token" in e)
+    assert text.strip().endswith(assistant.NO_ANSWER) or assistant.NO_ANSWER in text
+    assert {"notice": "no_answer"} in events and events[-1] == {"done": True}
+    assert sum(1 for e in events if e.get("done")) == 1
+
+
+def test_an_empty_tag_answer_is_not_retried(indexed, fake_ollama, app):
+    app.state.db.set_setting(chat.TOOL_FORMAT_SETTING, "tags")
+    fake_ollama.chat_lines = EMPTY
+    events = _post(indexed)
+    assert len(_chat_bodies(fake_ollama)) == 1
+    assert {"token": assistant.NO_ANSWER} in events and {"notice": "no_answer"} in events
+
+
+def test_the_chat_hides_every_tool_name_while_streaming():
+    import re
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent / "frontend" / "app.js").read_text()
+    names = set(re.findall(r"'(\w+)'", re.search(r"const CHAT_TOOL_NAMES = \[(.*?)\];", js, re.S).group(1)))
+    assert {t["function"]["name"] for t in assistant.NATIVE_TOOLS} | set(assistant.TOOLS) | set(assistant.CLIENT_ACTIONS) <= names
+    assert f"const CHAT_NO_ANSWER = '{assistant.NO_ANSWER}';" in js

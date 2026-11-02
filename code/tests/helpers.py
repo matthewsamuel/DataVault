@@ -27,6 +27,7 @@ class FakeOllama:
         self.refuse_tools = set()   # names whose /api/chat answers 'does not support tools' when tools are sent
         self.chat_status = 200
         self.chat_lines = None      # list of dicts streamed as JSON lines
+        self.chat_queue = []        # line lists for the next /api/chat requests, one per request (before chat_lines)
         self.chat_error = None      # an httpx exception raised for /api/chat
         self.requests = []
 
@@ -52,7 +53,7 @@ class FakeOllama:
                 return httpx.Response(self.chat_status, json={"error": "kapot"})
             if body.get("tools") and body["model"] in self.refuse_tools:
                 return httpx.Response(400, json={"error": f"registry.ollama.ai/library/{body['model']} does not support tools"})
-            lines = self.chat_lines if self.chat_lines is not None else [
+            lines = self.chat_queue.pop(0) if self.chat_queue else self.chat_lines if self.chat_lines is not None else [
                 {"message": {"content": "Hallo "}, "done": False},
                 {"message": {"content": "daar, ik ben Pasha."}, "done": False},
                 {"done": True},
