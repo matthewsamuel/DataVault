@@ -1724,6 +1724,7 @@ let fileToMove = null;
 let moveBatch = null;       // de selectiebalk (export.js): { files, folder (hun gezamenlijke map of null), onMove(folder) }
 let moveInFlight = false;   // één verplaatsing tegelijk: dubbel Enter/klikken stuurt niets extra
 let moveNav = null;         // toetsenbordnavigatie van de mappenboom (één per modal)
+let moveTwin = null;        // { path, name }: precies dit bestand (dezelfde bytes) staat al in de doelmap
 
 // fileData: één bestand, of een lijst (de selectie) met onMove(folder) -> Promise<bool> die het
 // verplaatsen zelf doet; bij true sluit het venster
@@ -1756,6 +1757,7 @@ function openMoveFileModal(fileData = null, { onMove = null } = {}) {
         ? (count === 1 ? fileToMove.name : countText) : (fileToMove.name || 'Onbekend bestand');
     document.getElementById('btn-confirm-move').disabled = true;
     selectedMoveFolder = null;
+    showMoveTwin(null);
     const destDisplay = document.getElementById('move-dest-display');
     if (destDisplay) destDisplay.style.display = 'none';
 
@@ -1837,6 +1839,7 @@ function closeMoveFileModal() {
     fileToMove = null;
     moveBatch = null;
     selectedMoveFolder = null;
+    showMoveTwin(null);
 
     // Resume show if it was playing and not intentionally paused
     if (activeShow && activeShow.isPlaying) {
@@ -1874,6 +1877,7 @@ function selectMoveDestination(path, row = null) {
 // wat je ziet. quiet: geen melding als het de huidige map is (bij pijltjes)
 function previewMoveDestination(path, quiet) {
     if (moveInFlight || !fileToMove) return;
+    if (path !== selectedMoveFolder) showMoveTwin(null);
     selectedMoveFolder = path;
     const btn = document.getElementById('btn-confirm-move');
 
@@ -1882,7 +1886,8 @@ function previewMoveDestination(path, quiet) {
 
     if (path === currentDir) {
         btn.disabled = true;
-        if (!quiet) showToast('Verplaatsen', moveBatch ? 'Alles staat al in deze map' : 'Het bestand staat al in deze map', 'warning');
+        // Dit is de map van het bestand zelf: er is geen tweede kopie, dus ook niets om weg te gooien
+        if (!quiet) showToast('Verplaatsen', moveBatch ? 'Dit is de map waar alles nu staat' : 'Dit is de map waar het bestand nu staat', 'warning');
     } else {
         btn.disabled = false;
     }
@@ -1927,6 +1932,28 @@ async function confirmMoveFile() {
         return;
     }
 
+    // Staan dezelfde bytes al in de doelmap? Dan eerst kiezen: deze kopie naar de prullenmand
+    // of toch verplaatsen. Nog een keer bevestigen verplaatst (er wordt nooit iets overschreven).
+    if (!moveTwin) {
+        let twin = null;
+        try {
+            twin = (await fetchJSON(`${API_BASE}/api/move-check`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source_path: file.path, destination_folder: destination }),
+            })).twin;
+        } catch (e) {
+            console.warn('Controle op een kopie in de doelmap mislukt', e);
+        }
+        if (twin && fileToMove === file && selectedMoveFolder === destination) {
+            btn.replaceChildren(...originalContent);
+            btn.disabled = false;
+            moveInFlight = false;
+            showMoveTwin(twin);
+            return;
+        }
+    }
+
     let moved;
     try {
         moved = await fetchJSON(`${API_BASE}/api/move-file`, {
@@ -1947,6 +1974,12 @@ async function confirmMoveFile() {
 
     showToast('Verplaatst', `${moved.message || 'Bestand verplaatst'}. Terugzetten kan in het Herstelcentrum.`, 'success');
     btn.replaceChildren(...originalContent);
+    finishMoveOut(file);
+}
+
+// Het bestand is weg uit deze map (verplaatst of naar de prullenmand): uit de lijst, de show
+// en de viewer halen en het venster sluiten
+function finishMoveOut(file) {
     removeFromFilesView(file);
 
     if (activeShow && activeShow.files.includes(file)) {
@@ -1980,6 +2013,59 @@ async function confirmMoveFile() {
         if (onRemoved) onRemoved(file);
     }
     closeMoveFileModal();
+}
+
+// De melding als dezelfde bytes al in de doelmap staan (null: weg). De hoofdknop heet dan
+// 'Toch verplaatsen'; naar de prullenmand gaat alleen met de eigen knop, nooit met ⌘Enter
+function showMoveTwin(twin) {
+    moveTwin = twin;
+    const label = document.querySelector('#btn-confirm-move .move-confirm-label');
+    if (label) label.textContent = twin ? 'Toch verplaatsen' : 'Hierheen verplaatsen';
+    const box = document.getElementById('move-twin');
+    if (!box) return;
+    box.hidden = !twin;
+    if (!twin) return;
+    document.getElementById('move-twin-thumb').replaceChildren(
+        createEl('img', { src: vaultFileUrl('thumb', twin.path), alt: '' }));
+    document.getElementById('move-twin-detail').textContent =
+        `${twin.name} heeft precies dezelfde inhoud. Deze kopie kan dus weg; terugzetten kan in het Herstelcentrum.`;
+}
+
+// Deze kopie naar de prullenmand; de server vergelijkt eerst opnieuw byte voor byte
+async function trashMoveTwin() {
+    if (moveInFlight || !fileToMove || !moveTwin || moveBatch) return;
+    moveInFlight = true;
+    const file = fileToMove;
+    const twin = moveTwin;
+    const btn = document.getElementById('btn-move-twin-trash');
+    const confirmBtn = document.getElementById('btn-confirm-move');
+    const originalContent = [...btn.childNodes];
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Naar de prullenmand…';
+    btn.disabled = true;
+    confirmBtn.disabled = true;
+
+    try {
+        await fetchJSON(`${API_BASE}/api/move-twin-trash`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_path: file.path, twin_path: twin.path }),
+        });
+    } catch (e) {
+        // Niets verplaatst (bijv. de andere kopie is veranderd): de melding gaat weg
+        toastFetchError('Niet naar de prullenmand', e);
+        btn.replaceChildren(...originalContent);
+        btn.disabled = false;
+        confirmBtn.disabled = false;
+        moveInFlight = false;
+        showMoveTwin(null);
+        return;
+    }
+
+    const folder = twin.path.split('/').slice(-2, -1)[0] || 'het archief';
+    showToast('Naar de prullenmand', `${twin.name} blijft staan in ${folder}. Terugzetten kan in het Herstelcentrum.`, 'success');
+    btn.replaceChildren(...originalContent);
+    btn.disabled = false;
+    finishMoveOut(file);
 }
 
 function zoomIn() {

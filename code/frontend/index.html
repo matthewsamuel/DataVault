@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=82">
+    <link rel="stylesheet" href="style.css?v=83">
 </head>
 
 <body>
@@ -1253,10 +1253,20 @@
                     </div>
                 </div>
             </div>
+            <!-- Dezelfde bytes staan al in de doelmap (app.js, showMoveTwin) -->
+            <div class="move-twin" id="move-twin" role="status" hidden>
+                <div class="move-twin-thumb" id="move-twin-thumb"></div>
+                <div class="move-twin-text">
+                    <div class="move-twin-title"><i class="fas fa-clone" aria-hidden="true"></i>Hier staat al een identieke kopie</div>
+                    <div class="move-twin-detail" id="move-twin-detail"></div>
+                </div>
+                <button type="button" class="btn btn-danger btn-sm" id="btn-move-twin-trash" onclick="trashMoveTwin()"><i
+                        class="fas fa-trash-can" aria-hidden="true"></i>Deze naar de prullenmand</button>
+            </div>
             <div class="move-modal-footer">
                 <button class="btn btn-secondary" onclick="closeMoveFileModal()">Annuleren</button>
                 <button class="btn btn-primary" id="btn-confirm-move" onclick="confirmMoveFile()" disabled><i
-                        class="fas fa-check" aria-hidden="true"></i>Hierheen verplaatsen</button>
+                        class="fas fa-check" aria-hidden="true"></i><span class="move-confirm-label">Hierheen verplaatsen</span></button>
             </div>
         </div>
     </div>
@@ -1607,7 +1617,7 @@
     <script src="folder-tree.js?v=8"></script>
     <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
     <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
-    <script src="app.js?v=79"></script>
+    <script src="app.js?v=80"></script>
     <script src="pasha-tools.js?v=2"></script>
     <script src="jobs.js?v=17"></script>
     <script src="duplicates.js?v=29"></script>

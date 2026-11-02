@@ -5,13 +5,15 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+import os
 import sqlite3
 
 from backend import recovery
 from backend.config import Config, content_type, is_video, media_type
+from backend.scanner import is_hidden
 from backend.paths import resolve_in_vault, is_in_vault, ArchiveFilter
 from backend.file_ops import (
-    move_no_overwrite, same_folder, is_inside, ARCHIVE_LOCK,
+    move_no_overwrite, same_folder, is_inside, files_identical, ARCHIVE_LOCK,
     FileOperationError, CrossDeviceError, DestinationFolderError, ProtectedPathError,
 )
 
@@ -331,3 +333,155 @@ def trash_files_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
     if not is_in_vault(trash, config, allow_internal=True):
         raise HTTPException(status_code=409, detail="De prullenmand staat buiten het archief; verwijderen kan hier niet")
     return _move_selection(paths, trash, "selection_trash", "Naar de prullenmand", "Staat al in de prullenmand")
+
+
+# ==================== MOVE: THE SAME FILE IS ALREADY IN THE DESTINATION ====================
+# 'Bestand verplaatsen' in the viewer: when the chosen folder already holds the very same
+# bytes (under any name), the file need not be there twice. The viewer then offers to put
+# THIS copy in the trash instead (a folder; the recovery center puts it back). The other
+# copy is the one that stays, so every check runs again under the lock right before the move.
+
+MAX_TWIN_CANDIDATES = 50   # same-size files compared byte for byte per check
+
+recovery.register_kind("move_twin_trash", "Dubbel bij verplaatsen")
+
+
+def _not_a_keeper_folders() -> List[Path]:
+    """Folders a copy that stays may never be in: from there it can still go, or it is the app's."""
+    return [config.TRASH_FOLDER, config.DUPLICATES_FOLDER, config.CACHE_FOLDER, config.DB_PATH]
+
+
+def _hidden(path: Path) -> bool:
+    return is_hidden(path, config.VAULT_ROOT, os.lstat(path))
+
+
+def _twin_problem(source: Path, twin: Path) -> Optional[str]:
+    """
+    Why twin cannot be the copy that stays in place of source, or None when it can.
+    Reads both files in full; raises OSError when one cannot be read.
+    """
+    if twin.is_symlink() or not twin.is_file():
+        return "De andere kopie bestaat niet meer"
+    if os.path.samefile(source, twin):
+        # Also a hard link or another spelling of the same path: that is not a second copy
+        return "Dit is hetzelfde bestand, geen tweede kopie"
+    if any(is_inside(twin, folder) for folder in _not_a_keeper_folders()):
+        return "De andere kopie staat in de prullenmand of bij de duplicaten"
+    if _hidden(twin) and not _hidden(source):
+        return "De andere kopie is verborgen"
+    if os.stat(source).st_size == 0:
+        return "Het bestand is leeg"
+    if not files_identical(source, twin):
+        return "De andere kopie is niet meer precies gelijk"
+    return None
+
+
+@router.post("/api/move-check")
+def move_check_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Before a move: is the same file (byte for byte) already in the destination folder?
+
+    Body: { "source_path": "...", "destination_folder": "..." }
+    Returns: { "twin": { "path", "name" } | null }
+    """
+    if not config:
+        raise HTTPException(status_code=500, detail="Configuration not initialized")
+    source_str = body.get("source_path")
+    destination_str = body.get("destination_folder")
+    if not isinstance(source_str, str) or not isinstance(destination_str, str) or not source_str or not destination_str:
+        raise HTTPException(status_code=400, detail="Ontbrekende 'source_path' of 'destination_folder'")
+    source = resolve_in_vault(source_str, config)
+    destination = resolve_in_vault(destination_str, config, folder=True)
+
+    if source.is_symlink() or not source.is_file():
+        raise HTTPException(status_code=404, detail="Bestand niet gevonden")
+    if (not destination.is_dir() or same_folder(destination, source.parent)
+            or any(is_inside(destination, folder) for folder in _not_a_keeper_folders())):
+        return {"twin": None}
+
+    size = source.stat().st_size
+    candidates: List[Path] = []
+    try:
+        with os.scandir(destination) as entries:
+            for entry in entries:
+                try:
+                    if entry.is_file(follow_symlinks=False) and entry.stat(follow_symlinks=False).st_size == size:
+                        candidates.append(Path(entry.path))
+                except OSError:
+                    continue
+    except OSError:
+        return {"twin": None}
+
+    # The same name first: that is the copy the move would otherwise clash with (_DUP_001)
+    candidates.sort(key=lambda p: (p.name.casefold() != source.name.casefold(), p.name.casefold()))
+    for twin in candidates[:MAX_TWIN_CANDIDATES]:
+        try:
+            if _twin_problem(source, twin) is None:
+                return {"twin": {"path": str(twin), "name": twin.name}}
+        except OSError:
+            continue
+    return {"twin": None}
+
+
+@router.post("/api/move-twin-trash")
+def move_twin_trash_endpoint(body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Put source in the trash because twin (elsewhere) has exactly the same bytes. Every check
+    of /api/move-check runs again under the lock, so twin is certain to stay.
+
+    Body: { "source_path": "...", "twin_path": "..." }
+    Returns: { "success": true, "trash_path", "action_id", "message" }
+    """
+    if not config:
+        raise HTTPException(status_code=500, detail="Configuration not initialized")
+    source_str = body.get("source_path")
+    twin_str = body.get("twin_path")
+    if not isinstance(source_str, str) or not isinstance(twin_str, str) or not source_str or not twin_str:
+        raise HTTPException(status_code=400, detail="Ontbrekende 'source_path' of 'twin_path'")
+    source = resolve_in_vault(source_str, config)
+    twin = resolve_in_vault(twin_str, config)
+    trash = config.TRASH_FOLDER
+    # The recovery center only moves files back from inside the vault
+    if not is_in_vault(trash, config, allow_internal=True):
+        raise HTTPException(status_code=409, detail="De prullenmand staat buiten het archief; verwijderen kan hier niet")
+
+    try:
+        with ARCHIVE_LOCK:
+            if source.is_symlink() or not source.is_file():
+                raise HTTPException(status_code=404, detail="Bestand niet gevonden")
+            if is_inside(source, trash):
+                raise HTTPException(status_code=400, detail="Dit bestand staat al in de prullenmand")
+            try:
+                problem = _twin_problem(source, twin)
+            except OSError as e:
+                raise HTTPException(status_code=409, detail=f"Kon de twee kopieën niet vergelijken: {e}. Er is niets verplaatst")
+            if problem:
+                raise HTTPException(status_code=409, detail=f"{problem}. Er is niets verplaatst")
+
+            target = move_no_overwrite(source, trash / source.name)
+            # If recording fails the file goes straight back and the move is refused
+            try:
+                recorder = recovery.ActionRecorder(
+                    db, "move_twin_trash", f"Dubbel van {twin.name} naar de prullenmand",
+                    folder=str(source.parent),
+                )
+                recorder.add(source, target)
+            except sqlite3.OperationalError:
+                raise   # database gone with the disk: 503 (errors.py)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Niet vastgelegd, het bestand is teruggezet: {e}")
+    except ProtectedPathError:
+        raise HTTPException(status_code=403, detail="Toegang geweigerd: cache-map van de app")
+    except CrossDeviceError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except DestinationFolderError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileOperationError as e:
+        raise HTTPException(status_code=500, detail=f"Naar de prullenmand verplaatsen mislukt: {e}")
+
+    return {
+        "success": True,
+        "trash_path": str(target),
+        "action_id": recorder.action_id,
+        "message": f"Naar de prullenmand; {twin.name} blijft staan",
+    }
