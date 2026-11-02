@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=90">
+    <link rel="stylesheet" href="style.css?v=91">
     <!-- Beweging: als eerste, zodat html[data-motion] klopt vóór de eerste weergave (docs/MOTION.md) -->
     <script src="motion.js?v=2"></script>
 </head>
@@ -1406,43 +1406,43 @@
                         <div id="dna-modal-icon" class="dna-big-icon" aria-hidden="true"></div>
                         <h3 id="dna-modal-title" class="dna-hero-title"></h3>
                         <p id="dna-modal-description" class="dna-hero-desc"></p>
-                        <p class="dna-hero-how">Je type is het dagdeel waarin je de meeste nummers afspeelde, op de tijd van je
-                            export. Kies rechts een type om te lezen wat het betekent.</p>
+                        <p class="dna-hero-how">Je type is het dagdeel waarin je de meeste nummers afspeelde (volgens de tijden in
+                            je Spotify-export). Kies rechts een type om te lezen wat het betekent.</p>
                     </div>
                 </div>
 
                 <!-- Right: All Types -->
                 <div class="dna-sidebar">
                     <h4 class="dna-sidebar-title">Typen</h4>
-                    <div class="dna-types-list">
-                        <div class="dna-type-item personality-early-bird" data-type="Early Bird">
+                    <div class="dna-types-list" role="group" aria-label="Typen">
+                        <button type="button" class="dna-type-item personality-early-bird" data-type="Early Bird" aria-pressed="false">
                             <span class="type-icon" aria-hidden="true"><i class="fas fa-dove"></i></span>
-                            <div class="type-info">
+                            <span class="type-info">
                                 <strong>Vroege vogel</strong>
                                 <span>5:00 – 12:00</span>
-                            </div>
-                        </div>
-                        <div class="dna-type-item personality-daydreamer" data-type="Daydreamer">
+                            </span>
+                        </button>
+                        <button type="button" class="dna-type-item personality-daydreamer" data-type="Daydreamer" aria-pressed="false">
                             <span class="type-icon" aria-hidden="true"><i class="fas fa-sun"></i></span>
-                            <div class="type-info">
+                            <span class="type-info">
                                 <strong>Dagdromer</strong>
                                 <span>12:00 – 18:00</span>
-                            </div>
-                        </div>
-                        <div class="dna-type-item personality-evening-chiller" data-type="Evening Chiller">
+                            </span>
+                        </button>
+                        <button type="button" class="dna-type-item personality-evening-chiller" data-type="Evening Chiller" aria-pressed="false">
                             <span class="type-icon" aria-hidden="true"><i class="fas fa-cloud-moon"></i></span>
-                            <div class="type-info">
+                            <span class="type-info">
                                 <strong>Avondgenieter</strong>
                                 <span>18:00 – 23:00</span>
-                            </div>
-                        </div>
-                        <div class="dna-type-item personality-night-owl" data-type="Night Owl">
+                            </span>
+                        </button>
+                        <button type="button" class="dna-type-item personality-night-owl" data-type="Night Owl" aria-pressed="false">
                             <span class="type-icon" aria-hidden="true"><i class="fas fa-moon"></i></span>
-                            <div class="type-info">
+                            <span class="type-info">
                                 <strong>Nachtuil</strong>
                                 <span>23:00 – 5:00</span>
-                            </div>
-                        </div>
+                            </span>
+                        </button>
                     </div>
                 </div>
             </div>

@@ -6193,15 +6193,20 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     gap: var(--space-sm);
 }
 
+/* Een knop (Tab, Enter of spatie kiest het type); de focusring is de gewone :focus-visible */
 .dna-type-item {
     position: relative;
     display: flex;
     align-items: center;
     gap: var(--space-md);
+    width: 100%;
     padding: var(--space-md);
     background: var(--surface-card);
     border: 1px solid var(--border-hairline);
     border-radius: var(--radius-lg);
+    color: inherit;
+    font: inherit;
+    text-align: left;
     cursor: pointer;
     transition: border-color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
 }

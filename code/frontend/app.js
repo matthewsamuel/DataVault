@@ -3269,18 +3269,23 @@ function showDnaExplanation() {
         if (isActual) {
             newItem.classList.add('actual-personality');
             if (!newItem.querySelector('.actual-dna-badge')) {
-                newItem.appendChild(createEl('div', { class: 'actual-dna-badge', text: 'Jij' }));
+                newItem.appendChild(createEl('span', { class: 'actual-dna-badge', text: 'Jij' }));
             }
         }
 
         // Initial active state matches the actual DNA
         newItem.classList.toggle('active', info.key === typeName);
+        newItem.setAttribute('aria-pressed', String(info.key === typeName));
 
         // Click listener to view other explanations
         newItem.addEventListener('click', () => {
             // Update active state
-            document.querySelectorAll('.dna-type-item').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.dna-type-item').forEach(el => {
+                el.classList.remove('active');
+                el.setAttribute('aria-pressed', 'false');
+            });
             newItem.classList.add('active');
+            newItem.setAttribute('aria-pressed', 'true');
 
             // Find full type name key
             const fullTypeKey = Object.keys(dnaTypes).find(k => k.includes(typeName)) || 'Balanced Listener';
