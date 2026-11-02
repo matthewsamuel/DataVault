@@ -1850,6 +1850,36 @@ html[data-motion="rustig"] .toast .toast-icon {
     line-height: var(--lh-snug);
 }
 
+/* Een lijst die een melding openklapt (bijv. de mappen die de Tijdlijn niet vond): rustig, in een
+   verzonken vlak, met een eigen schuifbalk als hij lang is */
+.toast-list {
+    list-style: none;
+    margin: var(--space-sm) 0 0;
+    padding: var(--space-xs) 0;
+    max-height: 168px;
+    overflow-y: auto;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-sm);
+    animation: dv-pop-in var(--spring-snappy-dur) var(--spring-snappy) both;
+}
+
+.toast-list li {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--fs-xs);
+    color: var(--text-primary);
+    line-height: var(--lh-snug);
+}
+
+.toast-list li i {
+    flex: none;
+    font-size: var(--icon-xs);
+    color: var(--text-tertiary);
+}
+
 /* Een knop in de melding (showToast(..., action)), bijv. 'Ongedaan maken' (undo-toast.js), met
    rechts de sneltoets als rustige hint ervoor */
 .toast-actions {
@@ -9623,6 +9653,23 @@ button.storage-file-thumb:hover .storage-file-play {
     background: transparent;
     border-style: dashed;
     color: var(--text-secondary);
+}
+
+/* Een gekozen map die er niet (meer) is: warm omrand, met een waarschuwingsicoon voor de naam */
+.tl-folder-chip.is-missing {
+    background: var(--warning-subtle);
+    border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+    color: var(--text-secondary);
+    padding-left: var(--space-sm);
+}
+
+.tl-folder-chip.is-missing:hover {
+    border-color: var(--warning);
+}
+
+.tl-chip-icon {
+    font-size: var(--icon-xs);
+    color: var(--warning-text);
 }
 
 .tl-chip-name {

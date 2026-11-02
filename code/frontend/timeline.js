@@ -11,6 +11,8 @@
     let tlYearBoundaries = {};          // year → first index in tlFiles
     let tlSelectedFolders = new Set();  // selected folder paths
     let tlExcludedFolders = new Set();  // folders left out of a selected one, with everything below
+    let tlMissingFolders = new Set();   // chosen folders the last scan could not find (moved or gone)
+    let tlMissingToast = null;          // the toast that names them, while it is up
     let tlFolderTree = [];              // full folder tree from API
     let tlLoading = false;
     let tlScanning = false;
@@ -412,7 +414,13 @@
 
         tlSelectedFolders.forEach(path => {
             const name = path.split('/').pop();
-            const chip = createEl('div', { class: 'tl-folder-chip' },
+            // Niet gevonden (verplaatst of weg): een waarschuwingsicoon, het pad in de tooltip
+            const missing = tlMissingFolders.has(path);
+            const chip = createEl('div', {
+                class: `tl-folder-chip${missing ? ' is-missing' : ''}`,
+                title: missing ? `Niet gevonden, overgeslagen: ${displayPath(path)}` : null,
+            },
+                missing ? createEl('i', { class: 'fas fa-triangle-exclamation tl-chip-icon', 'aria-hidden': 'true' }) : null,
                 createEl('span', { class: 'tl-chip-name', text: name }),
                 createEl('button', {
                     class: 'tl-chip-remove',
@@ -444,6 +452,39 @@
         ({ chosen: tlSelectedFolders, excluded: tlExcludedFolders } = normalizedMarks(tlSelectedFolders, tlExcludedFolders));
         await applyFolderSelection();
     };
+
+    // Welke gekozen mappen er niet meer zijn: 'Welke?' klapt de lijst open in de melding, daarna
+    // haalt dezelfde knop ze uit de selectie
+    function showMissingFoldersToast(paths) {
+        const same = tlMissingToast && tlMissingToast.isConnected && !tlMissingToast._leaving;
+        if (same && tlMissingToast._paths === paths.join('\n')) return;
+        if (same) hideToast(tlMissingToast);
+        const n = paths.length;
+        const message = n === 1 ? '1 gekozen map is niet gevonden en overgeslagen'
+            : `${n} gekozen mappen zijn niet gevonden en overgeslagen`;
+        tlMissingToast = showToast('Tijdlijn', message, 'warning', {
+            label: 'Welke?', icon: 'fa-list-ul', keepOpen: true,
+            onClick: (button, toast) => {
+                if (!toast._expanded) {
+                    toast._expanded = true;
+                    toast.querySelector('.toast-body').after(createEl('ul', { class: 'toast-list' },
+                        ...paths.map(p => createEl('li', { title: p },
+                            createEl('i', { class: 'fas fa-folder', 'aria-hidden': 'true' }),
+                            createEl('span', { class: 'path-label', text: displayPath(p) })))));
+                    button.querySelector('i').className = 'fas fa-xmark';
+                    button.querySelector('.toast-action-label').textContent = 'Uit de selectie halen';
+                    // Open blijft hij langer staan, zodat de lijst uit te lezen is
+                    toastSchedule(toast, 20000);
+                    restartToastTimer(toast);
+                    return;
+                }
+                hideToast(toast);
+                paths.forEach(p => { tlSelectedFolders.delete(p); tlMissingFolders.delete(p); });
+                applyFolderSelection();
+            },
+        });
+        tlMissingToast._paths = paths.join('\n');
+    }
 
     async function applyFolderSelection() {
         saveFolders();
@@ -492,9 +533,9 @@
             tlFiles = timelineFilesFrom(data);
             tlTotal = data.total || tlFiles.length;
             tlScanFailed = false;
-            if (data.skipped && data.skipped.length) {
-                showToast('Tijdlijn', `${data.skipped.length} gekozen map(pen) niet gevonden en overgeslagen`, 'warning');
-            }
+            tlMissingFolders = new Set(data.skipped || []);
+            updateFolderChips();
+            if (tlMissingFolders.size) showMissingFoldersToast([...tlMissingFolders]);
             if (data.complete === false) {
                 showToast('Tijdlijn', `${data.errors || 'Sommige'} map(pen) of bestand(en) konden niet gelezen worden; de tijdlijn is mogelijk onvolledig`, 'warning');
             }
