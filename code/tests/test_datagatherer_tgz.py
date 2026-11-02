@@ -74,10 +74,12 @@ def test_a_tgz_lists_the_same_files_as_the_zip_in_dutch_and_english(tmp_path):
         assert raw_store.archive_names(path) is None        # a connector that reads no tar sees nothing
     assert raw_store.tar_head_names(tmp_path / "takeout-nl.tgz", members=2) == [
         "Takeout/Google Foto's/Foto's uit 2019/IMG_0.jpg", "Takeout/Agenda/Mijn agenda.ics"]
-    # Not a tar: no names, nothing yielded, nothing raised
+    # Not a tar: detect() sees no names; reading it says so instead of finding nothing
     junk = tmp_path / "kapot.tgz"
     junk.write_bytes(b"geen tar" * 100)
-    assert raw_store.tar_head_names(junk) is None and list(raw_store.iter_export_files(junk, READ)) == []
+    assert raw_store.tar_head_names(junk) is None
+    with pytest.raises(raw_store.RawStoreError, match="geen leesbaar"):
+        list(raw_store.iter_export_files(junk, READ))
 
 
 def test_a_tgz_is_read_as_a_stream_and_never_extracted(tmp_path, monkeypatch):
@@ -130,6 +132,44 @@ def test_a_gzip_bomb_in_a_tgz_is_refused(tmp_path, monkeypatch):
     with pytest.raises(raw_store.RawStoreError, match="beschadigd of onvolledig"):
         for _, read in raw_store.iter_export_files(cut, READ):
             read()
+
+
+def _read_all(path):
+    for _, read in raw_store.iter_export_files(path, READ):
+        read()
+
+
+def test_a_tgz_cut_off_between_members_or_in_a_header_is_not_complete(tmp_path):
+    # Many small JSON files (an activity-heavy part): a cut often falls between two members,
+    # where tarfile just stops as if the archive had ended
+    members = {f"Takeout/Google Foto's/IMG_{i}.jpg.json": json.dumps({"title": f"IMG_{i}.jpg"}) for i in range(600)}
+    members.update(fx.dutch_takeout_members())
+    for mode, name in (("w:gz", "takeout.tgz"), ("w", "takeout.tar")):
+        whole = fx.write_tgz(tmp_path / f"heel-{name}", members, mode=mode).read_bytes()
+        _read_all(tmp_path / f"heel-{name}")                          # the whole archive reads fine
+        cuts = [len(whole) * k // 37 for k in range(1, 37)]
+        if mode == "w:gz":
+            cuts += [len(whole) - 2000, len(whole) - 100]              # the end of the compressed stream
+        else:                                                          # (a plain tar ends in zero padding)
+            cuts += [512 * 40, 512 * 41 + 100]                         # exactly between members, inside a header
+        for k in cuts:
+            cut = tmp_path / f"cut-{name}"
+            cut.write_bytes(whole[:k])
+            with pytest.raises(raw_store.RawStoreError, match="beschadigd of onvolledig"):
+                _read_all(cut)
+
+
+def test_a_bomb_member_that_is_skipped_stops_early_too(tmp_path, monkeypatch):
+    # tarfile skips a member nobody reads by inflating it; the guard sits under that as well
+    monkeypatch.setattr(raw_store, "BOMB_FLOOR", 1024 * 1024)          # stand-in for 50 MB
+    tgz = fx.write_tgz(tmp_path / "takeout.tgz", {"Takeout/Google Foto's/groot.jpg": b"\0" * (96 * 1024 * 1024),
+                                                  "Takeout/Keep/Klein.json": fx.keep_note()})
+    inflated = []
+    real_read = tarfile._Stream.read
+    monkeypatch.setattr(tarfile._Stream, "read", lambda self, size=-1: inflated.append(size) or real_read(self, size))
+    with pytest.raises(raw_store.RawStoreError, match="verdacht"):
+        _read_all(tgz)
+    assert sum(inflated) < 24 * 1024 * 1024                             # stopped near the floor, not after 96 MB
 
 
 # ---------- importing ----------
@@ -197,3 +237,32 @@ def test_a_tgz_that_an_earlier_version_only_copied_is_read_now(client, app, conf
     assert _kinds(app)["note"] == 1
     assert state.get_raw(app.state.db, raw["id"])["parser_version"] == 3
     assert _import(client, app)["imports"] == 0              # once
+
+
+def test_a_missing_or_damaged_tgz_raw_fails_and_is_retried(client, app, tmp_path):
+    tgz = fx.dutch_takeout_tgz(tmp_path / "takeout-20240101T000000Z-001.tgz")
+    r = client.post(f"/api/datagatherer/sources/google_takeout/upload?name={tgz.name}", content=tgz.read_bytes())
+    result = app.state.jobs.result(_wait(app, r.json()["job"]["id"])["id"])
+    assert _wait(app, result["import_job"])["status"] == "done"
+    raw_id, path = _rows(app, "SELECT id, path FROM dg_raw_imports")[0]
+    copy = Path(path)
+    whole = copy.read_bytes()
+    aside = copy.with_name("weg.bin")
+    copy.rename(aside)                                                   # temp vault: the copy is gone
+    state.update_raw(app.state.db, raw_id, status="pending")
+    assert _import(client, app)["errors"] == 1
+    status, error, parser = _rows(app, "SELECT status, error, parser_version FROM dg_raw_imports")[0]
+    assert status == "failed" and error.startswith("Niet leesbaar")
+    # A damaged gzip header: a clear Dutch error, never 'imported' with nothing in it
+    aside.rename(copy)
+    os.chmod(copy, 0o644)
+    copy.write_bytes(b"\x1f\x8b\x08\x00kapot" + whole[10:])
+    state.update_raw(app.state.db, raw_id, status="pending")
+    assert _import(client, app)["errors"] == 1
+    status, error = _rows(app, "SELECT status, error FROM dg_raw_imports")[0]
+    assert status == "failed" and ("geen leesbaar" in error or "beschadigd" in error)
+    # The file restored: read on the next import
+    copy.write_bytes(whole)
+    state.update_raw(app.state.db, raw_id, status="pending")
+    assert _import(client, app)["imports"] == 1
+    assert _rows(app, "SELECT status FROM dg_raw_imports")[0][0] == "imported"

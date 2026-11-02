@@ -294,27 +294,79 @@ def is_tar_name(name: str) -> bool:
     return name.lower().endswith(TAR_SUFFIXES)
 
 
+class _EndInfo(tarfile.TarInfo):
+    """A TarInfo that notes why a stream ended: only a block of zeros is a real end of archive."""
+
+    @classmethod
+    def fromtarfile(cls, tar):
+        try:
+            return super().fromtarfile(tar)
+        except tarfile.HeaderError as e:
+            tar.dv_end = e
+            raise
+
+
+class _TarGuard:
+    """
+    The raw file under a tar stream. Every read of compressed bytes checks how far the archive
+    has been inflated, also while tarfile skips a member nobody reads (its own seek), so a
+    gzip bomb stops after BOMB_FLOOR instead of being inflated in full first.
+    """
+
+    def __init__(self, raw, name: str):
+        self.raw, self.name = raw, name
+        self.stream = None            # tarfile._Stream, once the tar is open
+
+    def read(self, size: int = -1) -> bytes:
+        data = self.raw.read(size)
+        self.check()
+        return data
+
+    def check(self) -> None:
+        if self.stream is None:
+            return
+        done = getattr(self.stream, "pos", 0)   # decompressed bytes so far
+        packed = max(1, self.raw.tell())        # compressed bytes read so far
+        if done > BOMB_FLOOR and done / packed > MAX_RATIO:
+            raise RawStoreError(f"{self.name} is verdacht sterk ingepakt; niet verder ingelezen")
+
+
 def _open_tar(path: Path):
-    """(raw file, TarFile) of a .tgz/.tar.gz/.tar, read as a stream (mode 'r|*'): never seeks back."""
+    """
+    (raw file, TarFile) of a .tgz/.tar.gz/.tar, read as a stream (mode 'r|*'): never seeks
+    back. The TarFile reads through a _TarGuard (tar.dv_guard).
+    """
     raw = open(path, "rb")
     try:
-        return raw, tarfile.open(fileobj=raw, mode="r|*")
-    except (tarfile.TarError, OSError, EOFError):
+        guard = _TarGuard(raw, Path(path).name)
+        tar = tarfile.open(fileobj=guard, mode="r|*", tarinfo=_EndInfo)
+        guard.stream = tar.fileobj
+        tar.dv_guard = guard
+        return raw, tar
+    except BaseException:
         raw.close()
         raise
 
 
-class _TarGuard:
-    """Whole-archive ratio check while a tar is decompressed: a gzip bomb stops early."""
-
-    def __init__(self, raw, tar: "tarfile.TarFile", name: str):
-        self.raw, self.tar, self.name = raw, tar, name
-
-    def check(self) -> None:
-        done = getattr(self.tar.fileobj, "pos", 0)   # decompressed bytes so far (tarfile._Stream)
-        packed = max(1, self.raw.tell())              # compressed bytes read so far
-        if done > BOMB_FLOOR and done / packed > MAX_RATIO:
-            raise RawStoreError(f"{self.name} is verdacht sterk ingepakt; niet verder ingelezen")
+def _check_complete(tar: "tarfile.TarFile", name: str) -> None:
+    """
+    After the last member: was this the real end of the archive? A tar stream that is cut
+    off between members or inside a header just stops (tarfile returns no next member), so
+    a truncated download would otherwise look complete. The end must be a block of zeros,
+    and a compressed stream must reach its own end.
+    """
+    damaged = RawStoreError(f"{name} is beschadigd of onvolledig")
+    if not isinstance(getattr(tar, "dv_end", None), tarfile.EOFHeaderError):
+        raise damaged
+    stream = tar.fileobj
+    try:
+        while stream.read(stream.bufsize):    # the rest: padding after the end blocks
+            pass
+    except (tarfile.TarError, EOFError, zlib_error) as e:
+        raise RawStoreError(f"{name} is beschadigd of onvolledig") from e
+    cmp = getattr(stream, "cmp", None)
+    if cmp is not None and not getattr(cmp, "eof", True):
+        raise damaged
 
 
 class _TarSource:
@@ -344,11 +396,10 @@ class _TarSource:
         try:
             data = self.stream.read(size)
         except (tarfile.TarError, EOFError, zlib_error) as e:
-            raise RawStoreError(f"{self.guard.name} is beschadigd of onvolledig: {str(e)[:80]}")
+            raise RawStoreError(f"{self.guard.name} is beschadigd of onvolledig") from e
         if len(self.head) == self.pos and self.pos + len(data) <= self.REPLAY:
             self.head += data
         self.pos += len(data)
-        self.guard.check()
         return data
 
 
@@ -394,7 +445,7 @@ def tar_head_names(path: Path, members: int = TAR_HEAD_MEMBERS, max_bytes: int =
     names: List[str] = []
     try:
         raw, tar = _open_tar(Path(path))
-    except (tarfile.TarError, OSError, EOFError):
+    except (tarfile.TarError, OSError, EOFError, zlib_error, RawStoreError):
         return None
     try:
         with raw, tar:
@@ -403,7 +454,7 @@ def tar_head_names(path: Path, members: int = TAR_HEAD_MEMBERS, max_bytes: int =
                     names.append(info.name[2:] if info.name.startswith("./") else info.name)
                 if len(names) >= members or tar.offset > max_bytes:
                     break
-    except (tarfile.TarError, OSError, EOFError, zlib_error):
+    except (tarfile.TarError, OSError, EOFError, zlib_error, RawStoreError):
         if not names:
             return None
     return names
@@ -418,21 +469,26 @@ def archive_names(path: Path, tar: bool = False) -> Optional[List[str]]:
 
 
 def _iter_tar(path: Path, wanted: Callable[[str], bool]) -> Iterator[Tuple[str, "ExportFile"]]:
+    """
+    The wanted members of a tar, as a stream. A raw that is missing raises OSError (as for a
+    zip: 'Niet leesbaar'); one that is no tar, damaged or cut off raises RawStoreError, so
+    it is never marked as read with nothing in it.
+    """
     try:
-        raw, tar = _open_tar(path)
-    except (tarfile.TarError, OSError, EOFError):
-        return
+        raw, tar = _open_tar(path)       # OSError (missing, unreadable) goes up as it is
+    except (tarfile.TarError, EOFError, zlib_error) as e:
+        raise RawStoreError(f"{path.name} is geen leesbaar .tgz- of .tar-archief") from e
     with raw, tar:
-        guard = _TarGuard(raw, tar, path.name)
+        guard = tar.dv_guard
         while True:
             try:
                 info = tar.next()
             except (tarfile.TarError, EOFError, zlib_error) as e:
-                raise RawStoreError(f"{path.name} is beschadigd of onvolledig: {str(e)[:80]}")
+                raise RawStoreError(f"{path.name} is beschadigd of onvolledig") from e
             if info is None:
+                _check_complete(tar, path.name)
                 return
             tar.members = [info]       # a stream keeps every header otherwise (100.000 photos)
-            guard.check()
             name = info.name[2:] if info.name.startswith("./") else info.name
             base = name.rsplit("/", 1)[-1]
             if not info.isfile() or base.startswith(".") or "__MACOSX/" in name or not wanted(base):
