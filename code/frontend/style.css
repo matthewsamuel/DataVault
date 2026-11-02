@@ -8032,6 +8032,126 @@ button.otd-settings-icon:hover {
     word-break: break-all;
 }
 
+/* Grootste bestanden: mini-voorbeeld | naam, grootte, pad | In Bestanden, prullenmand */
+.storage-file-item {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-sm) var(--space-md) var(--space-sm) var(--space-sm);
+}
+
+.storage-file-thumb {
+    position: relative;
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: var(--thumb-sm);
+    height: var(--thumb-sm);
+    padding: 0;
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--surface-raised);
+    color: var(--text-tertiary);
+    font-size: var(--icon-lg);
+}
+
+button.storage-file-thumb {
+    cursor: zoom-in;
+}
+
+.storage-file-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform var(--duration-slow) var(--ease-spring);
+}
+
+button.storage-file-thumb:hover img {
+    transform: scale(1.08);
+}
+
+button.storage-file-thumb:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+.storage-file-play {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    width: var(--icon-xl);
+    height: var(--icon-xl);
+    border-radius: var(--radius-full);
+    background: var(--media-scrim);
+    color: var(--on-media);
+    font-size: var(--fs-2xs);
+    pointer-events: none;
+    transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.storage-file-play i {
+    margin-left: var(--space-2xs);   /* het driehoekje optisch in het midden */
+}
+
+button.storage-file-thumb:hover .storage-file-play {
+    transform: scale(1.12);
+}
+
+.storage-file-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.storage-file-item .storage-file-name {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.storage-file-item .storage-file-path {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.storage-file-actions {
+    flex: none;
+    display: flex;
+    gap: var(--space-xs);
+    margin-left: var(--space-xs);
+}
+
+.storage-file-actions .btn {
+    --btn-fg: var(--text-tertiary);
+}
+
+.storage-file-item:hover .storage-file-actions .btn {
+    --btn-fg: var(--text-secondary);
+}
+
+.storage-file-actions .storage-file-trash:hover:not(:disabled) {
+    --btn-fg: var(--danger-text);
+    --btn-bg-hover: var(--danger-subtle);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .storage-file-thumb img,
+    .storage-file-play {
+        transition: none;
+    }
+}
+
+:root[data-motion="reduce"] .storage-file-thumb img,
+:root[data-motion="reduce"] .storage-file-play {
+    transition: none;
+}
+
 .storage-breadcrumb {
     display: flex;
     align-items: center;
@@ -9015,6 +9135,13 @@ button.otd-settings-icon:hover {
     border-color: var(--border-strong);
 }
 
+/* Een uitgezonderde map: rustiger, met een gestippelde rand */
+.tl-folder-chip.is-excluded {
+    background: transparent;
+    border-style: dashed;
+    color: var(--text-secondary);
+}
+
 .tl-chip-name {
     white-space: nowrap;
     overflow: hidden;
@@ -9321,9 +9448,127 @@ button.otd-settings-icon:hover {
     color: var(--text-on-accent);
 }
 
-.tl-picker-checkbox.checked {
+/* Gekozen: groen vak. Mee met een gekozen map: gestippeld groen vinkje (een klik zondert uit).
+   Uitgezonderd: een leeg vak en een gat in het groene blok. Erin andersom gekozen: een streepje.
+   Een gekozen map is één blok met zijn submappen. */
+.tl-picker-node.is-chosen {
+    background: var(--accent-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: inset 0 0 0 1px var(--accent-subtle-hover);
+}
+
+.tl-picker-node.is-chosen + .tl-picker-node.is-chosen {
+    margin-top: var(--space-xs);
+}
+
+.tl-picker-checkbox.checked,
+.tl-picker-row[data-state="checked"] .tl-picker-checkbox {
     background: var(--accent);
     border-color: var(--accent);
+}
+
+.tl-picker-row[data-state="checked"] .tl-picker-name {
+    font-weight: 600;
+}
+
+.tl-picker-row[data-state="checked"] .tl-picker-icon,
+.tl-picker-row[data-state="none"].is-mixed .tl-picker-icon {
+    color: var(--accent);
+}
+
+/* Uitgezonderd: weer de achtergrond van het venster, binnen het groene blok */
+.tl-picker-node.is-excluded {
+    background: var(--surface-overlay);
+    border-radius: var(--radius-md);
+    box-shadow: inset 0 0 0 1px var(--border-hairline);
+}
+
+.tl-picker-row[data-state="excluded"] .tl-picker-name {
+    color: var(--text-tertiary);
+}
+
+.tl-picker-row[data-state="included"]:hover,
+.tl-picker-node.is-chosen > .tl-picker-row:hover {
+    background: var(--accent-subtle-hover);
+}
+
+.tl-picker-row[data-state="included"] .tl-picker-checkbox {
+    background: transparent;
+    border-color: var(--accent);
+    border-style: dashed;
+    color: var(--accent);
+}
+
+.tl-picker-row[data-state="included"] .tl-picker-name {
+    color: var(--text-secondary);
+}
+
+.tl-picker-row[data-state="none"].is-mixed .tl-picker-checkbox,
+.tl-picker-row[data-state="excluded"].is-mixed .tl-picker-checkbox {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.tl-picker-via {
+    flex-shrink: 0;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    opacity: 0;
+    transform: translateX(var(--space-xs));
+    transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+
+/* Alleen bij de rij onder de muis of het toetsenbord: anders staat het op elke rij */
+.tl-picker-row:hover .tl-picker-via,
+.tl-picker-row:focus-visible .tl-picker-via {
+    opacity: 1;
+    transform: none;
+}
+
+/* Altijd te zien: 'uitgezonderd', en dichtgeklapt wat erin andersom gekozen is (gekozen in groen) */
+.tl-picker-via.is-hint,
+.tl-picker-via.is-note {
+    opacity: 1;
+    transform: none;
+}
+
+.tl-picker-via.is-hint {
+    color: var(--accent);
+    font-weight: 500;
+}
+
+.tl-picker-row .folder-chevron {
+    margin-right: calc(-1 * var(--space-xs));
+}
+
+/* Openklappen: de submappen glijden zacht in beeld (alleen transform en opacity) */
+.tl-picker-children:not([hidden]) {
+    animation: tl-picker-unfold var(--duration-slow) var(--ease-out);
+}
+
+@keyframes tl-picker-unfold {
+    from {
+        opacity: 0;
+        transform: translateY(calc(-1 * var(--space-sm)));
+    }
+}
+
+.tl-picker-tools {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-xs);
+    margin: 0 var(--space-xs) var(--space-xs);
+}
+
+.tl-picker-summary {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
 }
 
 .tl-picker-icon {
@@ -9368,7 +9613,7 @@ button.otd-settings-icon:hover {
 #modal-timeline-folders .folder-tree-container {
     min-height: 0 !important;
     height: auto !important;
-    flex: none !important;
+    flex: 0 1 auto !important;   /* krimpt op een laag scherm: de laatste map blijft te zien */
     padding: var(--space-sm) !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
@@ -13455,8 +13700,15 @@ button.otd-settings-icon:hover {
     outline: none;
 }
 
-.map-canvas.leaflet-container:focus-visible {
+/* De focusring als laag boven de kaart: als schaduw van de container viel hij onder het land weg */
+.map-canvas.leaflet-container:focus-visible::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1001;
+    border-radius: inherit;
     box-shadow: inset 0 0 0 2px var(--focus-ring);
+    pointer-events: none;
 }
 
 .map-overlay {
@@ -13555,6 +13807,106 @@ button.otd-settings-icon:hover {
 
 .map-place-capital {
     font-weight: var(--fw-semibold);
+}
+
+/* Een aangeklikt land: groene rand en een zweem groen; provincies gestippeld, met hun naam */
+.map-canvas .map-country.map-country-selected {
+    fill: color-mix(in srgb, var(--accent) 6%, var(--map-land));
+    stroke: var(--accent);
+    stroke-width: 1.5px;
+}
+
+.map-canvas .map-region-border {
+    stroke: var(--map-label);
+    stroke-opacity: 0.6;
+    animation: dv-fade-in var(--duration-slow) var(--ease-out);
+}
+
+.map-region {
+    display: block;
+    width: max-content;
+    transform: translate(-50%, -50%);
+    color: var(--map-label);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-regular);
+    letter-spacing: 0.02em;
+    text-shadow: 0 0 3px var(--map-land), 0 0 3px var(--map-land), 0 0 6px var(--map-land);
+    white-space: nowrap;
+    opacity: 0.85;
+}
+
+.map-label-new {
+    animation: dv-fade-in var(--duration-slow) var(--ease-out);
+}
+
+.map-country-chip {
+    position: absolute;
+    top: var(--space-lg);
+    left: 50%;
+    z-index: 800;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-xs) var(--space-xs) var(--space-xs) var(--space-md);
+    transform: translateX(-50%);
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-full);
+    background: var(--surface-overlay);
+    box-shadow: var(--shadow-md);
+    font-size: var(--fs-xs);
+    animation: map-chip-in var(--duration-slow) var(--ease-out);
+}
+
+.map-country-chip[hidden] {
+    display: none;
+}
+
+.map-country-chip > .fa-location-dot {
+    color: var(--accent);
+}
+
+.map-country-chip-name {
+    color: var(--text-primary);
+    font-weight: var(--fw-semibold);
+}
+
+.map-country-chip-meta {
+    color: var(--text-secondary);
+}
+
+.map-country-chip-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.map-country-chip-close:hover {
+    background: var(--surface-hover);
+    color: var(--text-primary);
+}
+
+.map-country-chip-close:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+}
+
+@keyframes map-chip-in {
+    from { opacity: 0; transform: translate(-50%, -6px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+:root[data-motion="reduce"] .map-country-chip,
+:root[data-motion="reduce"] .map-label-new,
+:root[data-motion="reduce"] .map-canvas .map-region-border {
+    animation: none;
 }
 
 /* Markers: een groene stip met een lichte rand; groepen met het aantal erin */
@@ -13792,6 +14144,193 @@ button.otd-settings-icon:hover {
     justify-content: center;
 }
 
+/* Voorvertoning bij hover over een pin of groep: pas aanklikbaar als hij zichtbaar is */
+.map-hover {
+    position: absolute;
+    z-index: 750;
+    width: 208px;
+    padding: var(--space-sm);
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-lg);
+    background: var(--surface-overlay);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-lg);
+    font-family: var(--font-sans);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(6px) scale(0.92);
+    transform-origin: var(--origin-x, 50%) 100%;
+    transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-slow) var(--ease-spring);
+    will-change: transform, opacity;
+}
+
+.map-hover[data-side="below"] {
+    transform: translateY(-6px) scale(0.92);
+    transform-origin: var(--origin-x, 50%) 0;
+}
+
+.map-hover[data-side="right"],
+.map-hover[data-side="left"] {
+    transform: scale(0.92);
+    transform-origin: var(--origin-x, 0) var(--origin-y, 50%);
+}
+
+.map-hover.is-visible {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+}
+
+.map-hover.is-group {
+    width: 232px;
+}
+
+.map-hover-grid {
+    display: grid;
+    gap: var(--space-xs);
+    border-radius: var(--radius-thumb);
+    overflow: hidden;
+}
+
+.map-hover-grid-2,
+.map-hover-grid-3,
+.map-hover-grid-4 {
+    grid-template-columns: 1fr 1fr;
+}
+
+.map-hover-thumb {
+    position: relative;
+    display: block;
+    aspect-ratio: 1 / 1;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: var(--thumb-bg);
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.map-hover-thumb::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 2px var(--accent);
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out);
+    pointer-events: none;
+}
+
+.map-hover-thumb:hover::before,
+.map-hover-thumb:active::before {
+    opacity: 1;
+}
+
+.map-hover-thumb:active {
+    transform: scale(0.97);
+    transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.map-hover-grid-1 .map-hover-thumb {
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius-thumb);
+}
+
+.map-hover-grid-2 .map-hover-thumb {
+    aspect-ratio: 3 / 4;
+}
+
+.map-hover-grid-3 .map-hover-thumb:first-child {
+    grid-row: span 2;
+    aspect-ratio: auto;
+}
+
+.map-hover-thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transform: scale(1.06);
+    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-slow) var(--ease-out);
+    transition-delay: calc(var(--hover-i, 0) * 40ms);
+}
+
+.map-hover-thumb.is-loaded img {
+    opacity: 1;
+    transform: none;
+}
+
+.map-hover-thumb.is-loaded:hover img {
+    transform: scale(1.05);
+    transition-delay: 0ms;
+}
+
+.map-hover-noimg,
+.map-hover-broken {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+    font-size: var(--icon-lg);
+}
+
+.map-hover-broken img {
+    display: none;
+}
+
+.map-hover-broken::after {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    content: "\f03e";
+}
+
+.map-hover-badge {
+    position: absolute;
+    z-index: 2;
+    right: var(--space-xs);
+    bottom: var(--space-xs);
+    padding: var(--space-2xs) var(--space-xs);
+    border-radius: var(--radius-full);
+    background: var(--media-scrim);
+    color: var(--on-media);
+    font-size: var(--fs-2xs);
+}
+
+.map-hover-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-xs) var(--space-2xs);
+    line-height: var(--lh-snug);
+}
+
+.map-hover-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.map-hover-zoom {
+    flex: none;
+}
+
+.map-hover-title {
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+}
+
+.map-hover-sub {
+    margin-top: var(--space-2xs);
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+}
+
+:root[data-motion="reduce"] .map-hover,
+:root[data-motion="reduce"] .map-hover-thumb img {
+    transition: none;
+}
+
 .settings-hint {
     margin: var(--space-sm) 0 0;
     max-width: 62ch;
@@ -13807,7 +14346,7 @@ button.otd-settings-icon:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .map-pin, .map-cluster, .map-popup-img, .map-canvas .map-country {
+    .map-pin, .map-cluster, .map-popup-img, .map-canvas .map-country, .map-hover, .map-hover-thumb img {
         transition: none;
     }
 }

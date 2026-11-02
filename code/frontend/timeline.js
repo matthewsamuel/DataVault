@@ -10,6 +10,7 @@
     let tlDateIndex = {};               // year → { month → count }
     let tlYearBoundaries = {};          // year → first index in tlFiles
     let tlSelectedFolders = new Set();  // selected folder paths
+    let tlExcludedFolders = new Set();  // folders left out of a selected one, with everything below
     let tlFolderTree = [];              // full folder tree from API
     let tlLoading = false;
     let tlScanning = false;
@@ -51,15 +52,15 @@
     function loadSavedFolders() {
         try {
             const saved = localStorage.getItem('timeline_folders');
-            if (saved) {
-                const arr = JSON.parse(saved);
-                tlSelectedFolders = new Set(arr);
-            }
+            const excluded = localStorage.getItem('timeline_excluded');
+            ({ chosen: tlSelectedFolders, excluded: tlExcludedFolders } = normalizedMarks(
+                saved ? JSON.parse(saved) : [], excluded ? JSON.parse(excluded) : []));
         } catch (e) { /* ignore */ }
     }
 
     function saveFolders() {
         localStorage.setItem('timeline_folders', JSON.stringify([...tlSelectedFolders]));
+        localStorage.setItem('timeline_excluded', JSON.stringify([...tlExcludedFolders]));
     }
 
     // ── Init ──────────────────────────────────────────────
@@ -137,18 +138,68 @@
     };
 
     // ── Folder Picker Modal ───────────────────────────────
+    // A chosen folder brings all its subfolders, and a subfolder of it can be left out
+    // again (with everything below it): the nearest marked folder above a folder decides,
+    // as selected_marks in routes/timeline.py. Below a chosen folder everything is ticked
+    // along (a click leaves it out); a folder with an exception inside gets a dash.
+    // The picker works on a draft: Annuleren leaves the selection as it was.
+    // Folders can be folded away; that only hides rows, the draft stays as it is.
+    let tlPickerDraft = new Set();
+    let tlPickerExcluded = new Set();
+    let tlPickerCollapsed = new Set();   // folded folders, kept between visits
+
+    try {
+        tlPickerCollapsed = new Set(JSON.parse(localStorage.getItem('timeline_picker_collapsed') || '[]'));
+    } catch (e) { /* ignore */ }
+
+    function saveCollapsed() {
+        try {
+            localStorage.setItem('timeline_picker_collapsed', JSON.stringify([...tlPickerCollapsed]));
+        } catch (e) { /* ignore */ }
+    }
+
+    function isInside(path, folder) {
+        return path.startsWith(folder.endsWith('/') ? folder : folder + '/');
+    }
+
+    // The nearest marked folder above path (not path itself): { folder, chosen } or null
+    function markAbove(path, chosen, excluded) {
+        let nearest = null;
+        for (const [marks, isChosen] of [[chosen, true], [excluded, false]]) {
+            for (const folder of marks) {
+                if (isInside(path, folder) && (!nearest || folder.length > nearest.folder.length)) {
+                    nearest = { folder, chosen: isChosen };
+                }
+            }
+        }
+        return nearest;
+    }
+
+    // Without the marks that change nothing: a chosen folder inside a chosen one, a
+    // left-out folder that is not inside a chosen one (also done by the server)
+    function normalizedMarks(chosen, excluded) {
+        const c = new Set(chosen);
+        const x = new Set([...excluded].filter(p => !c.has(p)));
+        return {
+            chosen: new Set([...c].filter(p => markAbove(p, c, x)?.chosen !== true)),
+            excluded: new Set([...x].filter(p => markAbove(p, c, x)?.chosen === true)),
+        };
+    }
+
     window.timelineOpenFolderPicker = function () {
         const modal = document.getElementById('modal-timeline-folders');
         const tree = document.getElementById('timeline-folder-tree');
         if (!modal || !tree) return;
 
+        ({ chosen: tlPickerDraft, excluded: tlPickerExcluded } = normalizedMarks(tlSelectedFolders, tlExcludedFolders));
         tree.innerHTML = '';
         if (tlFolderTree.length === 0) {
             tree.appendChild(emptyState({ icon: 'fa-folder-open', title: 'Geen mappen gevonden',
                 text: tlFoldersFailed ? 'De mappen konden niet geladen worden. Is de schijf aangesloten?' : 'Het archief heeft nog geen mappen met foto\'s.' }));
         } else {
-            renderPickerTree(tree, tlFolderTree, 0);
+            renderPickerTree(tree, tlFolderTree, 0, tree);
         }
+        refreshPicker();
         modal.classList.add('active');
         // De eerste map krijgt de focus: pijltjes en spatie werken meteen
         const first = tree.querySelector('.tl-picker-row');
@@ -162,30 +213,136 @@
 
     window.timelineConfirmFolders = async function () {
         timelineCloseFolderPicker();
-        saveFolders();
-        updateFolderChips();
-
-        if (tlSelectedFolders.size > 0) {
-            await scanTimeline();
-        } else {
-            tlScanSeq++;   // pages still on their way are for the old selection
-            tlFiles = [];
-            tlTotal = 0;
-            renderEmptyState();
-        }
+        ({ chosen: tlSelectedFolders, excluded: tlExcludedFolders } = normalizedMarks(tlPickerDraft, tlPickerExcluded));
+        await applyFolderSelection();
     };
 
-    function renderPickerTree(container, folders, depth) {
+    // Chosen: off. Ticked along: left out, with what was marked below it. Left out: along again.
+    // Not in: chosen.
+    function togglePickerFolder(path, state) {
+        if (state === 'checked') {
+            tlPickerDraft.delete(path);
+        } else if (state === 'included') {
+            [...tlPickerDraft, ...tlPickerExcluded].forEach(p => {
+                if (isInside(p, path)) { tlPickerDraft.delete(p); tlPickerExcluded.delete(p); }
+            });
+            tlPickerExcluded.add(path);
+        } else if (state === 'excluded') {
+            tlPickerExcluded.delete(path);
+        } else {
+            tlPickerDraft.add(path);
+        }
+        ({ chosen: tlPickerDraft, excluded: tlPickerExcluded } = normalizedMarks(tlPickerDraft, tlPickerExcluded));
+        refreshPicker();
+    }
+
+    const PICKER_TITLES = {
+        checked: 'Gekozen, met alle submappen. Klik om niet meer te kiezen.',
+        included: 'Komt mee met de map erboven. Klik om uit te zonderen.',
+        excluded: 'Uitgezonderd, met alle submappen. Klik om weer mee te nemen.',
+        none: '',
+    };
+
+    // Draws every row's state from the draft: chosen, along with a chosen folder, left out,
+    // or nothing; mixed when something inside it is the other way round
+    function refreshPicker() {
+        const tree = document.getElementById('timeline-folder-tree');
+        if (!tree) return;
+        tree.querySelectorAll('.tl-picker-node').forEach(node => {
+            const path = node.dataset.path;
+            const row = node.firstElementChild;
+            const box = row.querySelector('.tl-picker-checkbox');
+            const via = row.querySelector('.tl-picker-via');
+            const above = markAbove(path, tlPickerDraft, tlPickerExcluded);
+            const state = tlPickerDraft.has(path) ? 'checked'
+                : tlPickerExcluded.has(path) ? 'excluded'
+                : above?.chosen ? 'included' : 'none';
+            const isIn = state === 'checked' || state === 'included';
+            // The other way round inside: left out (in a folder that is in) or chosen (in one that is not)
+            const inside = [...(isIn ? tlPickerExcluded : tlPickerDraft)].filter(p => isInside(p, path)).length;
+
+            node.classList.toggle('is-chosen', state === 'checked');
+            node.classList.toggle('is-excluded', state === 'excluded');
+            row.dataset.state = state;
+            row.classList.toggle('is-mixed', inside > 0);
+            setHTML(box, inside > 0 ? html`<i class="fas fa-minus" aria-hidden="true"></i>`
+                : isIn ? html`<i class="fas fa-check" aria-hidden="true"></i>` : html``);
+            row.setAttribute('aria-checked', inside > 0 ? 'mixed' : String(isIn));
+            row.title = PICKER_TITLES[state];
+
+            // Folded with an exception inside: say how many, the rows themselves are hidden
+            const folded = inside > 0 && node.classList.contains('is-collapsed');
+            via.textContent = folded ? (isIn ? `${inside} uitgezonderd` : `${inside} gekozen`)
+                : state === 'excluded' ? 'uitgezonderd'
+                : state === 'included' ? `via ${above.folder.split('/').pop()}` : '';
+            via.hidden = !via.textContent;
+            via.classList.toggle('is-hint', folded && !isIn);
+            via.classList.toggle('is-note', state === 'excluded' || (folded && isIn));
+        });
+        updatePickerSummary(tree);
+    }
+
+    function updatePickerSummary(tree) {
+        const summary = document.getElementById('timeline-picker-summary');
+        if (!summary) return;
+        const chosen = tlPickerDraft.size;
+        const along = tree.querySelectorAll('.tl-picker-row[data-state="included"]').length;
+        const left = tlPickerExcluded.size;
+        if (chosen === 0) {
+            summary.textContent = 'Nog geen map gekozen';
+            return;
+        }
+        const parts = [chosen === 1 ? [...tlPickerDraft][0].split('/').pop() : `${chosen} mappen`];
+        if (along > 0) parts.push(`met ${along} ${along === 1 ? 'submap' : 'submappen'}`);
+        if (left > 0) parts.push(`${left} uitgezonderd`);
+        summary.textContent = parts.join(', ');
+    }
+
+    function setCollapsed(node, collapsed) {
+        const children = node.querySelector(':scope > .tl-picker-children');
+        if (!children) return;
+        const row = node.firstElementChild;
+        node.classList.toggle('is-collapsed', collapsed);
+        children.hidden = collapsed;
+        row.querySelector('.folder-chevron').classList.toggle('expanded', !collapsed);
+        row.setAttribute('aria-expanded', String(!collapsed));
+        if (collapsed) tlPickerCollapsed.add(node.dataset.path);
+        else tlPickerCollapsed.delete(node.dataset.path);
+    }
+
+    function toggleCollapsed(node) {
+        setCollapsed(node, !node.classList.contains('is-collapsed'));
+        saveCollapsed();
+        refreshPicker();
+    }
+
+    window.timelinePickerFoldAll = function (collapsed) {
+        const tree = document.getElementById('timeline-folder-tree');
+        if (!tree) return;
+        tree.querySelectorAll('.tl-picker-node').forEach(node => setCollapsed(node, collapsed));
+        saveCollapsed();
+        refreshPicker();
+    };
+
+    function renderPickerTree(container, folders, depth, tree) {
         folders.forEach(folder => {
+            const node = createEl('div', { class: 'tl-picker-node' });
+            node.dataset.path = folder.path;
+            const hasChildren = folder.children && folder.children.length > 0;
+
             const row = document.createElement('div');
             row.className = 'tl-picker-row';
-            row.style.paddingLeft = `${depth * 20 + 12}px`;
+            row.style.paddingLeft = `${depth * 20 + 8}px`;
 
-            const isSelected = tlSelectedFolders.has(folder.path);
+            // Dichtklappen: alleen de rijen gaan weg, wat erin gekozen is blijft gekozen
+            const chevron = createEl('span', { class: 'folder-chevron' + (hasChildren ? '' : ' no-children') });
+            if (hasChildren) {
+                setHTML(chevron, html`<i class="fas fa-chevron-right" aria-hidden="true"></i>`);
+                chevron.title = 'In- of uitklappen';
+                chevron.onclick = (e) => { e.stopPropagation(); toggleCollapsed(node); };
+            }
 
-            const checkbox = document.createElement('div');
-            checkbox.className = 'tl-picker-checkbox' + (isSelected ? ' checked' : '');
-            checkbox.innerHTML = isSelected ? '<i class="fas fa-check"></i>' : '';
+            const checkbox = createEl('span', { class: 'tl-picker-checkbox' });
 
             const icon = document.createElement('span');
             icon.className = 'tl-picker-icon';
@@ -195,49 +352,48 @@
             name.className = 'tl-picker-name';
             name.textContent = folder.name;
 
+            const via = createEl('span', { class: 'tl-picker-via' });
+
             const count = document.createElement('span');
             count.className = 'tl-picker-count';
             count.textContent = folder.media_count > 0 ? `${folder.media_count}` : '';
 
-            row.appendChild(checkbox);
-            row.appendChild(icon);
-            row.appendChild(name);
-            row.appendChild(count);
+            row.append(chevron, checkbox, icon, name, via, count);
 
             // Een aanvinkvakje voor het toetsenbord en schermlezers: Tab erheen, spatie of Enter
             row.tabIndex = 0;
             row.setAttribute('role', 'checkbox');
-            row.setAttribute('aria-checked', String(isSelected));
             row.setAttribute('aria-label', folder.name);
-            row.onclick = () => {
-                if (tlSelectedFolders.has(folder.path)) {
-                    tlSelectedFolders.delete(folder.path);
-                    checkbox.classList.remove('checked');
-                    checkbox.innerHTML = '';
-                } else {
-                    tlSelectedFolders.add(folder.path);
-                    checkbox.classList.add('checked');
-                    checkbox.innerHTML = '<i class="fas fa-check"></i>';
-                }
-                row.setAttribute('aria-checked', String(tlSelectedFolders.has(folder.path)));
-            };
+            row.onclick = () => togglePickerFolder(folder.path, row.dataset.state);
             row.onkeydown = (e) => {
                 if (e.key === ' ' || e.key === 'Enter') {
                     e.preventDefault();
                     row.click();
                 } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                     e.preventDefault();
-                    const rows = [...container.querySelectorAll('.tl-picker-row')];
+                    // Only the rows that can be seen: not those in a folded folder
+                    const rows = [...tree.querySelectorAll('.tl-picker-row')].filter(r => !r.closest('[hidden]'));
                     const next = rows[rows.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)];
                     if (next) next.focus();
+                } else if (e.key === 'ArrowRight' && hasChildren && node.classList.contains('is-collapsed')) {
+                    e.preventDefault();
+                    toggleCollapsed(node);
+                } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (hasChildren && !node.classList.contains('is-collapsed')) toggleCollapsed(node);
+                    else node.parentElement.closest('.tl-picker-node')?.firstElementChild.focus();
                 }
             };
 
-            container.appendChild(row);
+            node.appendChild(row);
+            container.appendChild(node);
 
-            // Render children recursively
-            if (folder.children && folder.children.length > 0) {
-                renderPickerTree(container, folder.children, depth + 1);
+            // Render children recursively, inside the node: a chosen folder is one block with its subfolders
+            if (hasChildren) {
+                const children = createEl('div', { class: 'tl-picker-children', role: 'group' });
+                node.appendChild(children);
+                renderPickerTree(children, folder.children, depth + 1, tree);
+                setCollapsed(node, tlPickerCollapsed.has(folder.path));
             }
         });
     }
@@ -266,10 +422,30 @@
                 }, '×'));
             container.appendChild(chip);
         });
+        // Uitgezonderde mappen: het kruisje neemt ze weer mee
+        tlExcludedFolders.forEach(path => {
+            const name = path.split('/').pop();
+            const chip = createEl('div', { class: 'tl-folder-chip is-excluded', title: `Uitgezonderd: ${path.split('/').slice(-2).join('/')}` },
+                createEl('span', { class: 'tl-chip-name', text: `zonder ${name}` }),
+                createEl('button', {
+                    class: 'tl-chip-remove',
+                    'aria-label': `${name} weer in de tijdlijn nemen`,
+                    title: 'Weer meenemen',
+                    onClick: (e) => { e.stopPropagation(); timelineRemoveFolder(path); },
+                }, '×'));
+            container.appendChild(chip);
+        });
     }
 
+    // A chip's cross: a chosen folder goes out, a left-out folder comes back
     window.timelineRemoveFolder = async function (path) {
         tlSelectedFolders.delete(path);
+        tlExcludedFolders.delete(path);
+        ({ chosen: tlSelectedFolders, excluded: tlExcludedFolders } = normalizedMarks(tlSelectedFolders, tlExcludedFolders));
+        await applyFolderSelection();
+    };
+
+    async function applyFolderSelection() {
         saveFolders();
         updateFolderChips();
 
@@ -281,13 +457,14 @@
             tlTotal = 0;
             renderEmptyState();
         }
-    };
+    }
 
     // ── Scanning ──────────────────────────────────────────
     function timelineScanUrl(offset, limit) {
         // Eén parameter per map: een mapnaam mag een komma bevatten
         const params = new URLSearchParams();
         [...tlSelectedFolders].forEach(folder => params.append('folders', folder));
+        [...tlExcludedFolders].forEach(folder => params.append('exclude', folder));
         params.set('offset', String(offset));
         params.set('limit', String(limit));
         return `${API_BASE}/api/timeline/scan?${params}`;

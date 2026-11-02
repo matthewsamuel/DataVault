@@ -56,6 +56,21 @@ def init_router(cfg: Config, database=None):
         _scan_cache.clear()
 
 
+def _resolved_folders(entries: List[str]) -> Tuple[List[Path], List[str]]:
+    """The entries as resolved vault folders, plus those that are not (outside the vault, not a folder)."""
+    folders: List[Path] = []
+    skipped: List[str] = []
+    for entry in entries:
+        if not isinstance(entry, str) or not entry.strip():
+            continue
+        folder = vault_folder_or_none(entry, config)
+        if folder is None or not folder.is_dir():
+            skipped.append(entry)
+            continue
+        folders.append(folder)
+    return folders, skipped
+
+
 def selected_roots(folders: List[str]) -> Tuple[List[Path], List[str]]:
     """
     The chosen folders as resolved vault folders, without any that lies inside another
@@ -63,16 +78,7 @@ def selected_roots(folders: List[str]) -> Tuple[List[Path], List[str]]:
     MEDIA-THUMBS-TIMELINE-14), plus the entries that were skipped (outside the vault,
     not a folder): those are reported, never silently dropped.
     """
-    roots: List[Path] = []
-    skipped: List[str] = []
-    for entry in folders:
-        if not isinstance(entry, str) or not entry.strip():
-            continue
-        folder = vault_folder_or_none(entry, config)
-        if folder is None or not folder.is_dir():
-            skipped.append(entry)
-            continue
-        roots.append(folder)
+    roots, skipped = _resolved_folders(folders)
     kept: List[Path] = []
     for folder in sorted(set(roots), key=lambda p: (len(p.parts), str(p))):
         if not any(folder == k or folder.is_relative_to(k) for k in kept):
@@ -80,11 +86,42 @@ def selected_roots(folders: List[str]) -> Tuple[List[Path], List[str]]:
     return sorted(kept, key=str), skipped
 
 
-def _walk_media(roots: List[Path], errors: List[str]) -> Tuple[List[Tuple[str, os.stat_result]], List[Tuple[str, int]]]:
+def selected_marks(folders: List[str], excluded: Optional[List[str]] = None) -> Tuple[List[Path], List[Path], List[str]]:
+    """
+    (roots, left out, skipped) of a selection with exceptions: a file is in it when the
+    nearest marked folder above it (chosen or left out) is a chosen one. So a folder
+    left out inside a chosen one drops out with everything below it, and a folder
+    chosen inside a left-out one is in again. Marks that change nothing are dropped:
+    a chosen folder inside a chosen one, a left-out folder that is not inside a chosen
+    one. A folder both chosen and left out counts as chosen. skipped as in
+    selected_roots (only the chosen entries: a left-out folder that is gone leaves
+    nothing out).
+    """
+    chosen, skipped = _resolved_folders(folders)
+    left_out, _ = _resolved_folders(excluded or [])
+    marks: Dict[Path, bool] = {f: False for f in left_out}
+    marks.update({f: True for f in chosen})
+
+    def above(folder: Path) -> Optional[bool]:
+        nearest = None
+        for mark in marks:
+            if mark != folder and folder.is_relative_to(mark) and (nearest is None or len(mark.parts) > len(nearest.parts)):
+                nearest = mark
+        return None if nearest is None else marks[nearest]
+
+    roots = sorted((f for f, c in marks.items() if c and above(f) is not True), key=str)
+    excludes = sorted((f for f, c in marks.items() if not c and above(f) is True), key=str)
+    return roots, excludes, skipped
+
+
+def _walk_media(roots: List[Path], errors: List[str],
+                excludes: Optional[List[Path]] = None) -> Tuple[List[Tuple[str, os.stat_result]], List[Tuple[str, int]]]:
     """
     Every photo and video below roots with its stat, and the mtime of every folder
-    walked. Every folder or file that could not be read is added to errors.
+    walked, never entering a folder in excludes (a root inside one is walked on its
+    own). Every folder or file that could not be read is added to errors.
     """
+    skip = {str(e) for e in excludes or []}
     files: List[Tuple[str, os.stat_result]] = []
     folders: List[Tuple[str, int]] = []
     extensions = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
@@ -96,7 +133,7 @@ def _walk_media(roots: List[Path], errors: List[str]) -> Tuple[List[Tuple[str, o
     for top in roots:
         # walk_archive skips the app's own folders, TRASH, RAW_DUPLICATES, hidden files and symlinks
         for root, dirs, names in walk_archive(top, config, archive_filter, onerror=onerror):
-            dirs.sort()
+            dirs[:] = sorted(d for d in dirs if os.path.join(root, d) not in skip)
             try:
                 folders.append((root, os.stat(root).st_mtime_ns))
             except OSError:
@@ -136,9 +173,10 @@ def _summary(rows: List[Tuple[int, int, int]]) -> Tuple[Dict[int, Dict[int, int]
     return dict(date_index), year_boundaries
 
 
-def _index_payload(roots: List[Path], offset: int, limit: Optional[int]) -> Dict[str, Any]:
+def _index_payload(roots: List[Path], excludes: List[Path], offset: int, limit: Optional[int]) -> Dict[str, Any]:
     """The answer from the media index: one page of rows, the counts of the whole selection."""
-    filters = {"kind": ["photo", "video"], "folders": [str(r) for r in roots]}
+    filters = {"kind": ["photo", "video"], "folders": [str(r) for r in roots],
+               "exclude_folders": [str(e) for e in excludes]}
     vault = str(config.VAULT_ROOT).rstrip("/") + "/"
     # First: a change after this shows as a new version on the next page
     version = "i" + media_index.selection_version(db, filters)
@@ -147,7 +185,7 @@ def _index_payload(roots: List[Path], offset: int, limit: Optional[int]) -> Dict
     total = sum(n for _, _, n in histogram)
     rows = []
     sources: Dict[str, int] = defaultdict(int)
-    for taken, path, size, kind, source in media_index.timeline_page(db, roots, offset, limit):
+    for taken, path, size, kind, source in media_index.timeline_page(db, roots, offset, limit, excludes):
         rows.append([round(taken, 3), path[len(vault):] if path.startswith(vault) else path, size,
                      TYPE_CODES.get(kind, "p"), media_dates.SOURCES.get(source, "m")])
     with db._connect() as conn:
@@ -164,6 +202,7 @@ def _index_payload(roots: List[Path], offset: int, limit: Optional[int]) -> Dict
         "year_boundaries": year_boundaries,
         "date_sources": dict(sources),
         "folders": [str(r) for r in roots],
+        "excluded": [str(e) for e in excludes],
         "skipped": [],
         "complete": True,
         "errors": 0,
@@ -172,16 +211,19 @@ def _index_payload(roots: List[Path], offset: int, limit: Optional[int]) -> Dict
     }
 
 
-def _scan_payload(roots: List[Path]) -> Tuple[Dict[str, Any], Tuple[Tuple[str, int], ...], bool]:
+def _scan_payload(roots: List[Path], excludes: List[Path]) -> Tuple[Dict[str, Any], Tuple[Tuple[str, int], ...], bool]:
     """(answer, folder mtimes, complete) of a walk. Only a complete answer may be cached."""
     errors: List[str] = []
-    files, folders = _walk_media(roots, errors)
+    files, folders = _walk_media(roots, errors, excludes)
     dates = media_dates.capture_dates(files, db, read_errors=errors, vault_root=config.VAULT_ROOT)
     complete = not errors and config.VAULT_ROOT.is_dir()
     if db is not None and complete:
         # Only after a full walk: a folder that could not be read is not 'gone'
         existing = {path for path, _ in files}
         for top in roots:
+            # Not below a folder that was left out: its files were not walked, not gone
+            if any(e.is_relative_to(top) for e in excludes):
+                continue
             try:
                 db.prune_media_dates(top, existing)
             except Exception:
@@ -214,6 +256,7 @@ def _scan_payload(roots: List[Path]) -> Tuple[Dict[str, Any], Tuple[Tuple[str, i
         "year_boundaries": year_boundaries,
         "date_sources": dict(sources),
         "folders": [str(r) for r in roots],
+        "excluded": [str(e) for e in excludes],
         "skipped": [],
         "complete": complete,
         "errors": len(errors),
@@ -223,21 +266,21 @@ def _scan_payload(roots: List[Path]) -> Tuple[Dict[str, Any], Tuple[Tuple[str, i
     return payload, tuple(folders), complete
 
 
-def _walk_answer(roots: List[Path], continuation: bool = False) -> Dict[str, Any]:
+def _walk_answer(roots: List[Path], excludes: List[Path], continuation: bool = False) -> Dict[str, Any]:
     """
     The walk's answer for this selection, from the cache while no folder changed. An
     incomplete answer is reused only for a continuation (a later page of the same
     paging, shortly after): paging must not walk the whole selection for every page,
     but a new first page tries again what could not be read.
     """
-    key = tuple(str(r) for r in roots)
+    key = tuple(str(r) for r in roots) + tuple("-" + str(e) for e in excludes)
     with _scan_cache_lock:
         cached = _scan_cache.get(key)
     if cached is not None and _unchanged(cached[0]):
         folder_mtimes, payload, complete, stored = cached
         if complete or (continuation and time.monotonic() - stored < INCOMPLETE_SECONDS):
             return payload
-    payload, folder_mtimes, complete = _scan_payload(roots)
+    payload, folder_mtimes, complete = _scan_payload(roots, excludes)
     with _scan_cache_lock:
         _scan_cache[key] = (folder_mtimes, payload, complete, time.monotonic())
         _scan_cache.move_to_end(key)
@@ -249,6 +292,7 @@ def _walk_answer(roots: List[Path], continuation: bool = False) -> Dict[str, Any
 @router.get("/scan")
 def timeline_scan(
     folders: List[str] = Query(..., description="Folder paths, one 'folders' parameter per folder"),
+    exclude: List[str] = Query([], description="Folders left out of the chosen ones, one 'exclude' parameter per folder"),
     offset: int = Query(0, ge=0, le=2 ** 62),   # larger does not fit in an SQLite integer
     limit: Optional[int] = Query(None, ge=1, le=MAX_PAGE),
 ):
@@ -256,9 +300,11 @@ def timeline_scan(
     The photos and videos of the chosen folders, ordered by capture date (oldest first).
 
     One 'folders' parameter per folder (a folder name may contain a comma,
-    MEDIA-THUMBS-TIMELINE-13). offset and limit ask for one page of rows (no limit: all
+    MEDIA-THUMBS-TIMELINE-13); one 'exclude' per folder left out of a chosen one, with
+    everything below it (selected_marks: the nearest marked folder above a file decides). offset and limit ask for one page of rows (no limit: all
     of them). Answer: {total, root, columns, rows, offset, next_offset, date_index,
-    year_boundaries, date_sources, folders, skipped, complete, errors, source, version};
+    year_boundaries, date_sources, folders, excluded, skipped, complete, errors, source,
+    version};
     each row is [timestamp, path relative to root, size, 'p'|'v', date source code].
     total, date_index and year_boundaries always describe the whole selection;
     next_offset is null on the last page. source is 'index' or 'walk'; when version
@@ -268,18 +314,18 @@ def timeline_scan(
     complete is false (errors counts the folders and files) when something could not
     be read.
     """
-    roots, skipped = selected_roots(folders)
+    roots, excludes, skipped = selected_marks(folders, exclude)
     if not roots:
         if skipped:
             raise HTTPException(status_code=404, detail="Geen van de gekozen mappen bestaat (nog) in het archief")
         raise HTTPException(status_code=400, detail="Geen mappen gekozen")
 
     if db is not None and media_index.fresh_for(db, roots):
-        data = _index_payload(roots, offset, limit)
+        data = _index_payload(roots, excludes, offset, limit)
     else:
         # The index is not there yet or behind the disk: walk now, and bring it up to date
         media_index.request_update()
-        payload = _walk_answer(roots, continuation=offset > 0)
+        payload = _walk_answer(roots, excludes, continuation=offset > 0)
         data = dict(payload)
         end = None if limit is None else offset + limit
         if offset or end is not None:

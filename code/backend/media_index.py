@@ -807,6 +807,8 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
       date_from     taken >= this epoch;  date_to: taken < this epoch
       folder        an absolute folder: files in it and below (recursive=False: only in it)
       folders       a list of such folders (any of them)
+      exclude_folders  folders left out of those (recursive only): a file below one of
+                    them is left out of each chosen folder the left-out one lies in
       camera        'Canon EOS 80D' (make + model) or just the model, case-insensitive
       camera_make, camera_model   exact, case-insensitive
       has_gps       True: only with a position; False: only without
@@ -847,13 +849,20 @@ def _where(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
     if filters.get("folder") is not None:
         folders.append(str(filters["folder"]))
     if folders:
+        excludes = [str(f).rstrip("/") for f in _as_list(filters.get("exclude_folders"))]
         parts = []
         for folder in folders:
             folder = folder.rstrip("/") or "/"
             if filters.get("recursive", True):
                 low, high = _prefix_range(folder)
-                parts.append("(m.path >= ? AND m.path < ?)")
+                part = "(m.path >= ? AND m.path < ?"
                 args.extend([low, high])
+                # A chosen folder inside a left-out one has its own part, without that one
+                for left_out in excludes:
+                    if left_out.startswith(low):
+                        part += " AND NOT (m.path >= ? AND m.path < ?)"
+                        args.extend(_prefix_range(left_out))
+                parts.append(part + ")")
             else:
                 parts.append("m.folder = ?")
                 args.append(folder)
@@ -1053,9 +1062,11 @@ def selection_version(db, filters: Optional[Dict[str, Any]] = None) -> str:
     return selection_info(db, filters)[1]
 
 
-def timeline_page(db, roots: Sequence[Path], offset: int, limit: Optional[int]) -> List[Tuple]:
-    """(taken, path, size, kind, taken_source) of the photos and videos below roots, by date."""
-    where, args = _where({"kind": ["photo", "video"], "folders": [str(r) for r in roots]})
+def timeline_page(db, roots: Sequence[Path], offset: int, limit: Optional[int],
+                  excludes: Sequence[Path] = ()) -> List[Tuple]:
+    """(taken, path, size, kind, taken_source) of the photos and videos below roots and not below excludes, by date."""
+    where, args = _where({"kind": ["photo", "video"], "folders": [str(r) for r in roots],
+                          "exclude_folders": [str(e) for e in excludes]})
     sql = (f"SELECT m.taken, m.path, m.size, m.kind, m.taken_source FROM media m WHERE {where} "
            "ORDER BY m.taken ASC, m.path ASC")
     if limit is not None:

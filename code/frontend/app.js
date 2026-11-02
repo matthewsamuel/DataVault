@@ -658,6 +658,14 @@ function archivePath(path) {
     return path.slice(root.path.lastIndexOf('/') + 1);
 }
 
+// Omgekeerd: een pad vanaf het archief (zoals /api/stats ze geeft) naar het volledige pad,
+// waarmee Bestanden en de mappenboom werken
+function fullVaultPath(path) {
+    const first = (folderTree || [])[0];
+    if (!first || !path || path.startsWith('/')) return path;
+    return `${first.path.slice(0, first.path.lastIndexOf('/'))}/${path}`;
+}
+
 // Hét padlabel van de app: vanaf het archief ('RAW/2019/zomer', 'TRASH/…', 'Archief' voor de
 // archiefmap zelf), en een lang pad ingekort in het midden ('RAW/…/zomer/dag 2'), zodat begin
 // en eind herkenbaar blijven. Toon het in mono (class path-label); het hele pad hoort in title.
@@ -1508,7 +1516,11 @@ async function openInFinder() {
 // 'In Bestanden': de map van het bestand openen in de app zelf, met de tegel in beeld en
 // even aangewezen. Wat erboven openstond (zoeken, chat, een slideshow) gaat ook dicht.
 async function showViewerFileInFiles() {
-    const file = viewerFile();
+    showFileInFiles(viewerFile());
+}
+
+// file: { path, name }, het pad vanaf het archief
+async function showFileInFiles(file) {
     if (!file || !file.path) return;
     const folder = parentFolder(file.path);
     for (let top = topOverlay(), guard = 0; top && guard < 10; top = topOverlay(), guard++) closeOverlay(top);
@@ -3145,34 +3157,7 @@ async function storageNavigateToPath(folderPath) {
             const filesData = await fetchJSON(`${API_BASE}/api/stats/largest-files?folder_path=${encodeURIComponent(folderPath)}&limit=20`)
                 .catch(err => { toastFetchError('Grootste bestanden laden mislukt', err); return {}; });
 
-            if (filesData.files) {
-                filesData.files.forEach(file => {
-                    const li = document.createElement('li');
-                    li.className = 'storage-file-item';
-
-                    const filename = file.name;
-                    const ext = filename.split('.').pop().toLowerCase();
-                    let fileIcon = 'fa-file';
-
-                    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) fileIcon = 'fa-image';
-                    else if (['mp4', 'mov', 'avi', 'mkv'].includes(ext)) fileIcon = 'fa-video';
-                    else if (['mp3', 'wav', 'flac', 'aac'].includes(ext)) fileIcon = 'fa-music';
-                    else if (['pdf', 'doc', 'docx', 'txt'].includes(ext)) fileIcon = 'fa-file-text';
-                    else if (['zip', 'rar', '7z'].includes(ext)) fileIcon = 'fa-file-archive';
-
-                    const displaySize = formatBytes(typeof file.size === 'number' ? file.size : file.size_mb * 2 ** 20);
-
-                    li.innerHTML = html`
-                        <div class="storage-file-header">
-                            <span class="storage-file-name"><i class="fas ${fileIcon}"></i>${filename}</span>
-                            <span class="storage-file-size">${displaySize}</span>
-                        </div>
-                        <div class="storage-file-path">${file.path}</div>
-                    `;
-
-                    filesList.appendChild(li);
-                });
-            }
+            if (filesData.files) filesList.replaceChildren(...filesData.files.map(storageFileRow));
         }
 
         loading.style.display = 'none';
@@ -3187,6 +3172,84 @@ async function storageNavigateToPath(folderPath) {
 
 function storageNavigateToRoot() {
     storageNavigateToPath(null);
+}
+
+const STORAGE_FILE_ICONS = [
+    ['fa-image', ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'tif', 'tiff', 'bmp']],
+    ['fa-video', ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', '3gp']],
+    ['fa-music', ['mp3', 'wav', 'flac', 'aac', 'm4a']],
+    ['fa-file-lines', ['pdf', 'doc', 'docx', 'txt']],
+    ['fa-file-zipper', ['zip', 'rar', '7z']],
+];
+
+// Een rij in 'Grootste bestanden': een mini-voorbeeld (opent de viewer), naam, grootte en pad,
+// en rechts 'In Bestanden' en de prullenmand
+function storageFileRow(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    const fileIcon = (STORAGE_FILE_ICONS.find(([, exts]) => exts.includes(ext)) || ['fa-file'])[0];
+    const visual = fileIcon === 'fa-image' || fileIcon === 'fa-video';
+    const playable = visual || fileIcon === 'fa-music';
+    const size = formatBytes(typeof file.size === 'number' ? file.size : file.size_mb * 2 ** 20);
+    const faIcon = (name) => createEl('i', { class: `fas ${name}`, 'aria-hidden': 'true' });
+
+    const preview = createEl(playable ? 'button' : 'span', playable
+        ? { type: 'button', class: 'storage-file-thumb', title: 'Bekijken', 'aria-label': `${file.name} bekijken`,
+            onClick: () => openFileInViewer(file.path) }
+        : { class: 'storage-file-thumb', 'aria-hidden': 'true' },
+        visual ? createEl('img', { src: vaultFileUrl('thumb', file.path), alt: '', loading: 'lazy', decoding: 'async' }) : faIcon(fileIcon),
+        fileIcon === 'fa-video' ? createEl('span', { class: 'storage-file-play', 'aria-hidden': 'true' }, faIcon('fa-play')) : null);
+
+    const li = createEl('li', { class: 'storage-file-item' });
+    li.append(
+        preview,
+        createEl('div', { class: 'storage-file-main' },
+            createEl('div', { class: 'storage-file-header' },
+                createEl('span', { class: 'storage-file-name', text: file.name, title: file.name }),
+                createEl('span', { class: 'storage-file-size', text: size })),
+            createEl('div', { class: 'storage-file-path', text: file.path, title: file.path })),
+        createEl('div', { class: 'storage-file-actions' },
+            createEl('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-sm',
+                title: 'Toon in Bestanden', 'aria-label': `${file.name} tonen in Bestanden`,
+                onClick: () => showFileInFiles({ ...file, path: fullVaultPath(file.path) }) }, faIcon('fa-folder-open')),
+            createEl('button', { type: 'button', class: 'btn btn-ghost btn-icon btn-sm storage-file-trash',
+                title: 'Naar de prullenmand (terug te zetten in het Herstelcentrum)', 'aria-label': `${file.name} naar de prullenmand`,
+                onClick: (e) => storageTrashFile(file, li, e.currentTarget) }, faIcon('fa-trash-can'))));
+    return li;
+}
+
+// Naar de prullenmand (er wordt nooit iets gewist); de melding biedt 'Ongedaan maken'. De rij
+// schuift weg en de rijen eronder schuiven soepel omhoog.
+async function storageTrashFile(file, li, button) {
+    button.disabled = true;
+    button.classList.add('is-loading');
+    const moved = await DVExport.trashFiles([file]);
+    button.classList.remove('is-loading');
+    if (!moved.length) { button.disabled = false; return; }
+    const list = li.parentElement;
+    const calm = document.documentElement.dataset.motion === 'reduce'
+        || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    const finish = () => {
+        if (!li.isConnected) return;
+        const below = [...list.children].filter(el => el !== li && li.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+        const before = below.map(el => el.getBoundingClientRect().top);
+        li.remove();
+        if (!list.children.length) {
+            list.replaceChildren(emptyState({ icon: 'fa-folder-open', title: 'Geen bestanden meer', text: 'Alles uit deze map staat in de prullenmand.' }));
+            return;
+        }
+        if (calm) return;
+        below.forEach((el, i) => {
+            const dy = before[i] - el.getBoundingClientRect().top;
+            if (dy) el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }],
+                { duration: 420, delay: i * 18, easing: 'cubic-bezier(0.22, 1.2, 0.36, 1)', fill: 'backwards' });
+        });
+    };
+    if (calm || typeof li.animate !== 'function') { finish(); return; }
+    li.style.pointerEvents = 'none';
+    li.animate([
+        { opacity: 1, transform: 'none' },
+        { opacity: 0, transform: 'translateX(24px) scale(0.98)' },
+    ], { duration: 220, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards' }).finished.then(finish, finish);
 }
 
 function storageShowTab(tabName) {

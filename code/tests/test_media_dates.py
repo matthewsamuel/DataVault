@@ -101,7 +101,7 @@ def test_the_timeline_answer_is_cached_until_a_folder_changes(client, vault, mon
     folder = vault / "RAW/2019"
     walks = []
     real = timeline._walk_media
-    monkeypatch.setattr(timeline, "_walk_media", lambda roots, errors: (walks.append(roots), real(roots, errors))[1])
+    monkeypatch.setattr(timeline, "_walk_media", lambda roots, *a: (walks.append(roots), real(roots, *a))[1])
     first = _scan(client, folder)
     second = _scan(client, folder)
     assert first == second and len(walks) == 1

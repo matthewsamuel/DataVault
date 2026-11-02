@@ -696,6 +696,44 @@ def test_the_timeline_from_the_index_matches_the_walk(client, config):
         assert indexed[key] == walked[key], key
 
 
+def test_a_folder_left_out_of_a_chosen_one_is_left_out_by_walk_and_index(client, config):
+    """The nearest marked folder above a file decides: RAW without 2023, but with 2023/iphone again."""
+    raw = config.VAULT_ROOT / "RAW"
+    every = {row[1] for row in _scan(client, raw)["rows"]}
+    assert any(p.startswith("RAW/2023/") for p in every) and any(p.startswith("RAW/2019/") for p in every)
+
+    def selections():
+        without = _scan(client, raw, exclude=[str(raw / "2023")])
+        again = _scan(client, raw, raw / "2023/iphone", exclude=[str(raw / "2023")])
+        return without, again
+
+    walked = selections()
+    assert all(s["source"] == "walk" for s in walked)
+    without, again = walked
+    paths = {row[1] for row in without["rows"]}
+    assert paths == {p for p in every if not p.startswith("RAW/2023/")}
+    assert without["excluded"] == [str(raw / "2023")] and without["total"] == len(paths)
+    assert {row[1] for row in again["rows"]} == paths | {p for p in every if p.startswith("RAW/2023/iphone/")}
+    assert sorted(again["folders"]) == sorted([str(raw), str(raw / "2023/iphone")])
+
+    _index(client)
+    indexed = selections()
+    for walk, index in zip(walked, indexed):
+        assert index["source"] == "index"
+        for key in ("total", "rows", "date_index", "year_boundaries", "folders", "excluded"):
+            assert index[key] == walk[key], key
+
+
+def test_marks_that_change_nothing_are_dropped(client, config):
+    raw = config.VAULT_ROOT / "RAW"
+    whole = _scan(client, raw)
+    # Left out but not inside a chosen folder, or chosen inside a chosen one: no difference
+    same = _scan(client, raw, raw / "2019", exclude=[str(config.VAULT_ROOT / "library/Familie")])
+    assert same["rows"] == whole["rows"] and same["folders"] == [str(raw)] and same["excluded"] == []
+    # Chosen and left out at once: chosen
+    assert _scan(client, raw, exclude=[str(raw)])["rows"] == whole["rows"]
+
+
 def test_the_timeline_pages_give_every_row_once(client, config):
     _index(client)
     whole = _scan(client, config.VAULT_ROOT)
@@ -752,7 +790,7 @@ def test_paging_an_incomplete_walk_walks_once_per_first_page(client, config, mon
     locked = config.VAULT_ROOT / "RAW/2022/bursts"
     walks = []
     real = timeline._scan_payload
-    monkeypatch.setattr(timeline, "_scan_payload", lambda roots: walks.append(1) or real(roots))
+    monkeypatch.setattr(timeline, "_scan_payload", lambda *a: walks.append(1) or real(*a))
     os.chmod(locked, 0)
     try:
         first = _scan(client, config.VAULT_ROOT / "RAW", limit=4)

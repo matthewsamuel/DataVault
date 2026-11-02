@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=83">
+    <link rel="stylesheet" href="style.css?v=84">
 </head>
 
 <body>
@@ -1556,12 +1556,21 @@
                 <button class="modal-close" onclick="timelineCloseFolderPicker()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body folder-selector-body">
-                <p class="picker-intro">Kies een of meer mappen. De foto's en video's uit alle gekozen mappen komen op volgorde van datum in de tijdlijn.</p>
+                <p class="picker-intro">Kies een of meer mappen. Een map neemt al zijn submappen mee; klik op een submap om die uit te zonderen. De foto's en video's komen op volgorde van datum in de tijdlijn.</p>
+                <div class="tl-picker-tools">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="timelinePickerFoldAll(true)">
+                        <i class="fas fa-down-left-and-up-right-to-center" aria-hidden="true"></i> Alles dichtklappen
+                    </button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="timelinePickerFoldAll(false)">
+                        <i class="fas fa-up-right-and-down-left-from-center" aria-hidden="true"></i> Alles openklappen
+                    </button>
+                </div>
                 <div class="folder-tree-container" id="timeline-folder-tree">
                     <!-- Populated by timeline.js -->
                 </div>
             </div>
             <div class="modal-footer">
+                <span class="modal-footer-note tl-picker-summary" id="timeline-picker-summary" aria-live="polite"></span>
                 <button class="btn btn-secondary" onclick="timelineCloseFolderPicker()">Annuleren</button>
                 <button class="btn btn-primary" onclick="timelineConfirmFolders()">
                     <i class="fas fa-check" aria-hidden="true"></i> Toepassen
@@ -1617,7 +1626,7 @@
     <script src="folder-tree.js?v=8"></script>
     <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
     <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
-    <script src="app.js?v=80"></script>
+    <script src="app.js?v=81"></script>
     <script src="pasha-tools.js?v=2"></script>
     <script src="jobs.js?v=17"></script>
     <script src="duplicates.js?v=29"></script>
@@ -1628,9 +1637,9 @@
     <script src="resizable-sidebar.js?v=1"></script>
     <script src="recovery.js?v=9"></script>
     <script src="settings.js?v=5"></script>
-    <script src="map.js?v=9"></script>
+    <script src="map.js?v=11"></script>
     <script src="shortcuts.js?v=9"></script>
-    <script src="export.js?v=5"></script>
+    <script src="export.js?v=6"></script>
     <script src="library.js?v=8"></script>
     <script src="datagatherer.js?v=8"></script>
     <script src="activity.js?v=5"></script>

@@ -12,6 +12,7 @@
 //   DVExport.openExport(files)  het exportvenster; DVExport.openBest() 'Beste van een periode'
 //   DVExport.onMoved(fn)        fn(moved, {trashed}) na verplaatsen: [{path, new_path}]
 //   DVExport.onRestored(fn)     fn() na 'Ongedaan maken': de bestanden staan weer op hun plek
+//   DVExport.trashFiles(files)  losse bestanden naar de prullenmand (met melding); geeft de verplaatste
 //   DVExport.selectButton(fn)   het rondje voor op een tegel; fn(event) bij een klik
 
 (function () {
@@ -94,6 +95,7 @@
         },
         moveSelection,
         trashSelection,
+        trashFiles,
     };
     window.DVExport = DVExport;
 
@@ -170,6 +172,19 @@
         } finally {
             moving = false;
             renderBar();
+        }
+    }
+
+    // Losse bestanden naar de prullenmand, buiten de selectie om (Opslag per map). Geeft de
+    // verplaatste terug ([{path, new_path}]), leeg als er niets weg is.
+    async function trashFiles(files) {
+        try {
+            const result = await post('/api/trash-files', { paths: files.map(f => f.path) });
+            finishMove(result, true);
+            return result.moved || [];
+        } catch (e) {
+            toastFetchError('Verwijderen mislukt', e);
+            return [];
         }
     }
 
