@@ -86,6 +86,9 @@ def test_chrome_history_is_read_from_a_copy_once_and_incrementally(client, app, 
     assert _count(app, "chrome_history") == 3
     assert (history.read_bytes(), history.stat().st_mtime_ns) == before      # never opened in place
     assert not list((app.state.config.CACHE_FOLDER / "datagatherer-snapshots").iterdir())   # copy removed
+    # Read to its end just now: current, though its newest visit is years old (Chrome that is hardly used)
+    card = next(c for c in client.get("/api/datagatherer/sources").json()["sources"] if c["id"] == "chrome_history")
+    assert card["status"] == "actueel" and "niets na 14 jul 2019" in card["next_step"], card
     _sync(client, app, "chrome_history")
     assert _count(app, "chrome_history") == 3
     conn = sqlite3.connect(str(history))

@@ -169,6 +169,10 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     hole = max(cov.holes, key=lambda h: h[1] - h[0]) if cov.holes else None
     hole_days = int((hole[1] - hole[0]) // 86400) if hole else None
     sync_failed = bool(st["last_error"]) and (not st["last_success_at"] or (st["last_sync_at"] or 0) > st["last_success_at"])
+    # A database on this Mac that was read to its end recently is current, however old its newest
+    # record: the source itself has nothing newer (Chrome that is hardly used)
+    read_recently = (local and not api and access is None and not sync_failed and bool(st["last_success_at"])
+                     and now - st["last_success_at"] <= connector.stale_days * 86400)
 
     # ---- status ----
     if api and st["needs_reconnect"]:
@@ -187,7 +191,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         status = "geregistreerd"
     elif hole:
         status = "gat"
-    elif gap_days is not None and gap_days <= connector.stale_days:
+    elif (gap_days is not None and gap_days <= connector.stale_days) or read_recently:
         status = "actueel"
     else:
         status = "achter"
@@ -234,6 +238,9 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
                     "export aan om het gat te vullen.")
         elif hole:
             step = f"Er ontbreken gegevens {hole_text}. Bijwerken haalt alleen je nieuwste op."
+        elif status == "actueel" and gap_days is not None and gap_days > connector.stale_days:
+            step = (f"Je gegevens zijn bij: {name} op deze Mac heeft niets na {_date(cov.last)}. "
+                    f"Bijwerken haalt nieuwe {connector.record_label[1]} op zodra die er zijn.")
         elif status == "actueel":
             step = "Je gegevens zijn bij. Bijwerken haalt de nieuwste op."
         else:
