@@ -1039,6 +1039,26 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 return n; })()""")
             expect(overlaps == 0, f"map: {overlaps} pairs of names overlap on the map")
             expect(page.evaluate("mapView().labelMs") < 50, f"map: placing the names took {page.evaluate('mapView().labelMs')} ms")
+            # No name under a group or pin of photos, under the zoom buttons or half outside the map; over the
+            # date line (Japan, the Pacific) every name that is placed is also on screen
+            label_check = """(() => {
+                const map = document.getElementById('map-canvas').getBoundingClientRect();
+                const top = [...document.querySelectorAll('#map-canvas .map-cluster, #map-canvas .map-pin, #map-canvas .leaflet-control')].map(e => e.getBoundingClientRect());
+                const out = [], under = [];
+                for (const e of document.querySelectorAll('#map-canvas .map-country-label, #map-canvas .map-region, #map-canvas .map-place')) {
+                    if (e.classList.contains('map-label-leaving')) continue;
+                    const r = e.getBoundingClientRect();
+                    if (r.left < map.left || r.right > map.right || r.top < map.top || r.bottom > map.bottom) out.push(e.textContent);
+                    else if (top.some(o => r.left < o.right - 1 && o.left < r.right - 1 && r.top < o.bottom - 1 && o.top < r.bottom - 1)) under.push(e.textContent);
+                }
+                return {out, under}; })()"""
+            found = page.evaluate(label_check)
+            expect(not found["out"] and not found["under"], f"map: names cut off at the edge {found['out'][:5]} or under photos {found['under'][:5]}")
+            step("map: over the date line", lambda: page.evaluate("mapFocus([5, 95, 60, 200])"), 1.2)
+            found = page.evaluate(label_check)
+            names = [l["name"] for l in page.evaluate("mapView().labels")]
+            expect(not found["out"] and not found["under"] and "China" in names and "Japan" in names,
+                   f"map: over the date line {names[:10]}, cut off {found['out'][:5]}, under photos {found['under'][:5]}")
             step("map: zoom in on the Netherlands", lambda: page.evaluate("mapSelectCountry('NLD')"), 2.0)
             names = [l["name"] for l in page.evaluate("mapView().labels")]
             expect("Gelderland" in names and "Amsterdam" in names,
