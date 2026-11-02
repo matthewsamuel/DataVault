@@ -137,6 +137,11 @@ In deze ronde is afgemaakt wat eerder bleef liggen. Wat nog steeds niet kan, sta
   het anders vragen?".
 - In **Instellingen > Taalmodel van Pasha** kies je bij **Acties** tussen *Ollama-gereedschap*
   (standaard) en *Tekstcode*. Een model dat geen gereedschap kent, gebruikt vanzelf de tekstcode.
+- **Pasha zet je liedje op.** Vraag "zet dat liedje op" en Pasha speelt het nummer van **Spotify op
+  deze dag** af in de Spotify-app op je Mac. In de chat verschijnt een kaart met de hoes en "Speelt
+  nu in Spotify". De eerste keer vraagt macOS of DataVault Spotify mag bedienen. Zonder die
+  toestemming, zonder de app of zonder een bekende Spotify-link biedt de kaart de webspeler of de
+  zoekpagina van Spotify aan.
 
 **DataGatherer en berichten**
 - **Google Takeout als `.tgz`** wordt nu gelezen zoals een `.zip`, stukje voor stukje en zonder het

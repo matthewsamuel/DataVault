@@ -351,24 +351,8 @@ def get_photo_on_this_day(allowed_folders: Optional[List[str]] = Query(None)) ->
 
 @router.get("/spotify-on-this-day")
 def get_spotify_on_this_day() -> Dict[str, Any]:
-    now = datetime.now()
-    date_filter = (now.month, now.day)
-    
-    data = parse_spotify_data(None, date_filter)
-    tracks = data.get('on_this_day', [])
-    if not tracks:
-        return {"track": None}
-    now_minutes = now.hour * 60 + now.minute
-
-    def time_to_minutes(t):
-        h, m = map(int, t['time'].split(':'))
-        return h * 60 + m
-
-    closest = min(tracks, key=lambda t: (abs(time_to_minutes(t) - now_minutes), t['year'], t['track']))
-    # The album cover when the Spotify sync stored one (Home itself never goes online)
-    from backend.datagatherer import spotify_covers
-    cover = spotify_covers.cover_file(db, config, closest['track'], closest['artist'])
-    return {"track": {**closest, "cover": f"/api/spotify/cover/{cover}" if cover else None}}
+    from backend.routes.spotify import on_this_day_track
+    return {"track": on_this_day_track()}
 
 @router.get("/photos-by-date")
 def get_photos_by_date(date: str) -> Dict[str, Any]:

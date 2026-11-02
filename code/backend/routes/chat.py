@@ -410,6 +410,7 @@ Welke functie:
 - een bestandsnaam (IMG_1234): search_photos; één dag: library_filter met date_from en date_to
 - bijna-dubbele foto's en reeksen: series_overview; dubbele bestanden zoeken: scan_duplicates
 - lopende taken: job_status; laatste verplaatsingen: recovery_summary; vandaag in eerdere jaren: on_this_day
+- een liedje opzetten of afspelen (het nummer van Spotify op deze dag, rechtsboven op Home): play_song
 - verplaatsen: propose_move; de beste van reeksen houden: propose_keep_best; exporteren: propose_export.
   Dat zijn voorstellen: de gebruiker bevestigt zelf op een kaart, jij verplaatst niets.
 
@@ -421,6 +422,7 @@ Voorbeelden:
 "laat foto's van het strand zien" -> find_photos(query="strand")
 "zijn er foto's in Frankrijk?" -> photos_at_place(place="Frankrijk")
 "zijn er bijna-dubbele foto's?" -> series_overview()
+"zet dat liedje op" -> play_song()
 "bewaar de beste foto van mijn 3 grootste reeksen" -> propose_keep_best(count=3)
 "exporteer mijn foto's van 2019" -> propose_export(year=2019)
 "verplaats strand 001 naar library" -> propose_move(query="strand 001", folder="library")
@@ -465,6 +467,7 @@ Tonen en zoeken (voert de app direct uit):
 - op bestandsnaam zoeken: {{"action": "search_photos", "query": "IMG_1234"}}; datum: {{"action": "show_photos", "date": "YYYY-MM-DD"}}
 - map openen: {{"action": "open_folder", "target": "mapnaam"}}; tab: {{"action": "open_tab", "target": "viewer"}} (ook spotify, shows, home)
 - duplicaten scannen: {{"action": "scan_duplicates"}}
+- een liedje opzetten (het nummer van Spotify op deze dag, rechtsboven op Home): {{"action": "play_song"}}
 Voorstellen (er verschijnt een kaart; de gebruiker moet zelf bevestigen, jij verplaatst niets):
 - bestanden naar een map: {{"action": "propose_move", "query": "bestandsnaam", "folder": "bestaande mapnaam"}}
 - beste foto van de grootste reeksen houden: {{"action": "propose_keep_best", "count": 3}}
@@ -478,6 +481,7 @@ Voorbeelden (let op: altijd tussen << en >>):
 "zijn er foto's in Frankrijk?" -> Even kijken. <<ACTION: {{"action": "photos_at_place", "place": "Frankrijk"}}>>
 "foto's uit Spanje" -> Hier zijn ze. <<ACTION: {{"action": "photos_at_place", "place": "Spanje"}}>>
 "zijn er bijna-dubbele foto's?" -> Dit zijn je reeksen. <<ACTION: {{"action": "series_overview"}}>>
+"zet dat liedje op" -> Ik zet het op. <<ACTION: {{"action": "play_song"}}>>
 "is er een taak bezig?" -> Ik kijk het na. <<ACTION: {{"action": "job_status"}}>>
 "overzicht van mijn fotoreeksen" -> Dit zijn je reeksen. <<ACTION: {{"action": "series_overview"}}>>
 "bewaar de beste foto van mijn 3 grootste reeksen" -> Ik stel het voor. <<ACTION: {{"action": "propose_keep_best", "count": 3}}>>

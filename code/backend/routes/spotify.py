@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from backend.config import Config
 
 router = APIRouter()
@@ -544,3 +545,47 @@ def get_stats(year: Optional[str] = None):
             raise HTTPException(status_code=400, detail="Ongeldig jaar: gebruik een jaartal of 'all'")
             
     return parse_spotify_data(year_int, date_filter)
+
+
+def on_this_day_track(now: Optional[datetime] = None) -> Optional[dict]:
+    """
+    Home's 'Spotify op deze dag': of the tracks played on this month and day in an earlier
+    year, the one played closest to the current time of day, with its stored cover. None
+    when nothing played. Pasha's play_song plays this same track.
+    """
+    now = now or datetime.now()
+    tracks = parse_spotify_data(None, (now.month, now.day)).get('on_this_day', [])
+    if not tracks:
+        return None
+    now_minutes = now.hour * 60 + now.minute
+
+    def time_to_minutes(t):
+        h, m = map(int, t['time'].split(':'))
+        return h * 60 + m
+
+    closest = min(tracks, key=lambda t: (abs(time_to_minutes(t) - now_minutes), t['year'], t['track']))
+    # The album cover when the Spotify sync stored one (Home itself never goes online)
+    from backend.datagatherer import spotify_covers
+    cover = spotify_covers.cover_file(db, config, closest['track'], closest['artist'])
+    return {**closest, "cover": f"/api/spotify/cover/{cover}" if cover else None}
+
+
+class PlayRequest(BaseModel):
+    uri: str
+
+
+@router.post("/play")
+def play_track(request: PlayRequest):
+    """
+    Start a track in the Spotify app on this Mac (Pasha's 'zet dat liedje op'; spotify_player.py).
+    played False with a code and a Dutch message when it cannot: the page then offers the web player.
+    """
+    from backend import spotify_player
+    try:
+        spotify_player.play(request.uri)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except spotify_player.PlayError as e:
+        return {"played": False, "code": e.code, "message": str(e), "web": spotify_player.web_url(request.uri)}
+    return {"played": True}
+

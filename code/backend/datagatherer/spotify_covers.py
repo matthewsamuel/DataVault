@@ -68,6 +68,20 @@ def cover_file(db, config, track: Optional[str], artist: Optional[str]) -> Optio
     return row[0]
 
 
+def track_uri(db, track: Optional[str], artist: Optional[str]) -> Optional[str]:
+    """The spotify:track: URI of a track (a cover lookup's, else a stored play's), or None (only the exports in files)."""
+    if db is None or not track:
+        return None
+    key = key_of(track, artist)
+    try:
+        with db._connect() as conn:
+            row = conn.execute("SELECT track_uri FROM spotify_covers WHERE key = ? AND track_uri LIKE 'spotify:track:%'",
+                               (key,)).fetchone()
+            return row[0] if row else _uris(conn, [(track, artist)]).get(key)
+    except Exception:
+        return None
+
+
 # ---------- what to fetch ----------
 
 def wanted(plays: Iterable, now: Optional[datetime] = None, days: int = DAYS_AHEAD) -> List[Tuple[str, str]]:

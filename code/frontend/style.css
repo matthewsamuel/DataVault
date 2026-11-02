@@ -16085,6 +16085,15 @@ button.msg-edited[aria-expanded="true"] .msg-edited-chevron {
     color: var(--accent-text);
 }
 
+.chat-play-status > i {
+    flex: none;
+    font-size: var(--icon-sm);
+}
+
+.chat-play-status > i:not([class*="fa-"]) {
+    display: none;
+}
+
 .chat-play.is-error .chat-play-status {
     color: var(--danger-text);
 }
@@ -16131,8 +16140,12 @@ button.msg-edited[aria-expanded="true"] .msg-edited-chevron {
 .chat-play.is-playing .chat-play-eq > span:nth-child(2) { animation-duration: 0.7s; animation-delay: -0.4s; }
 .chat-play.is-playing .chat-play-eq > span:nth-child(3) { animation-duration: 1.1s; animation-delay: -0.2s; }
 
-.chat-play.is-error .chat-play-eq {
+.chat-play:is(.is-note, .is-error) .chat-play-eq {
     display: none;
+}
+
+.chat-play:is(.is-note, .is-error) .chat-play-status {
+    align-items: baseline;
 }
 
 @keyframes chat-play-wait {
@@ -16145,14 +16158,23 @@ button.msg-edited[aria-expanded="true"] .msg-edited-chevron {
     to { transform: scaleY(1); }
 }
 
-/* Rustig: geen dansende staafjes, wel een stilstaand 'speelt'-teken */
-html[data-motion="rustig"] .chat-play-eq > span {
+/* Rustig en Uit: geen dansende staafjes maar een stilstaand 'speelt'-teken; de hoes vervaagt alleen in */
+html[data-motion="rustig"] .chat-play-cover {
+    animation-name: chat-play-fade;
+}
+
+@keyframes chat-play-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+html:is([data-motion="rustig"], [data-motion="uit"]) .chat-play-eq > span {
     animation: none !important;
 }
 
-html[data-motion="rustig"] .chat-play.is-playing .chat-play-eq > span:nth-child(1) { transform: scaleY(0.6); }
-html[data-motion="rustig"] .chat-play.is-playing .chat-play-eq > span:nth-child(2) { transform: scaleY(1); }
-html[data-motion="rustig"] .chat-play.is-playing .chat-play-eq > span:nth-child(3) { transform: scaleY(0.45); }
+html:is([data-motion="rustig"], [data-motion="uit"]) .chat-play.is-playing .chat-play-eq > span:nth-child(1) { transform: scaleY(0.6); }
+html:is([data-motion="rustig"], [data-motion="uit"]) .chat-play.is-playing .chat-play-eq > span:nth-child(2) { transform: scaleY(1); }
+html:is([data-motion="rustig"], [data-motion="uit"]) .chat-play.is-playing .chat-play-eq > span:nth-child(3) { transform: scaleY(0.45); }
 
 /* ==================== DataGatherer 3.9c: Activiteit, Tijdlijn op de kaart ==================== */
 

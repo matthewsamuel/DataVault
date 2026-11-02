@@ -4834,7 +4834,7 @@ const CHAT_ACTION_TAG = /<<ACTION:\s*(\{[\s\S]*?\})\s*>>/g;
 // een ACTION-tag, en een aanroep die het model als tekst schrijft ({"name": ...}, <tool_call>, find_photos(...))
 const CHAT_TOOL_NAMES = ['find_photos', 'library_filter', 'open_smart_album', 'on_this_day', 'photos_at_place',
     'series_overview', 'job_status', 'recovery_summary', 'search_photos', 'open_folder', 'open_tab', 'open_file',
-    'show_photos', 'scan_duplicates', 'propose_move', 'propose_keep_best', 'propose_export'];
+    'show_photos', 'scan_duplicates', 'propose_move', 'propose_keep_best', 'propose_export', 'play_song'];
 const CHAT_LIVE_HIDDEN = new RegExp('(?:<<|<\\|)ACTION[\\s\\S]*$|\\{\\s*"action"[^}]*$|<\\/?tool_call>[\\s\\S]*$'
     + '|\\{\\s*"name"[\\s\\S]*$|\\b(?:' + CHAT_TOOL_NAMES.join('|') + ')\\s*\\([\\s\\S]*$');
 const CHAT_NO_ANSWER = 'Dat lukte me niet, wil je het anders vragen?';

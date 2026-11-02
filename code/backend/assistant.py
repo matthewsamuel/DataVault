@@ -8,6 +8,8 @@ is the only place where such a tag gets a meaning on the server:
   unknown action, an unknown or badly typed argument and an over-long text are dropped.
 - Read-only tools (search, filters, on this day, places, series, jobs, recovery) run
   at once and answer a result for the chat: a strip of photos plus a link to the screen.
+  play_song answers the track of Home's 'Spotify op deze dag'; the card in the chat starts
+  it in the Spotify app (spotify_player.py), the model only names the tool.
 - Tools that would MOVE files (propose_move, propose_keep_best) and the export only
   PROPOSE: they make a pending action (PendingStore: an unguessable id, kept in memory,
   valid for PENDING_TTL seconds, usable once) and the chat shows a card with what would
@@ -120,6 +122,7 @@ TOOLS: Dict[str, Tuple[str, Dict[str, Callable], Tuple[str, ...]]] = {
     "series_overview": ("read", {}, ()),
     "job_status": ("read", {}, ()),
     "recovery_summary": ("read", {}, ()),
+    "play_song": ("read", {}, ()),
     "propose_move": ("propose", {"query": _text(120), "path": _text(1000), "folder": _text(300),
                                  "limit": _int(1, MOVE_MAX)}, ("folder",)),
     "propose_keep_best": ("propose", {"count": _int(1, SERIES_MAX)}, ()),
@@ -284,6 +287,8 @@ _NATIVE: Dict[str, Tuple[str, Dict[str, Any], Tuple[str, ...]]] = {
     "series_overview": ("Overzicht van reeksen bijna-dezelfde foto's.", {}, ()),
     "job_status": ("Welke achtergrondtaken er lopen.", {}, ()),
     "recovery_summary": ("De laatste verplaatsingen en wat terug te zetten is.", {}, ()),
+    "play_song": ("Het nummer van 'Spotify op deze dag' (rechtsboven op Home) afspelen in Spotify. "
+                  "Voor 'zet dat liedje op', 'speel het nummer af', 'muziek aan'.", {}, ()),
     "search_photos": ("Een bestand zoeken op bestandsnaam, bijv. IMG_1234.",
                       {"query": _p(_STR, "(deel van de) bestandsnaam")}, ("query",)),
     "open_folder": ("Een map in het archief openen.", {"target": _p(_STR, "mapnaam")}, ("target",)),
@@ -425,6 +430,8 @@ def resolve_actions(text: str, calls: Any = None) -> Tuple[List[Dict[str, Any]],
             server.append(action)
         elif page:
             client.append(page)
+    if not (server or client) and _claim(text) in CLAIM_ACTIONS:
+        server.append(dict(CLAIM_ACTIONS[_claim(text)]))
     tried = bool(calls) or bool(raws) or bool(UNFINISHED.search(text)) or is_bare_claim(text)
     return server[:2], client[:1], tried
 
@@ -433,12 +440,21 @@ def resolve_actions(text: str, calls: Any = None) -> Tuple[List[Dict[str, Any]],
 # promised a result but carries no action (the small model sometimes forgets the tag).
 CLAIMS = {"hier zijn ze", "hier zijn ze dan", "hier is het", "dit vond ik", "alsjeblieft", "ik kijk het na",
           "even kijken", "dit zijn je reeksen", "ik stel het voor", "ik bereid het voor", "zoeken",
-          "ik zoek het op", "ik heb het opgezocht"}
+          "ik zoek het op", "ik heb het opgezocht", "ik zet het op"}
+
+
+# A lead-in that only one example uses means that action, also when the tag is missing
+# (in the tag format qwen2.5 often stops at 'Ik zet het op.')
+CLAIM_ACTIONS = {"ik zet het op": {"action": "play_song"}}
+
+
+def _claim(text: str) -> str:
+    words = re.sub(r"[^\w\s']", " ", (text or "").lower())
+    return " ".join(words.split())
 
 
 def is_bare_claim(text: str) -> bool:
-    words = re.sub(r"[^\w\s']", " ", (text or "").lower())
-    return " ".join(words.split()) in CLAIMS
+    return _claim(text) in CLAIMS
 
 
 def parse_actions(text: str) -> List[Dict[str, Any]]:
@@ -714,10 +730,23 @@ def tool_recovery_summary(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
             "link": {"view": "recovery", "label": "Herstelcentrum openen"}}
 
 
+def tool_play_song(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
+    # The same pick as Home's card; the track goes to the chat card only, never back to the model
+    from backend.datagatherer import spotify_covers
+    from backend.routes import spotify as spotify_route
+    track = spotify_route.on_this_day_track()
+    if track is None:
+        raise ToolError("Op deze dag in eerdere jaren speelde er niets op Spotify, dus ik heb geen nummer om op te zetten.")
+    return {"title": "Spotify op deze dag",
+            "play": {"track": track["track"], "artist": track["artist"], "year": track.get("year"),
+                     "time": track.get("time"), "cover": track.get("cover"),
+                     "uri": spotify_covers.track_uri(ctx.db, track["track"], track["artist"])}}
+
+
 READ_TOOLS: Dict[str, Callable[[Context, Dict[str, Any]], Dict[str, Any]]] = {
     "find_photos": tool_find_photos, "library_filter": tool_library_filter, "open_smart_album": tool_open_smart_album,
     "on_this_day": tool_on_this_day, "photos_at_place": tool_photos_at_place, "series_overview": tool_series_overview,
-    "job_status": tool_job_status, "recovery_summary": tool_recovery_summary,
+    "job_status": tool_job_status, "recovery_summary": tool_recovery_summary, "play_song": tool_play_song,
 }
 
 

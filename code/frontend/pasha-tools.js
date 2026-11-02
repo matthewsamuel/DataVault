@@ -50,7 +50,66 @@ function chatStrip(items) {
     return grid;
 }
 
+// play_song: het nummer van 'Spotify op deze dag', meteen gestart in de Spotify-app op deze Mac
+// (POST /api/spotify/play). Lukt dat niet, dan een knop naar de webspeler of de zoekpagina.
+function chatPlayCard(p) {
+    const cover = createEl('div', { class: 'chat-play-cover', 'aria-hidden': 'true' },
+        createEl('i', { class: 'fas fa-music' }));
+    if (p.cover) {
+        const img = createEl('img', { class: 'chat-play-cover-img', src: `${API_BASE}${p.cover}`, alt: '' });
+        img.addEventListener('error', () => img.remove(), { once: true });
+        cover.appendChild(img);
+    }
+    const eq = createEl('span', { class: 'chat-play-eq', 'aria-hidden': 'true' },
+        createEl('span'), createEl('span'), createEl('span'));
+    const statusText = createEl('span');
+    const statusIcon = createEl('i', { class: 'fas', 'aria-hidden': 'true' });
+    const status = createEl('div', { class: 'chat-play-status', role: 'status' }, eq, statusIcon, statusText);
+    const actions = createEl('div', { class: 'chat-confirm-actions' });
+    const card = createEl('div', { class: 'chat-play is-starting', role: 'group', 'aria-label': `${p.track} van ${p.artist}` },
+        cover,
+        createEl('div', { class: 'chat-play-info' },
+            createEl('div', { class: 'chat-play-overline' },
+                createEl('i', { class: 'fab fa-spotify', 'aria-hidden': 'true' }), ' Spotify op deze dag'),
+            createEl('div', { class: 'chat-play-track', text: p.track }),
+            createEl('div', { class: 'chat-play-artist', text: p.artist }),
+            status, actions));
+
+    const button = (label, icon, onClick) => createEl('button', { type: 'button', class: 'btn btn-secondary btn-sm', onClick },
+        createEl('i', { class: `fas ${icon}`, 'aria-hidden': 'true' }), ` ${label}`);
+    // starting en playing met de staafjes; note (iets wat jij kunt oplossen) rustig met een i, error in de foutkleur
+    const settle = (state, text, link) => {
+        card.classList.remove('is-starting', 'is-playing', 'is-note', 'is-error');
+        card.classList.add(`is-${state}`);
+        statusIcon.className = `fas ${state === 'note' ? 'fa-circle-info' : state === 'error' ? 'fa-triangle-exclamation' : ''}`;
+        statusText.textContent = text;
+        status.setAttribute('role', state === 'error' ? 'alert' : 'status');
+        actions.replaceChildren(...(link ? [link] : []));
+        chatScrollDown();
+    };
+    const search = () => button('Zoeken in Spotify', 'fa-magnifying-glass', () => openSpotifySearch(`${p.track} ${p.artist}`));
+
+    if (!p.uri) {
+        settle('note', 'Ik weet de Spotify-link van dit nummer niet, dus ik kan het niet zelf starten.', search());
+        return chatBubble(card);
+    }
+    const start = () => {
+        settle('starting', 'Starten in Spotify…');
+        fetchJSON(`${API_BASE}/api/spotify/play`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uri: p.uri }),
+        }).then(done => {
+            if (done.played) settle('playing', 'Speelt nu in Spotify', button('Opnieuw afspelen', 'fa-rotate-right', start));
+            else settle(['not_allowed', 'not_installed'].includes(done.code) ? 'note' : 'error',
+                done.message || 'Spotify kon het nummer niet starten.',
+                done.web ? button('Openen in de webspeler', 'fa-arrow-up-right-from-square', () => openExternal(done.web)) : search());
+        }).catch(e => settle('error', e.message || 'Spotify kon het nummer niet starten.', search()));
+    };
+    start();
+    return chatBubble(card);
+}
+
 function chatToolResult(result) {
+    if (result.play) return chatPlayCard(result.play);
     const body = createEl('div', { class: 'chat-tool' },
         createEl('div', { class: 'chat-tool-title', text: result.title || '' }));
     if (result.items && result.items.length) body.appendChild(chatStrip(result.items));
