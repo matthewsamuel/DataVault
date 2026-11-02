@@ -136,6 +136,9 @@ def _laplacian(g: np.ndarray) -> np.ndarray:
 
 VIDEO_FRAME_AT = 1.0          # seconds into a video for its representative frame (as its thumbnail)
 VIDEO_TIMEOUT = 30            # seconds ffmpeg may take for one frame
+VIDEO_LATER_SHARES = (0.1, 0.5)   # of the duration: where to look when the frame at VIDEO_FRAME_AT is flat
+VIDEO_LATER_UNKNOWN = (5.0, 15.0)  # seconds, the same for a video of unknown duration
+VIDEO_LENGTH_SLACK = (1.0, 0.02)   # two videos are copies only within 1 s or 2 % of each other's duration
 
 
 class NoFfmpeg(Exception):
@@ -146,39 +149,92 @@ def video_frames_available() -> bool:
     return thumbnail.have_ffmpeg()
 
 
-def _video_small(path: str) -> Image.Image:
+def _video_times(duration: Optional[float]) -> List[Optional[float]]:
+    """
+    The moments (seconds, None = the very first frame) tried for a video's frame, in order:
+    VIDEO_FRAME_AT (as its thumbnail), then later moments for a video that opens on a flat
+    frame (black, a fade-in, a plain title card), then the first frame for a very short one.
+    """
+    if duration and duration > 0:
+        later = [t for t in (duration * share for share in VIDEO_LATER_SHARES)
+                 if VIDEO_FRAME_AT + 0.5 <= t < duration - 0.1]
+    else:
+        later = list(VIDEO_LATER_UNKNOWN)
+    return [VIDEO_FRAME_AT, *later, None]
+
+
+def _check_readable(path: str) -> None:
+    """Raises OSError (with an errno) when the file cannot be read now, to its last byte."""
+    st = os.stat(path)
+    with open(path, "rb") as f:
+        if st.st_size:
+            f.seek(st.st_size - 1)
+        f.read(1)
+
+
+def _video_frame(binary: str, path: str, at: Optional[float]) -> Optional[Image.Image]:
+    """The frame at 'at' seconds as RGB, or None when ffmpeg gives none there."""
+    import io
+    import subprocess
+    scale = f"scale={ANALYSE_SIZE}:{ANALYSE_SIZE}:force_original_aspect_ratio=decrease"
+    seek = ["-ss", f"{at:.3f}"] if at is not None else []
+    cmd = [binary, "-nostdin", "-v", "error", "-threads", "1", *seek, "-i", path, "-frames:v", "1",
+           "-vf", scale, "-f", "image2pipe", "-vcodec", "png", "-"]
+    try:
+        result = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=VIDEO_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        _check_readable(path)       # a disk that went away is a read error, tried again next run
+        raise Undecodable("ffmpeg deed er te lang over")
+    if result.returncode != 0 or not result.stdout:
+        return None
+    try:
+        img = Image.open(io.BytesIO(result.stdout))
+        img = img.convert("RGB")
+    except (OSError, ValueError, SyntaxError) as e:
+        raise Undecodable(str(e)) from e
+    if img.width < 8 or img.height < 8:
+        raise Undecodable("te klein")
+    return img
+
+
+def _video_small(path: str, duration: Optional[float] = None) -> Image.Image:
     """
     One frame of a video as RGB, upright (ffmpeg applies the rotation), at most
-    ANALYSE_SIZE on a side, piped as PNG (no temporary file). Raises NoFfmpeg, OSError
-    (with an errno) when the file cannot be read, Undecodable when ffmpeg gets no frame.
+    ANALYSE_SIZE on a side, piped as PNG (no temporary file). The frame at VIDEO_FRAME_AT,
+    unless that one is flat (nearly one colour): a black opening or a fade-in carries
+    nothing, and two unrelated videos that open alike must not look like copies, so a
+    later moment (VIDEO_LATER_SHARES of the duration) is taken instead. When every frame
+    tried is flat, the first one is returned (and update_pairs leaves the video unpaired).
+
+    Raises NoFfmpeg, OSError (with an errno) when the file cannot be read (also when it
+    went away while ffmpeg read it), Undecodable when ffmpeg gets no frame.
     """
-    import io
     import shutil
-    import subprocess
     binary = shutil.which("ffmpeg")
     if not binary:
         raise NoFfmpeg()
     with open(path, "rb") as f:      # a clear read error first (permission, disk)
         f.read(1)
-    scale = f"scale={ANALYSE_SIZE}:{ANALYSE_SIZE}:force_original_aspect_ratio=decrease"
-    for seek in (["-ss", f"{VIDEO_FRAME_AT:g}"], []):
-        cmd = [binary, "-nostdin", "-v", "error", "-threads", "1", *seek, "-i", path, "-frames:v", "1",
-               "-vf", scale, "-f", "image2pipe", "-vcodec", "png", "-"]
-        try:
-            result = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                    stderr=subprocess.DEVNULL, timeout=VIDEO_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            raise Undecodable("ffmpeg deed er te lang over")
-        if result.returncode == 0 and result.stdout:
-            try:
-                img = Image.open(io.BytesIO(result.stdout))
-                img = img.convert("RGB")
-            except (OSError, ValueError, SyntaxError) as e:
-                raise Undecodable(str(e)) from e
-            if img.width < 8 or img.height < 8:
-                raise Undecodable("te klein")
+    first = None
+    for at in _video_times(duration):
+        if first is not None and at is None:
+            break                     # the first frame is only for a video too short for a seek
+        img = _video_frame(binary, path, at)
+        if img is None:
+            continue
+        if _grey_spread(img) >= FLAT_CONTRAST:
             return img
+        first = first or img
+    if first is not None:
+        return first
+    _check_readable(path)            # no frame because the disk went away: a read error, not undecodable
     raise Undecodable("ffmpeg kon geen beeld uit de video halen")
+
+
+def _grey_spread(img: Image.Image) -> float:
+    """The contrast figure of _figures (spread of the grey values)."""
+    return float(np.asarray(img.convert("L"), dtype=np.float32).std())
 
 
 def analyse(path: str) -> Dict[str, Any]:
@@ -189,9 +245,9 @@ def analyse(path: str) -> Dict[str, Any]:
     return _figures(_open_small(path))
 
 
-def analyse_video(path: str) -> Dict[str, Any]:
-    """The same for a video's representative frame; also raises NoFfmpeg."""
-    return _figures(_video_small(path))
+def analyse_video(path: str, duration: Optional[float] = None) -> Dict[str, Any]:
+    """The same for a video's representative frame (duration in seconds, when known); also raises NoFfmpeg."""
+    return _figures(_video_small(path, duration))
 
 
 def _figures(img: Image.Image) -> Dict[str, Any]:
@@ -404,6 +460,8 @@ STRICTNESS: Dict[str, Dict[str, Tuple[int, int, float]]] = {
 }
 FLAT_CONTRAST = 10.0          # grey spread below which a photo counts as nearly flat
 FLAT_COLOR = 6.0              # the colour limit (at most) when one of the two is flat
+# A video whose every frame tried is flat (black, one colour) carries nothing to compare: it stays unpaired
+_NOT_FLAT_VIDEO = f"NOT (m.kind = 'video' AND COALESCE(h.contrast, 0) < {FLAT_CONTRAST!r})"
 DEFAULT_STRICTNESS = "normaal"
 LOOSEST = "ruim"
 PAIR_RADIUS = STRICTNESS[LOOSEST]["near"][0]    # = 11: radius // 4 = 2 bits per part (fast)
@@ -495,11 +553,12 @@ def counts(db) -> Dict[str, int]:
             (ALGO_VERSION,)).fetchall()
         unpaired = conn.execute(
             f"SELECT COUNT(*) FROM media m JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE m.missing = 0 AND h.paired = 0 AND h.status = 'ok' AND {_CURRENT}", (ALGO_VERSION,)).fetchone()[0]
+            f"WHERE m.missing = 0 AND h.paired = 0 AND h.status = 'ok' AND {_CURRENT} AND {_NOT_FLAT_VIDEO}",
+            (ALGO_VERSION,)).fetchone()[0]
         pairs = conn.execute("SELECT COUNT(*) FROM near_dup_pairs").fetchone()[0]
         signature = list(conn.execute(
             f"SELECT COUNT(*), COALESCE(SUM(m.id), 0) FROM media m JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE h.status = 'ok' AND {_CURRENT}", (ALGO_VERSION,)).fetchone())
+            f"WHERE h.status = 'ok' AND {_CURRENT} AND {_NOT_FLAT_VIDEO}", (ALGO_VERSION,)).fetchone())
         reviewed = conn.execute("SELECT COUNT(*) FROM near_dup_reviews").fetchone()[0]
     by_status = dict(rows)
     done = by_status.get(OK, 0) + by_status.get(UNDECODABLE, 0)
@@ -521,11 +580,11 @@ def counts(db) -> Dict[str, int]:
     }
 
 
-def _todo(db) -> List[Tuple[int, str, int, int, str]]:
+def _todo(db) -> List[Tuple[int, str, int, int, str, Optional[float]]]:
     """Photos and videos without a current fingerprint (new, changed, older version, or failed last time)."""
     with db._connect() as conn:
         return conn.execute(
-            f"SELECT m.id, m.path, m.size, m.mtime_ns, m.kind FROM media m "
+            f"SELECT m.id, m.path, m.size, m.mtime_ns, m.kind, m.duration FROM media m "
             f"LEFT JOIN media_phash h ON h.media_id = m.id "
             f"WHERE m.missing = 0 AND {_compared()} "
             f"AND (h.media_id IS NULL OR NOT ({_CURRENT}) OR h.status = 'error') ORDER BY m.id",
@@ -539,6 +598,7 @@ def _analyse_row(row: Tuple) -> Tuple[str, Optional[Dict[str, Any]], Optional[st
     """(status, figures, error text) for one photo or video; 'behind' when the file changed since it was indexed."""
     _id, path, size, mtime_ns = row[:4]
     video = len(row) > 4 and row[4] == "video"
+    duration = row[5] if len(row) > 5 else None
     try:
         st = os.lstat(path)
     except FileNotFoundError:
@@ -546,7 +606,7 @@ def _analyse_row(row: Tuple) -> Tuple[str, Optional[Dict[str, Any]], Optional[st
     if not stat_module.S_ISREG(st.st_mode) or (st.st_size, st.st_mtime_ns) != (size, mtime_ns):
         return "behind", None, None   # the index is behind the disk: its next pass reads it again
     try:
-        return OK, (analyse_video(path) if video else analyse(path)), None
+        return OK, (analyse_video(path, duration) if video else analyse(path)), None
     except Undecodable as e:
         return UNDECODABLE, None, str(e)[:200]
     except NoFfmpeg:
@@ -577,6 +637,7 @@ def run_job(ctx, config, db, errors, vault_check) -> Dict[str, Any]:
     """
     from backend.jobs import bounded_map
     started = time.time()
+    vault_present = lambda: config.VAULT_ROOT.is_dir()  # noqa: E731
     forget_orphans(db)
     todo = _todo(db)
     total = len(todo)
@@ -606,7 +667,10 @@ def run_job(ctx, config, db, errors, vault_check) -> Dict[str, Any]:
                 pending.append(_values(row, ERROR, None, str(error)[:200], now))
             else:
                 status, figures, text = outcome
-                if status in ("behind", SKIPPED):
+                if status == UNDECODABLE and row[4] == "video" and (errors.vault_lost or not vault_present()):
+                    # ffmpeg may have failed because the disk went away: tried again next run
+                    pending.append(_values(row, ERROR, None, text, now))
+                elif status in ("behind", SKIPPED):
                     done[status] += 1
                 else:
                     done["analysed" if status == OK else "undecodable"] += 1
@@ -699,15 +763,51 @@ def _color_matrix(blobs: Sequence[Optional[bytes]]) -> np.ndarray:
     return out
 
 
+def same_length(a: Optional[float], b: Optional[float]) -> bool:
+    """Whether two videos last about as long (VIDEO_LENGTH_SLACK); an unknown duration passes."""
+    if not a or not b:
+        return True
+    seconds, share = VIDEO_LENGTH_SLACK
+    return abs(a - b) <= max(seconds, share * max(a, b))
+
+
+def _split_by_length(members: List[int], length: Callable[[int], Optional[float]]) -> List[List[int]]:
+    """
+    Videos that look alike but differ in length are no copies: the members in runs of
+    about the same duration (in their own order within a run), the unknown ones together.
+    """
+    order = {i: n for n, i in enumerate(members)}
+    known = sorted((i for i in members if length(i)), key=lambda i: (length(i), order[i]))
+    runs: List[List[int]] = []
+    for i in known:
+        if runs and same_length(length(runs[-1][-1]), length(i)):
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    unknown = [i for i in members if not length(i)]
+    if unknown:
+        runs.append(unknown)
+    return sorted((sorted(run, key=order.__getitem__) for run in runs), key=lambda run: order[run[0]])
+
+
 def _twins(rows) -> Dict[Tuple, List[int]]:
     """
     Positions of rows that look exactly alike to the analysis (same hashes and colours,
     and the same kind when the rows have one: a photo and a video are never twins).
+    Videos are twins only when they also last about as long (same_length; the duration
+    is r[13] when the rows have it).
     """
     twins: Dict[Tuple, List[int]] = {}
     for i, r in enumerate(rows):
         twins.setdefault((r[1], r[2], r[3], r[12] if len(r) > 12 else "photo"), []).append(i)
-    return twins
+    split: Dict[Tuple, List[int]] = {}
+    for key, members in twins.items():
+        if key[3] != "video" or len(members) < 2 or len(rows[members[0]]) <= 13:
+            split[key] = members
+            continue
+        for n, run in enumerate(_split_by_length(members, lambda i: rows[i][13])):
+            split[(*key, n)] = run
+    return split
 
 
 CONTENT_BATCH = 100           # content hashes written per transaction
@@ -1115,9 +1215,10 @@ def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]
     with db._connect() as conn:
         rows = conn.execute(
             f"SELECT m.id, h.phash, h.dhash, h.colors, h.paired, m.size, m.path, m.taken, m.taken_source, "
-            f"m.camera_make, m.camera_model, h.contrast, m.kind FROM media m "
+            f"m.camera_make, m.camera_model, h.contrast, m.kind, m.duration FROM media m "
             f"JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE h.status = 'ok' AND {_CURRENT} ORDER BY m.id", (ALGO_VERSION,)).fetchall()
+            f"WHERE h.status = 'ok' AND {_CURRENT} AND {_NOT_FLAT_VIDEO} ORDER BY m.id",
+            (ALGO_VERSION,)).fetchall()
     dirty = [r[0] for r in rows if not r[4]]
     # (also when a photo left the index: it may have been the anchor of its group)
     signature = [len(rows), sum(r[0] for r in rows)]
@@ -1143,6 +1244,12 @@ def update_pairs(db, check: Callable[[], None] = lambda: None) -> Dict[str, int]
             continue
         part = near_pairs(phashes[pos], dhashes[pos], colors[pos], flat[pos], queries, check)
         part["a"], part["b"] = pos[part["a"]], pos[part["b"]]
+        if is_video and len(part["a"]):
+            # Two videos that look alike but differ in length are no copies (an edit, another clip)
+            lengths = [rows[i][13] for i in firsts]
+            keep = np.array([same_length(lengths[a], lengths[b])
+                             for a, b in zip(part["a"].tolist(), part["b"].tolist())], dtype=bool)
+            part = {k: v[keep] for k, v in part.items()}
         parts.append(part)
     if len(parts) == 1:
         found = parts[0]
@@ -1312,8 +1419,8 @@ def all_series(db, strictness: str) -> Dict[str, Any]:
     with db._connect() as conn:
         analysed = conn.execute(
             f"SELECT m.id, h.phash, h.dhash, h.colors, h.content, m.missing, m.path, m.folder, m.taken, "
-            f"m.size, m.mtime_ns, m.kind FROM media m JOIN media_phash h ON h.media_id = m.id "
-            f"WHERE h.status = 'ok' AND {_CURRENT}", (ALGO_VERSION,)).fetchall()
+            f"m.size, m.mtime_ns, m.kind, m.duration FROM media m JOIN media_phash h ON h.media_id = m.id "
+            f"WHERE h.status = 'ok' AND {_CURRENT} AND {_NOT_FLAT_VIDEO}", (ALGO_VERSION,)).fetchall()
         pairs = conn.execute(
             "SELECT a, b, kind FROM near_dup_pairs WHERE "
             "(kind = 'near' AND phash_d <= ? AND dhash_d <= ? AND color_d <= CASE WHEN flat THEN ? ELSE ? END) "
@@ -1327,8 +1434,18 @@ def all_series(db, strictness: str) -> Dict[str, Any]:
     members_of: Dict[int, List[int]] = {}
     rows: Dict[int, Tuple] = {}
     content: Dict[int, Optional[str]] = {}
-    for r in analysed:
-        g = group_ids.setdefault((r[1], r[2], r[3], r[11]), len(group_ids))
+    looks: Dict[Tuple, List[int]] = {}
+    for n, r in enumerate(analysed):
+        looks.setdefault((r[1], r[2], r[3], r[11]), []).append(n)
+    look_of: Dict[int, Tuple] = {}
+    for key, positions in looks.items():
+        runs = (_split_by_length(positions, lambda n: analysed[n][12])
+                if key[3] == "video" and len(positions) > 1 else [positions])
+        for k, run in enumerate(runs):
+            for n in run:
+                look_of[n] = (*key, k)
+    for n, r in enumerate(analysed):
+        g = group_ids.setdefault(look_of[n], len(group_ids))
         group_of[r[0]] = g
         if r[5] == 0:
             members_of.setdefault(g, []).append(r[0])

@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from backend import near_dups, thumbnail
 from test_media_index import _index
@@ -80,7 +81,7 @@ def test_a_video_is_decoded_once_until_it_changes(client, config, videos, monkey
     _run(client)
     calls = []
     original = near_dups.analyse_video
-    monkeypatch.setattr(near_dups, "analyse_video", lambda path: calls.append(path) or original(path))
+    monkeypatch.setattr(near_dups, "analyse_video", lambda path, *a: calls.append(path) or original(path, *a))
     assert _run(client)["analysed"] == 0 and calls == []
     # Edited in place (other size and mtime): read again, and only that one
     time.sleep(0.01)
@@ -138,3 +139,105 @@ def test_the_done_message_names_photos_and_videos():
     assert near_dups.run_message({**base, "analysed": 2, "videos_analysed": 2}) == "Klaar: 2 video's vergeleken, 2 reeksen"
     assert near_dups.run_message({**base, "analysed": 4, "videos_analysed": 1}) == \
         "Klaar: 3 foto's en 1 video vergeleken, 2 reeksen"
+
+
+def _opens_on(path: Path, picture, lead: str = "black", lead_seconds=2, seconds=2):
+    """A video that opens on lead_seconds of one flat colour, then shows the picture."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    still = path.with_suffix(".still.png")
+    picture.resize((320, 240)).save(still)
+    try:
+        subprocess.run(["ffmpeg", "-nostdin", "-v", "error",
+                        "-f", "lavfi", "-i", f"color=c={lead}:s=320x240:d={lead_seconds}:r=10",
+                        "-loop", "1", "-t", str(seconds), "-r", "10", "-i", str(still),
+                        "-filter_complex", "[1]setsar=1[b];[0]setsar=1[a];[a][b]concat=n=2:v=1",
+                        "-c:v", "mpeg4", "-q:v", "3", "-y", str(path)],
+                       check=True, stdin=subprocess.DEVNULL, timeout=60)
+    finally:
+        still.unlink()
+    return path
+
+
+def test_two_different_videos_that_open_on_black_are_no_series(client, config):
+    folder = config.VAULT_ROOT / FOLDER
+    _opens_on(folder / "feest.mp4", _scene(61))
+    _opens_on(folder / "strand.mp4", _scene(62))
+    # Fingerprinted on a later frame that shows something, not on the black opening
+    a = near_dups.analyse_video(str(folder / "feest.mp4"), 4.0)
+    b = near_dups.analyse_video(str(folder / "strand.mp4"), 4.0)
+    assert a["contrast"] >= near_dups.FLAT_CONTRAST and b["contrast"] >= near_dups.FLAT_CONTRAST
+    assert near_dups.hamming(a["phash"], b["phash"]) > 11
+    _index(client)
+    _run(client)
+    for strictness in ("streng", "normaal", "ruim"):
+        assert [s for s in _series(client, strictness)["items"] if s["media"] == "video"] == []
+
+
+def test_a_copy_of_a_video_that_opens_on_black_is_still_found(client, config):
+    folder = config.VAULT_ROOT / FOLDER
+    _opens_on(folder / "feest.mp4", _scene(63))
+    shutil.copy(folder / "feest.mp4", folder / "feest kopie.mp4")
+    (folder / "feest kopie.mp4").write_bytes((folder / "feest kopie.mp4").read_bytes())
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", str(folder / "feest.mp4"), "-c:v", "mpeg4",
+                    "-q:v", "8", "-y", str(folder / "feest klein.mp4")], check=True, stdin=subprocess.DEVNULL)
+    (folder / "feest kopie.mp4").unlink()
+    _index(client)
+    _run(client)
+    video = [s for s in _series(client, "streng")["items"] if s["media"] == "video"]
+    assert [sorted(m["name"] for m in s["members"]) for s in video] == [["feest klein.mp4", "feest.mp4"]]
+
+
+def test_videos_that_are_black_throughout_stay_unpaired_and_nothing_waits(client, config):
+    folder = config.VAULT_ROOT / FOLDER
+    _opens_on(folder / "zwart 1.mp4", Image.new("RGB", (320, 240)), seconds=2)
+    _opens_on(folder / "zwart 2.mp4", Image.new("RGB", (320, 240)), seconds=2)
+    _index(client)
+    result = _run(client)
+    assert result["videos_analysed"] >= 2
+    assert _rows(config, "SELECT h.status FROM media_phash h JOIN media m ON m.id = h.media_id "
+                         "WHERE m.name LIKE 'zwart %'") == [("ok",), ("ok",)]
+    assert [s for s in _series(client, "ruim")["items"] if s["media"] == "video"] == []
+    assert client.get("/api/series/status").json()["pending"] == 0
+
+
+def test_the_same_picture_in_videos_of_another_length_is_no_series(client, config):
+    folder = config.VAULT_ROOT / FOLDER
+    _clip(folder / "titel kort.mp4", _scene(64), "-c:v", "mpeg4", "-q:v", "2", seconds=3)
+    _clip(folder / "titel lang.mp4", _scene(64), "-c:v", "mpeg4", "-q:v", "2", seconds=12)
+    _clip(folder / "titel kopie.mp4", _scene(64), "-c:v", "mpeg4", "-q:v", "6", seconds=12)
+    _index(client)
+    _run(client)
+    video = [s for s in _series(client, "ruim")["items"] if s["media"] == "video"]
+    assert [sorted(m["name"] for m in s["members"]) for s in video] == [["titel kopie.mp4", "titel lang.mp4"]]
+
+
+def test_same_length_allows_a_second_or_two_percent():
+    assert near_dups.same_length(10.0, 10.9) and not near_dups.same_length(10.0, 11.2)
+    assert near_dups.same_length(100.0, 101.9) and not near_dups.same_length(100.0, 102.5)
+    assert near_dups.same_length(None, 5.0) and near_dups.same_length(0, 5.0)
+    runs = near_dups._split_by_length([1, 2, 3, 4], {1: 10.0, 2: 30.0, 3: 10.4, 4: None}.get)
+    assert runs == [[1, 3], [2], [4]]
+
+
+def test_a_video_frame_that_fails_because_the_vault_went_away_is_a_read_error(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    clip = _clip(vault / "a.mp4", _scene(65), "-c:v", "mpeg4")
+    st = clip.stat()
+    real_run = subprocess.run
+    unplug = [True]
+
+    def unplugged(cmd, *args, **kwargs):
+        if cmd and str(cmd[0]).endswith("ffmpeg") and unplug:
+            unplug.clear()
+            vault.rename(tmp_path / "weg")       # the disk goes away while ffmpeg reads
+            return subprocess.CompletedProcess(cmd, 1, b"", b"")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", unplugged)
+    with pytest.raises(OSError) as caught:
+        near_dups._analyse_row((1, str(clip), st.st_size, st.st_mtime_ns, "video", 2.0))
+    assert caught.value.errno is not None
+    # Back again: the frame reads fine
+    (tmp_path / "weg").rename(vault)
+    status, figures, _ = near_dups._analyse_row((1, str(clip), st.st_size, st.st_mtime_ns, "video", 2.0))
+    assert status == near_dups.OK and figures
