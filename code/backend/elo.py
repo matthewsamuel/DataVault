@@ -539,9 +539,11 @@ def scope_kinds() -> List[str]:
 
 
 def resolve_scope(key: str) -> Optional[Dict[str, Any]]:
-    """{'key', 'kind', 'value', 'title', 'paths', 'filters'} for a registered 'kind:value',
+    """{'key', 'kind', 'value', 'title', 'paths', 'filters', 'version'} for a registered 'kind:value',
     else None (an unknown kind, or a collection that does not exist). filters: the library
-    filter of the collection when it has one (an album), for 'Top N als album'."""
+    filter of the collection when it has one (an album), for 'Top N als album'. version: when
+    the resolver gives one, the same version means the same paths (the routes then reuse what
+    they built for them)."""
     kind, sep, value = (key or "").partition(":")
     if not sep or kind not in _scopes:
         return None
@@ -550,7 +552,7 @@ def resolve_scope(key: str) -> Optional[Dict[str, Any]]:
         return None
     return {"key": f"{kind}:{value}", "kind": kind, "value": value,
             "title": str(found.get("title") or value), "paths": list(found.get("paths") or []),
-            "filters": found.get("filters")}
+            "filters": found.get("filters"), "version": found.get("version")}
 
 
 def comparisons_in_scope(db, scope: str) -> int:

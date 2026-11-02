@@ -620,6 +620,44 @@ def test_an_album_of_videos_has_no_photos_to_compare(client, app, vault):
     assert {p["name"] for p in both["pair"]} == {"rome.jpg", "venetië.jpg"}
 
 
+def test_an_album_scope_is_built_once_per_version_and_follows_its_album(client, app, vault, monkeypatch):
+    """An album's photos are looked up once per selection version (as a folder's are), not for every
+    pair; a new photo, an edited album and a disabled show folder are all seen at once."""
+    from test_media_index import _index
+    _index(client, full=False)
+    lib = (vault / "library").resolve()
+    italy = lib / "Reis Italië"
+    album = client.post("/api/library/albums", json={"name": "Italië", "filters": {"folder": str(italy)}}).json()
+    key = f"album:{album['id']}"
+    builds = []
+    real = elo.mark_series
+    monkeypatch.setattr(elo, "mark_series", lambda base: (builds.append(len(base)), real(base))[1])
+
+    def photos():
+        return client.get("/api/shows/compare/pair", params={"scope": key}).json()["stats"]["photos"]
+
+    assert [photos() for _ in range(5)] == [2] * 5
+    pair = client.get("/api/shows/compare/pair", params={"scope": key}).json()["pair"]
+    client.post("/api/shows/compare", json={"a": pair[0]["path"], "b": pair[1]["path"], "winner": "a", "scope": key})
+    client.get("/api/shows/leaderboard", params={"scope": key})
+    assert builds == [2]                      # one lookup for six pair requests, a pick and the ranking
+    # A new photo in the album's folder: the next index pass changes the version
+    shutil.copy2(lib / "Familie/opa.jpg", italy / "napels.jpg")
+    _index(client, full=False)
+    assert photos() == 3 and builds[-1] == 3
+    # The album itself edited: from three photos to the one of another folder
+    r = client.patch(f"/api/library/albums/{album['id']}", json={"filters": {"folder": str(lib / "Familie")}})
+    assert r.status_code == 200, r.text
+    assert photos() == 1
+    client.patch(f"/api/library/albums/{album['id']}", json={"filters": {"folder": str(italy)}})
+    assert photos() == 3
+    # A show folder switched off counts at once (without forget_candidates)
+    client.post("/api/shows/settings", json={"path": str(italy), "enabled": False})
+    assert photos() == 0
+    client.post("/api/shows/settings", json={"path": str(italy), "enabled": True})
+    assert photos() == 3
+
+
 def test_perceptual_near_duplicates_from_step_3_4_are_never_paired(client, app, vault):
     from test_media_index import _index
     from backend.routes import shows
