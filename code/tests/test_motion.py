@@ -6,21 +6,21 @@ FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
 
 def test_motion_is_unset_until_the_user_chooses(client):
-    assert client.get("/api/ui/settings").json() == {"motion": None}
+    assert client.get("/api/ui/settings").json()["motion"] is None
     for mode in ("rustig", "uit", "volledig"):
-        assert client.put("/api/ui/settings", json={"motion": mode}).json() == {"motion": mode}
-        assert client.get("/api/ui/settings").json() == {"motion": mode}
+        assert client.put("/api/ui/settings", json={"motion": mode}).json()["motion"] == mode
+        assert client.get("/api/ui/settings").json()["motion"] == mode
     # Back to 'follow macOS'
-    assert client.put("/api/ui/settings", json={"motion": None}).json() == {"motion": None}
+    assert client.put("/api/ui/settings", json={"motion": None}).json()["motion"] is None
 
 
 def test_a_wrong_motion_value_is_refused_and_nothing_changes(client):
     client.put("/api/ui/settings", json={"motion": "rustig"})
     for bad in ("snel", 1, True, ""):
         assert client.put("/api/ui/settings", json={"motion": bad}).status_code == 400
-    assert client.get("/api/ui/settings").json() == {"motion": "rustig"}
+    assert client.get("/api/ui/settings").json()["motion"] == "rustig"
     # Without the key nothing changes either
-    assert client.put("/api/ui/settings", json={}).json() == {"motion": "rustig"}
+    assert client.put("/api/ui/settings", json={}).json()["motion"] == "rustig"
 
 
 def test_the_motion_setting_lives_with_the_other_app_settings(client, app):

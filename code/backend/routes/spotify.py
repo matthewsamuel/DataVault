@@ -567,11 +567,14 @@ def on_this_day_track(now: Optional[datetime] = None) -> Optional[dict]:
     # The album cover when the Spotify sync stored one (Home itself never goes online)
     from backend.datagatherer import spotify_covers
     cover = spotify_covers.cover_file(db, config, closest['track'], closest['artist'])
-    return {**closest, "cover": f"/api/spotify/cover/{cover}" if cover else None}
+    return {**closest, "cover": f"/api/spotify/cover/{cover}" if cover else None,
+            "uri": spotify_covers.track_uri(db, closest['track'], closest['artist'])}
 
 
 class PlayRequest(BaseModel):
     uri: str
+    # Home's start-up song: leave a Spotify that is playing something else alone
+    if_idle: bool = False
 
 
 @router.post("/play")
@@ -582,10 +585,31 @@ def play_track(request: PlayRequest):
     """
     from backend import spotify_player
     try:
-        spotify_player.play(request.uri)
+        spotify_player.play(request.uri, if_idle=request.if_idle)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except spotify_player.PlayError as e:
         return {"played": False, "code": e.code, "message": str(e), "web": spotify_player.web_url(request.uri)}
     return {"played": True}
+
+
+@router.post("/pause")
+def pause_track():
+    """Pause the Spotify app (Home's card); does nothing when Spotify is not running."""
+    from backend import spotify_player
+    try:
+        spotify_player.pause()
+    except spotify_player.PlayError as e:
+        return {"paused": False, "code": e.code, "message": str(e)}
+    return {"paused": True}
+
+
+@router.get("/state")
+def player_state():
+    """What the Spotify app plays now, so Home's card knows when the song stopped or changed."""
+    from backend import spotify_player
+    try:
+        return spotify_player.state()
+    except spotify_player.PlayError as e:
+        return {"playing": False, "uri": None, "code": e.code}
 

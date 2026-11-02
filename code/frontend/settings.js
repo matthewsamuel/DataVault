@@ -163,6 +163,47 @@ registerSettingsSection({
     },
 });
 
+// Home: het nummer van 'Spotify op deze dag' bij het openen (app.js spotifyOtdAutoplay); bewaard
+// in app_settings via /api/ui/settings
+async function setStartupSong(input) {
+    const on = input.checked;
+    input.disabled = true;
+    try {
+        await fetchJSON(`${API_BASE}/api/ui/settings`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startup_song: on }),
+        });
+    } catch (err) {
+        input.checked = !on;
+        toastFetchError('De keuze is niet bewaard', err);
+    }
+    input.disabled = false;
+}
+
+registerSettingsSection({
+    id: 'home',
+    title: 'Home',
+    icon: 'fa-house',
+    order: 17,
+    description: 'Wat Home doet als je DataVault opent.',
+    render(body) {
+        const input = createEl('input', {
+            type: 'checkbox', role: 'switch', id: 'settings-startup-song', checked: true, disabled: true,
+            onChange: e => setStartupSong(e.target),
+        });
+        fetchJSON(`${API_BASE}/api/ui/settings`)
+            .then(data => { input.checked = data.startup_song !== false; input.disabled = false; })
+            .catch(() => { input.title = 'Niet bereikbaar: probeer het later opnieuw'; });
+        body.append(
+            createEl('div', { class: 'settings-row' },
+                createEl('label', { class: 'settings-row-label', for: 'settings-startup-song',
+                    text: "Het nummer van 'Spotify op deze dag' afspelen" }),
+                createEl('span', { class: 'settings-row-value' },
+                    createEl('label', { class: 'switch' }, input, createEl('span', { class: 'slider' })))),
+            createEl('p', { class: 'settings-hint', text: 'Eén keer per keer dat je DataVault opent, in de Spotify-app op deze Mac. '
+                + 'Speelt Spotify al iets, dan blijft dat spelen. Met de knop op de kaart pauzeer je het.' }));
+    },
+});
+
 // Hoe Pasha zijn acties doorgeeft (docs/PASHA_TOOLS.md); bewaard via /api/chat/tool-format
 const TOOL_FORMAT_CHOICES = [
     ['native', 'Ollama-gereedschap', 'Pasha geeft zijn acties door via Ollama zelf. Aanbevolen.'],

@@ -106,11 +106,11 @@ def test_a_hanging_spotify_times_out():
 
 def test_the_play_route(client, anon_client, monkeypatch):
     played = []
-    monkeypatch.setattr(spotify_player, "play", lambda uri: played.append(uri))
+    monkeypatch.setattr(spotify_player, "play", lambda uri, **kw: played.append(uri))
     assert client.post("/api/spotify/play", json={"uri": URI}).json() == {"played": True}
     assert played == [URI]
 
-    def refuse(uri):
+    def refuse(uri, **kw):
         raise spotify_player.PlayError("not_allowed")
     monkeypatch.setattr(spotify_player, "play", refuse)
     r = client.post("/api/spotify/play", json={"uri": URI}).json()

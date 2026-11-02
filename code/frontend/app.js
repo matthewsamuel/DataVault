@@ -2879,8 +2879,10 @@ async function fetchHomeWidgets() {
             makeActivatable(item, `${t.track} van ${t.artist} zoeken in Spotify`);
             homeOtdShow('spotify-otd-loading', 'spotify-otd-content', item);
             spotifyOtdCover(item, cover, t.cover ? `${API_BASE}${t.cover}` : null);
+            spotifyOtdPlayer(t);
         } else {
             spotifyOtdCover(null, null, null);
+            spotifyOtdPlayer(null);
             homeOtdShow('spotify-otd-loading', 'spotify-otd-content', homeOtdState(emptyState({
                 icon: 'fa-music',
                 title: 'Niets geluisterd',
@@ -2890,6 +2892,7 @@ async function fetchHomeWidgets() {
         }
     } catch (e) {
         spotifyOtdCover(null, null, null);
+        spotifyOtdPlayer(null);
         homeOtdShow('spotify-otd-loading', 'spotify-otd-content', homeOtdState(errorState('Laden mislukt', e)));
     }
 }
@@ -2980,6 +2983,125 @@ function spotifyOtdCover(item, cover, src) {
         cover.style.removeProperty('--tilt-x');
         cover.style.removeProperty('--tilt-y');
     });
+}
+
+// Spotify op deze dag ook horen: de knop in de kop start het nummer in de Spotify-app op deze Mac
+// (POST /api/spotify/play, net als Pasha's 'zet dat liedje op'). Bij het openen van het dashboard
+// speelt het vanzelf, één keer per sessie van dit tabblad (Instellingen > Home), en nooit over iets
+// heen wat Spotify al speelt. Zolang het speelt dansen de staafjes en pauzeert dezelfde knop; de
+// kaart kijkt af en toe of Spotify nog dit nummer speelt (GET /api/spotify/state).
+const SPOTIFY_STARTUP_KEY = 'dvStartupSongPlayed';
+const SPOTIFY_WATCH_MS = 15000;
+const spotifyOtd = { track: null, state: 'idle', watch: null };
+
+function spotifyOtdPlayer(track) {
+    const box = document.getElementById('spotify-otd-actions');
+    if (!box) return;
+    spotifyOtd.track = track && track.uri ? track : null;
+    spotifyOtdWatch(false);
+    if (!spotifyOtd.track) {
+        box.replaceChildren();
+        return;
+    }
+    const button = createEl('button', {
+        type: 'button', class: 'btn btn-ghost btn-sm otd-play', id: 'spotify-otd-play',
+        onClick: () => (spotifyOtd.state === 'playing' ? spotifyOtdPause() : spotifyOtdPlay(false)),
+    },
+        createEl('span', { class: 'chat-play-eq', 'aria-hidden': 'true' }, createEl('span'), createEl('span'), createEl('span')),
+        createEl('i', { class: 'fas fa-play', 'aria-hidden': 'true' }),
+        createEl('span', { class: 'otd-play-label' }));
+    box.replaceChildren(button);
+    spotifyOtdSet('idle');
+    spotifyOtdAutoplay();
+}
+
+// idle (Afspelen), starting (wachtende staafjes) of playing (dansende staafjes, Pauzeren)
+function spotifyOtdSet(state, note) {
+    const button = document.getElementById('spotify-otd-play');
+    spotifyOtd.state = state;
+    if (!button || !spotifyOtd.track) return;
+    const { track, artist } = spotifyOtd.track;
+    button.classList.toggle('is-starting', state === 'starting');
+    button.classList.toggle('is-playing', state === 'playing');
+    button.disabled = state === 'starting';
+    button.querySelector('.otd-play-label').textContent =
+        state === 'playing' ? 'Pauzeren' : state === 'starting' ? 'Starten…' : 'Afspelen';
+    button.title = note || (state === 'playing' ? `Speelt nu in Spotify: ${track}` : `${track} afspelen in Spotify`);
+    button.setAttribute('aria-label', state === 'playing'
+        ? `${track} van ${artist} pauzeren (speelt nu in Spotify)` : `${track} van ${artist} afspelen in Spotify`);
+    spotifyOtdWatch(state === 'playing');
+}
+
+async function spotifyOtdPlay(auto) {
+    const track = spotifyOtd.track;
+    if (!track) return;
+    spotifyOtdSet('starting');
+    try {
+        const done = await fetchJSON(`${API_BASE}/api/spotify/play`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uri: track.uri, if_idle: auto }),
+        });
+        if (track !== spotifyOtd.track) return;
+        if (done.played) {
+            spotifyOtdSet('playing');
+            return;
+        }
+        // Bij het opstarten stil: Spotify speelt al iets, of de Mac staat het (nog) niet toe
+        spotifyOtdSet('idle', done.code === 'busy' ? null : done.message);
+        if (auto) return;
+        if (done.code === 'not_installed' && done.web) openExternal(done.web);
+        else showToast('Spotify', done.message || 'Spotify kon het nummer niet starten.', done.code === 'not_allowed' ? 'info' : 'error');
+    } catch (e) {
+        if (track !== spotifyOtd.track) return;
+        spotifyOtdSet('idle');
+        if (!auto) toastFetchError('Spotify kon het nummer niet starten', e);
+    }
+}
+
+async function spotifyOtdPause() {
+    spotifyOtdSet('idle');
+    try {
+        const done = await fetchJSON(`${API_BASE}/api/spotify/pause`, { method: 'POST' });
+        if (!done.paused) showToast('Spotify', done.message || 'Spotify kon niet pauzeren.', 'error');
+    } catch (e) {
+        toastFetchError('Spotify kon niet pauzeren', e);
+    }
+}
+
+async function spotifyOtdAutoplay() {
+    try {
+        if (sessionStorage.getItem(SPOTIFY_STARTUP_KEY)) return;
+        sessionStorage.setItem(SPOTIFY_STARTUP_KEY, '1');
+    } catch (_) {
+        return;     // zonder sessionStorage zou elke herlaadbeurt het nummer opnieuw starten
+    }
+    try {
+        if ((await fetchJSON(`${API_BASE}/api/ui/settings`)).startup_song === false) return;
+    } catch (_) {
+        return;
+    }
+    spotifyOtdPlay(true);
+}
+
+// Speelt Spotify nog dit nummer? Gepauzeerd in de app, of het volgende nummer: weer Afspelen.
+function spotifyOtdWatch(on) {
+    clearInterval(spotifyOtd.watch);
+    window.removeEventListener('focus', spotifyOtdCheck);
+    spotifyOtd.watch = null;
+    if (!on) return;
+    spotifyOtd.watch = setInterval(() => { if (!document.hidden) spotifyOtdCheck(); }, SPOTIFY_WATCH_MS);
+    window.addEventListener('focus', spotifyOtdCheck);
+}
+
+async function spotifyOtdCheck() {
+    const track = spotifyOtd.track;
+    if (!track || spotifyOtd.state !== 'playing') return;
+    try {
+        const now = await fetchJSON(`${API_BASE}/api/spotify/state`);
+        if (track === spotifyOtd.track && spotifyOtd.state === 'playing' && (!now.playing || now.uri !== track.uri)) {
+            spotifyOtdSet('idle');
+        }
+    } catch (_) { /* server even weg: de knop blijft zoals hij is */ }
 }
 
 // 'Op deze dag': eerst de draaier, daarna de inhoud of een lege of mislukte staat. Er komt

@@ -142,6 +142,11 @@ In deze ronde is afgemaakt wat eerder bleef liggen. Wat nog steeds niet kan, sta
   nu in Spotify". De eerste keer vraagt macOS of DataVault Spotify mag bedienen. Zonder die
   toestemming, zonder de app of zonder een bekende Spotify-link biedt de kaart de webspeler of de
   zoekpagina van Spotify aan.
+- **Je liedje bij het opstarten.** Open je het dashboard, dan speelt het nummer van **Spotify op deze
+  dag** vanzelf in de Spotify-app, één keer per keer dat je DataVault opent (herladen start het niet
+  opnieuw). Speelt Spotify al iets, dan blijft dat spelen. Rechtsboven op de kaart staat **Afspelen**;
+  speelt het nummer, dan dansen daar groene staafjes en pauzeer je het met dezelfde knop. Uitzetten
+  kan in **Instellingen > Home**.
 
 **DataGatherer en berichten**
 - **Google Takeout als `.tgz`** wordt nu gelezen zoals een `.zip`, stukje voor stukje en zonder het
