@@ -142,8 +142,44 @@ def test_describe_names_a_position_in_dutch_offline():
     from backend import places
     assert places.describe(52.37, 4.89) == "Amsterdam, Nederland"
     assert places.describe(41.9, 12.49) == "Rome, Italië"
-    # A harbour just outside the simplified coast line still gets its country
+    assert places.describe(48.858, 2.294) == "Parijs, Frankrijk"           # the Eiffel tower, in the Dutch name
+    # A harbour just outside the simplified coast line still gets its town and country
     assert places.describe(38.72, -9.14) == "Lissabon, Portugal"
-    # Far from any larger city: the country alone; at sea: nothing
-    assert places.describe(68.42, 27.41) == "Finland"
-    assert places.describe(0.0, -30.0) is None
+    assert places.describe(64.5, -17.0) == "Suðurland, IJsland"
+
+
+def test_describe_gives_every_geotagged_photo_a_place():
+    """Not only near a larger city: a town with a distance and direction, the province in the
+    countryside, the coast, the sea; always in Dutch and with the country."""
+    from backend import places
+    # Near a town: distance and compass direction from the town that names the area
+    assert places.describe(37.02, -7.93) == "Faro, Portugal"
+    assert places.describe(37.02, -7.80) == "4 km ten oosten van Olhão, Portugal"
+    assert places.describe(52.15, 5.85) == "11 km ten zuidwesten van Apeldoorn, Nederland"   # the Veluwe
+    # Countryside far from any town: the province, as on the Kaart
+    assert places.describe(68.42, 27.41) == "Lapland, Finland"
+    assert places.describe(37.75, -119.59) == "Californië, Verenigde Staten"               # Yosemite
+    assert places.describe(36.1, -112.1) == "Arizona, Verenigde Staten"                     # the Grand Canyon
+    # On a beach and on the water
+    assert places.describe(52.37, 4.52) == "Zandvoort, Nederland"
+    assert places.describe(53.45, 5.75) == "Aan de kust van Friesland, Nederland"           # Ameland
+    assert places.describe(52.4, 4.3) == "Voor de kust bij Zandvoort, Nederland"
+    assert places.describe(51.80, -10.25) == "Voor de kust van Kerry, Ierland"
+    assert places.describe(42.75, 15.08) == "Op zee, 70 km uit de kust van Italië"
+    assert places.describe(0.0, -30.0) == "Op zee"
+    # 0, 0 is what a broken GPS writes: no place at all
+    assert places.describe(0.0, 0.0) is None
+    parts = places.describe_parts(37.02, -7.80)
+    assert parts["town"] == "Olhão" and parts["direction"] == "oosten" and parts["country"] == "Portugal"
+    assert parts["region"] == "Faro" and parts["sea"] is False
+    assert places.describe_parts(52.4, 4.3)["sea"] is True and places.describe_parts(52.4, 4.3)["coast"] is True
+
+
+def test_describe_is_fast_enough_for_a_page_of_photos():
+    import time
+    from backend import places
+    places.describe(52.0, 5.0)                                  # loads the data once
+    start = time.perf_counter()
+    for i in range(200):
+        places.describe(40.0 + (i % 20) * 0.5, -5.0 + (i // 20) * 2.0)
+    assert (time.perf_counter() - start) / 200 < 0.02           # about a millisecond each here
