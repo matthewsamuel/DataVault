@@ -14,7 +14,7 @@ from fixtures.vault_builder import STRAND, STRAND_COPIES
 
 
 def _scan(client, folder, **params):
-    return client.post("/api/duplicates/scan_folder", params={"folder_path": str(folder), **params})
+    return client.post("/api/duplicates/scan_folder", json={"folder_path": str(folder), **params})
 
 
 def _write(path, data, ts=None):

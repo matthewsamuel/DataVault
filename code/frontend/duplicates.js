@@ -854,15 +854,31 @@ function applyCleanupResult(moved, failed) {
 
 // ==================== HERSTELLEN ====================
 
-async function loadDuplicateRuns() {
+async function loadDuplicateRuns(focusRunId = null, showFocus = false) {
     const container = document.getElementById('dup-runs');
     if (!container) return;
+    // Opnieuw tekenen vervangt elke rij: wie met het toetsenbord in de lijst zat, blijft er
+    const focusedRun = focusRunId || (container.contains(document.activeElement)
+        ? document.activeElement.closest('.dup-run')?.dataset.runId : null);
     try {
         const data = await fetchJSON(`${API_BASE}/api/duplicates/runs`);
         renderDuplicateRuns(data.runs || []);
     } catch (error) {
         container.replaceChildren(createEl('div', { class: 'dup-runs-empty', text: `Kon de geschiedenis niet laden: ${error.message}` }));
     }
+    // Alleen als de focus met de oude rij verdween (niet als de gebruiker al verder is)
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (focusedRun && lost) focusDuplicateRun(focusedRun, showFocus);
+}
+
+// Focus op de knop Terugzetten van die opruimactie; kan die niet meer (alles terug, of wat
+// overblijft is veranderd), dan op Herstelcentrum, zodat het toetsenbord niet bovenaan begint.
+function focusDuplicateRun(runId, showFocus = false) {
+    const row = [...document.querySelectorAll('#dup-runs .dup-run')].find(r => r.dataset.runId === runId);
+    const button = row?.querySelector('button:not([disabled])')
+        || document.querySelector('#dup-restore-panel .dup-restore-all');
+    // showFocus: de actie kwam van het toetsenbord, dus de focusring hoort zichtbaar te zijn
+    button?.focus({ preventScroll: true, focusVisible: showFocus });
 }
 
 function renderDuplicateRuns(runs) {
@@ -877,15 +893,32 @@ function renderDuplicateRuns(runs) {
             : (run.timestamp || '?');
         let count = `${run.remaining} bestand${run.remaining === 1 ? '' : 'en'}`;
         if (run.remaining !== run.total_files) count += ` (van ${run.total_files})`;
-        const gone = run.remaining - run.restorable;
-        const note = run.restorable === 0
-            ? 'staat niet meer in RAW_DUPLICATES'
-            : gone > 0 ? `${gone} staan niet meer in RAW_DUPLICATES` : '';
-        return createEl('div', { class: 'dup-run' },
+        // changed: nog in RAW_DUPLICATES, maar sinds het opruimen veranderd of vervangen (blijft staan)
+        const changed = run.changed || 0;
+        const gone = run.remaining - run.restorable - changed;
+        const parts = [];
+        if (changed > 0) {
+            parts.push(`${changed} veranderd of vervangen; ${changed === 1 ? 'blijft' : 'blijven'} staan`);
+        }
+        if (gone > 0) {
+            parts.push(gone === run.remaining
+                ? `${gone === 1 ? 'staat' : 'staan'} niet meer in RAW_DUPLICATES`
+                : `${gone} ${gone === 1 ? 'staat' : 'staan'} niet meer in RAW_DUPLICATES`);
+        }
+        const rowClass = 'dup-run' + (changed > 0 ? ' has-changed' : '') + (parts.length ? ' has-note' : '');
+        return createEl('div', { class: rowClass, 'data-run-id': run.run_id },
             createEl('span', { class: 'dup-run-time', text: when }),
             createEl('span', { class: 'dup-run-count', text: count }),
             createEl('span', { class: 'dup-run-folder', text: run.folder ? displayPath(run.folder, 60) : '', title: run.folder || '' }),
-            createEl('span', { class: 'dup-run-note', text: note }),
+            parts.length ? createEl('span', { class: 'dup-run-note',
+                title: changed > 0
+                    ? 'Veranderd of vervangen sinds het opruimen: die bestanden worden niet teruggezet. '
+                      + 'Het Herstelcentrum toont per bestand de reden.'
+                    : undefined },
+                changed > 0 ? createEl('i', { class: 'fas fa-triangle-exclamation', 'aria-hidden': 'true' }) : null,
+                // Elke reden op een eigen regel: een lange notitie drukt de map niet weg
+                createEl('span', { class: 'dup-run-note-lines' }, ...parts.map(part => createEl('span', { text: part }))))
+                : null,
             createEl('button', {
                 class: 'btn btn-secondary btn-small',
                 disabled: run.restorable === 0,
@@ -897,11 +930,17 @@ function renderDuplicateRuns(runs) {
 
 async function undoDuplicateRun(run, button) {
     const n = run.restorable;
+    const changedCount = run.changed || 0;
+    const viaKeyboard = button.matches(':focus-visible');
+    const body = [`${n === 1 ? 'Het gaat' : 'Ze gaan'} terug naar de oorspronkelijke plek.`,
+                  'Staat daar intussen een ander bestand, dan komt het teruggezette bestand ernaast '
+                  + '(naam_RESTORED_001); er wordt niets overschreven.'];
+    if (changedCount > 0) {
+        body.push(`${changedCount} bestand${changedCount === 1 ? ' blijft' : 'en blijven'} in RAW_DUPLICATES: `
+            + `${changedCount === 1 ? 'het is' : 'ze zijn'} veranderd of vervangen sinds het opruimen.`);
+    }
     if (!await dvConfirm({
-        title: `${n} bestand${n === 1 ? '' : 'en'} terugzetten?`, icon: 'fa-rotate-left', confirmLabel: 'Terugzetten',
-        body: ['Ze gaan terug naar de oorspronkelijke plek.',
-               'Staat daar intussen een ander bestand, dan komt het teruggezette bestand ernaast '
-               + '(naam_RESTORED_001); er wordt niets overschreven.'],
+        title: `${n} bestand${n === 1 ? '' : 'en'} terugzetten?`, icon: 'fa-rotate-left', confirmLabel: 'Terugzetten', body,
     })) {
         return;
     }
@@ -915,13 +954,22 @@ async function undoDuplicateRun(run, button) {
         const beside = (data.files || []).filter(f => f.restored_path !== f.src_path).length;
         let message = `${data.restored} bestand${data.restored === 1 ? '' : 'en'} teruggezet.`;
         if (beside) message += ` ${beside} kwam${beside === 1 ? '' : 'en'} naast een bestaand bestand (_RESTORED_).`;
+        if (dupState.folder && data.restored) {
+            message += ` Scan opnieuw om ${data.restored === 1 ? 'het' : 'ze'} weer als duplicaat te zien.`;
+        }
+        const changed = (data.changed || []).length;
+        if (changed) {
+            message += ` ${changed} ${changed === 1 ? 'bleef' : 'bleven'} in RAW_DUPLICATES: veranderd of vervangen `
+                + `sinds het opruimen (${data.changed[0].dst_path.split('/').pop()}${changed > 1 ? ', …' : ''}).`;
+        }
         if (data.errors && data.errors.length) message += ` ${data.errors.length} fout(en): ${data.errors[0]}`;
-        if (dupState.folder) message += ' Scan opnieuw om ze weer als duplicaat te zien.';
-        showToast('Teruggezet', message, data.errors && data.errors.length ? 'warning' : 'success');
+        const warn = changed || (data.errors && data.errors.length);
+        showToast(data.restored ? 'Teruggezet' : 'Niet teruggezet', message, warn ? 'warning' : 'success');
     } catch (error) {
         toastFetchError('Terugzetten mislukt', error);
     } finally {
-        loadDuplicateRuns();
+        // Na het nieuwe tekenen komt de focus terug op deze opruimactie
+        loadDuplicateRuns(run.run_id, viaKeyboard);
     }
 }
 

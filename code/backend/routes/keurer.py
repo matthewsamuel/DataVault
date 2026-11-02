@@ -11,7 +11,7 @@ import stat
 from backend.config import Config, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS
 from backend.paths import ArchiveFilter, resolve_in_vault, scan_dir
 from backend.file_ops import (
-    move_no_overwrite, is_inside, same_folder, ARCHIVE_LOCK,
+    move_no_overwrite, is_inside, same_folder, ARCHIVE_LOCK, sqlite_ino,
     FileOperationError, CrossDeviceError, DestinationExistsError, ProtectedPathError,
 )
 
@@ -137,7 +137,7 @@ def _fingerprint(path: Path) -> Tuple[Optional[int], Optional[int]]:
         st = os.lstat(path)
     except OSError:
         return None, None
-    return st.st_ino, st.st_size
+    return sqlite_ino(st.st_ino), st.st_size
 
 
 def _dest_state(rec: Dict[str, Any]) -> str:
@@ -156,7 +156,7 @@ def _dest_state(rec: Dict[str, Any]) -> str:
         return "missing"
     if rec.get("dest_ino") is None or rec.get("dest_size") is None:
         return "unknown"
-    if (st.st_ino, st.st_size) != (rec["dest_ino"], rec["dest_size"]):
+    if (sqlite_ino(st.st_ino), st.st_size) != (rec["dest_ino"], rec["dest_size"]):
         return "other"
     return "ok"
 

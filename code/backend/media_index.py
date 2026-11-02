@@ -50,6 +50,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from backend import media_meta
 from backend.config import media_type
+from backend.file_ops import sqlite_ino
 from backend.paths import ArchiveFilter, excluded_folders, scan_dir
 
 INDEX_JOB = "index"
@@ -218,7 +219,7 @@ def _fallback_meta(path: str, st: os.stat_result, status: str) -> Dict[str, Any]
     taken, source = media_dates.file_date(st)
     meta = {c: None for c in META_COLUMNS}
     meta.update(kind=media_type(Path(path)), ext=os.path.splitext(path)[1].lower(), size=st.st_size,
-                mtime_ns=st.st_mtime_ns, inode=st.st_ino,
+                mtime_ns=st.st_mtime_ns, inode=sqlite_ino(st.st_ino),
                 birthtime=birthtime if birthtime and birthtime > 0 else None,
                 taken=taken, taken_source=source, meta_status=status)
     return meta

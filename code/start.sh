@@ -12,6 +12,26 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
+# Browser from config.json ("browser" key), Safari by default. plutil prints its error on
+# stdout when the key is missing, so its output only counts when it exits 0 and is not blank.
+# -expect string: a number, true/false, list or object is not a browser name either.
+config_browser() {
+    local value
+    if value=$(plutil -extract browser raw -expect string -o - "$CONFIG_FILE" 2>/dev/null) \
+            && [ -n "${value//[[:space:]]/}" ]; then
+        printf '%s\n' "$value"
+    else
+        printf '%s\n' "Safari"
+    fi
+}
+BROWSER=$(config_browser)
+
+# ./start.sh --print-browser: only say which browser would open, start nothing (used by the tests)
+if [ "$1" = "--print-browser" ]; then
+    printf '%s\n' "$BROWSER"
+    exit 0
+fi
+
 PYTHON="$SCRIPT_DIR/venv/bin/python"
 
 # ---- Create the virtual environment on first run ----
@@ -51,9 +71,6 @@ done
 
 # ffmpeg lives in /opt/homebrew/bin (Apple Silicon) or /usr/local/bin (Intel)
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-
-# Browser from config.json ("browser" key), Safari by default
-BROWSER=$(plutil -extract browser raw -o - "$CONFIG_FILE" 2>/dev/null || echo "Safari")
 
 echo ""
 echo "Starting DataVault Dashboard..."

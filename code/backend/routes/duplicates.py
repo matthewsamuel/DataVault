@@ -8,7 +8,7 @@ before every move it checks, under ARCHIVE_LOCK, that the copy that stays still
 exists and is byte-for-byte identical. Moved files go to RAW_DUPLICATES (never
 deleted) and one user action is one undo run, however many requests it takes.
 """
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import os
@@ -19,7 +19,7 @@ from backend.config import Config
 from backend.scanner import is_hidden
 from backend.paths import resolve_in_vault, is_in_vault, vault_folder_or_none
 from backend.file_ops import (
-    safe_move_with_structure, move_no_overwrite, files_identical, is_inside, ARCHIVE_LOCK,
+    safe_move_with_structure, move_no_overwrite, files_identical, is_inside, ARCHIVE_LOCK, sqlite_ino,
     FileOperationError, CrossDeviceError, ProtectedPathError,
 )
 
@@ -141,7 +141,39 @@ def get_duplicates_endpoint() -> Dict[str, Any]:
     }
 
 
+def _body_fields(request: Request, body: Any, required: str, optional: Tuple[str, ...]) -> Dict[str, Any]:
+    """
+    The fields of a JSON body for the two older single-call endpoints. Paths travel in the
+    body only, never in the URL (where they would end up in logs and history): a call that
+    still sends them as URL parameters gets a 400 that says so, not a silent default.
+    """
+    in_url = [name for name in (required, *optional) if name in request.query_params]
+    if in_url:
+        _bad_request(f"Stuur {', '.join(in_url)} in de JSON-body, niet in de URL")
+    if not isinstance(body, dict):
+        _bad_request(f'Body must be a JSON object with "{required}"')
+    unknown = set(body) - {required, *optional}
+    if unknown:
+        _bad_request(f"Unknown field(s): {', '.join(sorted(unknown))}")
+    value = body.get(required)
+    if not isinstance(value, str) or not value:
+        _bad_request(f"{required} must be a path")
+    fields = {required: value}
+    for name in optional:
+        value = body.get(name)
+        if value is not None and not isinstance(value, str):
+            _bad_request(f"{name} must be a string")
+        fields[name] = value
+    return fields
+
+
 @router.post("/api/duplicates/scan_folder")
+def scan_folder_endpoint(request: Request, body: Any = Body(None)) -> Dict[str, Any]:
+    """Body: {"folder_path": path, "rule": optional, "prefer_folder": optional}. See scan_folder_for_duplicates."""
+    fields = _body_fields(request, body, "folder_path", ("rule", "prefer_folder"))
+    return scan_folder_for_duplicates(fields["folder_path"], fields["rule"] or "oldest", fields["prefer_folder"])
+
+
 def scan_folder_for_duplicates(
     folder_path: str, rule: str = "oldest", prefer_folder: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -329,10 +361,20 @@ def _forget_hashes(*paths: Path) -> None:
             pass
 
 
+def _dst_fingerprint(dst_path: Path) -> Tuple[Optional[int], Optional[int]]:
+    """Inode and size of the file that was just moved (a rename keeps both)."""
+    try:
+        st = os.lstat(dst_path)
+    except OSError:
+        return None, None
+    return sqlite_ino(st.st_ino), st.st_size
+
+
 def _record_or_move_back(run_id: Optional[str], src_path: Path, dst_path: Path, folder: Optional[str]) -> str:
     """Record the move for undo; if that fails, put the file back so nothing is untracked."""
+    ino, size = _dst_fingerprint(dst_path)
     try:
-        return db.record_delete_operation(run_id, src_path, dst_path, folder)
+        return db.record_delete_operation(run_id, src_path, dst_path, folder, dst_ino=ino, dst_size=size)
     except Exception as e:
         try:
             move_no_overwrite(dst_path, src_path, suffix_prefix="RESTORED")
@@ -345,6 +387,12 @@ def _record_or_move_back(run_id: Optional[str], src_path: Path, dst_path: Path, 
 
 
 @router.post("/api/duplicates/delete_single")
+def delete_single_endpoint(request: Request, body: Any = Body(None)) -> Dict[str, Any]:
+    """Body: {"file_path": path, "duplicate_of": optional path}. See delete_single_duplicate."""
+    fields = _body_fields(request, body, "file_path", ("duplicate_of",))
+    return delete_single_duplicate(fields["file_path"], fields["duplicate_of"])
+
+
 def delete_single_duplicate(file_path: str, duplicate_of: Optional[str] = None) -> Dict[str, Any]:
     """
     Move a single duplicate file to RAW_DUPLICATES (one file, its own undo run).
@@ -498,16 +546,49 @@ def _paths_allowed(op: Dict[str, Any]) -> bool:
     )
 
 
+def moved_file_state(op: Dict[str, Any], st: Any = False) -> str:
+    """
+    Is the file this operation moved still in RAW_DUPLICATES, unchanged?
+    'ok', 'missing' (gone, or no longer a regular file), 'other' (another file has its
+    name: the inode differs) or 'changed' (the same file, but its size changed).
+    Operations recorded before migration 171 have no inode and size: for them only
+    'ok' or 'missing' (the checks those runs always had).
+    st: dst_path's lstat when the caller already has it (None: it does not exist).
+    """
+    if st is False:
+        try:
+            st = os.lstat(op["dst_path"])
+        except (OSError, ValueError):
+            st = None
+    if st is None or not stat.S_ISREG(st.st_mode):
+        return "missing"
+    ino, size = op.get("dst_ino"), op.get("dst_size")
+    if ino is None or size is None:
+        return "ok"
+    if sqlite_ino(st.st_ino) != ino:
+        return "other"
+    if st.st_size != size:
+        return "changed"
+    return "ok"
+
+
 def _still_there(op: Dict[str, Any]) -> bool:
-    """The moved file is still a regular file at its RAW_DUPLICATES location."""
-    try:
-        return stat.S_ISREG(os.lstat(op["dst_path"]).st_mode)
-    except OSError:
-        return False
+    """The moved file is still a regular file at its RAW_DUPLICATES location, and (when the
+    run recorded it) still the same file with the same size."""
+    return moved_file_state(op) == "ok"
 
 
 def _restorable(op: Dict[str, Any]) -> bool:
     return _paths_allowed(op) and _still_there(op)
+
+
+# Why a file that is still in RAW_DUPLICATES does not go back (Dutch, for the screen)
+def changed_reason(state: str, name: str) -> str:
+    if state == "other":
+        return (f"In RAW_DUPLICATES staat nu een ander bestand met de naam {name}; "
+                "het wordt niet teruggezet")
+    return (f"{name} is in RAW_DUPLICATES veranderd sinds het daar kwam (andere grootte); "
+            "het wordt niet teruggezet")
 
 
 def _restore_ops(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -521,6 +602,7 @@ def _restore_ops(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
     skipped = 0
     errors = []
     files = []
+    changed = []  # still in RAW_DUPLICATES, but changed or swapped since the move: left alone
 
     for op in operations:
         # src_path is the ORIGINAL location, dst_path is where it went (in RAW_DUPLICATES).
@@ -532,7 +614,14 @@ def _restore_ops(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
             skipped += 1
             continue
 
-        if not _still_there(op):
+        state = moved_file_state(op)
+        if state == "missing":
+            skipped += 1
+            continue
+        if state != "ok":
+            # Stays recorded (and listed with its reason in the Herstelcentrum)
+            changed.append({"src_path": str(src_path), "dst_path": str(dst_path), "state": state,
+                            "reason": changed_reason(state, dst_path.name)})
             skipped += 1
             continue
 
@@ -560,7 +649,14 @@ def _restore_ops(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         restored += 1
         files.append({"src_path": str(src_path), "restored_path": str(restored_path)})
 
-    return {"restored": restored, "skipped": skipped, "errors": errors, "files": files}
+    return {"restored": restored, "skipped": skipped, "errors": errors, "files": files, "changed": changed}
+
+
+def _nothing_to_restore(operations: List[Dict[str, Any]]) -> str:
+    if any(moved_file_state(op) in ("other", "changed") for op in operations):
+        return ("Niets terug te zetten: de bestanden in RAW_DUPLICATES zijn veranderd of vervangen "
+                "sinds het opruimen. Er is niets verplaatst")
+    return "Niets meer terug te zetten: de bestanden staan niet meer in RAW_DUPLICATES"
 
 
 @router.post("/api/raw_duplicates/undo_last")
@@ -581,17 +677,17 @@ def undo_last_delete_endpoint() -> Dict[str, Any]:
 
         run_id = None
         operations = []
+        passed_over = []
         for run in runs:
             ops = db.get_delete_operations(run["run_id"])
             if any(_restorable(op) for op in ops):
                 run_id, operations = run["run_id"], ops
                 break
+            passed_over.extend(ops)
 
         if run_id is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Nothing left to restore: the moved files are no longer in RAW_DUPLICATES"
-            )
+            # Says whether the files are gone or changed/swapped (and so stay put)
+            raise HTTPException(status_code=404, detail=_nothing_to_restore(passed_over))
 
         outcome = _restore_ops(operations)
 
@@ -603,13 +699,16 @@ def list_delete_runs(limit: int = RUNS_TO_LIST) -> Dict[str, Any]:
     """
     The most recent cleanup actions that can still be undone, newest first:
     {runs: [{run_id, seq, created_at, timestamp, folder, total_files, remaining, restorable}]}.
-    restorable counts the files that are still in RAW_DUPLICATES.
+    restorable counts the files that are still in RAW_DUPLICATES, unchanged; changed counts
+    the files that are still there but were changed or swapped since (they stay where they are).
     """
     _require_config()
     limit = max(1, min(int(limit), 100))
     runs = db.get_delete_runs(limit=limit)
     for run in runs:
-        run["restorable"] = sum(1 for op in db.get_delete_operations(run["run_id"]) if _still_there(op))
+        states = [moved_file_state(op) for op in db.get_delete_operations(run["run_id"])]
+        run["restorable"] = states.count("ok")
+        run["changed"] = states.count("other") + states.count("changed")
     return {"runs": runs}
 
 
@@ -631,10 +730,7 @@ def undo_delete_run(body: Any = Body(...)) -> Dict[str, Any]:
             raise HTTPException(status_code=404, detail="Deze actie bestaat niet (meer) of is al teruggezet")
         operations = db.get_delete_operations(run_id)
         if not any(_restorable(op) for op in operations):
-            raise HTTPException(
-                status_code=410,
-                detail="Niets meer terug te zetten: de bestanden staan niet meer in RAW_DUPLICATES"
-            )
+            raise HTTPException(status_code=410, detail=_nothing_to_restore(operations))
         outcome = _restore_ops(operations)
         run = db.get_delete_run(run_id)
 

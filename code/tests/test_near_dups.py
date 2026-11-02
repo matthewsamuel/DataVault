@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from backend import near_dups
 from fixtures.vault_builder import BURST, STRAND, STRAND_COPIES
 from test_media_index import _index, _manager
+from helpers import kept_rows
 
 KLEIN = "RAW/2022/bursts/strand klein.jpg"
 
@@ -856,7 +857,7 @@ def test_migration_30_adds_the_tables_and_keeps_every_user_row(tmp_path, monkeyp
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 31
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         assert {r[1] for r in conn.execute("PRAGMA table_info(media_phash)")} >= {
             "media_id", "algo", "version", "size", "mtime_ns", "status", "dhash", "phash", "colors",
             "sharpness", "clip_low", "clip_high", "contrast", "paired", "content"}

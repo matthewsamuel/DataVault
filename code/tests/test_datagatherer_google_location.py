@@ -20,6 +20,7 @@ import fake_exports as fx
 from backend.datagatherer import (activity_store, assistant_context, daemon, geotag, google_formats as gf,
                                   location_store, state, timezones)
 from fixtures.vault_builder import DATA_OWNER
+from helpers import kept_rows
 
 
 def _wait(app, job_id, timeout=60):
@@ -393,7 +394,7 @@ def test_migration_110_adds_tables_and_keeps_every_user_row(tmp_path, monkeypatc
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 110
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
         assert {"activity_events", "location_points", "location_visits", "media_location_inferred"} <= names
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
@@ -454,7 +455,7 @@ def test_migration_135_rekeys_my_activity_per_second_and_keeps_every_other_row(t
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 135
         for table, kept in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == kept, table
+            assert kept_rows(conn, table, kept) == kept, table
         after = {(r[0], r[1]): r[2:] for r in conn.execute(
             "SELECT source, kind, ts_ms, details, event_key FROM activity_events ORDER BY id")}
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

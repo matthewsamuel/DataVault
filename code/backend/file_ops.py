@@ -249,6 +249,13 @@ def files_identical(a: Path, b: Path, chunk_size: int = 1024 * 1024) -> bool:
                 return True
 
 
+def sqlite_ino(ino: int) -> int:
+    """An inode as SQLite can store it. SQLite integers are signed 64-bit, but some volumes
+    (FAT32 on macOS, for empty files) give inodes above 2**63: those are kept as their two's
+    complement. Every real inode below 2**63 is unchanged, so stored values stay valid."""
+    return ino - (1 << 64) if ino >= (1 << 63) else ino
+
+
 def _identity(path: Path) -> Optional[Tuple[int, int]]:
     """(device, inode) of an existing path, None if it does not exist."""
     try:

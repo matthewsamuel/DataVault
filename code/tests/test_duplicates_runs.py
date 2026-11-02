@@ -71,7 +71,7 @@ def test_batch_in_chunks_is_one_run_and_undo_restores_content_and_dates(client, 
 
 
 def test_per_group_override_keeps_the_copy_the_user_chose(client, vault):
-    scan = client.post("/api/duplicates/scan_folder", params={"folder_path": str(vault / "RAW")}).json()
+    scan = client.post("/api/duplicates/scan_folder", json={"folder_path": str(vault / "RAW")}).json()
     [group] = [g for g in scan["groups"] if str(vault / STRAND) in {c["path"] for c in g["copies"]}]
     default = group["copies"][group["keep"]]["path"]
     chosen = next(c["path"] for c in group["copies"] if c["path"] != default)
@@ -213,7 +213,7 @@ def test_a_hidden_copy_never_stays_in_place_of_a_visible_one(client, vault):
     in_dot_folder.parent.mkdir()
     in_dot_folder.write_bytes(visible.read_bytes())
     assert _move(client, [(in_dot_folder, [visible])]).json()["failed"][0]["status"] == 409
-    assert client.post("/api/duplicates/delete_single", params={
+    assert client.post("/api/duplicates/delete_single", json={
         "file_path": str(visible), "duplicate_of": str(hidden)}).status_code == 409
     assert visible.exists() and _runs(client) == []
 
@@ -275,7 +275,7 @@ def test_an_unreadable_keeper_refuses_its_group_and_the_rest_still_runs(client, 
     assert [f["status"] for f in r.json()["failed"]] == [409] and r.json()["failed"][0]["path"] == str(d1)
     assert [m["path"] for m in r.json()["moved"]] == [str(d2)]
     assert d1.exists() and k1.exists()
-    r = client.post("/api/duplicates/delete_single", params={"file_path": str(d1), "duplicate_of": str(k1)})
+    r = client.post("/api/duplicates/delete_single", json={"file_path": str(d1), "duplicate_of": str(k1)})
     assert r.status_code == 409 and "niet lezen" in r.json()["detail"]
 
 
@@ -441,14 +441,14 @@ def test_migration_7_orders_runs_by_insertion_and_keeps_every_run(tmp_path, monk
             conn.execute("INSERT INTO delete_operations (run_id, src_path, dst_path) VALUES (?, ?, ?)",
                          (run, f"/v/RAW/{run}.jpg", f"/v/RAW_DUPLICATES/{run}.jpg"))
         runs_before = conn.execute("SELECT run_id, timestamp, total_files FROM delete_runs ORDER BY rowid").fetchall()
-        ops_before = conn.execute("SELECT * FROM delete_operations ORDER BY id").fetchall()
+        ops_before = conn.execute("SELECT id, run_id, src_path, dst_path, timestamp FROM delete_operations ORDER BY id").fetchall()
         keurer_before = conn.execute("SELECT * FROM keurer_decisions ORDER BY id").fetchall()
 
     db = Database(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION
         assert conn.execute("SELECT run_id, timestamp, total_files FROM delete_runs ORDER BY seq").fetchall() == runs_before
-        assert conn.execute("SELECT * FROM delete_operations ORDER BY id").fetchall() == ops_before
+        assert conn.execute("SELECT id, run_id, src_path, dst_path, timestamp FROM delete_operations ORDER BY id").fetchall() == ops_before
         assert conn.execute("SELECT * FROM keurer_decisions ORDER BY id").fetchall() == keurer_before
         assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'delete_runs'").fetchone()[0] == 4
         created = conn.execute("SELECT created_at FROM delete_runs WHERE run_id = 'run-2'").fetchone()[0]

@@ -32,6 +32,13 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
   blijft in beeld, ook bij het laatste bericht.
 - **Een tapback die iemand terugnam** verdwijnt van het bericht, en een gewijzigde tapback vervangt de
   vorige van dezelfde persoon.
+- Terugzetten van een duplicatenrun controleert nu of het bestand in RAW_DUPLICATES nog precies het verplaatste bestand is (zelfde bestandsnummer en grootte). Is het intussen veranderd of vervangen, dan blijft het staan. Duplicaten toont dat bij de actie met een waarschuwing en in de melding na het terugzetten, en het Herstelcentrum noemt per bestand de reden. Acties van vóór deze versie werken zoals altijd.
+- Exporteren neemt de aanmaakdatum (de 'Aanmaakdatum' in Finder) nu exact over van het origineel, tot op de nanoseconde, ook als die later ligt dan de wijzigingsdatum. Een test bewijst het op APFS.
+- De twee oudere duplicaat-opdrachten (`delete_single`, `scan_folder`) nemen hun pad alleen nog in de JSON-body, nooit meer in de URL. Een pad in de URL wordt geweigerd met een duidelijke melding.
+- Een verzoek met een vreemde `Host` (DNS-rebinding) krijgt nu dezelfde JSON-foutmelding als de rest van de app (code `invalid_host`) in plaats van platte tekst.
+- `start.sh` opent Safari als er in config.json geen `browser` staat, of als die waarde geen tekst is (een getal, lijst of leeg). Voorheen werd de foutmelding van plutil als browsernaam gebruikt en lukte het openen niet.
+- Duplicaten: bij een opruimactie staat elke reden (veranderd, niet meer in RAW_DUPLICATES) op een eigen regel in een vaste kolom, zodat de mapnaam ook op een smal scherm leesbaar blijft. De vraag vóór het terugzetten zegt welke bestanden blijven staan, en na Terugzetten met het toetsenbord blijft de focus in de lijst.
+- Verplaatsen en terugzetten werkt nu ook op schijven die heel grote bestandsnummers geven (zoals FAT32 op macOS voor lege bestanden); voorheen weigerde de app dat met een fout.
 
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.

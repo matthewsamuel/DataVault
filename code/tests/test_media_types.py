@@ -55,7 +55,7 @@ def test_new_formats_reach_the_keurer_and_the_duplicate_scan(client, vault):
         shutil.copy2(vault / STRAND, folder / name)
     names = {f["name"] for f in client.get("/api/keurer/files", params={"folder": str(folder)}).json()["files"]}
     assert names == {"scan.tif", "fuji.RAF", "canon.cr3"}
-    r = client.post("/api/duplicates/scan_folder", params={"folder_path": str(folder)})
+    r = client.post("/api/duplicates/scan_folder", json={"folder_path": str(folder)})
     assert r.status_code == 200, r.text
     groups = r.json()["groups"]
     assert len(groups) == 1 and len(groups[0]["copies"]) == 3

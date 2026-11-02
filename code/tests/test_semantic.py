@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 from fixtures.vault_builder import BURST, STRAND, STRAND_COPIES, _photo
+from helpers import kept_rows
 
 DIM = 768
 COLOURS = {
@@ -143,7 +144,7 @@ def test_migration_40_adds_the_embeddings_table_and_keeps_every_user_row(tmp_pat
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 40
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         assert {r[1] for r in conn.execute("PRAGMA table_info(semantic_embeddings)")} == {
             "media_id", "model", "dim", "vector", "status", "size", "mtime_ns", "source", "created_at"}
         indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}

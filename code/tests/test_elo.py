@@ -22,6 +22,7 @@ import pytest
 
 from backend import elo
 from backend.database import Database
+from helpers import kept_rows
 
 ROME = "library/Reis Italië/rome.jpg"
 VENICE = "library/Reis Italië/venetië.jpg"
@@ -972,7 +973,7 @@ def test_migration_50_adds_the_comparison_history_and_keeps_every_user_row(tmp_p
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 50
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         assert {r[1] for r in conn.execute("PRAGMA table_info(elo_comparisons)")} >= {
             "path_a", "path_b", "winner", "rating_a_before", "rating_a_after", "rating_b_before",
             "rating_b_after", "games_a_before", "games_b_before", "created_at"}
@@ -1072,7 +1073,7 @@ def test_migration_160_replays_the_old_history_and_keeps_every_user_row(tmp_path
         for table, rows in before.items():
             if table in ("elo_comparisons", "file_ratings", "sqlite_sequence"):
                 continue
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'elo_comparisons'").fetchone()[0] == old_seq
         others = [r for r in before["sqlite_sequence"] if r[0] != "elo_comparisons"]
         assert [r for r in conn.execute("SELECT * FROM sqlite_sequence ORDER BY 1") if r[0] != "elo_comparisons"] == others
@@ -1201,7 +1202,7 @@ def test_migration_161_only_adds_indexes_and_keeps_every_user_row(tmp_path, monk
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 161
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
         assert {"idx_file_ratings_state", "idx_elo_ratings_state"} <= names
         plan = " ".join(r[3] for r in conn.execute(

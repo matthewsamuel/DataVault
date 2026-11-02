@@ -30,6 +30,48 @@ def test_foreign_host_header_is_refused(client, host):
     assert client.get("/api/session", headers={"Host": host}).status_code == 400
     r = client.post("/api/keurer/undo", json={"id": 1}, headers={"Host": host})
     assert r.status_code == 400
+    # The app's uniform JSON error (backend/errors.py), not Starlette's plain text
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json()["error"]["code"] == "invalid_host"
+    assert "127.0.0.1" in r.json()["error"]["message"] and r.json()["detail"] == r.json()["error"]["message"]
+
+
+@pytest.mark.parametrize("header, name", [
+    ("127.0.0.1:8000", "127.0.0.1"), ("LOCALHOST", "localhost"), ("[::1]:8000", "::1"), ("[::1]", "::1"),
+    ("localhost:abc", ""), ("[::1", ""), ("[::1]x", ""), ("", ""), (None, ""),
+])
+def test_host_name_parsing(header, name):
+    from backend.security import host_name
+    assert host_name(header) == name
+
+
+def test_a_missing_or_malformed_host_gets_the_json_error_too():
+    import asyncio
+    from backend.security import TrustedHostMiddleware
+
+    async def app(scope, receive, send):
+        raise AssertionError("must not be reached")
+
+    async def call(scope):
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        async def receive():
+            return {"type": "http.request", "body": b""}
+
+        await TrustedHostMiddleware(app, ["127.0.0.1", "localhost"])(scope, receive, send)
+        return sent
+
+    for headers in ([], [(b"host", b"localhost:x")], [(b"host", b"evil.example")]):
+        sent = asyncio.run(call({"type": "http", "method": "GET", "path": "/", "headers": headers,
+                                 "query_string": b""}))
+        assert sent[0]["status"] == 400
+        assert (b"content-type", b"application/json") in sent[0]["headers"]
+        assert b'"invalid_host"' in sent[1]["body"]
+    sent = asyncio.run(call({"type": "websocket", "path": "/", "headers": [(b"host", b"evil.example")]}))
+    assert sent == [{"type": "websocket.close", "code": 1008}]
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1:8000", "localhost:8802", "127.0.0.1"])
@@ -65,8 +107,8 @@ def _mutating_requests(vault):
         ("post", "/api/open-in-finder", {"json": {"path": str(photo)}}),
         ("post", "/api/keurer/decide", {"json": {"path": str(photo), "folder": str(photo.parent), "decision": "delete"}}),
         ("post", "/api/keurer/undo", {"json": {"id": 1}}),
-        ("post", "/api/duplicates/delete_single", {"params": {"file_path": str(photo)}}),
-        ("post", "/api/duplicates/scan_folder", {"params": {"folder_path": str(vault / "RAW")}}),
+        ("post", "/api/duplicates/delete_single", {"json": {"file_path": str(photo)}}),
+        ("post", "/api/duplicates/scan_folder", {"json": {"folder_path": str(vault / "RAW")}}),
         ("post", "/api/raw_duplicates/undo_last", {}),
         ("post", "/api/raw_duplicates/cancel", {}),
         ("post", "/api/jobs", {"json": {"type": "thumbnails", "params": {"folder": str(vault / "RAW")}}}),

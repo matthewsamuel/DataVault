@@ -11,13 +11,9 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 - **Oude Keurer-beslissingen ("weg") van vóór de migratie zijn niet ongedaan te maken.** Er is nooit
   opgeslagen waar het bestand heen ging en de oude prullenmapnamen zijn dubbelzinnig. Raden zou het
   verkeerde bestand kunnen terugzetten, dus de app meldt het en doet niets.
-- **Terugzetten van een duplicatenrun controleert niet op inode en grootte.** Het bestaande controleert
-  wel of er niets overschreven wordt. Een extra controle vraagt een nieuwe migratie. *Goede volgende stap.*
 - **Opgehaalde Spotify-gegevens worden niet gewist bij "Vergeet dit account".** Alleen de koppeling verdwijnt; de rijen
   worden gemarkeerd, omdat de regel is dat gegevens nooit worden gewist (de ontwikkelaarsvoorwaarden van Spotify
   vragen anders).
-- **Meegekopieerde bestandsdatum (birthtime) bij exporteren is niet bewezen.** De code probeert hem gelijk
-  te zetten, maar de tests controleren alleen de wijzigingsdatum.
 - **Weesbestanden na een crash** (ingelezen uploads, een half geschreven miniatuur) worden bij het starten
   niet opgeruimd. Ze staan alleen in de eigen cachemap van de app, nooit in het archief.
 - **`/api/thumb` is nog een GET met een neveneffect** (het schrijft een miniatuur in de eigen cache). Een `<img>`
@@ -68,8 +64,6 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
   gelezen is.
 - **Apple Music en Snapchat** staan niet in de Spotify-samenvoeging of de berichtentabel, omdat die tabellen daar niet
   voor gemaakt zijn.
-- **Twee oudere duplicaat-opdrachten** (`delete_single`, `scan_folder`) nemen hun pad nog als URL-parameter. Ze worden
-  niet meer door het scherm gebruikt en elke POST vraagt een token.
 
 ## Uiterlijk en bediening
 
@@ -93,5 +87,3 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
   afgebroken `fetch` of een time-out); een herhaling slaagt.
 - **Een blijvende test voor loskoppelen en terugplaatsen van de schijf** in de rooktest. De controle is eenmalig met de
   hand gedaan.
-- **Een uniform foutantwoord voor een vreemde `Host`.** Starlette antwoordt daar met platte tekst; alleen
-  DNS-rebinding-pogingen zien dat.

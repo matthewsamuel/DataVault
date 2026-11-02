@@ -172,7 +172,7 @@ def test_delete_single_refuses_protected_folders_in_other_case(client, config, v
     inside = config.DUPLICATES_FOLDER / "casetest" / "x.jpg"
     inside.parent.mkdir(parents=True)
     inside.write_bytes(data)
-    r = client.post("/api/duplicates/delete_single", params={
+    r = client.post("/api/duplicates/delete_single", json={
         "file_path": str(vault / "raw_duplicates" / "casetest" / "x.jpg"),
         "duplicate_of": str(vault / STRAND_PATH),
     })
@@ -182,7 +182,7 @@ def test_delete_single_refuses_protected_folders_in_other_case(client, config, v
     config.TRASH_FOLDER.mkdir(exist_ok=True)
     (config.TRASH_FOLDER / "k.jpg").write_bytes(data)
     dup = vault / STRAND_COPY
-    r = client.post("/api/duplicates/delete_single", params={
+    r = client.post("/api/duplicates/delete_single", json={
         "file_path": str(dup), "duplicate_of": str(vault / "trash" / "k.jpg"),
     })
     assert r.status_code == 409, r.text

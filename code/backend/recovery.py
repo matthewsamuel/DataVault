@@ -45,7 +45,7 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tupl
 
 from backend.file_ops import (
     ARCHIVE_LOCK, CrossDeviceError, DestinationExistsError, FileOperationError, ProtectedPathError,
-    move_no_overwrite,
+    move_no_overwrite, sqlite_ino,
 )
 from backend.paths import is_in_vault
 
@@ -131,6 +131,7 @@ def state_reason(state: str, name: str, place: str) -> Optional[str]:
     return {
         "missing": f"{name} staat niet meer in {place}",
         "other": f"In {place} staat nu een ander bestand met de naam {name}",
+        "changed": f"{name} is in {place} veranderd sinds het daar kwam (andere grootte)",
         "unknown": "Oudere actie: niet te controleren of het nog hetzelfde bestand is; zet het zo nodig met de hand terug",
         "occupied": f"Op de oorspronkelijke plek staat al een bestand {name}; er wordt niets overschreven",
         "refused": "Dit pad ligt buiten het archief; er wordt niets teruggezet",
@@ -147,7 +148,7 @@ def moved_file_state(dst_path: str, ino: Optional[int], size: Optional[int], st:
         return "missing"
     if ino is None or size is None:
         return "unknown"
-    if (st.st_ino, st.st_size) != (ino, size):
+    if (sqlite_ino(st.st_ino), st.st_size) != (ino, size):
         return "other"
     return "ok"
 
@@ -160,7 +161,7 @@ def file_entry(src: str, dst: str, state: str, place: str) -> Dict[str, Any]:
         "name": name,
         "state": state,
         "restorable": state in ("ok", "beside"),
-        "reason": state_reason(state, Path(dst).name if state in ("missing", "other") else name, place),
+        "reason": state_reason(state, Path(dst).name if state in ("missing", "other", "changed") else name, place),
     }
 
 
@@ -283,7 +284,7 @@ def _fingerprint(path: Path) -> Tuple[Optional[int], Optional[int]]:
         st = os.lstat(path)
     except OSError:
         return None, None
-    return st.st_ino, st.st_size
+    return sqlite_ino(st.st_ino), st.st_size
 
 
 class ActionRecorder:

@@ -118,8 +118,10 @@ def _op_state(op: Dict[str, Any], checks: recovery.FolderChecks) -> str:
     )
     if not allowed:
         return "refused"
-    if dst_entry is None or not stat.S_ISREG(dst_entry.st_mode):
-        return "missing"
+    # missing, or (runs since migration 171) another file in its place or a changed size
+    state = duplicates_routes.moved_file_state(op, dst_entry)
+    if state != "ok":
+        return state
     # The duplicates undo never overwrites: a taken name gets _RESTORED_001 next to it
     return "beside" if src_entry is not None else "ok"
 
