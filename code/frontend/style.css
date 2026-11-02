@@ -2331,14 +2331,19 @@ kbd {
 /* ==================== APP-SCHIL: NAVIGATIE ==================== */
 
 .top-nav {
+    /* Van 1024 tot 1440 px groeien de ruimtes, de onderdelen en het zoekveld vloeiend mee, zonder
+       sprongen bij een breekpunt: zo toont een breder venster nooit minder onderdelen in de balk
+       (nav-more.js). --nav-ramp is 0px bij 1024 px en 1px bij 1440 px. */
+    --nav-ramp: clamp(0px, calc((100vw - 1024px) / 416), 1px);
+    --nav-tab-pad: calc(var(--space-sm) + var(--nav-ramp) * 4);
     position: relative;
     z-index: 100;
     display: flex;
     align-items: center;
-    gap: var(--space-xl);
+    gap: calc(var(--space-md) + var(--nav-ramp) * 12);
     height: var(--nav-h);
     flex: none;
-    padding: 0 var(--space-xl);
+    padding: 0 calc(var(--space-lg) + var(--nav-ramp) * 8);
     background-color: var(--surface-nav);
     -webkit-backdrop-filter: saturate(180%) blur(12px);
     backdrop-filter: saturate(180%) blur(12px);
@@ -2410,7 +2415,7 @@ button.nav-brand {
     display: inline-flex;
     align-items: center;
     height: 32px;
-    padding: 0 var(--space-md);
+    padding: 0 var(--nav-tab-pad, var(--space-md));
     border: none;
     border-radius: var(--radius-sm);
     background: transparent;
@@ -2437,8 +2442,8 @@ button.nav-brand {
 .nav-tab.active::after {
     content: '';
     position: absolute;
-    left: var(--space-md);
-    right: var(--space-md);
+    left: var(--nav-tab-pad, var(--space-md));
+    right: var(--nav-tab-pad, var(--space-md));
     bottom: calc((32px - var(--nav-h)) / 2);
     height: 2px;
     border-radius: var(--radius-full);
@@ -4236,51 +4241,24 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     .theme-button .theme-caret {
         display: none;
     }
+}
 
-    .search-input {
-        width: 216px;
+/* Het zoekveld in de balk: 168 px bij 1024 px, vloeiend naar 216 px bij 1440 px (--nav-ramp) */
+@media (max-width: 1440px) and (min-width: 901px) {
+    .top-nav .search-input {
+        width: calc(168px + var(--nav-ramp) * 48);
     }
 }
 
-@media (max-width: 1240px) {
-    .top-nav {
-        gap: var(--space-md);
-        padding: 0 var(--space-lg);
-    }
-
-    .search-input {
-        width: 200px;
-    }
-}
-
-/* Onder 1280 px alleen het logo, zodat er tussen het menu en het zoekveld altijd minstens
-   --space-xl lucht blijft (zie navgap in de smoke-test) */
-@media (max-width: 1280px) {
-    .nav-brand-name {
-        display: none;
-    }
-}
-
-/* Smaller dan 1200 px: iets compactere onderdelen; wat dan nog niet past, staat in Meer */
-@media (max-width: 1200px) {
-    .nav-tab {
-        padding: 0 var(--space-sm);
-    }
-
-    .nav-tab.active::after {
-        left: var(--space-sm);
-        right: var(--space-sm);
-    }
-
-    .search-input {
-        width: 184px;
-    }
+/* Passen de onderdelen niet, dan gaat eerst het woordmerk weg (alleen het logo blijft) en pas
+   daarna schuiven onderdelen naar Meer (nav-more.js zet .nav-brand-compact) */
+.top-nav.nav-brand-compact .nav-brand-name {
+    display: none;
 }
 
 /* Onder 1100 px: een kort zoekveld zonder de /-hint */
 @media (max-width: 1100px) {
     .search-input {
-        width: 168px;
         padding-right: var(--space-md);
     }
 

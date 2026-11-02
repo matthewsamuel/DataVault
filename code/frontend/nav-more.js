@@ -67,19 +67,30 @@ const NavMore = (() => {
 
     // Hoeveel onderdelen passen er, met minstens --space-xl lucht voor het zoekveld? Eerst alles
     // tonen en in één keer meten, dan in één keer schrijven (geen heen-en-weer van lezen en schrijven).
+    // Het woordmerk DATAVAULT gaat als eerste weg: pas als de onderdelen zonder het woordmerk nog
+    // niet passen, schuiven er onderdelen naar Meer (een breder venster toont nooit minder).
     function layout() {
         if (!strip) return;
         const wasOverflow = overflow.map(t => t.dataset.view).join(' ');
+        const focused = document.activeElement;
+        const nav = strip.closest('.top-nav');
+        const brandName = nav && nav.querySelector('.nav-brand-name');
         tabs.forEach(t => t.classList.remove('is-overflow'));
         button.hidden = false;
+        if (nav) nav.classList.remove('nav-brand-compact');
         const style = getComputedStyle(strip);
         const gap = parseFloat(style.columnGap) || 0;
-        const room = strip.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0)
+        let room = strip.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0)
             - Motion.px('--space-xl', 24);
         const widths = tabs.map(t => t.getBoundingClientRect().width);
         const moreWidth = button.getBoundingClientRect().width;
+        const nameWidth = brandName ? brandName.getBoundingClientRect().width : 0;
+        const nameGap = brandName ? parseFloat(getComputedStyle(brandName.parentElement).columnGap) || 0 : 0;
 
         const all = widths.reduce((sum, w) => sum + w, 0) + gap * (tabs.length - 1);
+        // Zonder het woordmerk krijgt de rij (flex: 1) precies zijn breedte en de ruimte ervoor erbij
+        const compact = all > room && nameWidth > 0;
+        if (compact) room += nameWidth + nameGap;
         let keep = tabs.length;
         if (all > room) {
             let used = moreWidth;
@@ -87,6 +98,7 @@ const NavMore = (() => {
             while (keep < tabs.length && used + gap + widths[keep] <= room) used += gap + widths[keep++];
         }
 
+        if (nav) nav.classList.toggle('nav-brand-compact', compact);
         overflow = tabs.slice(keep);
         tabs.forEach((t, i) => t.classList.toggle('is-overflow', i >= keep));
         button.hidden = overflow.length === 0;
@@ -95,6 +107,27 @@ const NavMore = (() => {
             build();
         }
         sync(typeof currentMainView === 'function' ? currentMainView() : null);
+        keepFocus(focused);
+    }
+
+    // Had iets in de balk of in Meer de focus en is het nu weg (venster breder of smaller), dan
+    // gaat de focus naar dezelfde plek in zijn nieuwe vorm, nooit naar <body>
+    function keepFocus(focused) {
+        if (!focused || focused === document.body || !focused.closest) return;
+        const visible = (el) => el && el.isConnected && !el.hidden && !el.classList.contains('is-overflow');
+        let target = null;
+        if (focused.dataset && focused.dataset.moreView) {
+            // Een onderdeel in Meer: zijn knop in de balk, of anders Meer zelf
+            if (focused.isConnected && isOpen()) return;
+            const tab = tabs.find(t => t.dataset.view === focused.dataset.moreView);
+            target = visible(tab) ? tab : (visible(button) ? button : null);
+        } else if (tabs.includes(focused) && !visible(focused)) {
+            target = visible(button) ? button : null;
+        } else if (focused === button && button.hidden) {
+            const view = typeof currentMainView === 'function' ? currentMainView() : null;
+            target = tabs.find(t => t.dataset.view === view) || tabs[tabs.length - 1];
+        }
+        if (target && document.activeElement !== target) target.focus({ preventScroll: true });
     }
 
     // De onderdelen in Meer: icoon, naam en de sneltoets (uit shortcuts.js), het open onderdeel met een vinkje

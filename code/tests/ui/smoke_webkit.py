@@ -1786,6 +1786,28 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                            f"menu at 1024px: expected the first five in the bar and the rest under Meer ({gap[2]} | {gap[3]})")
                 if width == 1920:
                     expect(not gap[3], f"menu at 1920px: everything should fit, but {gap[3]} is under Meer")
+            # A wider window never shows fewer items in the bar (the wordmark goes first, the spacing is fluid)
+            counts = []
+            for width in range(1024, 1761, 16):
+                page.set_viewport_size({"width": width, "height": 900})
+                page.wait_for_timeout(80)
+                counts.append((width, len(page.evaluate("NavMore.overflow")),
+                               page.evaluate("document.querySelector('.nav-brand-name').offsetWidth > 0")))
+            fewer = [(a[0], b[0]) for a, b in zip(counts, counts[1:]) if b[1] > a[1]]
+            expect(not fewer, f"menu: a wider window puts more items under Meer at {fewer}")
+            expect(all(n == 0 for _, n, brand in counts if brand), f"menu: the wordmark shows while items are under Meer ({counts})")
+            # Widening the window while an item in Meer has the focus: the focus goes to its tab, not <body>
+            page.set_viewport_size({"width": 1024, "height": 768})
+            page.wait_for_timeout(300)
+            page.focus("#nav-more-btn")
+            page.keyboard.press("ArrowDown")
+            page.wait_for_timeout(200)
+            held = page.evaluate("document.activeElement.dataset.moreView")
+            page.set_viewport_size({"width": 1920, "height": 900})
+            page.wait_for_timeout(300)
+            now = page.evaluate("[document.activeElement.tagName, document.activeElement.dataset.view || '']")
+            expect(now == ["BUTTON", held], f"menu: widening with {held} focused in Meer left the focus on {now}")
+            page.evaluate("document.activeElement.blur()")
 
             # 'Meer' with the keyboard: ↓ opens on the first item, arrows go round, Escape closes and
             # gives the focus back; choosing an item opens it and lights up Meer; a click next to it closes
