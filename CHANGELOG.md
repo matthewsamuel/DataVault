@@ -827,6 +827,14 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Twee foto's die duizenden punten uit elkaar liggen (door veel duimpjes) gaven een fout bij
   vergelijken, en konden de app bij het bijwerken van de database laten vastlopen. Opgelost.
 
+### Afronding: wat nog bleef liggen
+
+- **Slim zoeken opnieuw gemeten met het echte model.** Met 30 nieuwe zoekopdrachten in eigen
+  woorden (20 Nederlands, 10 Engels) vindt Slim zoeken 87 tot 93 procent van de goede foto's,
+  en geen enkele zoekopdracht blijft leeg terwijl er wel goede foto's zijn. Ook als een
+  onderwerp een groot deel van een map is, blijft het gevonden. De relevantiegrens stond al
+  op het beste punt en is niet veranderd.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden

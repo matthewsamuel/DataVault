@@ -116,6 +116,13 @@ REFERENCE_TEXTS = (
 # The background (median and MAD) is taken over the whole index, not the filtered selection:
 # when a concept is a fifth of a folder, the folder's own median would rise above the matches.
 # A best score of at least CLEAR_SCORE is never emptied by the background rule.
+# Measured again with the installed model after CLEAR_SCORE (2026-11): the same 86% / 87% at
+# 69% / 75%; 20 Dutch and 10 English free-form queries (free_queries.txt, not used to set
+# the cut) 87% / 93% at 79% / 82%, none empty; 2 of 12 absent things let 7 photos through
+# (NL), 3 let 8 through (EN); a concept that is 20% or 50% of a folder keeps 85% / 86%,
+# none empty. A floor of 0.04 adds 1-2 points recall for 3-8 points precision; 0.0475 and up
+# empties a query ('avondeten') and folder searches. 0.045 is the highest floor without
+# empty results, so it stays.
 MIN_SCORE = 0.045
 SCORE_SPREAD = 0.055
 SCORE_Z = 1.0
