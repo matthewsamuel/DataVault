@@ -14019,7 +14019,6 @@ html[data-motion="rustig"] .elo-trash:hover i {
     letter-spacing: 0.02em;
     text-shadow: 0 0 3px var(--map-land), 0 0 3px var(--map-land), 0 0 6px var(--map-land);
     white-space: nowrap;
-    opacity: 0.85;
 }
 
 /* Landnamen: midden op het grootste deel van het land, iets sterker dan provincies (de hiërarchie op de
@@ -14053,7 +14052,7 @@ html[data-motion="rustig"] .elo-trash:hover i {
     animation-delay: calc(min(var(--label-i, 0), var(--stagger-max)) * var(--stagger-step));
 }
 
-/* Zonder eind-keyframe: elke soort naam eindigt op zijn eigen dekking (provincies 0.85) */
+/* Zonder eind-keyframe: een naam eindigt op zijn eigen dekking */
 @keyframes dv-label-in {
     from { opacity: 0; }
 }
