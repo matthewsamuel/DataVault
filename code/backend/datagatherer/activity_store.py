@@ -310,10 +310,19 @@ def events(db, day: str, sources=None, kinds=None, q=None, limit: int = 500) -> 
     with db._connect() as conn:
         rows = conn.execute(
             f"SELECT id, source, kind, ts_ms, end_ms, title, url, details, "
-            f"(SELECT group_concat(d.source || ':' || d.id) FROM activity_events d WHERE d.duplicate_of = activity_events.id) "
+            f"{_ALSO} "
             f"FROM activity_events WHERE {where} AND ts_ms >= ? AND ts_ms < ? ORDER BY ts_ms, id LIMIT ?",
             (*args, start, end, limit)).fetchall()
     return [_row(r) for r in rows]
+
+
+# The other rows of the same visit: the copies of a shown row, and for a copy (shown when its
+# own source is filtered on) the row it copies and the other copies, so it names them the same
+_ALSO = ("(SELECT group_concat(x) FROM ("
+         "SELECT d.source || ':' || d.id AS x FROM activity_events d WHERE d.duplicate_of = activity_events.id "
+         "UNION ALL SELECT o.source || ':' || o.id FROM activity_events o WHERE o.id = activity_events.duplicate_of "
+         "UNION ALL SELECT s.source || ':' || s.id FROM activity_events s WHERE s.duplicate_of = activity_events.duplicate_of "
+         "AND s.id != activity_events.id))")
 
 
 def _also(text: Optional[str], own: str) -> List[Dict[str, Any]]:

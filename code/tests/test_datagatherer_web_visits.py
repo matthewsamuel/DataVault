@@ -119,6 +119,9 @@ def test_a_visit_in_chrome_and_takeout_is_shown_once_with_both_sources(client, a
     only = _visits(client, source="google_takeout")
     assert sorted(e["url"] for e in only) == ["https://ander.be/pad?x=1", "https://voorbeeld.be/"]
     assert {e["source"] for e in only} == {"google_takeout"}
+    # ... and it names Chrome too, as the Chrome row names Takeout: the same line whatever the filter
+    assert all([a["source"] for a in e["also"]] == ["chrome_history"] for e in only)
+    assert next(e for e in only if "voorbeeld" in e["url"])["also"][0]["name"] == "Chrome-geschiedenis"
     # Reading both again changes nothing
     links = _rows(app, "SELECT id, duplicate_of FROM activity_events ORDER BY id")
     _sync_chrome(client, app)
