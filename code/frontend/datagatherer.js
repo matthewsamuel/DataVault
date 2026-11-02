@@ -199,6 +199,8 @@ function dgCard(src) {
     const card = createEl('article', {
         class: `card dg-card dg-tone-${src.tone}${job ? ' is-busy' : ''}`,
         dataset: { source: src.id },
+        // Het lichtspoor om het icoon loopt op de klok van de pagina: opnieuw tekenen = zelfde stand
+        style: job ? `--dg-orbit-delay: -${Math.round(performance.now())}ms` : null,
         'aria-labelledby': `dg-name-${src.id}`,
     });
     const status = job

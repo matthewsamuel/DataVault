@@ -18197,28 +18197,50 @@ html[data-motion="volledig"] .map-popup-body > :nth-child(3) { animation-delay: 
     transform: scale(1.12) rotate(-6deg);
 }
 
-/* Bezig: een stipje draait als een satelliet om het icoon */
+/* Bezig: een lichtspoor loopt rond langs de rand van de tegel. De rand is een draaiende kegel
+   achter een vlak dat de tegel op een haarlijn na bedekt; alleen transform beweegt. De vertraging
+   (datagatherer.js) koppelt de draai aan de klok van de pagina, zodat een kaart die opnieuw
+   getekend wordt niet terugspringt naar het begin */
+.dg-card.is-busy .dg-card-icon {
+    overflow: hidden;
+    isolation: isolate;
+    border-color: transparent;
+    background: var(--accent-subtle);
+    color: var(--accent);
+    transition: color var(--dur-3) var(--ease-out);
+}
+
+.dg-card.is-busy .dg-card-icon::before {
+    content: '';
+    position: absolute;
+    inset: -50%;
+    z-index: -2;
+    background: conic-gradient(from 0turn, transparent 0turn 0.35turn,
+        color-mix(in srgb, var(--accent) 40%, transparent) 0.75turn, var(--accent) 1turn);
+    will-change: transform;
+}
+
 .dg-card.is-busy .dg-card-icon::after {
     content: '';
     position: absolute;
-    top: 50%;
-    left: 50%;
-    width: calc(var(--space-xs) + var(--space-2xs));
-    height: calc(var(--space-xs) + var(--space-2xs));
-    margin: calc(-0.5 * (var(--space-xs) + var(--space-2xs)));
-    border-radius: var(--radius-full);
-    background: var(--accent);
-    box-shadow: 0 0 0 var(--space-2xs) var(--surface-card);
-    transform: rotate(-45deg) translateX(var(--space-xl));
+    inset: var(--space-2xs);
+    z-index: -1;
+    border-radius: calc(var(--radius-md) - var(--space-2xs));
+    background: var(--surface-raised);
 }
 
-html[data-motion="volledig"] .dg-card.is-busy .dg-card-icon::after {
+html[data-motion="volledig"] .dg-card.is-busy .dg-card-icon::before {
     animation: md-orbit calc(var(--dur-6) * 2.5) linear infinite;
+    animation-delay: var(--dg-orbit-delay, 0ms);
+}
+
+/* Zonder beweging: een rustige groene rand rondom, geen spoor dat stilstaat op één plek */
+html:not([data-motion="volledig"]) .dg-card.is-busy .dg-card-icon::before {
+    background: var(--accent);
 }
 
 @keyframes md-orbit {
-    from { transform: rotate(-45deg) translateX(var(--space-xl)); }
-    to { transform: rotate(315deg) translateX(var(--space-xl)); }
+    to { transform: rotate(1turn); }
 }
 
 /* Voortgang met karakter: een lichte glans loopt over het gevulde deel */
