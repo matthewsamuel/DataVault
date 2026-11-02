@@ -1152,6 +1152,22 @@ def _m195_activity_duplicate_of(conn: sqlite3.Connection):
     activity_store.link_web_visits_conn(conn)
 
 
+def _m196_message_edits(conn: sqlite3.Connection):
+    """
+    Edited and unsent messages (iMessage, macOS 13+): msg_messages gets edited_at_ms and
+    retracted_at_ms (UTC ms, NULL when not) and edits, a JSON list of the earlier versions
+    [{at, body}] (backend/datagatherer/messages_store.revise_messages). A later read updates
+    the stored row instead of leaving the first text or adding a second row; the earlier
+    text is kept in edits. Only new columns: no existing value changes.
+    """
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'msg_messages'").fetchone():
+        return
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(msg_messages)")}
+    for name, kind in (("edited_at_ms", "INTEGER"), ("retracted_at_ms", "INTEGER"), ("edits", "TEXT")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE msg_messages ADD COLUMN {name} {kind}")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -1191,6 +1207,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (170, "spotify_covers", _m170_spotify_covers),
     # 195-199: DataGatherer, what was left (web visits from two sources, edited iMessages)
     (195, "activity_duplicate_of", _m195_activity_duplicate_of),
+    (196, "message_edits", _m196_message_edits),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
