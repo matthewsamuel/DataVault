@@ -490,7 +490,7 @@ at the end of `style.css`. The screens call it after they render, behind
 | Spotify | Numbers count up the first time and tick when the year changes; cards stagger in; chart bars grow from the baseline when they scroll into view and morph between years; a thin share bar per top-list row; the Luister-DNA helix spins into view and on hover |
 | Kaart | Clusters split and merge on the token curve and pop in when the map opens; popups rise from the pin; Route per dag draws along its path with a light dot in front, and each place pops when the line reaches it (zoom or pan shows the whole route at once) |
 | DataGatherer | Cards arrive per group, coverage bars grow, a busy source gets an orbiting dot, progress runs on with a sheen, a finished source gets a ring, a burst and a short glow |
-| Berichten | The conversation list staggers in and the selection glides; messages come in from their own side; a found message lights up once; typing in the search only fades |
+| Berichten | The conversation list staggers in and the selection glides; messages come in from their own side; a found message lights up once; typing in the search only fades; **Bewerkt** unfolds the earlier versions of an edited message (rise, its chevron turns) |
 | Activiteit | Days stagger in and the selection glides; the timeline line draws down the day and each icon pops as the line reaches it |
 | Pasha | The avatar breathes after contact, tilts while you type, sways while thinking, nods on an answer (droops on an error); bubbles spring in from their own corner; typing dots wave; a streaming answer has a soft cursor; action and confirmation cards unfold, a confirmed action gets a green check, a failed one a small shake |
 

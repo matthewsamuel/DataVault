@@ -26,6 +26,7 @@ const msgState = {
 const MSG_DAY = new Intl.DateTimeFormat('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const MSG_SHORT = new Intl.DateTimeFormat('nl-BE', { day: 'numeric', month: 'short', year: 'numeric' });
 const MSG_TIME = new Intl.DateTimeFormat('nl-BE', { hour: '2-digit', minute: '2-digit' });
+const MSG_EDIT_TIME = new Intl.DateTimeFormat('nl-BE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 // Zoekveld leeg en terug naar alle gesprekken; de focus gaat terug naar het zoekveld
 function msgClearSearch() {
@@ -354,6 +355,41 @@ function msgRenderThread() {
     pane.replaceChildren(header, body);
 }
 
+// Onderaan een bubbel: het uur, en 'Bewerkt' of 'Eerdere tekst' (ingetrokken) als dat zo is. De eerdere
+// versies die DataVault al had, staan achter die knop (iMessage: messages_store.revise_messages).
+function msgFoot(m, when) {
+    const time = createEl('time', { class: 'msg-time mono', datetime: when.toISOString(),
+        title: `${MSG_DAY.format(when)} ${MSG_TIME.format(when)}${m.tz ? ` (${m.tz})` : ''}`, text: MSG_TIME.format(when) });
+    const edits = m.edits || [];
+    const changedAt = m.retracted_at || m.edited_at;
+    if (!changedAt || (m.retracted_at && !edits.length)) return { el: createEl('div', { class: 'msg-foot' }, time) };
+    const stamp = new Date(changedAt * 1000);
+    const title = `${m.retracted_at ? 'Ingetrokken' : 'Bewerkt'} op ${MSG_DAY.format(stamp)} om ${MSG_TIME.format(stamp)}`;
+    const label = m.retracted_at ? 'Eerdere tekst' : 'Bewerkt';
+    if (!edits.length) {
+        return { el: createEl('div', { class: 'msg-foot' }, createEl('span', { class: 'msg-edited', title, text: label }), time) };
+    }
+    const list = createEl('ol', { class: 'msg-edits', id: `msg-edits-${m.id}`, hidden: true,
+        'aria-label': edits.length === 1 ? 'Eerdere versie' : 'Eerdere versies' },
+        ...edits.map(e => {
+            const at = e.at ? new Date(e.at * 1000) : null;
+            return createEl('li', { class: 'msg-edit' },
+                createEl('span', { class: 'msg-edit-text', text: e.body }),
+                at ? createEl('time', { class: 'msg-edit-time mono', datetime: at.toISOString(),
+                    title: `${MSG_DAY.format(at)} ${MSG_TIME.format(at)}`, text: MSG_EDIT_TIME.format(at) }) : null);
+        }));
+    const button = createEl('button', {
+        type: 'button', class: 'msg-edited is-toggle', title, 'aria-expanded': 'false', 'aria-controls': list.id,
+        onClick: () => {
+            const open = list.hidden;
+            list.hidden = !open;
+            button.setAttribute('aria-expanded', String(open));
+            if (open && window.Motion) Motion.enter(list, 'rise');
+        },
+    }, createEl('span', { text: label }), createEl('i', { class: 'fas fa-chevron-down msg-edited-chevron', 'aria-hidden': 'true' }));
+    return { list, el: createEl('div', { class: 'msg-foot' }, button, time) };
+}
+
 function msgBubble(m, conv, prev) {
     if (m.kind === 'system') {
         return createEl('div', { class: 'msg-system', dataset: { msg: String(m.id) } },
@@ -382,8 +418,9 @@ function msgBubble(m, conv, prev) {
     if (m.body) bubble.append(createEl('p', { class: 'msg-text', text: m.body }));
     else if (m.kind === 'unsent') bubble.append(createEl('p', { class: 'msg-text msg-text-muted', text: 'Bericht ingetrokken' }));
     else if (!m.attachments.length) bubble.append(createEl('p', { class: 'msg-text msg-text-muted', text: 'Media (niet in de export)' }));
-    bubble.append(createEl('time', { class: 'msg-time mono', datetime: when.toISOString(),
-        title: `${MSG_DAY.format(when)} ${MSG_TIME.format(when)}${m.tz ? ` (${m.tz})` : ''}`, text: MSG_TIME.format(when) }));
+    const foot = msgFoot(m, when);
+    if (foot.list) bubble.append(foot.list);
+    bubble.append(foot.el);
     const row = createEl('div', {
         class: `msg-row${mine ? ' is-me' : ''}${sameSender ? ' is-continued' : ''}${msgState.highlight === m.id ? ' is-hit' : ''}`,
         dataset: { msg: String(m.id) },

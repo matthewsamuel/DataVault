@@ -56,9 +56,13 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 - **Gecodeerde iPhone-back-ups lezen binnen DataVault.** Dat vraagt versleuteling en een extra bibliotheek.
 - **Bijlagen die alleen op de Mac staan (WhatsApp, iMessage)** tonen een bestandsvakje: lezen vraagt Volledige
   schijftoegang, die de server niet mag nodig hebben.
-- **Tapback-verwijderingen, bewerkte en ingetrokken iMessages** worden niet opnieuw bekeken.
-- **`.tgz`-Takeouts** worden gekopieerd maar niet gelezen; alleen `.zip` en uitgepakte mappen.
-- **Dezelfde websitebezoek uit twee bronnen** (Chrome lokaal en Takeout) kan twee keer in Activiteit staan.
+- **De tijdsmarge voor hetzelfde websitebezoek** (5 seconden tussen Chrome op deze Mac en Takeout) is gekozen,
+  niet geijkt: je echte geschiedenis is tijdens de bouw nooit gelezen. Safari wordt niet samengevoegd (Safari staat
+  niet in Takeout).
+- **Een `.tgz` binnen een `.zip`** wordt niet gelezen; een `.tgz` als bestand of in een map wel.
+- **De vorm van `message_summary_info`** (eerdere versies van een bewerkt iMessage) komt uit de openbare beschrijving
+  en is niet aan een echte chat.db getoetst. Is hij anders, dan blijft alleen de tekst van nu zichtbaar, plus de
+  tekst die DataVault al had.
 - **Een eigen schema voor Chrome en Safari.** Schema's bestaan alleen voor bronnen met een online koppeling.
 - **Ijking van de matchtijd voor Last.fm en de Spotify-API** vraagt je echte luisterdata, die tijdens de bouw nooit
   gelezen is.

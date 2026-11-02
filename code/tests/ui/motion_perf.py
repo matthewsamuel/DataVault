@@ -231,6 +231,11 @@ DATA_TRANSITIONS = [
      " document.getElementById('msg-list')._mdKey = null; msgRenderList(); })()", 1200),
     ("berichten: scrollen door 5000", None,
      "document.getElementById('msg-list').scrollTop = 4000", 900),
+    # 'Bewerkt' onder een bewerkt iMessage: de eerdere versies rijzen in (alleen met berichten in de kluis)
+    ("berichten: eerdere versies openen",
+     "switchMainView('berichten'); document.querySelectorAll('#msg-thread button.msg-edited[aria-expanded=\"true\"]')"
+     ".forEach(b => b.click())",
+     "document.querySelector('#msg-thread button.msg-edited.is-toggle')?.click()", 700),
     ("activiteit: andere dag (tijdlijn)", "switchMainView('activity')",
      "(() => { const d = [...document.querySelectorAll('.act-day')]; const n = d.find(x => x.getAttribute('aria-pressed') !== 'true'); if (n) n.click(); })()", 1000),
     ("pasha: bubbel springt in", "switchMainView('home')",
