@@ -14,6 +14,8 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - De laatst gekozen collectie onthoudt de app voor de volgende keer. Bestaat een album niet meer, dan ga je vanzelf terug naar de hele bibliotheek, met een korte melding.
 - Een geopend album in Albums heeft een knop **Welke is mooier?** die het duel op dat album opent.
 - Een groot album is net zo vlot als een map: bij 10.000 foto's komt het volgende paar in 36 ms (was 86 ms) en is een keuze in 24 ms opgeslagen (was 76 ms).
+- **Pasha begrijpt je vaker.** Pasha gebruikt nu de eigen gereedschapsaanroep van Ollama in plaats van een tekstcode in het antwoord. Gemeten op 45 Nederlandse vragen, vijf keer elk: 97% gaat goed (was 89%), en bij anders geformuleerde vragen 92% (was 77%). Een groet of "verwijder alles" levert nooit meer een voorstel op. Een antwoord is even snel (een halve seconde); alleen de eerste vraag na het opstarten duurt ongeveer een seconde langer. De meting staat in [docs/PASHA_TOOLS.md](docs/PASHA_TOOLS.md).
+- Een vervolgvraag ("en die van het strand?") gaat net zo goed, en een model dat de gereedschapsaanroep niet kent, gebruikt vanzelf weer de oude manier. Verplaatsen, de beste houden en exporteren blijven voorstellen die pas na jouw klik op Uitvoeren gebeuren.
 
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.

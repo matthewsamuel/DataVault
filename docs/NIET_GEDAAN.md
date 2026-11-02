@@ -48,8 +48,11 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
   veiliger dan ze bewaren.
 - **Exact dubbele bestanden als apart voorstel.** De duplicatenscan heeft geen blijvend resultaat om uit voor te stellen;
   Pasha opent daarom de scan.
-- **Ollama's eigen gereedschapsaanroep** is niet vergeleken met het eigen JSON-formaat, dat bij qwen2.5:3b in 85 tot
-  90 procent van de tests lukt.
+- **Het resultaat van een actie terug naar het model** (een tweede antwoord na de actie). Pasha toont het resultaat
+  zelf als strook met een knop; een tweede ronde zou elke vraag twee keer zo lang laten duren. Zie
+  [PASHA_TOOLS.md](PASHA_TOOLS.md).
+- **Ollama's eigen gereedschapsaanroep is alleen gemeten met qwen2.5:3b.** Een ander model kiest zelf het formaat op
+  wat Ollama over het model zegt; meten kan met `scripts/bench_pasha_tools.py --model`.
 
 ## DataGatherer
 
