@@ -85,9 +85,12 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
   eigen indexeerronde. Dat bestond al; de schrijfacties zijn idempotent.
 - **Alle metingen zijn op gegenereerde archieven** op de interne SSD van de ontwikkelmachine, niet op de externe schijf en
   nooit op het echte archief.
-- **De rooktest is niet meegenomen in pytest** en is gevoelig voor een zwaar belaste machine (een enkele keer een
-  afgebroken `fetch` of een time-out); een herhaling slaagt.
-- **Een blijvende test voor loskoppelen en terugplaatsen van de schijf** in de rooktest. De controle is eenmalig met de
-  hand gedaan.
+- **De rooktest draait niet in een gewone pytest-ronde.** Hij duurt vijf tot tien minuten en heeft Playwright met
+  WebKit nodig; `pytest -m smoke` draait hem wel. Onder zware belasting wacht hij nu zelf langer en vraagt hij een
+  verzoek dat door herladen werd afgebroken opnieuw, maar een machine die minutenlang volledig bezet is kan hem nog
+  steeds laten mislukken.
+- **Loskoppelen wordt nagebootst door de archiefmap te hernoemen** (in `tests/test_unplug.py` en de rooktest). Een echte
+  USB-schijf die midden in een schrijfactie wegvalt geeft andere fouten (EIO in plaats van 'niet gevonden'); dat is
+  niet automatisch te testen zonder de schijf echt los te trekken.
 - **Een uniform foutantwoord voor een vreemde `Host`.** Starlette antwoordt daar met platte tekst; alleen
   DNS-rebinding-pogingen zien dat.

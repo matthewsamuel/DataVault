@@ -9,6 +9,12 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Afronding: wat nog bleef liggen
+- Loskoppelen en terugplaatsen van de schijf wordt nu bij elke testronde gecontroleerd, niet meer eenmalig met de hand: terwijl de app draait en een taak miniaturen maakt, verdwijnt het archief. De taak wacht dan op het archief, de balk bovenin en het takenpaneel zeggen dat, en er wordt niets geschreven: geen map op de oude plek en geen enkel bestand in het losgekoppelde archief dat verandert. Komt de schijf terug, dan verdwijnt de balk, komt de map weer in beeld en maakt de taak zijn werk af. Het archief zelf is daarna precies hetzelfde, en een beoordeling en een instelling zijn er nog.
+- Een gepauzeerde taak hervatten zonder schijf geeft nu de duidelijke melding dat het archief niet bereikbaar is (de stand van de taak staat in de database op de schijf); met de schijf terug gaat het gewoon.
+- De rooktest in de browser draait nu ook via pytest, als je erom vraagt: `pytest -m smoke`. In een gewone testronde wordt hij overgeslagen.
+- De rooktest is beter bestand tegen een druk bezette computer: na elke stap wacht hij zolang er nog verzoeken onderweg zijn, de wachttijden rekken mee met de belasting van de machine, en een verzoek dat door het herladen van de pagina werd afgebroken wordt één keer opnieuw gevraagd (alleen lezen). Echte fouten blijven fouten. Elke stap toont hoe lang hij duurde, met de traagste stappen op het einde.
+
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
 - Een foto groeit vanuit zijn miniatuur in de viewer en krimpt bij het sluiten terug naar zijn plek in het raster.
