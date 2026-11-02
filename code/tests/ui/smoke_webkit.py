@@ -32,7 +32,9 @@ repo root with a Python that has Playwright (`pip install playwright && playwrig
 Under load: after each step's own pause it waits as long as requests to the app are still on their
 way, every Playwright time-out is stretched by the machine's load (or $DATAVAULT_SMOKE_SLOW, e.g. 2),
 and a fetch that a reload cut off is asked again (GET only): an answer below 500 is printed as
-'transient', anything else stays a problem. Each step prints its time; the slowest are listed at the end.
+'transient', anything else stays a problem. A console or page error during a reload is only let go when
+it names such a fetch (tests/ui/smoke_cutoff.py); one the app logs itself, or one without an address,
+stays a problem. Each step prints its time; the slowest are listed at the end.
 
 If the installed WebKit build does not match Playwright's expected version, point
 PLAYWRIGHT_WEBKIT_EXECUTABLE at a pw_run.sh (the script tries the newest one in
@@ -53,6 +55,8 @@ import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
+
+from smoke_cutoff import ABORTED, sort_out
 
 CODE_DIR = Path(__file__).resolve().parents[2]
 
@@ -100,12 +104,6 @@ SLOW = load_factor()
 def T(ms: int) -> int:
     """A Playwright time-out (ms), stretched by SLOW."""
     return int(ms * SLOW)
-
-
-# How WebKit reports a fetch that a navigation (reload, goto) cut off, or that lost its connection
-ABORTED = re.compile(r"access control checks|network connection was lost|Load failed|cancelled|"
-                     r"Load request cancelled|NS_BINDING_ABORTED|ERR_ABORTED|aborted", re.I)
-URL_IN_TEXT = re.compile(r"https?://[^\s'\")]+")
 
 
 def free_port(avoid=()) -> int:
@@ -258,20 +256,24 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # Requests in flight (for the adaptive wait after a step) and what a navigation cut off
             inflight = {}
             navigation = {"until": 0.0}          # monotonic time up to which a navigation is going on
-            cut_off = []                         # (method, url, text) seen during a navigation
+            cut_off = []                         # (method, url, text): requests a navigation cut off
+            suspects = []                        # (text, location): errors during a navigation that read like an abort
             transient = []                       # what a navigation cut off and a retry answered fine
             timings = []                         # (seconds, step name)
 
             def navigating():
                 return time.monotonic() <= navigation["until"]
 
-            def report(text, url=None):
-                """A console or page error: a problem, unless a navigation cut off that fetch."""
+            def report(text, location=None):
+                """
+                A console or page error: a problem. During a navigation one that reads like an abort
+                waits for resolve_cut_off(), which lets it go only when it names a fetch that was cut
+                off and answered a retry (smoke_cutoff.py has the rules).
+                """
                 if aborted_poll(text):
                     return
                 if navigating() and ABORTED.search(text):
-                    found = url or (URL_IN_TEXT.search(text) or [None])[0]
-                    cut_off.append((None, found, text))
+                    suspects.append((text, location))
                     return
                 problems.append(text)
 
@@ -288,37 +290,31 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.on("requestfinished", lambda r: inflight.pop(r, None))
             page.on("requestfailed", on_failed)
             page.on("pageerror", lambda e: report(f"page error: {e}"))
+            # (the location is the script that logged it, or for 'Failed to load resource' the resource)
             page.on("console", lambda m: report(f"console {m.type}: {m.text}", (m.location or {}).get("url"))
                     if m.type == "error" else None)
             page.on("response", lambda r: problems.append(f"HTTP {r.status} {r.url}")
                     if "/api/" in r.url and r.status >= 500 else None)
 
+            def retry(url):
+                try:
+                    return page.request.get(url, timeout=T(10000)).status
+                except PlaywrightError as e:
+                    return f"failed ({e})"
+
             def resolve_cut_off():
                 """
-                Every fetch a navigation cut off is asked again (GET only, it changes nothing). An answer
-                below 500 makes it a transient abort, printed but not a problem; anything else (a failed
-                retry, a POST, an error without an address) stays a problem.
+                Every request a navigation cut off is asked again at its own address (GET only, it
+                changes nothing). An answer below 500 makes it a transient abort, printed but not a
+                problem; a failed retry or a POST stays a problem, and so does every console or page
+                error that does not name such a request (an error the app logs itself, one without
+                an address).
                 """
-                methods = {url: method for method, url, _ in cut_off if method}
-                retried = {}
-                for method, url, text in cut_off:
-                    method = method or methods.get(url)
-                    if url and url.startswith(origin) and method in (None, "GET"):
-                        if url not in retried:
-                            try:
-                                retried[url] = page.request.get(url, timeout=T(10000)).status
-                            except PlaywrightError as e:
-                                retried[url] = f"failed ({e})"
-                        status = retried[url]
-                        if isinstance(status, int) and status < 500:
-                            transient.append(f"{text} -> retried, {status}")
-                            continue
-                        problems.append(f"{text} (cut off by a navigation; the retry gave {status})")
-                    elif url is None and any(m == "GET" for m, _, _ in cut_off):
-                        transient.append(f"{text} -> belongs to a GET retried above")
-                    else:
-                        problems.append(f"{text} (cut off by a navigation, not retried: {method or 'no address'})")
+                found, explained = sort_out(cut_off, suspects, retry, origin)
+                problems.extend(found)
+                transient.extend(explained)
                 cut_off.clear()
+                suspects.clear()
 
             def navigate(action, name="navigation"):
                 """page.reload() or page.goto(): once more when WebKit itself cancels the load."""
@@ -387,11 +383,29 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             print(f"{engine} against {base} (time-outs x{SLOW})", flush=True)
 
             # The harness itself: a fetch that a reload cuts off is asked again and only printed (the
-            # route holds it until the reload cancels it; the retry does not go through the route)
+            # route holds it until the reload cancels it; the retry does not go through the route).
+            # In the same reload app.js logs an error of its own that reads like an abort (as it does
+            # when /api/shows really fails) and a handler throws one without an address: both must
+            # stay problems, although a GET was cut off and retried in that navigation.
             held = []
             page.route("**/api/health?cut-off", lambda route: held.append(route))
-            page.evaluate("() => { fetch('/api/health?cut-off').catch(() => {}); }")   # (not awaited)
+            fake_errors = ("console error: Error loading shows: TypeError: Load failed",
+                           "smoke self-check: upload Load failed in a broken handler")   # (a page error)
+            once = ("\n;(function () { if (sessionStorage.getItem('smoke-self-check')) {"
+                    " sessionStorage.removeItem('smoke-self-check');"
+                    " console.error('Error loading shows:', new TypeError('Load failed'));"
+                    " setTimeout(function () { throw new Error('smoke self-check: upload Load failed in a broken handler'); });"
+                    " } })();\n")
+
+            def app_js_with_errors(route):
+                response = route.fetch()
+                route.fulfill(response=response, body=response.text() + once)
+
+            page.route("**/app.js*", app_js_with_errors)
+            page.evaluate("() => { sessionStorage.setItem('smoke-self-check', '1');"
+                          " fetch('/api/health?cut-off').catch(() => {}); }")   # (not awaited)
             page.wait_for_timeout(200)
+            before = len(problems)
             navigate(page.reload, "reload with a fetch on its way")
             for route in held:
                 try:
@@ -399,8 +413,18 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 except PlaywrightError:
                     pass
             page.unroute("**/api/health?cut-off")
+            page.unroute("**/app.js*", app_js_with_errors)
             if not any("/api/health?cut-off" in t and "retried, 200" in t for t in transient):
                 problems.append(f"smoke: a fetch cut off by a reload was not asked again ({transient})")
+            caught = problems[before:]
+            for fake in fake_errors:
+                if not any(fake in p for p in caught):
+                    problems.append(f"smoke: a real error during a reload was let through as cut off: {fake!r} "
+                                    f"(problems {caught}, transient {transient})")
+            problems[before:] = [p for p in problems[before:] if not any(fake in p for fake in fake_errors)]
+            status = "ok" if len(problems) == before else "PROBLEM"
+            print(f"  {status:7} self-check: a cut-off fetch is retried, real errors in that reload stay problems",
+                  flush=True)
 
             # Every tab, by clicking it like a user
             # (Berichten has no button of its own in the menu: it opens from the DataGatherer page)
