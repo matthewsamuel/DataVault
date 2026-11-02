@@ -1723,7 +1723,7 @@ async function showFileInFiles(file) {
 // Een tegel aanwijzen: hij komt naar het midden, veert even op en een groene ring licht op en
 // dooft weer. Met minder beweging (Mac of Beweging in Instellingen) alleen de ring, even.
 function locateGridCard(card) {
-    const calm = document.documentElement.dataset.motion === 'reduce'
+    const calm = document.documentElement.dataset.motion !== 'volledig'
         || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     card.scrollIntoView({ block: 'center', behavior: calm ? 'auto' : 'smooth' });
     card.querySelectorAll(':scope > .locate-ring').forEach(el => el.remove());
@@ -2766,7 +2766,7 @@ function spotifyOtdCover(item, cover, src) {
     };
     img.src = src;   // mislukt het laden, dan blijft het eigen verloop staan
 
-    const calm = () => document.documentElement.dataset.motion === 'reduce'
+    const calm = () => document.documentElement.dataset.motion !== 'volledig'
         || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     let frame = 0;
     item.addEventListener('pointermove', e => {
@@ -3461,7 +3461,7 @@ async function storageTrashFile(file, li, button) {
     button.classList.remove('is-loading');
     if (!moved.length) { button.disabled = false; return; }
     const list = li.parentElement;
-    const calm = document.documentElement.dataset.motion === 'reduce'
+    const calm = document.documentElement.dataset.motion !== 'volledig'
         || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     const finish = () => {
         if (!li.isConnected) return;

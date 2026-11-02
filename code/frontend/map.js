@@ -276,7 +276,7 @@
     }
 
     function reducedMotion() {
-        return document.documentElement.dataset.motion === 'reduce'
+        return document.documentElement.dataset.motion !== 'volledig'
             || !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     }
 
@@ -579,7 +579,7 @@
     }
 
     // De groepen (Leaflet.markercluster). Bij veel punten (meer dan CLUSTER_ANIMATE_MAX) of met
-    // minder beweging (van de Mac, of Beweging in Instellingen: html[data-motion="reduce"])
+    // minder beweging (van de Mac, of Beweging in Instellingen: html[data-motion] is niet "volledig")
     // zonder de zoomanimatie van de groepen: die verschuift elke zichtbare groep apart en gaf
     // haperingen bij tienduizenden foto's. animate wordt alleen bij het maken gelezen, dus
     // dan komt er een nieuwe (lege) groep voor in de plaats.
