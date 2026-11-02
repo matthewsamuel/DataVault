@@ -273,6 +273,15 @@ def test_the_zone_of_the_place_is_used_far_from_home_and_videos_are_utc(app):
     assert geotag.inferred(db, video)["tz_source"] == "utc"
     assert timezones.zone_at(51.05, 3.72) == ("Europe/Brussels", "land")
     assert timezones.zone_at(-33.87, 151.21)[0] == "Australia/Sydney"
+    # The Kaart's outlines carry Dutch names; the zones are still found by the English name.
+    assert timezones.country_at(51.05, 3.72) == "België"
+    assert timezones.zone_at(39.0, -77.5) == ("America/New_York", "land")
+
+
+def test_every_country_outline_still_finds_its_time_zones():
+    data = timezones._load()
+    english = {shape[0] for shape in data["shapes"]}
+    assert len(english) > 200 and len(english - set(data["countries"])) <= 1   # only Heard I. and McDonald Is. has none
 
 
 def test_a_real_photo_offset_is_read_from_exif_and_the_file_is_never_written(tmp_path):

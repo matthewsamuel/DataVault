@@ -102,6 +102,11 @@ def test_find_photos_uses_semantic_search(indexed, fake_ollama, fake, config, tm
 
 def test_places_are_found_offline_in_dutch_and_english():
     assert places.find("Frankrijk").name == "France"
+    assert places.find("France").name == "France"
+    assert places.find("belgie").name == places.find("Belgium").name == "Belgium"   # Dutch 'België', no accent
+    assert places.find("Engeland").name == "United Kingdom"                           # alias, not the Kaart name
+    assert places.find("Verenigd Koninkrijk").name == "United Kingdom"
+    assert places.find("Verenigde Staten van Amerika").contains(39.0, -77.5)
     assert places.find("Parijs").kind == "city"
     assert places.find("nederland").contains(52.37, 4.89)
     assert not places.find("Nederland").contains(50.85, 4.35)    # Brussels

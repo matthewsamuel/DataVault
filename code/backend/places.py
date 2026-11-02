@@ -9,8 +9,9 @@ the country outlines and the list of capitals and larger cities. No network, no 
 - A country is its outline: photos are matched with a point-in-polygon test, so a
   photo in Belgium does not count for the Netherlands just because the boxes overlap.
 
-Names are matched without accents and case; the Dutch spelling of the common countries
-and cities is in the alias tables below.
+Names are matched without accents and case. A country is found by its Dutch name (as on
+the Kaart), its English Natural Earth name, or an alias below (Engeland, Amerika, ...);
+the Dutch spelling of the common cities is in CITY_ALIASES.
 """
 import json
 import math
@@ -81,7 +82,10 @@ def _load() -> None:
                 geometry = feature["geometry"]
                 polygons = geometry["coordinates"] if geometry["type"] == "MultiPolygon" else [geometry["coordinates"]]
                 rings = [(poly, _ring_bbox(poly[0])) for poly in polygons]
-                countries.append({"name": feature["properties"]["n"], "polygons": rings})
+                props = feature["properties"]
+                # 'n' is the Dutch name shown on the Kaart; 'e' the English Natural Earth name where it
+                # differs. The English name stays the place's name (the alias tables point at it).
+                countries.append({"name": props.get("e") or props["n"], "dutch": props["n"], "polygons": rings})
         with open(DATA / "places-50m.json", encoding="utf-8") as f:
             places = [(p[0], float(p[2]), float(p[1]), bool(p[4])) for p in json.load(f)]
         _places = places
@@ -133,7 +137,7 @@ def find(name: str) -> Optional[Place]:
         return None
     english = COUNTRY_ALIASES.get(key)
     for country in _countries:
-        if fold(country["name"]) == key or (english and country["name"] == english):
+        if key in (fold(country["name"]), fold(country["dutch"])) or (english and country["name"] == english):
             boxes = [b for _, b in country["polygons"]]
             bbox = [min(b[0] for b in boxes), min(b[1] for b in boxes),
                     max(b[2] for b in boxes), max(b[3] for b in boxes)]

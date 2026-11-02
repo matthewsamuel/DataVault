@@ -53,7 +53,11 @@ def _load() -> dict:
                             continue
                         lons = [p[0] for p in ring]
                         lats = [p[1] for p in ring]
-                        shapes.append((feature["properties"].get("n"), (min(lats), min(lons), max(lats), max(lons)), poly))
+                        props = feature.get("properties") or {}
+                        # country_zones.json is keyed by the English Natural Earth name: 'e' where the
+                        # Dutch name 'n' differs from it (België / Belgium), else 'n' itself.
+                        shapes.append((props.get("e") or props.get("n"), props.get("n"),
+                                       (min(lats), min(lons), max(lats), max(lons)), poly))
             except (OSError, ValueError, KeyError):
                 shapes = []
             try:
@@ -76,14 +80,20 @@ def _in_ring(lat: float, lon: float, ring: List[List[float]]) -> bool:
     return inside
 
 
-def country_at(lat: float, lon: float) -> Optional[str]:
-    """The Natural Earth name of the country at this point, or None (sea, or no data)."""
-    for name, (s, w, n, e), poly in _load()["shapes"]:
+def _country(lat: float, lon: float) -> Optional[Tuple[str, str]]:
+    """(English Natural Earth name, Dutch name) of the country at this point, or None."""
+    for english, dutch, (s, w, n, e), poly in _load()["shapes"]:
         if not (s <= lat <= n and w <= lon <= e):
             continue
         if _in_ring(lat, lon, poly[0]) and not any(_in_ring(lat, lon, hole) for hole in poly[1:]):
-            return name
+            return english, dutch
     return None
+
+
+def country_at(lat: float, lon: float) -> Optional[str]:
+    """The Dutch name of the country at this point (as on the Kaart), or None (sea, or no data)."""
+    found = _country(lat, lon)
+    return found[1] if found else None
 
 
 def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -109,8 +119,8 @@ def zone_at(lat: float, lon: float) -> Tuple[Optional[str], str]:
     'onbekend' (zone None).
     """
     data = _load()
-    country = country_at(lat, lon)
-    zones = data["countries"].get(country) if country else None
+    country = _country(lat, lon)
+    zones = data["countries"].get(country[0]) if country else None
     if zones:
         return (zones[0][0] if len(zones) == 1 else _nearest(lat, lon, zones)[0]), "land"
     zone, km = _nearest(lat, lon, data["all"])

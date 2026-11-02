@@ -7,7 +7,8 @@ Bronnen (eenmalig downloaden in een werkmap, niet in de repo):
   - GeoNames cities15000.txt (CC BY 4.0), https://download.geonames.org/export/dump/cities15000.zip
 
 Uitvoer:
-  - countries-50m.geojson: landen met n (Nederlandse naam) en a (ADM0_A3), coördinaten op 2 decimalen.
+  - countries-50m.geojson: landen met n (Nederlandse naam), e (de Engelse Natural Earth-naam, alleen
+    als die anders is) en a (ADM0_A3), coördinaten op 2 decimalen.
   - regions/<A3>.json per land: de grenzen tussen provincies (lijnen, zonder de buitengrens),
     plekken voor de provincienamen en de grote steden.
     De kaart laadt zo'n bestand pas als het land aangeduid wordt of in beeld is bij ver inzoomen.
@@ -85,7 +86,11 @@ def build_countries(src, out):
     for f in data['features']:
         p = f['properties']
         a3 = p['ADM0_A3']
-        feats.append({'type': 'Feature', 'properties': {'n': p.get('NAME_NL') or p['NAME'], 'a': a3},
+        props = {'n': p.get('NAME_NL') or p['NAME']}
+        if props['n'] != p['NAME']:
+            props['e'] = p['NAME']      # the English name: Pasha's place search and backend/data/country_zones.json
+        props['a'] = a3
+        feats.append({'type': 'Feature', 'properties': props,
                       'geometry': {'type': f['geometry']['type'], 'coordinates': rnd(f['geometry']['coordinates'], 2)}})
         code = p.get('ISO_A2_EH') or p.get('ISO_A2')
         if code and code != '-99':
