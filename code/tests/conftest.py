@@ -24,6 +24,16 @@ sys.path.insert(0, str(CODE_DIR / "tests"))
 from fixtures.vault_builder import build_test_vault, write_config  # noqa: E402
 
 
+def pytest_collection_modifyitems(config, items):
+    """The browser smoke (marker 'smoke') only runs when asked for: pytest -m smoke."""
+    if "smoke" in (config.getoption("-m") or ""):
+        return
+    skip = pytest.mark.skip(reason="browser smoke: run it with 'pytest -m smoke'")
+    for item in items:
+        if "smoke" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture(autouse=True)
 def fake_ollama(monkeypatch):
     """No test talks to a real Ollama: the chat's HTTP clients go to a FakeOllama."""
