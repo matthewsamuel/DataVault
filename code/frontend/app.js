@@ -1918,6 +1918,14 @@ let moveTwin = null;        // { path, name }: precies dit bestand (dezelfde byt
 
 // fileData: één bestand, of een lijst (de selectie) met onMove(folder) -> Promise<bool> die het
 // verplaatsen zelf doet; bij true sluit het venster
+// Wat het verplaatsvenster als miniatuur toont: voor geluid dezelfde illustratie als in het raster
+// (de server geeft daar alleen een grijs vlak)
+function moveThumbSrc(file) {
+    const name = file.name || file.path.split('/').pop();
+    const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')).toLowerCase() : '';
+    return ['.mp3', '.wav', '.flac', '.m4a', '.aac'].includes(ext) ? audioThumbUrl(name) : vaultFileUrl('thumb', file.path);
+}
+
 function openMoveFileModal(fileData = null, { onMove = null } = {}) {
     if (moveInFlight) return;
     moveBatch = null;
@@ -1968,10 +1976,10 @@ function openMoveFileModal(fileData = null, { onMove = null } = {}) {
         previewEl.classList.toggle('is-stack', !!moveBatch && count > 1);
         if (moveBatch && count > 1) {
             previewEl.replaceChildren(
-                ...moveBatch.files.slice(0, 3).reverse().map(f => createEl('img', { src: vaultFileUrl('thumb', f.path), alt: '' })),
+                ...moveBatch.files.slice(0, 3).reverse().map(f => createEl('img', { src: moveThumbSrc(f), alt: '' })),
                 createEl('span', { class: 'move-stack-count tabular', text: count.toLocaleString('nl-NL') }));
         } else {
-            previewEl.innerHTML = html`<img src="${vaultFileUrl('thumb', fileToMove.path)}" alt="Voorbeeld">`;
+            previewEl.innerHTML = html`<img src="${moveThumbSrc(fileToMove)}" alt="Voorbeeld">`;
         }
     }
 
