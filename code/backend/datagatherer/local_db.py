@@ -12,12 +12,18 @@ Either way the connector reads a SNAPSHOT: the database plus its -wal and -shm, 
 together into the cache, opened there, and removed from the cache after the import. The
 live database is only ever opened for reading (a plain file copy), never written.
 
+After a successful read the snapshot is also kept in the vault, as one standalone,
+read-only file data/<owner>/<raw_folder>/JJJJ-MM-DD <name> (keep_copy): the archive then
+holds the source itself, not only what DataVault made of it. At most one per KEEP_DAYS.
+
 Tests and the test server never touch the real home folder: gather_home() is
 DATAVAULT_GATHER_HOME, and in test mode without it a folder that does not exist.
 """
 import json
 import os
+import re
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -28,6 +34,7 @@ SIDECARS = ("-wal", "-shm")
 FDA_SETTINGS_PATH = "Systeeminstellingen > Privacy en beveiliging > Volledige schijftoegang"
 FDA_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
 HELPER = Path(__file__).with_name("fda_helper.py")
+KEEP_DAYS = 7          # a new copy in the vault at most once a week (each is a full database)
 
 # Where the databases live, relative to the home folder (fda_helper.py has the same list)
 LIVE_PATHS = {
@@ -225,3 +232,46 @@ def finish_snapshot(config, source: str, folder: Path, via: str) -> None:
             if older.name <= folder.name:
                 drop(config, older)
     drop(config, folder)
+
+
+def keep_copy(owner_folder: Optional[Path], raw_folder: str, source: str, copy: Path,
+              now: Optional[float] = None) -> Optional[Path]:
+    """
+    The database just read (copy, with its -wal applied) as one standalone read-only file
+    in data/<owner>/<raw_folder>/: 'JJJJ-MM-DD chat.db'. None when there is no owner folder
+    or the newest kept copy is younger than KEEP_DAYS. Never overwrites, never removes one.
+    """
+    if owner_folder is None:
+        return None
+    folder = Path(owner_folder) / raw_folder
+    name = Path(LIVE_PATHS[source]).name
+    pattern = re.compile(r"(\d{4}-\d{2}-\d{2}) " + re.escape(name))
+    now = time.time() if now is None else now
+    today = time.strftime("%Y-%m-%d", time.localtime(now))
+    if folder.is_dir():
+        days = sorted(m.group(1) for m in (pattern.fullmatch(n) for n in os.listdir(folder)) if m)
+        if days and time.mktime(time.strptime(days[-1], "%Y-%m-%d")) > now - KEEP_DAYS * 86400:
+            return None
+    folder.mkdir(parents=True, exist_ok=True)
+    final = folder / f"{today} {name}"
+    tmp = folder / f".{final.name}.{os.getpid()}.partial"
+    try:
+        src = sqlite3.connect(str(copy))
+        try:
+            dst = sqlite3.connect(str(tmp))
+            try:
+                src.backup(dst)
+                dst.execute("PRAGMA journal_mode = DELETE")     # one file, no -wal next to it
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        os.chmod(tmp, 0o444)
+        from backend.file_ops import _exclusive_rename
+        _exclusive_rename(tmp, final)                       # EEXIST when today's copy is already there
+    except FileExistsError:
+        return None
+    finally:
+        if tmp.exists():
+            tmp.unlink()                                    # only our own unfinished copy
+    return final

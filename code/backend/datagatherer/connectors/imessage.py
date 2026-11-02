@@ -49,7 +49,8 @@ class IMessage(Connector):
             steps=("Zet in Berichten > Instellingen > iMessage 'Berichten in iCloud' aan en klik op Synchroniseer nu.",
                    "Zet op je iPhone Instellingen > Berichten > Doorsturen van sms aan voor deze Mac.",
                    "Geef toegang zoals de kaart vraagt (Volledige schijftoegang voor de hulp) en klik op Bijwerken."),
-            note="DataVault leest een kopie van chat.db en schrijft er nooit in. Er gaat niets over het internet."),
+            note="DataVault leest een kopie van chat.db en schrijft er nooit in. Eens per week bewaart DataVault die "
+                 "kopie ook in je archief (data/<eigenaar>/iMessage/). Er gaat niets over het internet."),
         HelpOption(
             title="Bijlagen die nog in iCloud staan", effort="gemiddeld",
             steps=("Open in Berichten een gesprek, klik op de naam bovenaan en kies Info.",
@@ -83,11 +84,21 @@ class IMessage(Connector):
                 with ctx.db._connect() as c:
                     state.set_cursor(c, self.id, CURSOR, {"last": max(stats["covers_until"], cursor.get("last") or 0),
                                                           "via": via, "at": time.time(), "v": CURSOR_VERSION})
+            kept = self._keep(ctx, copy)
         except sqlite3.Error as e:
             raise ConnectorError(f"De kopie van chat.db is niet leesbaar ({e})") from e
         finally:
             local_db.finish_snapshot(ctx.config, SOURCE, folder, via)
-        return {**stats, "via": via}
+        return {**stats, "via": via, "kept": kept}
+
+    def _keep(self, ctx: GatherContext, copy) -> Optional[str]:
+        """The database itself into the vault (data/<owner>/iMessage/), weekly; a failure never fails the update."""
+        try:
+            kept = local_db.keep_copy(ctx.owner_folder, self.raw_folder, SOURCE, copy)
+        except (OSError, sqlite3.Error) as e:
+            ctx.progress(message=f"Kopie in het archief niet gemaakt ({e})")
+            return None
+        return str(kept) if kept else None
 
     def _read(self, ctx: GatherContext, conn: sqlite3.Connection, since: Optional[float]) -> Dict[str, Any]:
         chats = imessage_db.chats(conn)

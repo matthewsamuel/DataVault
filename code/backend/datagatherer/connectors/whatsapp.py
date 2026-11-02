@@ -120,7 +120,8 @@ class WhatsApp(Connector):
                    "Geef toegang zoals de kaart vraagt (Volledige schijftoegang voor de hulp), en klik op Bijwerken.",
                    "Open WhatsApp voor Mac af en toe: na lange tijd zonder gebruik meldt WhatsApp hem af."),
             note="DataVault leest een kopie van de database; er is geen contact met WhatsApp en dus geen risico op een "
-                 "blokkade. De Mac heeft niet altijd je volledige geschiedenis: vul aan met een iPhone-backup."),
+                 "blokkade. Eens per week bewaart DataVault die kopie ook in je archief (data/<eigenaar>/WhatsApp/). "
+                 "De Mac heeft niet altijd je volledige geschiedenis: vul aan met een iPhone-backup."),
         HelpOption(
             title="Losse chat exporteren", effort="gemiddeld",
             steps=("Tik in de chat op de naam > Exporteer chat > Voeg media toe.",
@@ -317,11 +318,21 @@ class WhatsApp(Connector):
                     state.set_cursor(c, self.id, CURSOR, {"last": max(stats["covers_until"], cursor.get("last") or 0),
                                                           "via": via, "at": time.time()})
             messages_store.reconcile_whatsapp(ctx.db)
+            kept = self._keep(ctx, copy)
         except sqlite3.Error as e:
             raise ConnectorError(f"De kopie van de WhatsApp-database is niet leesbaar ({e})") from e
         finally:
             local_db.finish_snapshot(ctx.config, SOURCE, folder, via)
-        return {**stats, "via": via}
+        return {**stats, "via": via, "kept": kept}
+
+    def _keep(self, ctx: GatherContext, copy) -> Optional[str]:
+        """The database itself into the vault (data/<owner>/WhatsApp/), weekly; a failure never fails the update."""
+        try:
+            kept = local_db.keep_copy(ctx.owner_folder, self.raw_folder, SOURCE, copy)
+        except (OSError, sqlite3.Error) as e:
+            ctx.progress(message=f"Kopie in het archief niet gemaakt ({e})")
+            return None
+        return str(kept) if kept else None
 
     def coverage(self, ctx: GatherContext) -> Coverage:
         return messages_store.coverage(ctx.db, source=SOURCE)

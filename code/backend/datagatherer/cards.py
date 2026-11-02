@@ -207,6 +207,13 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         primary = "import"
         what = "een export" if len(pending) + len(unread) == 1 else f"{len(pending) + len(unread)} exports"
         step = f"Er staat {what} in het archief die nog niet is ingelezen. Klik op Inlezen."
+    elif blocked and not request and cov.records and access["code"] == "denied":
+        # Read before with the helper, whose copy is cleaned up afterwards: that worked, the
+        # next update simply needs the helper again (the same steps, under Bijwerken)
+        primary = "access"
+        access = {**access, "title": "Bijwerken met de hulp"}
+        step = (f"Ingelezen tot {_date(cov.last)} met de hulp. DataVault mag {name} zelf niet lezen, dus voor "
+                f"nieuwe {connector.record_label[1]} start je de hulp opnieuw: Bijwerken toont de stappen.")
     elif blocked and not request:
         primary = "access"
         step = (f"{access['title']}: {name} leest een database op deze Mac die macOS beschermt. "
@@ -306,6 +313,9 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         notes.append({"tone": "info", "text": f"{notice['name']} staat in het archief. Het origineel in Downloads mag je "
                                               "weggooien: DataVault heeft het niet meer nodig.", "path": notice["path"]})
 
+    # The helper's steps are an update for a source that already has data (see above)
+    primary_view = ACTIONS["sync"] if primary == "access" and access.get("title") == "Bijwerken met de hulp" \
+        else ACTIONS[primary]
     last_contact = state.last_contact(db, connector.id) if api else None
     return {
         "id": connector.id,
@@ -330,7 +340,7 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
             "holes": [{"from": a, "until": b} for a, b in cov.holes],
         },
         "next_step": step,
-        "primary": {"action": primary, "label": ACTIONS[primary][0], "icon": ACTIONS[primary][1]},
+        "primary": {"action": primary, "label": primary_view[0], "icon": primary_view[1]},
         "actions": [{"action": a, "label": ACTIONS[a][0], "icon": ACTIONS[a][1]} for a in actions],
         "exports": [{"id": k.id, "label": k.label} for k in connector.exports],
         "configured": configured,

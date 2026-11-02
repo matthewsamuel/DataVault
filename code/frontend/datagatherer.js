@@ -699,7 +699,7 @@ async function dgOpenAccess(id) {
                 dgCloseModal('dg-access');
                 const data = await dgPost(`/api/datagatherer/sources/${encodeURIComponent(id)}/sync`);
                 dgAfterJob(data.job);
-                showToast(`${detail.name} bijwerken`, 'Toegang gelukt: DataVault leest je berichten nu in.', 'success');
+                showToast(`${detail.name} bijwerken`, 'De kopie is gevonden: DataVault leest je berichten nu in.', 'success');
             }
         } catch (err) {
             status.textContent = (err && err.message) || 'Controleren mislukt';

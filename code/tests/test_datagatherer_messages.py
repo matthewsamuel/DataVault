@@ -583,6 +583,55 @@ def _messages_db():
          "mime": "image/heic", "transfer": "IMG_0001.HEIC"}])
 
 
+def test_an_update_keeps_the_database_itself_in_the_vault_once_a_week(client, app):
+    _messages_db()
+    job, result = _sync(client, app, "imessage")
+    assert job["status"] == "done", job
+    from backend.datagatherer import raw_store
+    folder = raw_store.owner_folder(app.state.config) / "iMessage"
+    kept = folder / f"{time.strftime('%Y-%m-%d')} chat.db"
+    assert result["kept"] == str(kept) and os.listdir(folder) == [kept.name]   # one file: no -wal, no partial
+    assert not os.access(kept, os.W_OK)
+    with sqlite3.connect(f"file:{kept}?mode=ro", uri=True) as conn:
+        assert conn.execute("SELECT count(*) FROM message").fetchone()[0] == 8
+    # The same week: no second copy, and today's copy is never replaced
+    before = kept.stat().st_mtime_ns
+    job, result = _sync(client, app, "imessage")
+    assert job["status"] == "done" and result["kept"] is None and kept.stat().st_mtime_ns == before
+    # A week later: a new one next to it
+    copy = _home() / "copy.db"
+    import shutil
+    shutil.copyfile(_home() / "Library/Messages/chat.db", copy)
+    assert local_db.keep_copy(folder.parent, "iMessage", "imessage", copy, now=time.time() + 3 * 86400) is None
+    assert local_db.keep_copy(folder.parent, "iMessage", "imessage", copy, now=time.time() + 8 * 86400) is not None
+    assert len(os.listdir(folder)) == 2
+
+
+def test_after_a_helper_import_the_card_offers_bijwerken_not_toegang_geven(client, app, tmp_path):
+    _messages_db()
+    db_file = _home() / "Library/Messages/chat.db"
+    from backend.datagatherer import fda_helper
+    readable = tmp_path / "helper-home"
+    (readable / "Library/Messages").mkdir(parents=True)
+    import shutil
+    shutil.copyfile(db_file, readable / local_db.LIVE_PATHS["imessage"])
+    os.chmod(db_file, 0)
+    try:
+        assert fda_helper.main(["--bron", "imessage", "--naar", str(local_db.inbox(app.state.config)),
+                                "--home", str(readable)]) == 0
+        job, result = _sync(client, app, "imessage")
+        assert job["status"] == "done" and result["via"] == "helper"
+        cards.forget_existing_cache()
+        card = next(s for s in client.get("/api/datagatherer/sources").json()["sources"] if s["id"] == "imessage")
+        # The copy is cleaned up, so the server cannot read anything now: that is no failure
+        assert card["status"] != "toegang_nodig" and card["primary"]["action"] == "access"
+        assert card["primary"]["label"] == "Bijwerken" and card["access"]["title"] == "Bijwerken met de hulp"
+        assert card["next_step"].startswith("Ingelezen tot ") and "Toegang nodig" not in card["next_step"]
+        assert "voor nieuwe berichten start je de hulp opnieuw" in card["next_step"]
+    finally:
+        os.chmod(db_file, 0o600)
+
+
 def test_imessage_reads_attributed_body_dates_tapbacks_and_attachments(client, app):
     _messages_db()
     job, result = _sync(client, app, "imessage")
