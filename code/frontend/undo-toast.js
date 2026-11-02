@@ -43,7 +43,13 @@ const UndoToast = (() => {
             retitle(previous, title, message, type);
             const button = previous.querySelector('.toast-action');
             if (button) button.disabled = false;
-            toastSchedule(previous, UNDO_TOAST_MS);
+            // Staat de muis of de focus erop, dan blijft hij staan (de tijd begint bij weggaan)
+            if (previous.matches(':hover') || previous.contains(document.activeElement)) {
+                clearTimeout(previous._hideTimer);
+                previous._duration = UNDO_TOAST_MS;
+            } else {
+                toastSchedule(previous, UNDO_TOAST_MS);
+            }
             restartToastTimer(previous);
             Motion.animate(previous, [{ transform: 'none' }, { transform: `translate3d(${-Motion.px('--motion-distance-sm', 6)}px, 0, 0)` }, { transform: 'none' }],
                 { spring: 'snappy', key: 'nudge', calm: false });

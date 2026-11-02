@@ -1424,6 +1424,18 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(empty_shows == {"elo": True, "empty": True, "shuffle": False},
                    f"shows: without shows 'Welke is mooier?' cannot be reached ({empty_shows})")
 
+            # Spotify: every insight window says what it measures, your own result and how it is
+            # worked out, in Dutch (no English server labels such as 'Broad Explorer')
+            for key in ("record_day", "top_binge", "mainstream_score", "seasonal_mood"):
+                step(f"spotify: uitleg {key}", lambda: (nav_click("spotify"), page.wait_for_timeout(900),
+                                                        page.evaluate(f"showInsightExplanation('{key}')")), 0.4)
+                parts = page.evaluate("""['insight-modal-title', 'insight-modal-description', 'insight-modal-result', 'insight-modal-how']
+                    .map(id => { const e = document.getElementById(id); return e && e.getClientRects().length ? e.textContent.trim() : ''; })""")
+                english = [w for w in ("Explorer", "Repeater", "Listener", "Hibernator", "Vibes", "Consistent", "Balanced")
+                           if any(w in p for p in parts)]
+                expect(all(parts) and not english, f"spotify: the {key} window misses a part or shows English ({parts})")
+                page.evaluate("closeInsightModal()")
+
             # Spotify: both top lists show everything the export has (never cut to the shorter one),
             # the shorter one ends with a quiet closing line, and the stat labels in a row line up
             step("spotify: top lists", lambda: (nav_click("spotify"), page.wait_for_timeout(1200)), 0)

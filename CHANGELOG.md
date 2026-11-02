@@ -827,6 +827,37 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - Twee foto's die duizenden punten uit elkaar liggen (door veel duimpjes) gaven een fout bij
   vergelijken, en konden de app bij het bijwerken van de database laten vastlopen. Opgelost.
 
+### Afronding: wat nog bleef liggen
+- **Reeksen, Berichten en DataGatherer hebben een eigen plek in het menu.** Reeksen ("Beste uit
+  reeks") is nu een eigen onderdeel (sneltoets **g n**) in plaats van een tabblad bij Duplicaten;
+  Berichten en DataGatherer staan als gewone menu-onderdelen naast de rest. Het menu volgt de
+  volgorde Home, Bestanden, Tijdlijn, Kaart, Albums, Reeksen, Duplicaten, Keurer, Shows, Spotify,
+  Berichten, DataGatherer en Herstelcentrum.
+- **Meer.** Past niet alles naast het zoekveld (bij 1024 px, of op een smal venster), dan schuiven
+  de laatste onderdelen naar het menu **Meer**. Dat veert open, de onderdelen komen er een voor een
+  in, met hun icoon en sneltoets. Met het toetsenbord: **↓** op Meer opent het, pijltjes, Home, End
+  of een beginletter kiezen, Enter opent het onderdeel en **Esc** sluit en zet de focus terug. Staat
+  het open onderdeel in Meer, dan krijgt Meer het groene streepje. Het zoekveld is weer breder.
+- **"Ongedaan maken" in de melding.** Na verplaatsen, naar de prullenmand, een Keurer-beslissing
+  (prullenmand of verplaatsen), een reeks of opruimactie bij Duplicaten en de selectiebalk staat er
+  een knop **Ongedaan maken** in de melding; **⌘Z** doet hetzelfde. Hij zet precies die actie terug,
+  zoals het Herstelcentrum. De melding blijft 10 seconden staan, en langer zolang de muis of de focus
+  erop staat, en wordt na de klik zelf de uitkomst ("Teruggezet"). Wat al terug is (ook via het
+  Herstelcentrum of ↓ in de Keurer), wordt nooit nog eens aangeboden. In de Keurer en bij Welke is
+  mooier? loopt één melding mee met de laatste keuze, in plaats van een stapel.
+- **De back-upmap kies je in Instellingen.** Onder Back-ups staat bij Locatie **Andere map…**: een
+  mappenkiezer die mappen pas laadt als je ze opent, met een nieuwe map maken erbij. Bij elke map zie
+  je meteen of hij kan: hij moet bestaan en schrijfbaar zijn, en mag niet in het archief, de
+  prullenmand, RAW_DUPLICATES of de mappen van DataVault zelf liggen. Een eigen map op de T7 kan, met
+  de opmerking dat een andere schijf veiliger is. **Gebruiken en testen** bewaart de keuze en maakt
+  meteen een back-up daar; het venster toont de stappen en de uitkomst. Is de schijf met die map
+  los, dan maakt de app hem niet ergens anders opnieuw aan, maar zegt dat. Het terugzetscript vindt
+  de gekozen map zelf (of met `--map`).
+- **Spotify: de uitleg klopt en is helemaal Nederlands.** Elk inzicht (recorddag, langste reeks,
+  vaste favorieten of brede ontdekker, seizoensstemming) vertelt nu wat het meet, wat het voor jou
+  is en hoe DataVault het uitrekent, met dezelfde grenzen als de berekening zelf. Het luister-DNA zegt
+  hoe je type bepaald wordt.
+
 ## Fase 2 – Stabiliseren
 
 ### Veiligheid van je bestanden

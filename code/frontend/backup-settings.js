@@ -300,6 +300,9 @@ function bfDepth(row) {
 // De submappen van één map, één keer per keer dat het venster open is
 function bfLoad(path) {
     if (!path || path.endsWith(BF_LOADING)) return Promise.resolve();
+    // Zonder submappen (of het archief zelf, waar niets te kiezen valt): niets op te halen
+    const entry = backupFolder.nodes.get(path);
+    if (entry && entry.has_children === false) return Promise.resolve();
     if (backupFolder.loaded.has(path)) return backupFolder.loaded.get(path);
     const done = (async () => {
         let data;

@@ -327,6 +327,8 @@ so a page without it keeps working. Its CSS is the `BEWEGING: SCHIL` block in `s
 | Toasts | `initToastSwipe` | Swipe right to dismiss, rubber band to the left |
 | Modals | `overlayOrigin` | `transform-origin` at the click or the focused trigger, so a window grows from its button |
 | Menus | CSS `shell-menu-in` / `-out` | The theme menu and `.menu` spring open, items follow on the stagger step |
+| Meer (nav overflow) | `nav-more.js` (`NavMore`) | Tabs that do not fit move under Meer; the menu springs open with its items on `--stagger-step` (`--i`), fades out in `--dur-3`, the caret turns (Volledig only); Meer takes the green indicator, so the glide goes to Meer when an overflow view opens |
+| Undo toast | `undo-toast.js` (`showUndoToast`) | Same toast motion; one toast per group (Keurer, Elo) nudges and changes its text instead of stacking; after 'Ongedaan maken' the toast becomes the outcome in place and its icon pops again; the undo arrow turns a quarter on hover (Volledig only) |
 | Theme | `themeChanged` | A crisp circle with a 32 px soft edge (`--shell-reveal-feather`, a masked view transition; a wider feather reads as a grey smear and repaints more) and the icon turns half a turn |
 | Segments | `initSegmented` | A thumb glides between the old and new `.segmented` / `.view-toggle` choice |
 | Shortcut overview | `initShortcutEcho` | The key you press lights up |
