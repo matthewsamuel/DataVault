@@ -217,7 +217,8 @@ function dgCard(src) {
                     status),
                 createEl('p', { class: 'dg-card-desc', text: src.description }))),
         dgDataBlock(src),
-        createEl('p', { class: 'dg-next' }, ...dgTextWithPath(src.next_step, src.access && src.access.path)),
+        // Twee regels; de hele zin staat in de tooltip
+        createEl('p', { class: 'dg-next', title: src.next_step }, ...dgTextWithPath(src.next_step, src.access && src.access.path)),
         src.last_error ? dgNote({ tone: 'danger', text: `Laatste keer bijwerken mislukt (${dgTime(src.last_sync_at)}): ${src.last_error}` }) : null,
         ...src.notes.map(dgNote),
         job ? dgProgress(job) : null,
@@ -242,7 +243,7 @@ function dgDataBlock(src) {
     const until = dgDate(src.data_until);
     const line = createEl('div', { class: 'dg-until' });
     if (until) {
-        line.append(createEl('span', { class: 'dg-until-label', text: 'Gegevens t/m ' }),
+        line.append(createEl('span', { class: 'dg-until-label', text: 'Tot ' }),
             createEl('span', { class: 'mono dg-until-date', text: until }));
         // 'N dagen achter' staat al op het label; hier alleen 'vandaag', hoe lang geleden of 'compleet'
         if (src.complete) {
@@ -255,19 +256,23 @@ function dgDataBlock(src) {
         }
     } else if (src.unread_until) {
         // Elders in de app al te zien (het Spotify-scherm leest de export zelf), maar nog niet ingelezen
-        line.append(createEl('span', { class: 'dg-until-label', text: 'Gegevens t/m ' }),
+        line.append(createEl('span', { class: 'dg-until-label', text: 'Tot ' }),
             createEl('span', { class: 'mono dg-until-date', text: dgDate(src.unread_until) }),
             createEl('span', { class: 'dg-gap', text: ' · nog niet ingelezen' }));
     } else {
-        line.append(createEl('span', { class: 'dg-until-label', text: src.raw.count
-            ? `${formatNumberNl(src.raw.count)} ${src.raw.count === 1 ? 'export' : 'exports'} in het archief`
-            : 'Nog geen gegevens' }));
+        line.append(createEl('i', { class: `fas ${src.raw.count ? 'fa-box-archive' : 'fa-inbox'} dg-empty-icon`, 'aria-hidden': 'true' }),
+            createEl('span', { class: 'dg-until-label', text: src.raw.count
+                ? `${formatNumberNl(src.raw.count)} ${src.raw.count === 1 ? 'export' : 'exports'} in het archief`
+                : 'Nog geen gegevens' }));
     }
-    return createEl('div', { class: 'dg-data' }, line, dgCoverageBar(src),
-        src.records ? createEl('div', { class: 'dg-records' },
+    // Het aantal staat rechts op de regel van de datum: zo blijft het blok even hoog als bij de andere kaarten
+    line.title = `Gegevens ${line.textContent.replace(/^Tot /, 'tot en met ')}`;
+    const head = createEl('div', { class: 'dg-data-head' }, line,
+        src.records ? createEl('span', { class: 'dg-records' },
             createEl('span', { class: 'mono', text: formatNumberNl(src.records) }),
-            ` ${src.records === 1 ? src.record_label[0] : src.record_label[1]}`) : null,
-        dgAccountList(src));
+            ` ${src.records === 1 ? src.record_label[0] : src.record_label[1]}`) : null);
+    const bar = dgCoverageBar(src);
+    return createEl('div', { class: `dg-data${bar ? '' : ' is-empty'}` }, head, bar, dgAccountList(src));
 }
 
 // Per account (twee Instagram-accounts): tot wanneer het loopt, en of het nog actief is
@@ -468,19 +473,15 @@ function dgToggleHelp(id) {
     dgRender();
 }
 
+// Eén korte regel; de volledige uitleg (welke servers) staat in de tooltip
 function dgFooter(src) {
     const net = src.network;
-    const parts = [createEl('span', { class: 'dg-net' },
+    const parts = [net.local ? 'Alleen lokaal' : 'Online als jij klikt'];
+    if (!net.local && net.last_contact) parts.push(`contact ${dgTime(net.last_contact)}`);
+    if (src.schedule.available && src.schedule.enabled) parts.push(`schema elke ${src.schedule.minutes} min`);
+    return createEl('footer', { class: 'dg-card-foot', title: net.label },
         createEl('i', { class: `fas ${net.local ? 'fa-laptop' : 'fa-globe'}`, 'aria-hidden': 'true' }),
-        createEl('span', { text: net.label }))];
-    if (!net.local && net.last_contact) {
-        parts.push(createEl('span', { class: 'dg-net-last', text: `Laatste contact ${dgTime(net.last_contact)}` }));
-    }
-    if (src.schedule.available) {
-        parts.push(createEl('span', { class: 'dg-net-last', text: src.schedule.enabled
-            ? `Schema aan: elke ${src.schedule.minutes} minuten` : 'Schema uit' }));
-    }
-    return createEl('footer', { class: 'dg-card-foot' }, ...parts);
+        createEl('span', { class: 'dg-net', text: parts.join(' · ') }));
 }
 
 // ==================== ACTIES ====================

@@ -11837,12 +11837,13 @@ button.storage-file-thumb:hover .storage-file-play {
     color: var(--text-tertiary);
 }
 
-/* 400px: room for the longest main button, 'Meer' and the two icon buttons on one line */
+/* 400px: room for the longest main button, 'Meer' and the two icon buttons on one line.
+   Cards in a row stretch to the same height; the blocks inside reserve fixed room, so cards match across rows too. */
 .dg-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
     gap: var(--space-lg);
-    align-items: start;
+    align-items: stretch;
 }
 
 .skeleton-grid.dg-skeleton {
@@ -11926,24 +11927,55 @@ button.storage-file-thumb:hover .storage-file-play {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    min-height: calc(var(--fs-xs) * var(--lh-snug) * 2);
 }
 
 .dg-status {
     flex: none;
 }
 
+/* Reserves the height of a filled block (date line, bar, years), so an empty block is just as tall.
+   In a card stretched by its neighbour the block takes the extra room, so the text stays with the buttons. */
 .dg-data {
+    flex: 1 0 auto;
     display: flex;
     flex-direction: column;
+    justify-content: center;
     gap: var(--space-xs);
+    min-height: calc(var(--space-md) * 2 + var(--fs-sm) * var(--lh-normal) + var(--space-xs) * 3
+        + var(--dg-bar-h) + var(--fs-2xs) * var(--lh-normal));
     padding: var(--space-md);
     border-radius: var(--radius-md);
     background: var(--surface-sunken);
+    --dg-bar-h: 8px;
+}
+
+.dg-data-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-md);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
 }
 
 .dg-until {
-    font-size: var(--fs-sm);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-secondary);
+}
+
+.dg-data.is-empty .dg-until {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    color: var(--text-tertiary);
+}
+
+.dg-empty-icon {
+    font-size: var(--icon-sm);
 }
 
 .dg-until-date {
@@ -11952,8 +11984,10 @@ button.storage-file-thumb:hover .storage-file-play {
 }
 
 .dg-records {
+    flex: none;
     font-size: var(--fs-xs);
     color: var(--text-tertiary);
+    white-space: nowrap;
 }
 
 /* Per account (twee Instagram-accounts), onder het aantal in het datablok */
@@ -12006,7 +12040,7 @@ button.storage-file-thumb:hover .storage-file-play {
 
 .dg-coverage {
     position: relative;
-    height: 8px;
+    height: var(--dg-bar-h);
     border-radius: var(--radius-full);
     background: var(--surface-active);
     overflow: hidden;
@@ -12031,6 +12065,7 @@ button.storage-file-thumb:hover .storage-file-play {
     justify-content: space-between;
     gap: var(--space-sm);
     font-size: var(--fs-2xs);
+    line-height: var(--lh-normal);
     color: var(--text-tertiary);
 }
 
@@ -12063,10 +12098,16 @@ button.storage-file-thumb:hover .storage-file-play {
     box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
+/* At most two lines (the full sentence is in the tooltip); always two lines of room, so the buttons line up */
 .dg-next {
-    color: var(--text-primary);
+    color: var(--text-secondary);
     font-size: var(--fs-sm);
     line-height: var(--lh-normal);
+    min-height: calc(var(--fs-sm) * var(--lh-normal) * 2);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 .dg-note {
@@ -12115,12 +12156,13 @@ button.storage-file-thumb:hover .storage-file-play {
 
 /* ---------- Knoppen ---------- */
 
+/* Pushed to the bottom: in a stretched card the buttons line up with the neighbours */
 .dg-actions {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-sm);
-    margin-top: var(--space-xs);
+    margin-top: auto;
 }
 
 .dg-actions-spacer {
@@ -12232,8 +12274,8 @@ button.storage-file-thumb:hover .storage-file-play {
 
 .dg-card-foot {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs) var(--space-md);
+    align-items: center;
+    gap: var(--space-sm);
     padding-top: var(--space-md);
     border-top: 1px solid var(--border-hairline);
     font-size: var(--fs-xs);
@@ -12241,17 +12283,16 @@ button.storage-file-thumb:hover .storage-file-play {
     line-height: var(--lh-snug);
 }
 
-.dg-net {
-    display: flex;
-    gap: var(--space-sm);
-    align-items: flex-start;
-    flex-basis: 100%;
-    color: var(--text-secondary);
+.dg-card-foot i {
+    flex: none;
+    font-size: var(--icon-xs);
 }
 
-.dg-net i {
-    margin-top: 2px;
-    color: var(--text-tertiary);
+.dg-net {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ---------- Vensters ---------- */

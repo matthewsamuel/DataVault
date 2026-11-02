@@ -72,7 +72,9 @@ def _date(ts: Optional[float]) -> Optional[str]:
 
 
 def _expected(lo: int, hi: int) -> str:
-    """'meestal binnen 2 dagen' or 'meestal binnen 1 tot 5 dagen'."""
+    """'meestal binnen 2 dagen' or 'meestal binnen 1 tot 5 dagen' (a same-day export: 'binnen een dag')."""
+    if hi <= 0:
+        return "meestal binnen een dag"
     return f"meestal binnen {_days(hi)}" if lo <= 0 or lo == hi else f"meestal binnen {lo} tot {_days(hi)}"
 
 
@@ -225,8 +227,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         # next update simply needs the helper again (the same steps, under Bijwerken)
         primary = "access"
         access = {**access, "title": "Bijwerken met de hulp"}
-        step = (f"Ingelezen tot {_date(cov.last)} met de hulp. DataVault mag {name} zelf niet lezen, dus voor "
-                f"nieuwe {connector.record_label[1]} start je de hulp opnieuw: Bijwerken toont de stappen.")
+        step = (f"Ingelezen tot {_date(cov.last)} met de hulp; voor nieuwe {connector.record_label[1]} start je de "
+                "hulp opnieuw met Bijwerken.")
     elif blocked and not request:
         primary = "access"
         step = (f"{access['title']}: {name} leest een database op deze Mac die macOS beschermt. "
@@ -260,18 +262,16 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
             step = "Je gegevens zijn bij. Bijwerken haalt de nieuwste op."
         else:
             step = "Klik op Bijwerken om de nieuwste gegevens op te halen."
-        if st["schedule_enabled"]:
-            step += f" Het schema doet dat elke {st['schedule_minutes'] or connector.schedule_minutes} minuten."
     elif request and connector.has("export_watch"):
         primary = "find_downloads"
         days = int((now - request["requested_at"]) // 86400)
         lo, hi = request_kind.expected_days if request_kind else (1, 30)
         ago = "vandaag" if days == 0 else f"{_days(days)} geleden"
-        step = (f"Export aangevraagd ({ago}); {_expected(lo, hi)} klaar. DataVault kijkt elke 30 seconden "
-                f"in Downloads en leest hem dan vanzelf in.")
+        # Short: the card has room for two lines (the watching itself is in the help)
+        step = f"Export aangevraagd {ago}; {_expected(lo, hi)} klaar en daarna vanzelf ingelezen."
     elif not cov.records and not raws and connector.has("export_request"):
         primary = "request_export"
-        step = f"Nog geen gegevens. Vraag een export aan: {name} maakt hem voor je klaar, DataVault leest hem in."
+        step = f"Vraag een export aan; {name} maakt hem klaar en DataVault leest hem in."
     elif local and not api and access is None:
         # Not on this Mac (or not readable): a copy picked by hand still works when the source can import
         primary = "upload" if connector.has("import") else "sync"
@@ -291,8 +291,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     elif connector.has("export_request"):
         primary = "request_export"
         last = _date(cov.last) or _date(max((r["received_at"] for r in raws), default=None))
-        step = (f"Je laatste gegevens zijn van {last}. Vraag een nieuwe export aan om bij te werken." if last
-                else "Vraag een export aan om bij te werken.")
+        # The date itself is in the data block right above
+        step = "Vraag een nieuwe export aan om bij te werken." if last else "Vraag een export aan om bij te werken."
     else:
         primary = "upload"
         step = "Kies een exportbestand om in te lezen."
