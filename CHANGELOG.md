@@ -9,6 +9,12 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Afronding: wat nog bleef liggen
+- **Welke is mooier? met een album als bereik.** Bovenin staat nu een collectiekiezer met de hele bibliotheek, je shows en je slimme albums. Druk op `c` (ook op de ranglijst), typ een paar letters en kies met Enter: het duel gaat meteen verder met foto's uit dat album, en de ranglijst, de voortgang en "Als album" gaan dan over dat album. `Esc` sluit alleen de kiezer.
+- De laatst gekozen collectie onthoudt de app voor de volgende keer. Bestaat een album niet meer, dan ga je vanzelf terug naar de hele bibliotheek, met een korte melding.
+- Een geopend album in Albums heeft een knop **Welke is mooier?** die het duel op dat album opent.
+- Een groot album is net zo vlot als een map: bij 10.000 foto's komt het volgende paar in 36 ms (was 86 ms) en is een keuze in 24 ms opgeslagen (was 76 ms).
+
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
 - Een foto groeit vanuit zijn miniatuur in de viewer en krimpt bij het sluiten terug naar zijn plek in het raster.
