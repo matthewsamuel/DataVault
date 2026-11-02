@@ -110,7 +110,17 @@ def test_places_are_found_offline_in_dutch_and_english():
     assert places.find("Parijs").kind == "city"
     assert places.find("nederland").contains(52.37, 4.89)
     assert not places.find("Nederland").contains(50.85, 4.35)    # Brussels
-    assert places.find("Atlantis") is None
+    assert places.find("Atlantis") is not None and places.find("Nergenshuizen") is None   # Atlantis is a town in South Africa
+
+
+def test_places_also_know_provinces_and_smaller_towns():
+    toscane = places.find("Toscane")
+    assert toscane.kind == "region" and toscane.contains(43.77, 11.25) and not toscane.contains(44.49, 11.34)  # Florence, not Bologna
+    assert places.find("gelderland").contains(52.21, 5.97)                                              # Apeldoorn
+    limburg = places.find("Limburg")            # the Dutch and the Belgian province together
+    assert limburg.contains(50.85, 5.69) and limburg.contains(50.93, 5.33) and not limburg.contains(51.44, 5.47)
+    assert places.find("Olhao").kind == "city" and places.find("Olhão").contains(37.03, -7.84)
+    assert places.find("Groningen").kind == "city"     # a big town wins over the province of the same name
 
 
 def test_photos_at_a_place_use_the_gps_of_the_index(indexed, fake_ollama):
@@ -121,9 +131,14 @@ def test_photos_at_a_place_use_the_gps_of_the_index(indexed, fake_ollama):
     assert all("strand 001" not in i["path"] for i in fr.get("result", {}).get("items", []))
     none = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Japan"}))
     assert "Geen foto" in none["error"]
+    # Under the answer: where in the country, from the offline place names
+    assert nl["lines"] == ["Amsterdam: 1 foto"] if nl["total"] == 1 else nl["lines"][0].startswith("Amsterdam: ")
+    holland = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Noord-Holland"}))["result"]
+    assert holland["title"].startswith("1 foto's in Noord-Holland") or "in Noord-Holland" in holland["title"]
+    assert any(i["path"].endswith("strand 001.jpg") for i in holland["items"])
     paris = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "parijs"}))
     assert paris["error"] == "Geen foto's met een locatie in Parijs."      # the user's word, not 'Paris'
-    unknown = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Atlantis"}))
+    unknown = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Nergenshuizen"}))
     assert "niet" in unknown["error"]
 
 

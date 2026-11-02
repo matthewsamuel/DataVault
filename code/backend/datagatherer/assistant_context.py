@@ -14,6 +14,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
+from backend import places as places_nl
 from backend.datagatherer import activity_store, export_kit, registry, timezones
 
 MONTHS = {
@@ -90,7 +91,7 @@ def lines(db, question: str, as_data, today: Optional[date] = None) -> List[str]
                 f"ORDER BY ts_ms", (*location_allowed, start, end)).fetchall()
         places = []
         for s, e, lat, lon, name, address in visits:
-            where = name or address or timezones.country_at(lat, lon) or "onbekende plek"
+            where = name or address or places_nl.describe(lat, lon) or "onbekende plek"
             places.append(f"{_hm(max(s, start))}-{_hm(min(e, end - 1))} {where} ({lat:.3f}, {lon:.3f})")
         if places:
             out.append(f"Locatiegeschiedenis {label} (plekken met tijd, coördinaten): {as_data(places, MAX_PLACES, 160)}")

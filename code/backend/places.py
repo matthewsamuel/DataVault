@@ -112,7 +112,7 @@ def _in_ring(lat: float, lon: float, ring) -> bool:
 
 
 class Place:
-    """An area: kind 'city' or 'country', its name, and a bounding box [south, west, north, east]."""
+    """An area: kind 'city', 'region' (a province) or 'country', its name, and a bounding box [south, west, north, east]."""
 
     def __init__(self, kind: str, name: str, bbox: List[float], polygons=None):
         self.kind, self.name, self.bbox, self.polygons = kind, name, bbox, polygons
@@ -150,11 +150,46 @@ def find(name: str) -> Optional[Place]:
             if best is None or capital:
                 best = (pname, lat, lon)
     if best is None:
-        return None
+        return _find_detail(key)
     pname, lat, lon = best
-    dlat = CITY_RADIUS_KM / 111.0
-    dlon = CITY_RADIUS_KM / (111.0 * max(0.2, math.cos(math.radians(lat))))
-    return Place("city", pname, [lat - dlat, lon - dlon, lat + dlat, lon + dlon])
+    return _city_place(pname, lat, lon, CITY_RADIUS_KM)
+
+
+def _city_place(name: str, lat: float, lon: float, radius_km: float) -> Place:
+    dlat = radius_km / 111.0
+    dlon = radius_km / (111.0 * max(0.2, math.cos(math.radians(lat))))
+    return Place("city", name, [lat - dlat, lon - dlon, lat + dlat, lon + dlon])
+
+
+# Region names people use for a province with another name in the data
+REGION_ALIASES = {"algarve": "faro"}
+BIG_TOWN = 100.0        # thousands: a town this big wins over a province of the same name (Groningen, Utrecht)
+
+
+def _find_detail(key: str) -> Optional[Place]:
+    """A smaller town ('Faro', 15,000+ inhabitants) or a province or region as on the Kaart ('Toscane',
+    'Gelderland'). Provinces of the same name in several countries count together (Limburg)."""
+    d = _load_detail()
+    key = REGION_ALIASES.get(key, key)
+    town = None
+    for i, tname in enumerate(d["town_names"]):
+        if fold(tname) == key and (town is None or d["town_pop"][i] > d["town_pop"][town]):
+            town = i
+    regions = [(code, name, shapes) for code, name, shapes in d["provinces"] if fold(name) == key]
+    if town is not None and (d["town_pop"][town] >= BIG_TOWN or not regions):
+        pop = float(d["town_pop"][town])
+        lon, lat = (float(v) for v in d["town_xy"][town])
+        return _city_place(d["town_names"][town], lat, lon, CITY_RADIUS_KM if pop >= 300 else 15.0 if pop >= BIG_TOWN else 10.0)
+    if not regions:
+        return None
+    polygons = []
+    for _code, _name, shapes in regions:
+        for part in shapes:
+            rings = [ring.tolist() for ring in part]
+            polygons.append((rings, _ring_bbox(rings[0])))
+    boxes = [b for _, b in polygons]
+    bbox = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+    return Place("region", regions[0][1], bbox, polygons)
 
 
 # Dutch display names for countries and cities that have a Dutch spelling (the aliases above

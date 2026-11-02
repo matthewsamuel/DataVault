@@ -415,7 +415,7 @@ def tool_on_this_day(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
             "link": {"view": "otd", "month": today.month, "day": today.day, "label": "Foto op deze dag openen"}}
 
 
-def _gps_rows(ctx: Context, place: places.Place, year: Optional[int]) -> Tuple[List[int], bool]:
+def _gps_rows(ctx: Context, place: places.Place, year: Optional[int]) -> Tuple[List[Tuple[int, float, float]], bool]:
     base: Dict[str, Any] = {"kind": ["photo", "video"]}
     if year:
         base["year"] = year
@@ -425,25 +425,60 @@ def _gps_rows(ctx: Context, place: places.Place, year: Optional[int]) -> Tuple[L
         rows = conn.execute(f"SELECT m.id, m.lat, m.lon FROM media m WHERE {where} ORDER BY m.taken DESC LIMIT ?",
                             (*args, SCAN_MAX + 1)).fetchall()
     capped = len(rows) > SCAN_MAX
-    return [r[0] for r in rows[:SCAN_MAX] if place.contains(r[1], r[2])], capped
+    return [(r[0], r[1], r[2]) for r in rows[:SCAN_MAX] if place.contains(r[1], r[2])], capped
+
+
+PLACE_LINES = 5           # the most common places under a place answer
+PLACE_SAMPLE = 400        # positions named for those lines (about a millisecond each)
+NEAR_TOWN_KM = 15.0       # closer than this to a town counts as 'that town' in those lines
+
+
+def _place_lines(found: List[Tuple[int, float, float]], said: str) -> List[str]:
+    """'Lissabon: 12 foto's' for the places within the answer, from places.describe_parts (a sample
+    of PLACE_SAMPLE when there are more photos; the counts are then scaled and marked with ~)."""
+    step = max(1, len(found) // PLACE_SAMPLE)
+    counts: Dict[str, int] = {}
+    for _id, lat, lon in found[::step]:
+        parts = places.describe_parts(lat, lon)
+        if not parts:
+            continue
+        if parts["town"] and (parts["km"] or 0) <= NEAR_TOWN_KM:
+            name = parts["town"]
+        elif parts["sea"]:
+            name = "op zee" if not parts["country"] else f"voor de kust van {parts['region'] or parts['country']}"
+        else:
+            name = parts["region"] or parts["country"]
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    if len(counts) < 2 and all(places.fold(n) == places.fold(said) for n in counts):
+        return []               # only the place that was asked about: nothing to add
+    ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:PLACE_LINES]
+    about = "~" if step > 1 else ""
+    lines = []
+    for name, n in ranked:
+        count = n * step
+        noun = "foto" if count == 1 else "foto's"
+        lines.append(f"{name[:1].upper() + name[1:]}: {about}{count} {noun}")
+    return lines
 
 
 def tool_photos_at_place(ctx: Context, a: Dict[str, Any]) -> Dict[str, Any]:
     _need_library(ctx.db)
     place = places.find(a["place"])
     if place is None:
-        raise ToolError(f"Ik ken de plaats \"{a['place']}\" niet. Probeer een land of een grotere stad.")
+        raise ToolError(f"Ik ken de plaats \"{a['place']}\" niet. Probeer een land, een provincie of een stad.")
     said = a["place"][:1].upper() + a["place"][1:]      # the user's own spelling ('Parijs', not 'Paris')
-    ids, capped = _gps_rows(ctx, place, a.get("year"))
+    found, capped = _gps_rows(ctx, place, a.get("year"))
+    ids = [f[0] for f in found]
     if not ids:
         with ctx.db._connect() as conn:
             anywhere = conn.execute("SELECT COUNT(*) FROM media WHERE lat IS NOT NULL AND missing = 0").fetchone()[0]
         if not anywhere:
             raise ToolError("Er zijn nog geen foto's met een locatie in je bibliotheek; zonder GPS kan ik geen plaats vinden.")
         raise ToolError(f"Geen foto's met een locatie in {said}.")
-    where = "in" if place.kind == "country" else "bij"
+    where = "bij" if place.kind == "city" else "in"
     return {"title": f"{len(ids)}{'+' if capped else ''} foto's {where} {said}", "total": len(ids),
-            "items": _items_by_ids(ctx.db, ids[:STRIP_ITEMS]),
+            "items": _items_by_ids(ctx.db, ids[:STRIP_ITEMS]), "lines": _place_lines(found, said),
             "link": {"view": "map", "bounds": place.bbox, "label": "Op de kaart tonen"}}
 
 

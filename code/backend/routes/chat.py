@@ -367,7 +367,7 @@ Tonen en zoeken (voert de app direct uit):
 - selectie uit de bibliotheek: {{"action": "library_filter", "year": 2023, "month": 7, "kind": "photo"|"video", "camera_contains": "iPhone", "folder": "mapnaam", "min_rating": 1050, "has_gps": true, "date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD"}} (alleen wat nodig is)
 - slim album openen: {{"action": "open_smart_album", "name": "albumnaam"}}
 - foto's van deze dag in eerdere jaren: {{"action": "on_this_day"}}
-- foto's bij een stad of land (alleen een echte plaatsnaam): {{"action": "photos_at_place", "place": "Parijs"}}
+- foto's bij een stad, provincie of land (alleen een echte plaatsnaam): {{"action": "photos_at_place", "place": "Parijs"}}
 - reeksen bijna-dezelfde foto's: {{"action": "series_overview"}}
 - stand van achtergrondtaken: {{"action": "job_status"}}; laatste verplaatsingen: {{"action": "recovery_summary"}}
 - op bestandsnaam zoeken: {{"action": "search_photos", "query": "IMG_1234"}}; datum: {{"action": "show_photos", "date": "YYYY-MM-DD"}}
