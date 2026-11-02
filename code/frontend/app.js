@@ -3241,7 +3241,7 @@ function showDnaExplanation() {
         'Daydreamer ☀️': { icon: 'fa-sun', title: 'Dagdromer', key: 'Daydreamer', desc: 'Je luistert het meest tussen 12:00 en 18:00. Muziek houdt je middag op gang.' },
         'Evening Chiller 🌇': { icon: 'fa-cloud-moon', title: 'Avondgenieter', key: 'Evening Chiller', desc: 'Je luistert het meest tussen 18:00 en 23:00. Muziek is je manier om de dag af te sluiten.' },
         'Night Owl 🦉': { icon: 'fa-moon', title: 'Nachtuil', key: 'Night Owl', desc: 'Je luistert het meest tussen 23:00 en 5:00. De nacht is van jou, met muziek als gezelschap.' },
-        'Balanced Listener': { icon: 'fa-headphones', title: 'Evenwichtige luisteraar', key: 'Balanced Listener', desc: 'Je luistert verspreid over de hele dag, zonder één piekmoment.' }
+        'Balanced Listener': { icon: 'fa-headphones', title: 'Evenwichtige luisteraar', key: 'Balanced Listener', desc: 'Er springt (nog) geen dagdeel uit: in deze periode zijn te weinig nummers afgespeeld om een type te kiezen.' }
     };
 
     const info = dnaTypes[currentDna] || dnaTypes['Balanced Listener'];
@@ -3576,6 +3576,34 @@ function closeStorageModal() {
 
 // ==================== GENERIC INSIGHT EXPLANATION ====================
 
+// De lange uitleg bij een inzicht: wat het is, hoe DataVault het uitrekent en wat het voor jou is
+// (uit de laatst getoonde cijfers; spotifyLastStats zet renderSpotifyStats)
+let spotifyLastStats = null;
+
+function spotifyInsightResult(key) {
+    const insights = spotifyLastStats && spotifyLastStats.new_insights;
+    if (!insights) return null;
+    if (key === 'record_day') {
+        const day = insights.record_day;
+        return day ? `Op ${formatDateNl(day.date)} luisterde je ${formatNumberNl(day.hours, 1)} uur.` : null;
+    }
+    if (key === 'top_binge') {
+        const binge = insights.top_binge;
+        return binge ? `${binge.track} van ${binge.artist}: ${binge.count} keer achter elkaar.`
+            : 'In deze periode draaide je geen nummer twee keer direct na elkaar.';
+    }
+    if (key === 'mainstream_score' && insights.mainstream_score) {
+        return `${spotifyLabel(insights.mainstream_score)}: de top 5% van je artiesten is goed voor ${insights.mainstream_percent}% van je luistertijd.`;
+    }
+    if (key === 'seasonal_mood' && insights.seasonal_mood) {
+        const mood = String(insights.seasonal_mood);
+        if (mood.startsWith('Winter')) return 'Jij bent een winterluisteraar: in de winter luister je duidelijk meer.';
+        if (mood.startsWith('Summer')) return 'Jij bent een zomerluisteraar: in de zomer luister je duidelijk meer.';
+        return 'Jij luistert het hele jaar door ongeveer even veel.';
+    }
+    return null;
+}
+
 function showInsightExplanation(insightKey) {
     const modal = document.getElementById('modal-insight-explanation');
 
@@ -3583,22 +3611,28 @@ function showInsightExplanation(insightKey) {
         'record_day': {
             icon: 'fa-trophy',
             title: 'Recorddag',
-            desc: 'De ene dag waarop je het allerlangst naar muziek luisterde.'
+            desc: 'De dag waarop je het langst naar muziek luisterde, in de periode die bovenaan gekozen is.',
+            how: 'DataVault telt per kalenderdag de speeltijd op van alles wat je afspeelde, ook van nummers die je oversloeg, en kiest de dag met de meeste uren.',
         },
         'top_binge': {
             icon: 'fa-repeat',
             title: 'Langste reeks',
-            desc: 'Het nummer dat je het vaakst direct achter elkaar draaide, zonder iets anders ertussen.'
+            desc: 'Het nummer dat je het vaakst direct na elkaar draaide, zonder een ander nummer ertussen.',
+            how: 'Een reeks begint opnieuw zodra er een ander nummer speelt. Eén keer afspelen is nog geen reeks; het nummer moet minstens twee keer achter elkaar komen.',
         },
         'mainstream_score': {
             icon: 'fa-chart-line',
-            title: 'Ontdekker of vaste favorieten',
-            desc: 'Gaat meer dan 75% van je luistertijd naar een handvol topartiesten, dan heb je vaste favorieten. Is het breed verspreid, dan ben je een brede ontdekker.'
+            title: 'Vaste favorieten of brede ontdekker',
+            desc: 'Hoe je luistertijd over je artiesten verdeeld is: vooral steeds dezelfde, of juist veel verschillende.',
+            how: 'DataVault neemt de 5% artiesten naar wie je het langst luisterde en kijkt welk deel van je luistertijd naar hen ging. '
+                + 'Meer dan 75%: vaste favorieten. Minder dan 40%: brede ontdekker. Daartussen: evenwichtige luisteraar.',
         },
         'seasonal_mood': {
             icon: 'fa-cloud-sun',
             title: 'Seizoensstemming',
-            desc: 'Of je in de wintermaanden of juist in de zomermaanden duidelijk meer luistert, op basis van je luistertijd per maand.'
+            desc: 'Of je in de winter of juist in de zomer duidelijk meer muziek luistert.',
+            how: 'DataVault vergelijkt het aantal afgespeelde nummers in december, januari en februari met dat in juni, juli en augustus. '
+                + 'Is het ene seizoen minstens anderhalf keer zo groot, dan ben je een winter- of zomerluisteraar; anders luister je het hele jaar door.',
         }
     };
 
@@ -3608,10 +3642,18 @@ function showInsightExplanation(insightKey) {
     const iconEl = document.getElementById('insight-modal-icon');
     const titleEl = document.getElementById('insight-modal-title');
     const descEl = document.getElementById('insight-modal-description');
+    const howEl = document.getElementById('insight-modal-how');
+    const resultEl = document.getElementById('insight-modal-result');
 
     if (iconEl) iconEl.replaceChildren(createEl('i', { class: `fas ${info.icon}` }));
     if (titleEl) titleEl.textContent = info.title;
     if (descEl) descEl.textContent = info.desc;
+    if (howEl) howEl.textContent = info.how;
+    if (resultEl) {
+        const result = spotifyInsightResult(insightKey);
+        resultEl.hidden = !result;
+        resultEl.textContent = result || '';
+    }
 
     if (modal) modal.classList.add('active');
 }
@@ -4309,6 +4351,7 @@ function stopSpotifyClock() {
 }
 
 function renderSpotifyStats(data) {
+    spotifyLastStats = data;
     // 1. Stats Cards
     updateText('stat-minutes', data.total_minutes.toLocaleString('nl-NL'));
     updateText('stat-top-artist', data.top_artists.length > 0 ? data.top_artists[0].name : '-');

@@ -6337,7 +6337,55 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     color: var(--text-secondary);
     font-size: var(--fs-base);
     line-height: var(--lh-normal);
+    max-width: 400px;
+}
+
+/* Wat het voor jou is: een rustig vlak in de Spotify-kleur */
+.insight-modal-result {
+    max-width: 400px;
+    margin-top: var(--space-xs);
+    padding: var(--space-sm) var(--space-lg);
+    border-radius: var(--radius-md);
+    background: var(--spotify-subtle);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    line-height: var(--lh-snug);
+}
+
+.insight-modal-result[hidden] {
+    display: none;
+}
+
+/* Hoe het berekend wordt: kleiner, links uitgelijnd, onder een haarlijn */
+.insight-modal-how-box {
+    max-width: 400px;
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-hairline);
+    text-align: left;
+}
+
+.insight-modal-how-title {
+    margin: 0 0 var(--space-xs);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+}
+
+.insight-modal-how {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+}
+
+.dna-hero-how {
     max-width: 380px;
+    margin: var(--space-lg) auto 0;
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
 }
 
 /* Kaart die wegvliegt (verplaatst of verwijderd uit een lijst) */
@@ -6382,10 +6430,6 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
 .shows-page {
     padding: var(--space-2xl) var(--page-gutter) var(--space-4xl);
     max-width: var(--page-max);
-    margin: var(--space-lg) auto 0;
-    color: var(--text-secondary);
-    font-size: var(--fs-sm);
-    line-height: var(--lh-normal);
     width: 100%;
     margin: 0 auto;
     color: var(--text-primary);
@@ -13427,50 +13471,6 @@ html[data-motion="rustig"] .elo-trash:hover i {
     margin-top: var(--space-2xs);
 }
 
-.backup-restore {
-    border: 1px solid var(--border-hairline);
-    border-radius: var(--radius-md);
-    background-color: var(--surface-sunken);
-    max-width: 720px;
-}
-
-.backup-restore > summary {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    min-height: var(--control-h);
-    padding: var(--space-sm) var(--space-md);
-    cursor: pointer;
-    list-style: none;
-    font-size: var(--fs-sm);
-    font-weight: var(--fw-medium);
-    color: var(--text-primary);
-    border-radius: var(--radius-md);
-    transition: background-color var(--duration-fast) var(--ease-out);
-}
-
-.backup-restore > summary::-webkit-details-marker {
-    display: none;
-}
-
-.backup-restore > summary:hover {
-    background-color: var(--surface-hover);
-}
-
-/* Het pijltje rechts draait open, zoals een uitklapbaar stuk overal */
-.backup-restore > summary .backup-restore-chevron {
-    margin-left: auto;
-    font-size: var(--icon-xs);
-    transition: transform var(--duration-base) var(--ease-out);
-}
-
-.backup-restore[open] > summary .backup-restore-chevron {
-    transform: rotate(90deg);
-}
-
-.backup-restore > summary:focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: -2px;
 /* ---- Een andere map voor de back-ups (venster, backup-settings.js) ---- */
 
 /* Locatie: het pad (mag afbreken), het label en rechts 'Andere map…' */
@@ -13652,6 +13652,50 @@ html[data-motion="rustig"] .backup-folder-check.is-done .backup-folder-check-ico
     margin-right: auto;
 }
 
+.backup-restore {
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    background-color: var(--surface-sunken);
+    max-width: 720px;
+}
+
+.backup-restore > summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: var(--control-h);
+    padding: var(--space-sm) var(--space-md);
+    cursor: pointer;
+    list-style: none;
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.backup-restore > summary::-webkit-details-marker {
+    display: none;
+}
+
+.backup-restore > summary:hover {
+    background-color: var(--surface-hover);
+}
+
+/* Het pijltje rechts draait open, zoals een uitklapbaar stuk overal */
+.backup-restore > summary .backup-restore-chevron {
+    margin-left: auto;
+    font-size: var(--icon-xs);
+    transition: transform var(--duration-base) var(--ease-out);
+}
+
+.backup-restore[open] > summary .backup-restore-chevron {
+    transform: rotate(90deg);
+}
+
+.backup-restore > summary:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
 }
 
 .backup-restore > summary i {

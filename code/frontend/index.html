@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=88">
+    <link rel="stylesheet" href="style.css?v=90">
     <!-- Beweging: als eerste, zodat html[data-motion] klopt vóór de eerste weergave (docs/MOTION.md) -->
     <script src="motion.js?v=2"></script>
 </head>
@@ -1406,6 +1406,8 @@
                         <div id="dna-modal-icon" class="dna-big-icon" aria-hidden="true"></div>
                         <h3 id="dna-modal-title" class="dna-hero-title"></h3>
                         <p id="dna-modal-description" class="dna-hero-desc"></p>
+                        <p class="dna-hero-how">Je type is het dagdeel waarin je de meeste nummers afspeelde, op de tijd van je
+                            export. Kies rechts een type om te lezen wat het betekent.</p>
                     </div>
                 </div>
 
@@ -1461,6 +1463,11 @@
                 <div id="insight-modal-icon" class="insight-modal-icon" aria-hidden="true"><i class="fas fa-circle-info"></i></div>
                 <h3 id="insight-modal-title" class="insight-modal-title">Uitleg</h3>
                 <p id="insight-modal-description" class="insight-modal-text"></p>
+                <p id="insight-modal-result" class="insight-modal-result" hidden></p>
+                <div class="insight-modal-how-box">
+                    <h4 class="insight-modal-how-title">Zo rekent DataVault</h4>
+                    <p id="insight-modal-how" class="insight-modal-how"></p>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeInsightModal()">Sluiten</button>
@@ -1677,7 +1684,7 @@
     <script src="media-motion.js?v=3"></script>
     <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
     <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
-    <script src="app.js?v=84"></script>
+    <script src="app.js?v=85"></script>
     <script src="nav-more.js?v=1"></script>
     <script src="undo-toast.js?v=1"></script>
     <script src="pasha-tools.js?v=3"></script>
