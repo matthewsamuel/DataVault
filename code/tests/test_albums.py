@@ -15,6 +15,7 @@ from backend import library_filters
 from backend.database import Database
 from fixtures.vault_builder import PORTRAIT, STRAND, _photo
 from test_media_index import _index
+from helpers import kept_rows
 
 
 def _files(vault: Path):
@@ -79,7 +80,7 @@ def test_migration_20_and_21_add_smart_albums_and_keep_every_user_row(tmp_path, 
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 21
         assert {r[0] for r in conn.execute("SELECT version FROM schema_version")} >= {20, 21}
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         assert {r[1] for r in conn.execute("PRAGMA table_info(smart_albums)")} == {
             "id", "name", "filters", "sort", "icon", "builtin", "hidden", "position", "created_at", "updated_at"}
         # The migration adds no rows (the default albums come from the app, once)

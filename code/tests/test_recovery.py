@@ -9,6 +9,7 @@ import time
 import pytest
 
 from backend.database import Database
+from helpers import kept_rows
 
 INBOX = "RAW/inbox"
 
@@ -316,7 +317,7 @@ def test_migration_12_adds_recovery_tables_and_keeps_every_user_row(tmp_path, mo
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 12
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         assert {r[1] for r in conn.execute("PRAGMA table_info(recovery_actions)")} == {
             "id", "kind", "title", "folder", "details", "created_at"}
         assert {r[1] for r in conn.execute("PRAGMA table_info(recovery_moves)")} == {

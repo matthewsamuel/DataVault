@@ -877,15 +877,27 @@ function renderDuplicateRuns(runs) {
             : (run.timestamp || '?');
         let count = `${run.remaining} bestand${run.remaining === 1 ? '' : 'en'}`;
         if (run.remaining !== run.total_files) count += ` (van ${run.total_files})`;
-        const gone = run.remaining - run.restorable;
-        const note = run.restorable === 0
-            ? 'staat niet meer in RAW_DUPLICATES'
-            : gone > 0 ? `${gone} staan niet meer in RAW_DUPLICATES` : '';
-        return createEl('div', { class: 'dup-run' },
+        // changed: nog in RAW_DUPLICATES, maar sinds het opruimen veranderd of vervangen (blijft staan)
+        const changed = run.changed || 0;
+        const gone = run.remaining - run.restorable - changed;
+        const parts = [];
+        if (changed > 0) {
+            parts.push(changed === run.remaining
+                ? 'veranderd of vervangen sinds het opruimen; blijft staan'
+                : `${changed} veranderd of vervangen; ${changed === 1 ? 'blijft' : 'blijven'} staan`);
+        }
+        if (gone > 0) {
+            parts.push(gone === run.remaining ? 'staat niet meer in RAW_DUPLICATES' : `${gone} staan niet meer in RAW_DUPLICATES`);
+        }
+        const note = parts.join(' · ');
+        return createEl('div', { class: 'dup-run' + (changed > 0 ? ' has-changed' : '') },
             createEl('span', { class: 'dup-run-time', text: when }),
             createEl('span', { class: 'dup-run-count', text: count }),
             createEl('span', { class: 'dup-run-folder', text: run.folder ? displayPath(run.folder, 60) : '', title: run.folder || '' }),
-            createEl('span', { class: 'dup-run-note', text: note }),
+            createEl('span', { class: 'dup-run-note',
+                title: changed > 0 ? 'Deze bestanden worden niet teruggezet. Het Herstelcentrum toont per bestand de reden.' : undefined },
+                changed > 0 ? createEl('i', { class: 'fas fa-triangle-exclamation', 'aria-hidden': 'true' }) : null,
+                note),
             createEl('button', {
                 class: 'btn btn-secondary btn-small',
                 disabled: run.restorable === 0,
@@ -915,9 +927,17 @@ async function undoDuplicateRun(run, button) {
         const beside = (data.files || []).filter(f => f.restored_path !== f.src_path).length;
         let message = `${data.restored} bestand${data.restored === 1 ? '' : 'en'} teruggezet.`;
         if (beside) message += ` ${beside} kwam${beside === 1 ? '' : 'en'} naast een bestaand bestand (_RESTORED_).`;
+        const changed = (data.changed || []).length;
+        if (changed) {
+            message += ` ${changed} bestand${changed === 1 ? ' is' : 'en zijn'} niet teruggezet: `
+                + `veranderd of vervangen sinds het opruimen (${data.changed[0].dst_path.split('/').pop()}`
+                + `${changed > 1 ? ', …' : ''}). ${changed === 1 ? 'Het blijft' : 'Ze blijven'} in RAW_DUPLICATES; `
+                + 'het Herstelcentrum toont de reden.';
+        }
         if (data.errors && data.errors.length) message += ` ${data.errors.length} fout(en): ${data.errors[0]}`;
-        if (dupState.folder) message += ' Scan opnieuw om ze weer als duplicaat te zien.';
-        showToast('Teruggezet', message, data.errors && data.errors.length ? 'warning' : 'success');
+        if (dupState.folder && data.restored) message += ' Scan opnieuw om ze weer als duplicaat te zien.';
+        const warn = changed || (data.errors && data.errors.length);
+        showToast(data.restored ? 'Teruggezet' : 'Niet teruggezet', message, warn ? 'warning' : 'success');
     } catch (error) {
         toastFetchError('Terugzetten mislukt', error);
     } finally {

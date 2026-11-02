@@ -20,6 +20,7 @@ import pytest
 from backend.datagatherer import (base, cards, daemon, keychain, launchd, net, raw_store, registry, state)
 from backend.datagatherer.base import Connector, ExportKind, HelpOption
 from fake_services import FakeSpotify, extended_play, write_export_zip
+from helpers import kept_rows
 
 
 # ---------- registry ----------
@@ -634,7 +635,7 @@ def test_migrations_60_61_add_tables_and_keep_every_user_row(tmp_path, monkeypat
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 61
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
         assert {"dg_connectors", "dg_raw_imports", "dg_cursors", "dg_requests", "dg_network_log",
                 "spotify_plays", "spotify_api_plays", "spotify_plays_merged"} <= names

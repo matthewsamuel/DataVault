@@ -10,6 +10,7 @@ from PIL import Image
 
 from backend import jobs, scanner
 from backend.database import Database
+from helpers import kept_rows
 
 
 def _start(client, job_type, **params):
@@ -88,7 +89,7 @@ def test_migration_8_adds_jobs_and_keeps_every_user_row(tmp_path, monkeypatch):
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 8
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
         assert {"id", "type", "params", "status", "processed", "total", "checkpoint", "summary"} <= columns
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'idx_delops_run'").fetchone()

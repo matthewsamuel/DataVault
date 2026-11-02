@@ -11,6 +11,7 @@ import pytest
 
 from backend.database import Database
 from backend.routes import chat
+from helpers import kept_rows
 
 
 def _events(client, **body):
@@ -130,7 +131,7 @@ def test_migration_10_adds_settings_and_keeps_every_user_row(tmp_path, monkeypat
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 10
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         assert {r[1] for r in conn.execute("PRAGMA table_info(app_settings)")} == {"key", "value", "updated_at"}
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert len(list((tmp_path / migrations.BACKUP_DIR_NAME).glob("datavault-v9-*.db"))) == 1

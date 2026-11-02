@@ -538,12 +538,15 @@ class Database:
         }
 
     def record_delete_operation(
-        self, run_id: Optional[str], src_path: Path, dst_path: Path, folder: Optional[str] = None
+        self, run_id: Optional[str], src_path: Path, dst_path: Path, folder: Optional[str] = None,
+        dst_ino: Optional[int] = None, dst_size: Optional[int] = None,
     ) -> str:
         """
         Record one moved file. Without a run_id (or with one that no longer exists,
         e.g. because it was undone in the meantime) a new run is started in the same
         transaction. Returns the run_id the file was recorded under.
+        dst_ino and dst_size identify the moved file at dst_path (migration 171): the
+        undo only moves it back while they still match.
         """
         with self._connect() as conn:
             exists = run_id is not None and conn.execute(
@@ -557,8 +560,9 @@ class Database:
                     (run_id, datetime.now().isoformat(sep=" "), time.time(), folder),
                 )
             conn.execute(
-                "INSERT INTO delete_operations (run_id, src_path, dst_path, timestamp) VALUES (?, ?, ?, ?)",
-                (run_id, str(src_path), str(dst_path), datetime.now().isoformat(sep=" ")),
+                "INSERT INTO delete_operations (run_id, src_path, dst_path, timestamp, dst_ino, dst_size) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (run_id, str(src_path), str(dst_path), datetime.now().isoformat(sep=" "), dst_ino, dst_size),
             )
             conn.execute(
                 "UPDATE delete_runs SET total_files = total_files + 1 WHERE run_id = ?", (run_id,)
@@ -577,18 +581,18 @@ class Database:
             ).fetchone()
         return self._run_row(row) if row else None
     
-    def get_delete_operations(self, run_id: str, after_id: int = 0, limit: Optional[int] = None) -> List[Dict[str, str]]:
+    def get_delete_operations(self, run_id: str, after_id: int = 0, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get the operations of a delete run (all, or a page: id > after_id, at most limit)"""
         with self._connect() as conn:
             results = conn.execute("""
-                SELECT id, src_path, dst_path
+                SELECT id, src_path, dst_path, dst_ino, dst_size
                 FROM delete_operations
                 WHERE run_id = ? AND id > ?
                 ORDER BY id
                 LIMIT ?
             """, (run_id, after_id, -1 if limit is None else limit)).fetchall()
         return [
-            {"id": row[0], "src_path": row[1], "dst_path": row[2]}
+            {"id": row[0], "src_path": row[1], "dst_path": row[2], "dst_ino": row[3], "dst_size": row[4]}
             for row in results
         ]
     

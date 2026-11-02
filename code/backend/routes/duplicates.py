@@ -329,10 +329,20 @@ def _forget_hashes(*paths: Path) -> None:
             pass
 
 
+def _dst_fingerprint(dst_path: Path) -> Tuple[Optional[int], Optional[int]]:
+    """Inode and size of the file that was just moved (a rename keeps both)."""
+    try:
+        st = os.lstat(dst_path)
+    except OSError:
+        return None, None
+    return st.st_ino, st.st_size
+
+
 def _record_or_move_back(run_id: Optional[str], src_path: Path, dst_path: Path, folder: Optional[str]) -> str:
     """Record the move for undo; if that fails, put the file back so nothing is untracked."""
+    ino, size = _dst_fingerprint(dst_path)
     try:
-        return db.record_delete_operation(run_id, src_path, dst_path, folder)
+        return db.record_delete_operation(run_id, src_path, dst_path, folder, dst_ino=ino, dst_size=size)
     except Exception as e:
         try:
             move_no_overwrite(dst_path, src_path, suffix_prefix="RESTORED")
@@ -498,16 +508,49 @@ def _paths_allowed(op: Dict[str, Any]) -> bool:
     )
 
 
+def moved_file_state(op: Dict[str, Any], st: Any = False) -> str:
+    """
+    Is the file this operation moved still in RAW_DUPLICATES, unchanged?
+    'ok', 'missing' (gone, or no longer a regular file), 'other' (another file has its
+    name: the inode differs) or 'changed' (the same file, but its size changed).
+    Operations recorded before migration 171 have no inode and size: for them only
+    'ok' or 'missing' (the checks those runs always had).
+    st: dst_path's lstat when the caller already has it (None: it does not exist).
+    """
+    if st is False:
+        try:
+            st = os.lstat(op["dst_path"])
+        except (OSError, ValueError):
+            st = None
+    if st is None or not stat.S_ISREG(st.st_mode):
+        return "missing"
+    ino, size = op.get("dst_ino"), op.get("dst_size")
+    if ino is None or size is None:
+        return "ok"
+    if st.st_ino != ino:
+        return "other"
+    if st.st_size != size:
+        return "changed"
+    return "ok"
+
+
 def _still_there(op: Dict[str, Any]) -> bool:
-    """The moved file is still a regular file at its RAW_DUPLICATES location."""
-    try:
-        return stat.S_ISREG(os.lstat(op["dst_path"]).st_mode)
-    except OSError:
-        return False
+    """The moved file is still a regular file at its RAW_DUPLICATES location, and (when the
+    run recorded it) still the same file with the same size."""
+    return moved_file_state(op) == "ok"
 
 
 def _restorable(op: Dict[str, Any]) -> bool:
     return _paths_allowed(op) and _still_there(op)
+
+
+# Why a file that is still in RAW_DUPLICATES does not go back (Dutch, for the screen)
+def changed_reason(state: str, name: str) -> str:
+    if state == "other":
+        return (f"In RAW_DUPLICATES staat nu een ander bestand met de naam {name}; "
+                "het wordt niet teruggezet")
+    return (f"{name} is in RAW_DUPLICATES veranderd sinds het daar kwam (andere grootte); "
+            "het wordt niet teruggezet")
 
 
 def _restore_ops(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -521,6 +564,7 @@ def _restore_ops(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
     skipped = 0
     errors = []
     files = []
+    changed = []  # still in RAW_DUPLICATES, but changed or swapped since the move: left alone
 
     for op in operations:
         # src_path is the ORIGINAL location, dst_path is where it went (in RAW_DUPLICATES).
@@ -532,7 +576,14 @@ def _restore_ops(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
             skipped += 1
             continue
 
-        if not _still_there(op):
+        state = moved_file_state(op)
+        if state == "missing":
+            skipped += 1
+            continue
+        if state != "ok":
+            # Stays recorded (and listed with its reason in the Herstelcentrum)
+            changed.append({"src_path": str(src_path), "dst_path": str(dst_path), "state": state,
+                            "reason": changed_reason(state, dst_path.name)})
             skipped += 1
             continue
 
@@ -560,7 +611,14 @@ def _restore_ops(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         restored += 1
         files.append({"src_path": str(src_path), "restored_path": str(restored_path)})
 
-    return {"restored": restored, "skipped": skipped, "errors": errors, "files": files}
+    return {"restored": restored, "skipped": skipped, "errors": errors, "files": files, "changed": changed}
+
+
+def _nothing_to_restore(operations: List[Dict[str, Any]]) -> str:
+    if any(moved_file_state(op) in ("other", "changed") for op in operations):
+        return ("Niets terug te zetten: de bestanden in RAW_DUPLICATES zijn veranderd of vervangen "
+                "sinds het opruimen. Er is niets verplaatst")
+    return "Niets meer terug te zetten: de bestanden staan niet meer in RAW_DUPLICATES"
 
 
 @router.post("/api/raw_duplicates/undo_last")
@@ -603,13 +661,16 @@ def list_delete_runs(limit: int = RUNS_TO_LIST) -> Dict[str, Any]:
     """
     The most recent cleanup actions that can still be undone, newest first:
     {runs: [{run_id, seq, created_at, timestamp, folder, total_files, remaining, restorable}]}.
-    restorable counts the files that are still in RAW_DUPLICATES.
+    restorable counts the files that are still in RAW_DUPLICATES, unchanged; changed counts
+    the files that are still there but were changed or swapped since (they stay where they are).
     """
     _require_config()
     limit = max(1, min(int(limit), 100))
     runs = db.get_delete_runs(limit=limit)
     for run in runs:
-        run["restorable"] = sum(1 for op in db.get_delete_operations(run["run_id"]) if _still_there(op))
+        states = [moved_file_state(op) for op in db.get_delete_operations(run["run_id"])]
+        run["restorable"] = states.count("ok")
+        run["changed"] = states.count("other") + states.count("changed")
     return {"runs": runs}
 
 
@@ -631,10 +692,7 @@ def undo_delete_run(body: Any = Body(...)) -> Dict[str, Any]:
             raise HTTPException(status_code=404, detail="Deze actie bestaat niet (meer) of is al teruggezet")
         operations = db.get_delete_operations(run_id)
         if not any(_restorable(op) for op in operations):
-            raise HTTPException(
-                status_code=410,
-                detail="Niets meer terug te zetten: de bestanden staan niet meer in RAW_DUPLICATES"
-            )
+            raise HTTPException(status_code=410, detail=_nothing_to_restore(operations))
         outcome = _restore_ops(operations)
         run = db.get_delete_run(run_id)
 

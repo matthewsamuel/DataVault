@@ -23,6 +23,7 @@ from backend.datagatherer.formats import imessage_db, meta_dyi, whatsapp_txt
 from fake_messages import (APPLE_EPOCH, T0, WHATSAPP_TXT, fb_thread, instagram_export, make_chat_db,
                            make_chatstorage, meta_export, mojibake, secure_storage, tiny_jpeg, typedstream,
                            whatsapp_zip)
+from helpers import kept_rows
 
 BRUSSELS = ZoneInfo("Europe/Brussels")
 ME = "Matthias Voorbeeld"
@@ -135,7 +136,7 @@ def test_migrations_90_91_add_tables_and_keep_every_user_row(tmp_path, monkeypat
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 91
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
         assert {"msg_conversations", "msg_messages", "msg_fts", "social_items"} <= names
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

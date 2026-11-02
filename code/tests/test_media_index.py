@@ -34,7 +34,7 @@ def test_migration_11_adds_media_index_and_keeps_every_user_row(tmp_path, monkey
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 11
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         media_columns = {r[1] for r in conn.execute("PRAGMA table_info(media)")}
         assert {"id", "path", "folder", "name", "kind", "ext", "size", "mtime_ns", "inode", "birthtime",
                 "taken", "taken_source", "width", "height", "orientation", "camera_make", "camera_model",
@@ -675,7 +675,7 @@ def test_the_auto_indexer_runs_on_start_and_when_the_vault_returns(config_file, 
 
 from datetime import datetime  # noqa: E402
 
-from helpers import timeline_files  # noqa: E402
+from helpers import kept_rows, timeline_files  # noqa: E402
 from test_exclusions import DAY, planted  # noqa: E402,F401
 
 

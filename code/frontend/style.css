@@ -4357,6 +4357,11 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     color: var(--warning-text);
 }
 
+.dup-run-note .fas {
+    margin-right: var(--space-xs);
+    font-size: var(--icon-xs);
+}
+
 /* ---- Cijfers van de scan ---- */
 
 .status-grid {

@@ -131,6 +131,7 @@ def state_reason(state: str, name: str, place: str) -> Optional[str]:
     return {
         "missing": f"{name} staat niet meer in {place}",
         "other": f"In {place} staat nu een ander bestand met de naam {name}",
+        "changed": f"{name} is in {place} veranderd sinds het daar kwam (andere grootte); het wordt niet teruggezet",
         "unknown": "Oudere actie: niet te controleren of het nog hetzelfde bestand is; zet het zo nodig met de hand terug",
         "occupied": f"Op de oorspronkelijke plek staat al een bestand {name}; er wordt niets overschreven",
         "refused": "Dit pad ligt buiten het archief; er wordt niets teruggezet",
@@ -160,7 +161,7 @@ def file_entry(src: str, dst: str, state: str, place: str) -> Dict[str, Any]:
         "name": name,
         "state": state,
         "restorable": state in ("ok", "beside"),
-        "reason": state_reason(state, Path(dst).name if state in ("missing", "other") else name, place),
+        "reason": state_reason(state, Path(dst).name if state in ("missing", "other", "changed") else name, place),
     }
 
 

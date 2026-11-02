@@ -218,7 +218,9 @@ async function recoveryUndo(entry, button) {
             body: JSON.stringify(entry.undo.body),
         });
         const restored = typeof data.restored === 'number' ? data.restored : 1;
-        const skipped = (data.skipped || []).length + ((data.errors || []).length);
+        // Keurer en Herstelcentrum: skipped is een lijst; duplicaten: een getal (fouten zitten daar al in)
+        const skipped = typeof data.skipped === 'number' ? data.skipped
+            : (data.skipped || []).length + ((data.errors || []).length);
         let message = `${restored} bestand${restored === 1 ? '' : 'en'} teruggezet.`;
         if (skipped) message += ` ${skipped} kon${skipped === 1 ? '' : 'den'} niet terug; de reden staat in het Herstelcentrum.`;
         showToast('Teruggezet', message, skipped ? 'warning' : 'success');

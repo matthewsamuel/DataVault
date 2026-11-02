@@ -18,7 +18,7 @@ from PIL import Image
 from backend import media_dates
 from backend.database import Database
 from fixtures.vault_builder import _exif, PORTRAIT
-from helpers import timeline_files
+from helpers import timeline_files, kept_rows
 
 
 def _photo(path, exif_dt=None, file_ts=None, color=(90, 90, 90)):
@@ -230,7 +230,7 @@ def test_migration_9_adds_the_date_cache_and_keeps_every_user_row(tmp_path, monk
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 9
         for table, rows in before.items():
-            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+            assert kept_rows(conn, table, rows) == rows, table
         columns = {row[1] for row in conn.execute("PRAGMA table_info(media_dates)")}
         assert columns == {"path", "size", "mtime_ns", "taken", "source", "updated_at"}
         assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'idx_media_dates_taken'").fetchone()

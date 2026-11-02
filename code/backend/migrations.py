@@ -1132,6 +1132,22 @@ def _m170_spotify_covers(conn: sqlite3.Connection):
     """)
 
 
+def _m171_delete_ops_fingerprint(conn: sqlite3.Connection):
+    """
+    Remember which file a duplicates run moved: inode number and size of the file at
+    dst_path (in RAW_DUPLICATES), right after the move. A rename keeps the inode, so the
+    undo can tell the moved file apart from one that was changed or swapped in its place
+    since; such a file is not moved back. (st_dev is not stored: it changes when an external
+    disk is mounted again.) NULL for rows written before this migration: those runs keep
+    the checks they always had. Only two new columns; every row stays as it is.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(delete_operations)")}
+    if "dst_ino" not in columns:
+        conn.execute("ALTER TABLE delete_operations ADD COLUMN dst_ino INTEGER")
+    if "dst_size" not in columns:
+        conn.execute("ALTER TABLE delete_operations ADD COLUMN dst_size INTEGER")
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -1169,6 +1185,8 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (161, "elo_state_indexes", _m161_elo_state_indexes),
     # 170-179: Spotify covers on Home
     (170, "spotify_covers", _m170_spotify_covers),
+    # 171: inode and size of files a duplicates run moved (stream p4-safety)
+    (171, "delete_ops_fingerprint", _m171_delete_ops_fingerprint),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

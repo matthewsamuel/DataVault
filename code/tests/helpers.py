@@ -57,3 +57,16 @@ class FakeOllama:
                 return httpx.Response(200, json={"message": {"content": text}, "done": True})
             return httpx.Response(200, content="".join(json.dumps(l) + "\n" for l in lines).encode())
         return httpx.Response(404)
+
+
+def kept_rows(conn, table, before):
+    """
+    The rows of table now, cut to the columns the rows in `before` had. A survival test takes
+    `before` at an older schema; a later migration may append columns (ALTER TABLE ADD COLUMN
+    puts them at the end, e.g. 171 on delete_operations), which must not count as a lost row.
+    """
+    rows = conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+    if before:
+        width = len(before[0])
+        rows = [row[:width] for row in rows]
+    return rows

@@ -441,14 +441,14 @@ def test_migration_7_orders_runs_by_insertion_and_keeps_every_run(tmp_path, monk
             conn.execute("INSERT INTO delete_operations (run_id, src_path, dst_path) VALUES (?, ?, ?)",
                          (run, f"/v/RAW/{run}.jpg", f"/v/RAW_DUPLICATES/{run}.jpg"))
         runs_before = conn.execute("SELECT run_id, timestamp, total_files FROM delete_runs ORDER BY rowid").fetchall()
-        ops_before = conn.execute("SELECT * FROM delete_operations ORDER BY id").fetchall()
+        ops_before = conn.execute("SELECT id, run_id, src_path, dst_path, timestamp FROM delete_operations ORDER BY id").fetchall()
         keurer_before = conn.execute("SELECT * FROM keurer_decisions ORDER BY id").fetchall()
 
     db = Database(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION
         assert conn.execute("SELECT run_id, timestamp, total_files FROM delete_runs ORDER BY seq").fetchall() == runs_before
-        assert conn.execute("SELECT * FROM delete_operations ORDER BY id").fetchall() == ops_before
+        assert conn.execute("SELECT id, run_id, src_path, dst_path, timestamp FROM delete_operations ORDER BY id").fetchall() == ops_before
         assert conn.execute("SELECT * FROM keurer_decisions ORDER BY id").fetchall() == keurer_before
         assert conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'delete_runs'").fetchone()[0] == 4
         created = conn.execute("SELECT created_at FROM delete_runs WHERE run_id = 'run-2'").fetchone()[0]
