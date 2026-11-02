@@ -38,7 +38,11 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 - **Een plaatsnaam bij elke foto.** Een stad wordt alleen genoemd als er binnen 40 km een grotere stad in de
   offline gegevens ligt; op een kust of in de natuur blijft alleen het land over.
 - **Video's naast foto's in Beste uit reeks.** Video's vormen alleen reeksen met video's, op één beeld per video (op
-  1 s). Een ingekorte kopie die bij een ander moment begint, wordt daardoor niet herkend.
+  1 s, of op 10 % of 50 % van de duur als dat beeld vlak is) en alleen bij vrijwel dezelfde lengte. Een ingekorte
+  kopie wordt daardoor niet herkend, en een video die helemaal zwart is doet niet mee.
+- **Een groot beeld van een mkv of avi in Groot bekijken.** Een video die de browser niet afspeelt, toont alleen
+  zijn miniatuur (300 px) en blijft daarom passend op 100%; een groter beeld zou een extra ffmpeg-cache vragen.
+  De miniatuur van een video die zwart begint, is ook nog zwart (de miniatuur blijft op 1 s).
 - **Automatisch reeksen zoeken na elke index.** Dat zou veel processorgebruik geven zonder dat je erom vraagt.
 - **Paren bij 100.000 sterk scheve hashes nog sneller.** Nu 6 tot 7 s (was 12 tot 24 s) in het slechtste geval
   van de benchmark (`scripts/bench_near_pairs.py`); verder vraagt het gecompileerde code.

@@ -845,6 +845,18 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
   de verkleinde versie uit WhatsApp) staan nu ook als reeks klaar. Elke tegel toont een afspeelteken
   met de duur, en in Groot bekijken speel je de video meteen af. Video's komen alleen in een reeks
   met andere video's, en de video van een Live Photo blijft bij zijn foto. Hiervoor is ffmpeg nodig.
+  Twee verschillende video's die allebei met een zwart beeld of een fade-in beginnen, worden niet
+  meer voor kopieën aangezien: dan vergelijkt de app een later beeld, en video's van een duidelijk
+  andere lengte komen nooit samen in een reeks. Video's die helemaal zwart zijn, blijven erbuiten.
+  Valt de schijf weg terwijl een video wordt gelezen, dan probeert de volgende vergelijking hem
+  gewoon opnieuw.
+- **Video's groot bekijken.** Groot bekijken toont nu het echte beeld van elke video op zijn eigen
+  grootte, zodat je op 100% ziet welke kopie zachter is. Een spelende video blijft passend in beeld
+  met al zijn knoppen, zonder zwarte flits bij het starten. Met k of spatie speel je af of pauzeer
+  je, met ← en → spring je 5 seconden, en Esc zet de video stil zonder het venster te sluiten. Een
+  formaat dat de browser niet afspeelt (zoals mkv) krijgt een filmstrook in plaats van een
+  afspeelteken en de zichtbare regel 'Afspelen kan niet in de browser'. Teksten bij video-reeksen
+  zeggen nu 'video' in plaats van 'foto'.
 
 ## Fase 2 – Stabiliseren
 
