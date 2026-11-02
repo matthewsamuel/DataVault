@@ -28,15 +28,16 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 - **Koude eerste zoekopdracht onder 2 seconden.** Dat lukt met modelbestanden in het OS-geheugen (1,4 s); direct na
   opstarten of van een drukke externe schijf kan het 10 tot 20 s duren. Het model wordt voorgeladen zodra het zoekveld
   focus krijgt.
-- **Landnamen op de offline kaart.** Landen tonen een tooltip; labels vragen botsingsberekening, en middelpunten van
-  samengestelde landen (Frankrijk) staan op de verkeerde plek. Provincies ontbreken ook.
-- **Een plaatsnaam bij elke foto.** Een stad wordt alleen genoemd als er binnen 40 km een grotere stad in de
-  offline gegevens ligt; op een kust of in de natuur blijft alleen het land over.
 - **Video's in Beste uit reeks.** Per video een frame halen kost een ffmpeg-proces; de scan slaat video's over.
 - **Automatisch reeksen zoeken na elke index.** Dat zou veel processorgebruik geven zonder dat je erom vraagt.
 - **Sneller zoeken naar paren bij 100.000 scheve hashes.** 7 tot 10 s in het slechtste geval; het geheugen is wel begrensd.
 - **Videodata voor avi, mkv en mts, en RAW-miniaturen met echte camerabestanden.** Alleen de QuickTime-familie wordt
   gelezen; RAW via `sips` is getest met een nagebootste fout, niet met echte RAW. *Goede volgende stap met echte bestanden.*
+- **Namen van zeeën bij een foto op het water.** Een foto op zee heet "Voor de kust van Zeeland, Nederland" of
+  "Op zee, 80 km uit de kust van Portugal", niet "Noordzee" of "Middellandse Zee": de vlakken van de zeeën (Natural
+  Earth marine polys) zitten niet in de offline kaartdata. *Kan later met een extra bestand van ongeveer 1 MB.*
+- **Het land over de datumgrens heen.** De offline kaart tekent elk land één keer; wie voorbij 180 graden schuift
+  (Japan naar de Stille Oceaan), ziet daar lege zee en geen namen, tot de kaart terugspringt.
 
 ## Assistent (Pasha)
 

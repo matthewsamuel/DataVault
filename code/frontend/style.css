@@ -249,6 +249,7 @@
     --map-land-hover: #292c30;
     --map-border: #3a3d42;
     --map-label: #9a9da4;
+    --map-label-country: #c8cbd1;   /* landnamen: een tree sterker dan provincies en steden */
     --map-tile-filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.7);
     --skeleton-base: #1e1f22;
     --skeleton-highlight: #2a2b2f;
@@ -331,6 +332,7 @@
     --map-land-hover: #f0f2f0;
     --map-border: #c3c9d0;
     --map-label: #5b616b;
+    --map-label-country: #383d45;
     --map-tile-filter: none;
     --skeleton-base: #ececef;
     --skeleton-highlight: #f6f6f7;
@@ -411,6 +413,7 @@
         --map-land-hover: #f0f2f0;
         --map-border: #c3c9d0;
         --map-label: #5b616b;
+        --map-label-country: #383d45;
         --map-tile-filter: none;
         --skeleton-base: #ececef;
         --skeleton-highlight: #f6f6f7;
@@ -14042,11 +14045,52 @@ html[data-motion="rustig"] .elo-trash:hover i {
     letter-spacing: 0.02em;
     text-shadow: 0 0 3px var(--map-land), 0 0 3px var(--map-land), 0 0 6px var(--map-land);
     white-space: nowrap;
-    opacity: 0.85;
 }
 
+/* Landnamen: midden op het grootste deel van het land, iets sterker dan provincies (de hiërarchie op de
+   kaart: land, provincie, stad). Lange namen breken over twee regels (map.js). */
+.map-country-label {
+    display: block;
+    width: max-content;
+    transform: translate(-50%, -50%);
+    color: var(--map-label-country);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    line-height: var(--lh-tight);
+    letter-spacing: -0.01em;
+    text-align: center;
+    text-shadow: 0 0 3px var(--map-land), 0 0 3px var(--map-land), 0 0 6px var(--map-land);
+    white-space: nowrap;
+}
+
+.map-country-label-line {
+    display: block;
+}
+
+.map-country-label.is-selected {
+    color: var(--accent-text);
+}
+
+/* Namen die erbij komen, vloeien in: de belangrijkste eerst (landen, dan hoofdsteden, provincies,
+   steden), elk een stap later. Wat moet wijken, vervaagt versnellend en is pas daarna weg. */
 .map-label-new {
-    animation: dv-fade-in var(--duration-slow) var(--ease-out);
+    animation: dv-label-in var(--dur-4) var(--ease-out) backwards;
+    animation-delay: calc(min(var(--label-i, 0), var(--stagger-max)) * var(--stagger-step));
+}
+
+/* Zonder eind-keyframe: een naam eindigt op zijn eigen dekking */
+@keyframes dv-label-in {
+    from { opacity: 0; }
+}
+
+.map-place,
+.map-region,
+.map-country-label {
+    transition: opacity var(--dur-3) var(--ease-exit), color var(--dur-3) var(--ease-standard);
+}
+
+.map-label-leaving {
+    opacity: 0 !important;
 }
 
 .map-country-chip {

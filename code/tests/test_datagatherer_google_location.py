@@ -311,6 +311,7 @@ def test_the_map_shows_estimates_apart_and_the_viewer_can_ask(client, app, vault
     assert mid not in [p[0] for p in client.get("/api/map/points").json()["points"]]
     found = client.get("/api/map/locate", params={"path": path}).json()
     assert found["has_gps"] is False and found["inferred"]["source"] == "tijdlijn"
+    assert found["inferred"]["place"] and found["inferred"]["place_parts"]["label"] == found["inferred"]["place"]
     summary = client.get("/api/location/summary").json()
     assert summary["inferred"] == 1 and summary["points"] == 2
     day = datetime.fromtimestamp(_ms("2019-07-14T08:00:00+00:00") / 1000).strftime("%Y-%m-%d")

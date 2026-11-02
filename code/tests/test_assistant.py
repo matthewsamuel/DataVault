@@ -110,7 +110,82 @@ def test_places_are_found_offline_in_dutch_and_english():
     assert places.find("Parijs").kind == "city"
     assert places.find("nederland").contains(52.37, 4.89)
     assert not places.find("Nederland").contains(50.85, 4.35)    # Brussels
-    assert places.find("Atlantis") is None
+    assert places.find("Atlantis") is not None and places.find("Nergenshuizen") is None   # Atlantis is a town in South Africa
+
+
+def test_places_also_know_provinces_and_smaller_towns():
+    toscane = places.find("Toscane")
+    assert toscane.kind == "region" and toscane.contains(43.77, 11.25) and not toscane.contains(44.49, 11.34)  # Florence, not Bologna
+    assert places.find("gelderland").contains(52.21, 5.97)                                              # Apeldoorn
+    limburg = places.find("Limburg")            # the Dutch and the Belgian province together
+    assert limburg.contains(50.85, 5.69) and limburg.contains(50.93, 5.33) and not limburg.contains(51.44, 5.47)
+    assert places.find("Olhao").kind == "city" and places.find("Olhão").contains(37.03, -7.84)
+    assert places.find("Groningen").kind == "city"     # a big town wins over the province of the same name
+
+
+def test_a_name_that_is_a_place_here_and_abroad_means_the_one_here():
+    """Population alone does not decide: Middelburg is in Zeeland, not in South Africa; Bali is the Indonesian
+    province, not a town in India; Florida in Uruguay is not part of the American state."""
+    middelburg = places.find("Middelburg")
+    assert middelburg.kind == "city" and middelburg.contains(51.50, 3.61)
+    assert places.find("Ede").contains(52.04, 5.66)
+    assert places.find("Soest").contains(52.17, 5.30) and places.find("Harlingen").contains(53.17, 5.42)
+    bali = places.find("Bali")
+    assert bali.kind == "region" and bali.contains(-8.65, 115.22)                      # Denpasar
+    assert places.find("Holland").name == "Netherlands"
+    florida = places.find("Florida")
+    assert florida.contains(28.5, -81.4) and florida.bbox[0] > 20                       # Orlando; not down to Uruguay
+    lagos = places.candidates("Lagos")
+    assert {p.code for p in lagos} >= {"NGA", "PRT"}
+    assert places.find("Limburg").contains(50.85, 5.69) and places.find("Limburg").contains(50.93, 5.33)
+    # A city is a circle: a town in the corner of its box is not 'bij Amsterdam'
+    amsterdam = places.find("Amsterdam")
+    assert amsterdam.contains(52.37, 4.89) and not amsterdam.contains(52.13, 5.07)        # Maarssen, 27 km
+
+
+def _put_first_photo_at(config, lat, lon):
+    import sqlite3
+    with sqlite3.connect(str(config.DB_PATH)) as conn:
+        conn.execute("UPDATE media SET lat = ?, lon = ? WHERE ROWID = (SELECT MIN(ROWID) FROM media WHERE lat IS NOT NULL)",
+                     (lat, lon))
+
+
+def test_pasha_finds_the_place_where_the_photos_are(indexed, fake_ollama, config):
+    _put_first_photo_at(config, 37.10, -8.67)                   # Lagos in the Algarve, not Lagos in Nigeria
+    lagos = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Lagos"}))["result"]
+    assert lagos["total"] == 1 and lagos["title"] == "1 foto bij Lagos"
+    s, w, n, e = lagos["link"]["bounds"]
+    assert s < 37.10 < n and w < -8.67 < e
+    _put_first_photo_at(config, 51.4988, 3.6136)                # Middelburg, Zeeland
+    mid = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Middelburg"}))["result"]
+    assert mid["total"] == 1 and mid["lines"] == []
+    _put_first_photo_at(config, -8.65, 115.22)                  # Denpasar
+    bali = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Bali"}))["result"]
+    assert bali["title"] == "1 foto in Bali" and bali["lines"] == ["Denpasar: 1 foto"]
+
+
+def test_a_city_answer_counts_the_city_itself_first(indexed, fake_ollama, config):
+    import sqlite3
+    with sqlite3.connect(str(config.DB_PATH)) as conn:
+        ids = [r[0] for r in conn.execute("SELECT ROWID FROM media ORDER BY ROWID LIMIT 4")]
+        spots = [(52.373, 4.893), (52.36, 4.88), (52.52, 5.07), (52.13, 5.07)]     # Amsterdam twice, Volendam, Maarssen
+        for rowid, (lat, lon) in zip(ids, spots):
+            conn.execute("UPDATE media SET lat = ?, lon = ?, missing = 0 WHERE ROWID = ?", (lat, lon, rowid))
+        conn.execute("UPDATE media SET lat = NULL, lon = NULL WHERE ROWID NOT IN (%s)" % ",".join("?" * len(ids)), ids)
+    ams = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Amsterdam"}))["result"]
+    assert ams["title"] == "3 foto's bij Amsterdam"                     # Maarssen (27 km) is not
+    assert ams["lines"] == ["Amsterdam: 2 foto's", "Volendam: 1 foto"]
+
+
+def test_place_lines_name_at_most_a_sample(monkeypatch):
+    calls = []
+    monkeypatch.setattr(places, "describe_parts", lambda lat, lon: calls.append(1) or {
+        "town": "Faro", "km": 1.0, "sea": False, "region": "Faro", "country": "Portugal"})
+    lines = assistant._place_lines([(i, 37.0, -7.9) for i in range(799)], "Portugal")
+    assert len(calls) <= assistant.PLACE_SAMPLE and lines == ["Faro: ~800 foto's"]
+    monkeypatch.setattr(places, "describe_parts", lambda lat, lon: {
+        "town": None, "km": None, "sea": True, "region": "Zuid-Egeïsche Eilanden", "country": "Griekenland"})
+    assert assistant._place_lines([(1, 36.5, 25.4)], "Griekenland") == ["Voor de kust van de Zuid-Egeïsche Eilanden: 1 foto"]
 
 
 def test_photos_at_a_place_use_the_gps_of_the_index(indexed, fake_ollama):
@@ -121,9 +196,14 @@ def test_photos_at_a_place_use_the_gps_of_the_index(indexed, fake_ollama):
     assert all("strand 001" not in i["path"] for i in fr.get("result", {}).get("items", []))
     none = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Japan"}))
     assert "Geen foto" in none["error"]
+    # Under the answer: where in the country, from the offline place names
+    assert nl["lines"] == ["Amsterdam: 1 foto"] if nl["total"] == 1 else nl["lines"][0].startswith("Amsterdam: ")
+    holland = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Noord-Holland"}))["result"]
+    assert holland["title"].startswith("1 foto's in Noord-Holland") or "in Noord-Holland" in holland["title"]
+    assert any(i["path"].endswith("strand 001.jpg") for i in holland["items"])
     paris = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "parijs"}))
     assert paris["error"] == "Geen foto's met een locatie in Parijs."      # the user's word, not 'Paris'
-    unknown = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Atlantis"}))
+    unknown = _tool(_say(indexed, fake_ollama, {"action": "photos_at_place", "place": "Nergenshuizen"}))
     assert "niet" in unknown["error"]
 
 

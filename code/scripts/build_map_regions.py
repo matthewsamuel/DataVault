@@ -8,23 +8,30 @@ Bronnen (eenmalig downloaden in een werkmap, niet in de repo):
 
 Uitvoer:
   - countries-50m.geojson: landen met n (Nederlandse naam), e (de Engelse Natural Earth-naam, alleen
-    als die anders is) en a (ADM0_A3), coördinaten op 2 decimalen.
+    als die anders is), a (ADM0_A3), l (het punt voor de landnaam: de pool van ontoegankelijkheid van
+    het grootste deel, in Mercator zoals de kaart, dus Frankrijk zonder Frans-Guyana), z (vanaf welk
+    zoomniveau Natural Earth de naam toont) en k (LABELRANK, lager = belangrijker); coördinaten op 2 decimalen.
   - regions/<A3>.json per land: de grenzen tussen provincies (lijnen, zonder de buitengrens),
     plekken voor de provincienamen en de grote steden.
     De kaart laadt zo'n bestand pas als het land aangeduid wordt of in beeld is bij ver inzoomen.
+  - ../../../backend/data/places_detail.json (alleen voor de server, backend/places.describe): de
+    provincies als vlakken (met hun soort: provincie, staat, regio, ...), de kustlijn en de plaatsen vanaf 15.000 inwoners, voor 'een plaatsnaam
+    bij elke foto' ('12 km ten oosten van Faro, Portugal'). Coördinaten als gehele getallen in
+    duizendsten van een graad, per ring het eerste punt en daarna de verschillen.
 
-Gebruik: python3 scripts/build_map_regions.py <werkmap-met-bronnen> [uitvoermap]
+Gebruik: python3 scripts/build_map_regions.py <werkmap-met-bronnen> [uitvoermap] [map-voor-places_detail.json]
 Vereist shapely (systeem-python3 heeft het; de venv van de app niet, en heeft het ook niet nodig).
 """
 
 import json
 import math
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-from shapely.geometry import mapping, shape
-from shapely.ops import linemerge, unary_union
+from shapely.geometry import Point, Polygon, mapping, shape
+from shapely.ops import linemerge, polylabel, unary_union
 
 # Landen met heel veel kleine eenheden: samenvoegen tot de regio's die mensen kennen
 DISSOLVE = {'FRA': 'region', 'ITA': 'region', 'GBR': 'geonunit', 'SVN': 'region', 'LVA': 'region',
@@ -36,11 +43,25 @@ REGION_NL = {
     'Trentino-Alto Adige': 'Trentino-Zuid-Tirol', 'Corse': 'Corsica', 'Guyane française': 'Frans-Guyana',
     'England': 'Engeland', 'Scotland': 'Schotland', 'Northern Ireland': 'Noord-Ierland',
 }
-PROVINCE_NL = {('BEL', 'Brussels'): 'Brussel', ('FRA', 'Nord'): 'Nord'}
+PROVINCE_NL = {('BEL', 'Brussels'): 'Brussel', ('FRA', 'Nord'): 'Nord',
+               # Natural Earth vertaalt de Deense hoofdstadregio letterlijk ('Hoofdstad'); Nederlands gebruikt de Deense naam
+               ('DNK', 'Hovedstaden'): 'Hovedstaden', ('DNK', 'Sjaælland'): 'Seeland',
+               # één spelling voor de stad en haar regio, zoals de kaart de stad noemt
+               ('MAR', 'Marrakech - Tensift - Al Haouz'): 'Marrakesh-Tensift-Al Haouz'}
+# Zweedse län: de naam zonder 'län' (Natural Earth's Nederlandse naam is 'Stockholms län')
+RAW_NAME = {'SWE'}
+RAW_FIX = {('SWE', 'Orebro'): 'Örebro'}
+# Wat voor gebied het is, voor 'provincie Gelderland' bij een foto (alleen de gewone soorten)
+KIND_NL = {'Province': 'provincie', 'State': 'staat', 'Region': 'regio', 'District': 'district', 'County': 'graafschap',
+           'Department': 'departement', 'Canton': 'kanton', 'Prefecture': 'prefectuur', 'Voivodeship|Province': 'woiwodschap'}
+KIND_BY_COUNTRY = {'ESP': 'provincie', 'DEU': 'deelstaat', 'AUT': 'deelstaat', 'FRA': 'regio', 'ITA': 'regio', 'GBR': ''}
+# Een fylke (Noorwegen) en een län (Zweden) heten in het Nederlands provincie, geen graafschap
+KIND_COUNTY = {'NOR': 'provincie', 'SWE': 'provincie'}
 CITY_NL = {
     'Brussels': 'Brussel', 'Antwerp': 'Antwerpen', 'Ghent': 'Gent', 'Bruges': 'Brugge', 'Ostend': 'Oostende',
     'Liège': 'Luik', 'Namur': 'Namen', 'Mons': 'Bergen', 'Tournai': 'Doornik', 'Mouscron': 'Moeskroen',
     'Arlon': 'Aarlen', 'Wavre': 'Waver', 'Louvain': 'Leuven', 'Courtrai': 'Kortrijk', 'Malines': 'Mechelen',
+    'Almere Stad': 'Almere',    # GeoNames noemt het centrum zo; iedereen zegt Almere
 }
 SKIP_FCODES = {'PPLX', 'PPLH', 'PPLQ', 'PPLW', 'PPLCH', 'PPLR'}
 CITY_MIN_POP = 50000
@@ -73,10 +94,45 @@ def clean_name(a3, raw, nl):
     if (a3, raw) in PROVINCE_NL:
         return PROVINCE_NL[(a3, raw)]
     name = (nl or raw or '').strip()
-    for prefix in ('Provincie ', 'Province of ', 'Provinz '):
+    for prefix in ('Provincie ', 'Province of ', 'Provinz ', 'Woiwodschap ', 'Changwat ', 'Kraj '):
         if name.startswith(prefix):
             name = name[len(prefix):]
     return REGION_NL.get(name, name)
+
+
+def _merc(lat):
+    lat = max(-85.0, min(85.0, lat))
+    return math.degrees(math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)))
+
+
+def _unmerc(y):
+    return math.degrees(2 * math.atan(math.exp(math.radians(y))) - math.pi / 2)
+
+
+def true_area(g):
+    """Oppervlakte in vierkante graden op de breedte van het vlak zelf (gelijkvlakkig genoeg om te vergelijken)."""
+    return g.area * math.cos(math.radians(g.centroid.y))
+
+
+def label_point(g, preferred=None):
+    """Het punt voor een naam: de pool van ontoegankelijkheid van het grootste deel (naar echte oppervlakte),
+    berekend in Mercator, want zo staat het op de kaart. Een land met overzeese delen krijgt zo zijn naam
+    midden op het moederland. Een met de hand gekozen punt van Natural Earth (preferred) wint als het in
+    dat deel ligt met minstens de helft van de ruimte rondom die de pool heeft (Chili: midden in het land,
+    niet in de brede Atacama)."""
+    main = max(getattr(g, 'geoms', [g]), key=true_area)
+    ring = [(x, _merc(y)) for x, y in main.exterior.coords]
+    holes = [[(x, _merc(y)) for x, y in h.coords] for h in main.interiors]
+    flat = Polygon(ring, holes).buffer(0)
+    if flat.geom_type == 'MultiPolygon':
+        flat = max(flat.geoms, key=lambda x: x.area)
+    span = max(flat.bounds[2] - flat.bounds[0], flat.bounds[3] - flat.bounds[1])
+    pole = polylabel(flat, tolerance=max(0.005, span / 200))
+    if preferred:
+        hand = Point(preferred[0], _merc(preferred[1]))
+        if flat.contains(hand) and flat.boundary.distance(hand) >= 0.5 * flat.boundary.distance(pole):
+            return preferred
+    return (pole.x, _unmerc(pole.y))
 
 
 def build_countries(src, out):
@@ -90,6 +146,11 @@ def build_countries(src, out):
         if props['n'] != p['NAME']:
             props['e'] = p['NAME']      # the English name: Pasha's place search and backend/data/country_zones.json
         props['a'] = a3
+        hand = (p['LABEL_X'], p['LABEL_Y']) if p.get('LABEL_X') is not None else None
+        lx, ly = label_point(shape(f['geometry']).buffer(0), hand)
+        props['l'] = [round(lx, 2), round(ly, 2)]
+        props['z'] = round(float(p.get('MIN_LABEL') or 5), 1)
+        props['k'] = int(p.get('LABELRANK') or 9)
         feats.append({'type': 'Feature', 'properties': props,
                       'geometry': {'type': f['geometry']['type'], 'coordinates': rnd(f['geometry']['coordinates'], 2)}})
         code = p.get('ISO_A2_EH') or p.get('ISO_A2')
@@ -103,6 +164,7 @@ def build_countries(src, out):
 def build_provinces(src):
     data = json.loads((src / 'ne_10m_admin_1_states_provinces.geojson').read_text())
     groups = defaultdict(lambda: defaultdict(list))   # a3 -> naam -> [(geometrie, labelpunt)]
+    kinds = {}                                        # a3 -> naam -> 'provincie', 'staat', ... of ''
     for f in data['features']:
         p = f['properties']
         a3 = p['adm0_a3']
@@ -112,10 +174,13 @@ def build_provinces(src):
             name = clean_name(a3, p[key], None)
             label = None
         else:
-            name = clean_name(a3, p['name'], p.get('name_nl'))
+            raw = RAW_FIX.get((a3, p['name']), p['name'])
+            name = clean_name(a3, raw, None if a3 in RAW_NAME else p.get('name_nl'))
             label = (p['longitude'], p['latitude']) if p.get('longitude') is not None else None
         groups[a3][name].append((g, label))
-    result = {}
+        kind = KIND_COUNTY.get(a3) if p.get('type_en') == 'County' and a3 in KIND_COUNTY else None
+        kinds.setdefault(a3, {})[name] = kind or KIND_BY_COUNTRY.get(a3, KIND_NL.get(p.get('type_en') or '', ''))
+    result, shapes = {}, {}
     for a3, units in groups.items():
         polys = {name: unary_union([g for g, _ in parts]) for name, parts in units.items()}
         whole = unary_union(list(polys.values()))
@@ -129,9 +194,7 @@ def build_provinces(src):
                 at = pts[0]
             else:
                 # het grootste deel van de regio, zodat de naam niet op een eilandje belandt
-                main = max(getattr(g, 'geoms', [g]), key=lambda x: x.area)
-                rp = main.representative_point()
-                at = (rp.x, rp.y)
+                at = label_point(g)
             labels.append([name, round(at[0], 3), round(at[1], 3), round(g.area, 4)])
         borders = None
         if len(polys) > 1:
@@ -144,7 +207,8 @@ def build_provinces(src):
                 borders = geom(inner, digits) if inner.geom_type in ('LineString', 'MultiLineString') else None
         labels.sort(key=lambda x: -x[3])           # grote provincies eerst: die krijgen bij weinig plek voorrang
         result[a3] = {'borders': borders, 'labels': [x[:3] for x in labels]}
-    return result
+        shapes[a3] = {name: (g, kinds[a3].get(name, '')) for name, g in polys.items()}
+    return result, shapes
 
 
 def build_cities(src, iso2):
@@ -191,11 +255,115 @@ def build_cities(src, iso2):
     return result
 
 
+TOWN_MIN_POP = 15000
+TOWN_NEAR_KM = 3          # dichter bij een grotere plaats: een wijk daarvan
+DISTRICT_KM = 25          # zo ver kan een genummerd stadsdeel van zijn stad liggen
+DETAIL_TOL = 0.01          # ~1 km: genoeg om te zeggen in welke provincie en hoe ver van de kust
+DETAIL_SCALE = 1000        # coördinaten in duizendsten van een graad
+ISLAND_MIN = 0.0005        # kleinere eilandjes (vierkante graden, ~6 km2) laat de kustlijn weg
+
+
+def encode(coords):
+    """Een ring of lijn als [x0, y0, dx1, dy1, ...] in duizendsten van een graad."""
+    out, px, py = [], 0, 0
+    for i, (x, y) in enumerate(coords):
+        ix, iy = round(x * DETAIL_SCALE), round(y * DETAIL_SCALE)
+        if i and ix == px and iy == py:
+            continue
+        out += [ix, iy] if i == 0 else [ix - px, iy - py]
+        px, py = ix, iy
+    return out
+
+
+def build_towns(src, iso2, cities):
+    """Plaatsen vanaf TOWN_MIN_POP inwoners per land, met de Nederlandse naam van de kaart waar die er is."""
+    ne_nl = defaultdict(list)
+    for f in json.loads((src / 'ne_10m_populated_places.geojson').read_text())['features']:
+        p = f['properties']
+        if p.get('NAME_NL'):
+            names = {p.get(k) for k in ('NAME', 'NAMEASCII', 'NAME_EN', 'NAMEALT')} - {None, ''}
+            ne_nl[p['ADM0_A3']].append(((p['LONGITUDE'], p['LATITUDE']), names, p['NAME_NL']))
+    towns = defaultdict(list)       # a3 -> [naam, lon, lat, inwoners]
+    with open(src / 'cities15000.txt', encoding='utf-8') as fh:
+        for line in fh:
+            c = line.rstrip('\n').split('\t')
+            fcode, pop = c[7], int(c[14] or 0)
+            a3 = iso2.get(c[8])
+            if not a3 or fcode in SKIP_FCODES or pop < TOWN_MIN_POP:
+                continue
+            at = (float(c[5]), float(c[4]))
+            known = next((k for k in cities.get(a3, []) if km(at, (k[1], k[2])) < 2), None)
+            if known:
+                name = known[0]
+            else:
+                names = {c[1], c[2], *c[3].split(',')}
+                nl = next((n[2] for n in ne_nl.get(a3, []) if n[1] & names and km(at, n[0]) < 15), None)
+                name = CITY_NL.get(c[1], nl or c[1]).removeprefix('District of ')
+            towns[a3].append([name, at[0], at[1], pop])
+    # Hoofdplaatsen die alleen Natural Earth kent (Aarlen), staan al op de kaart: die horen er ook bij
+    for a3, kept in cities.items():
+        for name, lon, lat, _zoom, _cap in kept:
+            if not any(km((lon, lat), (t[1], t[2])) < 2 for t in towns[a3]):
+                towns[a3].append([name, lon, lat, TOWN_MIN_POP])
+    # Een kleinere plaats vlak naast een grotere is een wijk of deelgemeente (Porto de Mós bij Lagos)
+    for a3, rows in towns.items():
+        rows.sort(key=lambda t: -t[3])
+        kept = []
+        for t in rows:
+            if any(km((t[1], t[2]), (k[1], k[2])) < TOWN_NEAR_KM for k in kept):
+                continue
+            # Een genummerd stadsdeel van een grotere stad ('Paris 16 Passy', 'Lyon 03'): die stad, geen eigen plaats
+            if re.search(r' \d{1,2}( |$)', t[0]) and any(k[3] > t[3] and km((t[1], t[2]), (k[1], k[2])) < DISTRICT_KM for k in kept):
+                continue
+            kept.append(t)
+        towns[a3] = kept
+    return towns
+
+
+def build_detail(shapes, towns, path):
+    """backend/data/places_detail.json: provincies, kustlijn en plaatsen voor backend/places.describe."""
+    codes = sorted(set(shapes) | set(towns))
+    index = {a3: i for i, a3 in enumerate(codes)}
+    provinces, wholes = [], []
+    for a3 in sorted(shapes):
+        for name, (g, kind) in shapes[a3].items():
+            parts = []
+            for part in getattr(g, 'geoms', [g]):
+                if true_area(part) < ISLAND_MIN / 20:
+                    continue
+                part = part.simplify(DETAIL_TOL, preserve_topology=True)
+                if part.is_empty or part.geom_type != 'Polygon':
+                    continue
+                parts.append([encode(part.exterior.coords)] + [encode(h.coords) for h in part.interiors])
+            if parts:
+                provinces.append([index[a3], name, parts, kind])
+            wholes.append(g)
+    land = unary_union(wholes)
+    coast = []
+    for part in getattr(land, 'geoms', [land]):
+        if true_area(part) < ISLAND_MIN:
+            continue
+        for ring in [part.exterior, *part.interiors]:
+            line = ring.simplify(DETAIL_TOL)
+            if len(line.coords) >= 2:
+                coast.append(encode(line.coords))
+    town_rows = []
+    for a3 in sorted(towns):
+        for name, lon, lat, pop in sorted(towns[a3], key=lambda t: -t[3]):
+            town_rows.append([name, round(lon * DETAIL_SCALE), round(lat * DETAIL_SCALE),
+                              max(15, round(pop / 1000)), index[a3]])
+    body = json.dumps({'scale': DETAIL_SCALE, 'codes': codes, 'provinces': provinces, 'coast': coast,
+                       'towns': town_rows}, ensure_ascii=False, separators=(',', ':'))
+    path.write_text(body)
+    print(f'{len(provinces)} provincies, {len(coast)} kustlijnen, {len(town_rows)} plaatsen, '
+          f'{len(body) / 1e6:.1f} MB in {path}')
+
+
 def main():
     src = Path(sys.argv[1])
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(__file__).resolve().parent.parent / 'frontend/vendor/naturalearth'
     iso2 = build_countries(src, out)
-    provinces = build_provinces(src)
+    provinces, shapes = build_provinces(src)
     cities = build_cities(src, iso2)
     folder = out / 'regions'
     folder.mkdir(exist_ok=True)
@@ -208,6 +376,8 @@ def main():
         (folder / f'{a3}.json').write_text(body)
         total += len(body)
     print(f'{len(provinces)} landen met provincies, {len(cities)} met steden, {total / 1e6:.1f} MB in {folder}')
+    detail = Path(sys.argv[3]) if len(sys.argv) > 3 else Path(__file__).resolve().parent.parent / 'backend/data'
+    build_detail(shapes, build_towns(src, iso2, cities), detail / 'places_detail.json')
 
 
 if __name__ == '__main__':

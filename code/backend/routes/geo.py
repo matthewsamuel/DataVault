@@ -166,9 +166,11 @@ def items(ids: str = Query(..., description="comma-separated media ids")) -> Dic
 @router.get("/locate")
 def locate(path: str = Query(..., min_length=1)) -> Dict[str, Any]:
     """
-    {has_gps, id?, lat?, lon?, place?, details?} for one file; the path is checked like every
-    path from a request. details has what the viewer shows next to the photo: capture date,
-    pixel size and camera from the index. place is an offline name ('Lissabon, Portugal').
+    {has_gps, id?, lat?, lon?, place?, place_parts?, details?} for one file; the path is checked
+    like every path from a request. details has what the viewer shows next to the photo: capture
+    date, pixel size and camera from the index. place is an offline Dutch name ('Lissabon, Portugal',
+    '12 km ten oosten van Faro, Portugal'); place_parts its pieces (places.describe_parts). An
+    estimated position from the location history gets its place inside 'inferred'.
     """
     from backend.paths import resolve_in_vault
     resolved = str(resolve_in_vault(path, config))
@@ -185,11 +187,15 @@ def locate(path: str = Query(..., min_length=1)) -> Dict[str, Any]:
         from backend.datagatherer import geotag
         estimate = geotag.inferred(db, row[0])
         if estimate:
+            from backend import places
+            parts = places.describe_parts(estimate["lat"], estimate["lon"])
+            estimate = {**estimate, "place": parts and parts["label"], "place_parts": parts}
             return {"has_gps": False, "id": row[0], "inferred": estimate, "details": details}
         return {"has_gps": False, "id": row[0], "details": details}
     from backend import places
-    return {"has_gps": True, "id": row[0], "lat": row[1], "lon": row[2], "place": places.describe(row[1], row[2]),
-            "details": details}
+    parts = places.describe_parts(row[1], row[2])
+    return {"has_gps": True, "id": row[0], "lat": row[1], "lon": row[2], "place": parts and parts["label"],
+            "place_parts": parts, "details": details}
 
 
 @router.get("/settings")

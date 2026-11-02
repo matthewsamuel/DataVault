@@ -332,6 +332,15 @@ Tegels van OpenStreetMap zijn een keuze van de gebruiker (standaard uit, instell
   (stukken van hoogstens 50.000, op id; `next` is de `after` voor het volgende stuk).
 - `GET /api/map/items?ids=1,2,3` (viewer en popups), `GET /api/map/locate?path=`,
   `GET|PUT /api/map/settings {osm_tiles}`.
+- Namen op de offline kaart (`updateLabels` in `map.js`): landen op hun labelpunt (`l` in
+  `countries-50m.geojson`), hoofdsteden, provincies en steden, in die volgorde van voorrang; een naam
+  die over een eerdere zou vallen (gemeten met het echte lettertype) blijft weg. Namen blijven tussen
+  twee verschuivingen staan; nieuwe vloeien in (`.map-label-new`), wijkende vervagen eerst
+  (`.map-label-leaving`, `--dur-3`).
+- Plaatsnaam van een positie: `backend/places.py` `describe(lat, lon)` en `describe_parts` (stad met
+  afstand en richting, provincie, kust, zee; ongeveer 1 ms) uit `backend/data/places_detail.json`
+  (provincies, kustlijn en plaatsen vanaf 15.000 inwoners). `find(naam)` kent landen, steden,
+  provincies en kleinere plaatsen voor Pasha. Alle kaartdata maakt `scripts/build_map_regions.py`.
 
 ### Herstelcentrum
 - Eén lijst (tab **Herstel**, sneltoets 8) van alles wat de app in het archief verplaatste: Keurer

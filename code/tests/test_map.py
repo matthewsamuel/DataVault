@@ -130,6 +130,7 @@ def test_locate_gives_the_position_of_one_file(indexed, config):
     # The viewer's details: an offline place name, the capture date, pixel size and camera
     found = r.json()
     assert found["place"].endswith(", Frankrijk")   # (the nearest larger city in the data)
+    assert found["place_parts"]["country"] == "Frankrijk" and found["place_parts"]["label"] == found["place"]
     assert found["details"]["width"] == 800 and found["details"]["height"] == 600
     assert found["details"]["camera"] == "Canon EOS 80D" and found["details"]["taken_source"] == "exif"
     no_gps = indexed.get("/api/map/locate", params={"path": str(config.VAULT_ROOT / "RAW/2021/🎉 feest/no exif.jpg")}).json()
@@ -142,8 +143,84 @@ def test_describe_names_a_position_in_dutch_offline():
     from backend import places
     assert places.describe(52.37, 4.89) == "Amsterdam, Nederland"
     assert places.describe(41.9, 12.49) == "Rome, Italië"
-    # A harbour just outside the simplified coast line still gets its country
+    assert places.describe(48.858, 2.294) == "Parijs, Frankrijk"           # the Eiffel tower, in the Dutch name
+    # A harbour just outside the simplified coast line still gets its town and country
     assert places.describe(38.72, -9.14) == "Lissabon, Portugal"
-    # Far from any larger city: the country alone; at sea: nothing
-    assert places.describe(68.42, 27.41) == "Finland"
-    assert places.describe(0.0, -30.0) is None
+    assert places.describe(64.5, -17.0) == "Suðurland, IJsland"
+
+
+def test_describe_gives_every_geotagged_photo_a_place():
+    """Not only near a larger city: a town with a distance and direction, the province in the
+    countryside, the coast, the sea; always in Dutch and with the country."""
+    from backend import places
+    # Near a town: distance and compass direction from the town that names the area
+    assert places.describe(37.02, -7.93) == "Faro, Portugal"
+    assert places.describe(37.02, -7.80) == "4 km ten oosten van Olhão, Portugal"
+    assert places.describe(52.15, 5.85) == "11 km ten zuidwesten van Apeldoorn, Nederland"   # the Veluwe
+    # Countryside far from any town: the province, as on the Kaart
+    assert places.describe(68.42, 27.41) == "Lapland, Finland"
+    assert places.describe(37.75, -119.59) == "Californië, Verenigde Staten"               # Yosemite
+    assert places.describe(36.1, -112.1) == "Arizona, Verenigde Staten"                     # the Grand Canyon
+    # On a beach and on the water
+    assert places.describe(52.37, 4.52) == "Zandvoort, Nederland"
+    assert places.describe(53.45, 5.75) == "Aan de kust van Friesland, Nederland"           # Ameland
+    assert places.describe(52.4, 4.3) == "Voor de kust bij Zandvoort, Nederland"
+    assert places.describe(51.80, -10.25) == "Voor de kust van Kerry, Ierland"
+    assert places.describe(42.75, 15.08) == "Op zee, 70 km uit de kust van Italië"
+    assert places.describe(0.0, -30.0) == "Op zee"
+    # 0, 0 is what a broken GPS writes: no place at all
+    assert places.describe(0.0, 0.0) is None
+    parts = places.describe_parts(37.02, -7.80)
+    assert parts["town"] == "Olhão" and parts["direction"] == "oosten" and parts["country"] == "Portugal"
+    assert parts["region"] == "Faro" and parts["region_kind"] == "district" and parts["sea"] is False
+    assert places.describe_parts(52.15, 5.85)["region_kind"] == "provincie"           # the Veluwe, Gelderland
+    assert places.describe_parts(37.75, -119.59)["region_kind"] == "staat"
+    assert places.describe_parts(52.4, 4.3)["sea"] is True and places.describe_parts(52.4, 4.3)["coast"] is True
+
+
+def test_describe_names_downtown_landmarks_by_their_city():
+    """A big city's point is one spot downtown: its landmarks 10-15 km away are still in it, while a suburb with
+    its own centre keeps its name."""
+    from backend import places
+    assert places.describe(25.1972, 55.2744) == "Dubai, Verenigde Arabische Emiraten"     # Burj Khalifa
+    assert places.describe(25.1412, 55.1853) == "Dubai, Verenigde Arabische Emiraten"     # Burj al Arab
+    assert places.describe(35.7148, 139.7967) == "Tokio, Japan"                            # Asakusa
+    assert places.describe(34.0928, -118.3287) == "Los Angeles, Verenigde Staten"         # Hollywood
+    assert places.describe(52.30, 4.86) == "Amstelveen, Nederland"
+    assert places.describe(48.80, 2.13) == "Versailles, Frankrijk"
+    assert places.town_radius_km(15) < 4 and places.town_radius_km(1e5) == 25
+
+
+def test_describe_city_states_and_region_names_read_as_dutch():
+    from backend import places
+    assert places.describe(43.7384, 7.4246) == "Monaco"
+    assert places.describe(1.2903, 103.8519) == "Singapore"
+    assert places.describe(43.9356, 12.4473) == "San Marino"
+    assert places.describe(41.9022, 12.4539) == "Vaticaanstad"                             # Sint-Pietersplein
+    assert places.describe(41.8986, 12.4769) == "Rome, Italië"                             # the Pantheon
+    assert places.describe(52.40, 5.15) == "Almere, Nederland"                             # not 'Almere Stad'
+    oslo, stockholm, cph = places.describe_parts(59.91, 10.75), places.describe_parts(59.33, 18.07), places.describe_parts(55.68, 12.57)
+    assert (oslo["region_kind"], stockholm["region_kind"], stockholm["region"]) == ("provincie", "provincie", "Stockholm")
+    assert cph["region"] == "Hovedstaden"
+    assert places.describe_parts(31.63, -7.99)["region"].startswith("Marrakesh-")         # one spelling with the city
+    assert places.describe(37.40, 25.20) == "Voor de kust van de Zuid-Egeïsche Eilanden, Griekenland"
+
+
+def test_describe_off_the_coast_is_quick_too():
+    import time
+    from backend import places
+    places.describe(52.0, 5.0)
+    start = time.perf_counter()
+    for i in range(100):
+        places.describe(52.4 + (i % 10) * 0.1, 4.3 + (i // 10) * 0.08)           # the coast and the Wadden
+    assert (time.perf_counter() - start) / 100 < 0.004
+
+
+def test_describe_is_fast_enough_for_a_page_of_photos():
+    import time
+    from backend import places
+    places.describe(52.0, 5.0)                                  # loads the data once
+    start = time.perf_counter()
+    for i in range(200):
+        places.describe(40.0 + (i % 20) * 0.5, -5.0 + (i // 20) * 2.0)
+    assert (time.perf_counter() - start) / 200 < 0.02           # about a millisecond each here

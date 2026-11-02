@@ -25,6 +25,7 @@
     const COUNTRIES_URL = 'vendor/naturalearth/countries-50m.geojson';
     const PLACES_URL = 'vendor/naturalearth/places-50m.json';
     const REGIONS_URL = 'vendor/naturalearth/regions/';
+    const REGIONS_V = 2;                // ophogen als scripts/build_map_regions.py de bestanden opnieuw maakt
     const DETAIL_ZOOM = 7;              // vanaf hier krijgt elk land in beeld zijn provincies en steden
     const DETAIL_MAX = 8;               // hoogstens zoveel landen tegelijk
     const CHUNK = 10000;
@@ -32,6 +33,12 @@
     const NEIGHBOUR_PX = 28;            // foto's binnen zoveel pixels van de aangeklikte horen bij 'deze plek'
     const NEIGHBOUR_MAX = 200;          // zoveel bladert de viewer er hoogstens doorheen
     const MAX_LABELS = 120;
+    const LABEL_GAP = 4;                // px lucht tussen twee namen
+    const COUNTRY_WRAP = 16;            // langere landnamen breken over twee regels
+    const EDGE_GAP = 4;                 // px: een naam staat helemaal binnen de kaart, niet half erbuiten
+    const COUNTRY_NUDGE_MAX = 64;       // px: zo ver mag een landnaam opschuiven voor een groep foto's
+    // Korter op de kaart dan in Natural Earth (de tooltip houdt de volledige naam)
+    const COUNTRY_SHORT = { USA: 'Verenigde Staten', CHN: 'China' };
     const HINT_ZOOM = 9;                // vanaf hier is de basiskaart zonder internet te grof
     const KIND_ICON = ['fa-image', 'fa-film', 'fa-music'];
     const HOVER_DELAY = 90;             // ms stilstaan op een pin of groep voor de voorvertoning (niet bij langs bewegen)
@@ -63,6 +70,8 @@
         // Provincies en steden: het aangeklikte land, de landen die nu detail tonen en hun data
         selected: '', countryLayers: new Map(), countryBoxes: [], regionData: new Map(),
         regionLayers: new Map(), detailCodes: [], detailRegions: [], detailToken: 0, chip: null,
+        // Namen op de kaart: landen (punt, voorrang, grootste deel) en de namen die nu staan, per sleutel
+        countryLabels: [], labelPool: new Map(), textWidths: new Map(), fonts: null,
         osm: false, osmLoaded: false,
         filters: { year: '', date_from: '', date_to: '', camera: '', album: '' },
         points: [], markers: new Map(), total: 0, withoutGps: 0, version: '', bounds: null,
@@ -176,6 +185,15 @@
         });
         map.on('movestart zoomstart popupopen', hideHover);
         map.getContainer().addEventListener('mouseleave', hideHover);
+        // De kaart wordt hoger of lager zonder dat het venster verandert (de takenbalk onderaan komt of gaat):
+        // Leaflet meet dan opnieuw, en de namen volgen (moveend)
+        if (typeof ResizeObserver === 'function') {
+            let pending = 0;
+            new ResizeObserver(() => {
+                cancelAnimationFrame(pending);
+                pending = requestAnimationFrame(() => map.invalidateSize({ pan: false, debounceMoveend: true }));
+            }).observe(map.getContainer());
+        }
         syncOsmControls();
         applyBasemap();
     }
@@ -191,17 +209,28 @@
                 // bubblingMouseEvents uit: een klik op een land is geen klik op de zee (die heft de keuze op)
                 style: () => ({ className: 'map-country', weight: 1, bubblingMouseEvents: false }),
                 onEachFeature: (feature, layer) => {
-                    const { n, a } = feature.properties || {};
+                    const { n, a, l, z, k } = feature.properties || {};
                     if (n) layer.bindTooltip(n, { sticky: true, className: 'map-tip', direction: 'top' });
                     if (!a) return;
                     if (!state.countryLayers.has(a)) state.countryLayers.set(a, []);
                     state.countryLayers.get(a).push(layer);
                     const polys = feature.geometry.type === 'Polygon' ? [feature.geometry.coordinates] : feature.geometry.coordinates;
-                    for (const poly of polys) state.countryBoxes.push([a, L.latLngBounds(poly[0].map(([lon, lat]) => [lat, lon]))]);
+                    const boxes = polys.map(poly => L.latLngBounds(poly[0].map(([lon, lat]) => [lat, lon])));
+                    for (const box of boxes) state.countryBoxes.push([a, box]);
+                    // De naam staat op het punt l (build_map_regions.py: in het grootste deel); dat deel
+                    // bepaalt ook vanaf welke zoom de naam erin past
+                    if (n && l) {
+                        const main = boxes.filter(b => b.contains([l[1], l[0]])).sort((x, y) => boxArea(y) - boxArea(x))[0]
+                            || boxes.sort((x, y) => boxArea(y) - boxArea(x))[0];
+                        state.countryLabels.push({ code: a, name: COUNTRY_SHORT[a] || n, lon: l[0], lat: l[1],
+                            minZoom: z || 5, rank: k || 9, box: main, area: boxArea(main) * Math.cos(l[1] * Math.PI / 180) });
+                    }
                     layer.on('click', () => selectCountry(state.selected === a ? '' : a));
                 },
                 attribution: 'Basiskaart: Natural Earth, steden: GeoNames',
             });
+            // Belangrijkste eerst: Natural Earth's LABELRANK, dan het grootste land
+            state.countryLabels.sort((x, y) => (x.rank - y.rank) || (y.area - x.area));
         } catch (err) {
             console.error(err);
             state.countries = null;
@@ -225,7 +254,7 @@
         const wantOsm = state.osm;
         if (wantOsm) {
             if (state.countries) map.removeLayer(state.countries);
-            if (state.places) { map.removeLayer(state.places); state.places = null; }
+            if (state.places) { map.removeLayer(state.places); state.places = null; state.labelPool.clear(); }
             selectCountry('');
             updateDetail();
             if (!state.tiles) {
@@ -305,7 +334,7 @@
 
     async function loadRegion(a3) {
         if (!state.regionData.has(a3)) {
-            state.regionData.set(a3, fetch(`${REGIONS_URL}${a3}.json`)
+            state.regionData.set(a3, fetch(`${REGIONS_URL}${a3}.json?v=${REGIONS_V}`)
                 .then(res => (res.ok ? res.json() : null))
                 .then(data => data && { ...data, cities: (data.cities || []).map(([name, ...rest]) => [PLACE_NL[name] || name, ...rest]) })
                 .catch(() => null));
@@ -351,15 +380,120 @@
         updateLabels();
     }
 
+    // Breedte van een naam in px, gemeten met het lettertype van zijn soort (één keer per naam)
+    function textWidth(kind, text) {
+        const key = `${kind}:${text}`;
+        let w = state.textWidths.get(key);
+        if (w !== undefined) return w;
+        if (!state.fonts) {
+            const probe = createEl('span', { style: 'position:absolute;visibility:hidden;pointer-events:none' });
+            state.map.getPane('places').appendChild(probe);
+            state.fonts = {};
+            for (const [k, cls] of [['country', 'map-country-label'], ['region', 'map-region'], ['city', 'map-place'], ['capital', 'map-place map-place-capital']]) {
+                probe.className = cls;
+                const cs = getComputedStyle(probe);
+                state.fonts[k] = { font: `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`, size: parseFloat(cs.fontSize) || 12,
+                    spacing: parseFloat(cs.letterSpacing) || 0 };
+            }
+            probe.remove();
+            state.measure = document.createElement('canvas').getContext('2d');
+        }
+        const f = state.fonts[kind];
+        state.measure.font = f.font;
+        w = state.measure.measureText(text).width + f.spacing * text.length;
+        state.textWidths.set(key, w);
+        return w;
+    }
+
+    // Een lange landnaam over twee regels, gebroken bij de spatie die het dichtst bij het midden ligt
+    function countryLines(name) {
+        if (name.length <= COUNTRY_WRAP || !name.includes(' ')) return [name];
+        const mid = name.length / 2;
+        let at = -1;
+        for (let i = 0; i < name.length; i++) if (name[i] === ' ' && (at < 0 || Math.abs(i - mid) < Math.abs(at - mid))) at = i;
+        return [name.slice(0, at), name.slice(at + 1)];
+    }
+
+    // Hoeveel van een naam in het grootste deel van zijn land past (1 = helemaal)
+    function countryFit(c, zoom, width) {
+        const nw = state.map.project(c.box.getNorthWest(), zoom);
+        const se = state.map.project(c.box.getSouthEast(), zoom);
+        return Math.min((se.x - nw.x) / width, (se.y - nw.y) / 14);
+    }
+
+    function labelBox(kind, name, at) {
+        if (kind === 'country') {
+            const lines = countryLines(name);
+            const w = Math.max(...lines.map(line => textWidth('country', line)));
+            const h = lines.length * state.fonts.country.size * 1.2;
+            return [at.x - w / 2 - LABEL_GAP, at.y - h / 2 - LABEL_GAP / 2, at.x + w / 2 + LABEL_GAP, at.y + h / 2 + LABEL_GAP / 2];
+        }
+        if (kind === 'region') {
+            const w = textWidth('region', name);
+            return [at.x - w / 2 - LABEL_GAP, at.y - 9, at.x + w / 2 + LABEL_GAP, at.y + 9];
+        }
+        // een stad: het puntje links, de naam rechts ervan (zie .map-place)
+        return [at.x - 8, at.y - 8, at.x + 6 + textWidth(kind, name) + LABEL_GAP, at.y + 8];
+    }
+
+    function labelElement(kind, name, capital) {
+        if (kind === 'country') {
+            const lines = countryLines(name);
+            return createEl('span', { class: 'map-country-label' }, ...lines.map(line => createEl('span', { class: 'map-country-label-line', text: line })));
+        }
+        if (kind === 'region') return createEl('span', { class: 'map-region', text: name });
+        return createEl('span', { class: 'map-place' + (capital ? ' map-place-capital' : ''), text: name });
+    }
+
+    // Een naam die moet wijken, vervaagt eerst (--dur-3, versnellend) en gaat dan pas van de kaart
+    function retireLabel(marker) {
+        const group = state.places;
+        const el = marker.getElement()?.firstElementChild;
+        const ms = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-3')) || 0;
+        if (!el || ms <= 0) { group?.removeLayer(marker); return; }
+        el.classList.add('map-label-leaving');
+        setTimeout(() => group?.removeLayer(marker), ms + 20);
+    }
+
+    // Wat boven de namen ligt, in px binnen de kaart: de groepen en spelden (die van markercluster op dit
+    // zoomniveau; tijdens hun animatie hun eindplek), de knoppen van Leaflet en het label van een aangeduid land
+    function labelObstacles(map) {
+        const out = [];
+        const group = state.cluster?._featureGroup;
+        if (group && map.hasLayer(state.cluster)) {
+            const size = { x: map.getContainer().clientWidth, y: map.getContainer().clientHeight };
+            group.eachLayer(layer => {
+                const ll = layer._backupLatlng || layer.getLatLng?.();
+                if (!ll) return;
+                const pt = map.latLngToContainerPoint(ll);
+                if (pt.x < -60 || pt.y < -60 || pt.x > size.x + 60 || pt.y > size.y + 60) return;
+                const n = layer.getChildCount ? layer.getChildCount() : 0;
+                const r = (n ? (n < 10 ? 34 : n < 100 ? 40 : n < 1000 ? 48 : 56) : 18) / 2 + 2;
+                out.push([pt.x - r, pt.y - r, pt.x + r, pt.y + r]);
+            });
+        }
+        const origin = map.getContainer().getBoundingClientRect();
+        const overlays = [...map.getContainer().querySelectorAll('.leaflet-control'), state.chip, state.hint];
+        for (const el of overlays) {
+            if (!el || el.hidden || !el.offsetParent) continue;
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            out.push([r.left - origin.left - LABEL_GAP, r.top - origin.top - LABEL_GAP, r.right - origin.left + LABEL_GAP, r.bottom - origin.top + LABEL_GAP]);
+        }
+        return out;
+    }
+
     function updateLabels() {
         const map = state.map;
         if (!map || state.osm || !state.placeData) return;
+        const started = performance.now();
         if (!state.places) state.places = L.layerGroup([], { pane: 'places' }).addTo(map);
-        state.places.clearLayers();
         const zoom = map.getZoom();
         const view = map.getBounds().pad(0.1);
-        const wrap = view.getWest() < -180 || view.getEast() > 180;
-        const visible = (lat, lon) => wrap || view.contains([lat, lon]);
+        // Alleen wat echt in beeld is. Over de datumgrens (Japan, de Stille Oceaan) tekent de kaart het land maar
+        // één keer, op zijn eigen lengte: een naam op een kopie (lengte ±360) zou in lege zee staan, en alle namen
+        // van de wereld meetellen vulde MAX_LABELS met namen buiten beeld (geen Tokio en Peking meer)
+        const visible = (lat, lon) => view.contains([lat, lon]);
         // Steden van de landen met detail; een wereldplaats op (bijna) dezelfde plek valt dan weg
         const shown = [];
         const near = [];
@@ -376,39 +510,98 @@
             if (near.some(([x, y]) => Math.abs(x - lon) < 0.12 && Math.abs(y - lat) < 0.08)) continue;
             shown.push(['city', name, lon, lat, minZoom, capital]);
         }
-        // Volgorde = voorrang: hoofdsteden, dan de provincienamen, dan de andere steden
         shown.sort((a, b) => (b[5] - a[5]) || (a[4] - b[4]));
         const capitals = shown.filter(p => p[5]);
         const provinces = [];
         for (const region of state.detailRegions) {
             for (const [name, lon, lat] of region.labels || []) if (visible(lat, lon)) provinces.push(['region', name, lon, lat, 0, 0]);
         }
-        const ordered = [...capitals, ...provinces, ...shown.filter(p => !p[5])];
-        // Eerst de belangrijkste; een naam die over een eerdere heen valt, blijft weg
-        // Namen die er nog niet stonden, komen zacht op; de rest staat meteen stil op zijn plek
-        const seen = state.labelSeen || new Set();
-        state.labelSeen = new Set();
-        const boxes = [];
-        let count = 0;
-        for (const [kind, name, lon, lat, , capital] of ordered) {
-            if (count >= MAX_LABELS) break;
-            const at = map.latLngToContainerPoint([lat, lon]);
-            const half = name.length * 3.4;
-            const box = kind === 'region'
-                ? [at.x - half - 4, at.y - 9, at.x + half + 4, at.y + 9]
-                : [at.x - 8, at.y - 8, at.x + 14 + name.length * 6.2, at.y + 8];
-            if (boxes.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
-            boxes.push(box);
-            count++;
-            const key = `${kind}:${name}:${lon}`;
-            state.labelSeen.add(key);
-            const cls = (kind === 'region' ? 'map-region' : 'map-place' + (capital ? ' map-place-capital' : ''))
-                + (seen.has(key) ? '' : ' map-label-new');
-            L.marker([lat, lon], {
-                interactive: false, keyboard: false, pane: 'places',
-                icon: L.divIcon({ className: 'map-place-wrap', iconSize: [0, 0], html: createEl('span', { class: cls, text: name }) }),
-            }).addTo(state.places);
+        // Landnamen: wie provincies toont, zet zijn eigen naam achter de provincies (anders verdringt
+        // 'Nederland' midden in het land Gelderland en Utrecht)
+        // Een land krijgt zijn naam als Natural Earth hem vanaf deze zoom toont (MIN_LABEL) en hij er
+        // ongeveer in past; een dwergstaat (Monaco, Vaticaanstad) pas veel later en na de steden eromheen.
+        const countries = [];
+        const small = [];
+        const later = [];
+        for (const c of state.countryLabels) {
+            if (!visible(c.lat, c.lon)) continue;
+            const width = Math.max(...countryLines(c.name).map(line => textWidth('country', line)));
+            const fit = countryFit(c, zoom, width);
+            if (fit < 1 && zoom < c.minZoom - 0.5) continue;
+            if (fit < 0.35 && zoom < c.minZoom + 2) continue;
+            const row = ['country', c.name, c.lon, c.lat, 0, 0, c.code, c.box];
+            (state.detailCodes.includes(c.code) ? later : fit < 0.35 ? small : countries).push(row);
         }
+        // Volgorde = voorrang: landen, hoofdsteden, provincies, landen met detail en dwergstaten, dan de
+        // andere steden. Een naam die over een eerdere heen zou vallen, blijft weg. Hetzelfde voor een naam
+        // onder een groep of speld (die liggen erbovenop: 'Fr(134)k'), onder de knoppen en het label van een
+        // aangeduid land, of half buiten de kaart. Een landnaam schuift dan eerst nog naar boven, onder of
+        // binnen de rand, zolang hij in zijn land blijft.
+        const canvas = map.getContainer();
+        const size = { x: canvas.clientWidth, y: canvas.clientHeight };
+        const boxes = [];
+        const blocked = labelObstacles(map);
+        const hits = (box, list) => list.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]);
+        const inside = box => box[0] >= EDGE_GAP && box[1] >= EDGE_GAP && box[2] <= size.x - EDGE_GAP && box[3] <= size.y - EDGE_GAP;
+        const free = box => inside(box) && !hits(box, boxes) && !hits(box, blocked);
+        const ordered = [...countries, ...capitals, ...provinces, ...later, ...small, ...shown.filter(p => !p[5])];
+        const wanted = new Map();
+        for (const [kind, name, lon, lat, , capital, code, countryBox] of ordered) {
+            if (wanted.size >= MAX_LABELS) break;
+            const anchor = map.latLngToContainerPoint([lat, lon]);
+            const style = kind === 'city' && capital ? 'capital' : kind;
+            let box = labelBox(style, name, anchor);
+            if (!free(box)) {
+                if (kind !== 'country' || hits(box, boxes)) continue;
+                // een landnaam: binnen de rand, of net boven of onder de groep die erop ligt
+                const dx = Math.max(EDGE_GAP - box[0], 0) + Math.min(size.x - EDGE_GAP - box[2], 0);
+                const edgeDy = Math.max(EDGE_GAP - box[1], 0) + Math.min(size.y - EDGE_GAP - box[3], 0);
+                const shifted = [box[0] + dx, box[1] + edgeDy, box[2] + dx, box[3] + edgeDy];
+                const under = blocked.filter(b => hits(shifted, [b]));
+                const down = Math.max(0, ...under.map(b => b[3] - box[1])) + LABEL_GAP;
+                const up = Math.min(0, ...under.map(b => b[1] - box[3])) - LABEL_GAP;
+                const moves = [[dx, edgeDy], [dx, down], [dx, up]].filter(([, my]) => Math.abs(my) <= COUNTRY_NUDGE_MAX);
+                const fits = moves.find(([mx, my]) => {
+                    const moved = [box[0] + mx, box[1] + my, box[2] + mx, box[3] + my];
+                    const ll = map.containerPointToLatLng([anchor.x + mx, anchor.y + my]);
+                    return (mx || my) && free(moved) && countryBox.contains(ll);
+                });
+                if (!fits) continue;
+                box = [box[0] + fits[0], box[1] + fits[1], box[2] + fits[0], box[3] + fits[1]];
+                const ll = map.containerPointToLatLng([anchor.x + fits[0], anchor.y + fits[1]]);
+                boxes.push(box);
+                const key = `${kind}:${name}:${lon}:${lat}:${Math.round(fits[0])}:${Math.round(fits[1])}`;
+                if (!wanted.has(key)) wanted.set(key, { kind, name, lon: ll.lng, lat: ll.lat, capital, code });
+                continue;
+            }
+            boxes.push(box);
+            const key = `${kind}:${name}:${lon}:${lat}`;
+            if (!wanted.has(key)) wanted.set(key, { kind, name, lon, lat, capital, code });
+        }
+        // Wat blijft, blijft staan; wat weg moet, vervaagt; wat erbij komt, vloeit in (op volgorde)
+        for (const [key, marker] of state.labelPool) {
+            if (!wanted.has(key)) { state.labelPool.delete(key); retireLabel(marker); }
+        }
+        let fresh = 0;
+        for (const [key, w] of wanted) {
+            let marker = state.labelPool.get(key);
+            if (!marker) {
+                const el = labelElement(w.kind, w.name, w.capital);
+                el.classList.add('map-label-new');
+                el.style.setProperty('--label-i', String(fresh++));
+                if (w.code) el.dataset.code = w.code;
+                marker = L.marker([w.lat, w.lon], {
+                    interactive: false, keyboard: false, pane: 'places',
+                    icon: L.divIcon({ className: 'map-place-wrap', iconSize: [0, 0], html: el }),
+                }).addTo(state.places);
+                state.labelPool.set(key, marker);
+            } else {
+                const ll = marker.getLatLng();
+                if (ll.lat !== w.lat || ll.lng !== w.lon) marker.setLatLng([w.lat, w.lon]);
+            }
+            if (w.kind === 'country') marker.getElement()?.firstElementChild?.classList.toggle('is-selected', w.code === state.selected);
+        }
+        state.labelMs = performance.now() - started;
     }
 
     function updateHint() {
@@ -610,6 +803,7 @@
         state.cluster.on('mouseover clustermouseover', e => hoverStart(e.layer));
         state.cluster.on('mouseout clustermouseout', e => { if (e.layer === state.hoverLayer) hideHoverSoon(); });
         state.cluster.on('clusterclick', hideHover);
+        state.cluster.on('animationend', () => updateLabels());   // de groepen liggen op hun nieuwe plek
         state.map.addLayer(state.cluster);
     }
 
@@ -653,6 +847,7 @@
             }
             if (state.showInferred && token === state.loadToken) await loadInferred(token);
             setProgress('');
+            if (token === state.loadToken) updateLabels();         // namen wijken voor de groepen
         } catch (err) {
             if (token !== state.loadToken) return;
             setProgress('');
@@ -999,11 +1194,17 @@
         const est = found.inferred;
         const how = { bezoek: 'een bezochte plek', interpolatie: 'twee punten ervoor en erna', dichtstbij: 'het dichtstbijzijnde punt' }[est.method] || 'je Tijdlijn';
         const tz = { exif: 'tijdzone uit de foto', locatie: 'tijdzone van de plek', aangenomen: 'tijdzone aangenomen: Brussel', utc: 'tijd van de video' }[est.tz_source] || '';
+        // Zoals de Plaats van een foto met GPS: de plaats als waarde, de provincie en de kust stil eronder,
+        // en daaronder de technische waarden (de positie in mono, hoe zeker en hoe nauwkeurig)
+        const coords = createEl('span', { class: 'mono', text: `${est.lat.toFixed(4)}, ${est.lon.toFixed(4)}` });
+        const sure = `${Math.round(est.confidence * 100)}% zeker · ±${fmt(Math.round(est.accuracy_m || 0))} m`;
+        const note = est.place && typeof viewerPlaceNote === 'function' ? viewerPlaceNote(est.place, est.place_parts) : null;
         meta.append(
             createEl('span', { class: 'metadata-label metadata-estimated', text: 'Locatie (geschat)' }),
             createEl('span', { class: 'metadata-value', title: `Afgeleid uit ${how}; ${tz}. Alleen in DataVault, niet in het bestand.` },
-                createEl('span', { class: 'mono', text: `${est.lat.toFixed(4)}, ${est.lon.toFixed(4)}` }),
-                ` · ${Math.round(est.confidence * 100)}% zeker · ±${fmt(Math.round(est.accuracy_m || 0))} m`));
+                ...(est.place
+                    ? [est.place, note, createEl('span', { class: 'metadata-note' }, coords, ` · ${sure}`)]
+                    : [coords, createEl('span', { class: 'metadata-note', text: sure })])));
     }
 
     window.mapShowViewerFile = async function () {
@@ -1218,12 +1419,18 @@
         state.map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: [48, 48], maxZoom: 12, animate: false });
     };
 
+    // Voor de browsertest: een land aanduiden zoals een klik erop doet
+    window.mapSelectCountry = a3 => selectCountry(a3);
+
     // Voor de browsertest (tests/ui/smoke_webkit.py): wat de kaart nu toont
     window.mapView = () => (state.map ? {
         zoom: state.map.getZoom(), markers: state.markers.size, osm: state.osm, popup: !!(state.popup && state.map.hasLayer(state.popup)),
         tiles: !!(state.tiles && state.map.hasLayer(state.tiles)),
         estimated: state.inferredIds.size, track: !!state.track, trackDay: state.trackDay,
         selected: state.selected, detail: state.detailCodes.slice(),
+        labelMs: state.labelMs || 0,
+        countryLabels: [...state.labelPool.keys()].filter(k => k.startsWith('country:')).map(k => k.split(':')[1]),
+        labels: [...state.labelPool.keys()].map(k => { const [kind, name, lon, lat] = k.split(':'); return { kind, name, lon: +lon, lat: +lat }; }),
     } : null);
 
     window.mapVaultReturned = function () {

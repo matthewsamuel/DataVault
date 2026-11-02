@@ -39,6 +39,38 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - `start.sh` opent Safari als er in config.json geen `browser` staat, of als die waarde geen tekst is (een getal, lijst of leeg). Voorheen werd de foutmelding van plutil als browsernaam gebruikt en lukte het openen niet.
 - Duplicaten: bij een opruimactie staat elke reden (veranderd, niet meer in RAW_DUPLICATES) op een eigen regel in een vaste kolom, zodat de mapnaam ook op een smal scherm leesbaar blijft. De vraag vóór het terugzetten zegt welke bestanden blijven staan, en na Terugzetten met het toetsenbord blijft de focus in de lijst.
 - Verplaatsen en terugzetten werkt nu ook op schijven die heel grote bestandsnummers geven (zoals FAT32 op macOS voor lege bestanden); voorheen weigerde de app dat met een fout.
+- **Landnamen op de offline kaart.** De kaart zonder internet toont nu de namen van de landen in het
+  Nederlands, midden op het grootste deel van het land (Frankrijk op het vasteland, niet tussen
+  Europa en Frans-Guyana). Namen schuiven nooit over elkaar: de belangrijkste landen eerst, dan de
+  hoofdsteden, de provincies en de andere steden; kleine landen pas als ze er ongeveer in passen en
+  dwergstaten als Monaco pas ver ingezoomd. Bij inzoomen vloeien nieuwe namen op volgorde in en
+  vervagen namen die moeten wijken, volgens je Beweging-instelling. Waar provincies staan, gaan die
+  voor de naam van hun land.
+- **Een plaatsnaam bij elke foto.** Elke foto met GPS krijgt een Nederlandse plaats, ook buiten de
+  grote steden: in een plaats ("Faro, Portugal"), in de buurt met afstand en richting
+  ("4 km ten oosten van Olhão, Portugal"), op het platteland de provincie ("Lapland, Finland"), aan
+  de kust ("Aan de kust van Friesland, Nederland"), op het water ("Voor de kust bij Zandvoort,
+  Nederland") of op zee. De viewer zet de provincie en "aan de kust" er stil onder, ook bij een plek
+  die uit je Tijdlijn geschat is. Alles offline, uit Natural Earth en GeoNames (plaatsen vanaf
+  15.000 inwoners).
+- **Pasha kent meer plaatsen.** Vraag naar foto's in een provincie of regio ("Toscane", "Gelderland",
+  "Limburg" telt beide Limburgen) of bij een kleinere plaats ("Olhão"); onder het antwoord staat
+  waar ze genomen zijn ("Amsterdam: 12 foto's"). Een bezochte plek zonder naam in je
+  locatiegeschiedenis krijgt dezelfde plaatsnaam.
+- **De juiste plaats bij een naam die vaker voorkomt.** Middelburg, Ede of Soest zoekt Pasha in
+  Nederland, niet in Zuid-Afrika, Nigeria of Duitsland; Bali is het Indonesische eiland. Bestaat een
+  naam op meer plekken (Lagos in Portugal en in Nigeria), dan kiest Pasha de plek waar jouw foto's zijn.
+  "Holland" is Nederland. Bij een stad telt Pasha eerst de stad zelf ("Amsterdam: 2 foto's") en
+  zegt "1 foto" in plaats van "1 foto's".
+- **Plaatsnamen kloppen beter.** De Burj Khalifa ligt in Dubai en Asakusa in Tokio, niet "14 km ten
+  noorden van Dubai"; een voorstad met een eigen centrum houdt zijn naam (Schiedam, Amstelveen).
+  Monaco en Singapore staan er één keer, het Sint-Pietersplein is Vaticaanstad, en het is Almere,
+  niet "Almere Stad". Noorse en Zweedse provincies heten provincie ("provincie Stockholm"), en
+  "Voor de kust van de Zuid-Egeïsche Eilanden".
+- **Namen op de kaart blijven leesbaar.** Een land- of plaatsnaam valt niet meer onder een groep foto's,
+  onder de zoomknoppen of half buiten de kaart; een landnaam schuift dan net boven of onder de groep.
+  Over de datumgrens (Japan, de Stille Oceaan) staan weer de steden in beeld. Een geschatte locatie in
+  de viewer toont de plaats als hoofdregel, met de provincie en de positie stil eronder.
 
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
