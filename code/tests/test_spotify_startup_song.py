@@ -104,3 +104,55 @@ def test_the_setting_is_on_until_turned_off(client):
     assert client.put("/api/ui/settings", json={"startup_song": "nee"}).status_code == 400
     # Beweging kiezen laat de keuze staan
     assert client.put("/api/ui/settings", json={"motion": "rustig"}).json()["startup_song"] is False
+
+
+class FakeHelper:
+    stderr = None
+
+    def __init__(self, log, args):
+        self.log, self.args = log, args
+        log.append("helper")
+
+    def terminate(self):
+        self.log.append("stopped")
+
+
+def _spawn(log):
+    return lambda args, **kw: FakeHelper(log, args)
+
+
+def test_the_front_app_comes_back_while_spotify_starts_the_track():
+    log = []
+    run = FakeOsascript((0, "", ""), (0, "playing\n", ""))
+    real_run = run.__call__
+    run_logged = lambda args, **kw: (log.append("play" if URI in args else "find"), real_run(args, **kw))[1]
+    spotify_player.play(URI, run=run_logged, spawn=_spawn(log))
+    assert log == ["find", "helper", "play"]           # the helper knows the front app before the track starts
+    script = " ".join(spotify_player._KEEP_FRONT)
+    assert "path to frontmost application" in script and "activate" in script and "launch" not in script
+
+
+@pytest.mark.parametrize("answer,code", [((0, "busy\n", ""), "busy"), ((1, "", "(-1708)"), "failed")])
+def test_the_helper_stops_when_nothing_starts(answer, code):
+    log = []
+    with pytest.raises(spotify_player.PlayError) as e:
+        spotify_player.play(URI, run=FakeOsascript((0, "", ""), answer), if_idle=True, spawn=_spawn(log))
+    assert e.value.code == code and log == ["helper", "stopped"]
+
+
+def test_no_helper_when_spotify_is_missing():
+    log = []
+    with pytest.raises(spotify_player.PlayError):
+        spotify_player.play(URI, run=FakeOsascript((1, "", "")), spawn=_spawn(log))
+    assert log == []
+
+
+def test_a_fake_osascript_never_starts_a_real_helper(monkeypatch):
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: pytest.fail("a real helper started"))
+    spotify_player.play(URI, run=FakeOsascript())
+
+
+def test_pausing_keeps_the_front_app_too():
+    log = []
+    spotify_player.pause(run=FakeOsascript(), spawn=_spawn(log))
+    assert log == ["helper"]

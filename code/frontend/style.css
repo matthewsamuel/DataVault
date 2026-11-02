@@ -16255,6 +16255,12 @@ html:is([data-motion="rustig"], [data-motion="uit"]) :is(.chat-play, .otd-play).
     height: var(--icon-xs);
 }
 
+/* Even breed bij Afspelen, Starten… en Pauzeren: de knop verspringt niet bij het wisselen */
+.otd-play {
+    min-width: 7.5em;
+    justify-content: center;
+}
+
 .otd-play.is-playing {
     --btn-fg: var(--accent-text);
 }

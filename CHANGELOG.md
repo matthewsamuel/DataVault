@@ -146,7 +146,8 @@ In deze ronde is afgemaakt wat eerder bleef liggen. Wat nog steeds niet kan, sta
   dag** vanzelf in de Spotify-app, één keer per keer dat je DataVault opent (herladen start het niet
   opnieuw). Speelt Spotify al iets, dan blijft dat spelen. Rechtsboven op de kaart staat **Afspelen**;
   speelt het nummer, dan dansen daar groene staafjes en pauzeer je het met dezelfde knop. Uitzetten
-  kan in **Instellingen > Home**.
+  kan in **Instellingen > Home**. Spotify blijft daarbij op de achtergrond: bij het starten, bij
+  Afspelen en Pauzeren en bij Pasha's "zet dat liedje op" blijft het dashboard vooraan.
 
 **DataGatherer en berichten**
 - **Google Takeout als `.tgz`** wordt nu gelezen zoals een `.zip`, stukje voor stukje en zonder het
