@@ -131,7 +131,7 @@ def state_reason(state: str, name: str, place: str) -> Optional[str]:
     return {
         "missing": f"{name} staat niet meer in {place}",
         "other": f"In {place} staat nu een ander bestand met de naam {name}",
-        "changed": f"{name} is in {place} veranderd sinds het daar kwam (andere grootte); het wordt niet teruggezet",
+        "changed": f"{name} is in {place} veranderd sinds het daar kwam (andere grootte)",
         "unknown": "Oudere actie: niet te controleren of het nog hetzelfde bestand is; zet het zo nodig met de hand terug",
         "occupied": f"Op de oorspronkelijke plek staat al een bestand {name}; er wordt niets overschreven",
         "refused": "Dit pad ligt buiten het archief; er wordt niets teruggezet",

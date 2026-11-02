@@ -4323,8 +4323,9 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
 }
 
 .dup-run {
+    --dup-run-note-width: 280px;
     display: grid;
-    grid-template-columns: 150px 130px minmax(0, 1fr) auto auto;
+    grid-template-columns: 150px 130px minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-md);
     min-height: 40px;
@@ -4332,6 +4333,12 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
     border-radius: var(--radius-md);
     background: var(--surface-raised);
     font-size: var(--fs-xs);
+}
+
+.dup-run.has-note {
+    /* One note column for every row that has one, so the notes line up; the folder keeps
+       room for its name and a long note wraps instead of squeezing it */
+    grid-template-columns: 150px 130px minmax(160px, 1fr) var(--dup-run-note-width) auto;
 }
 
 .dup-run-time {
@@ -4354,11 +4361,23 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
 }
 
 .dup-run-note {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-xs);
+    min-width: 0;
     color: var(--warning-text);
+    line-height: var(--lh-snug);
+}
+
+.dup-run-note-lines {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    text-wrap: balance;
 }
 
 .dup-run-note .fas {
-    margin-right: var(--space-xs);
+    flex: none;
     font-size: var(--icon-xs);
 }
 
@@ -4851,7 +4870,8 @@ html[data-motion="rustig"] .move-file-thumb.is-stack img {
         grid-template-columns: 1fr;
     }
 
-    .dup-run {
+    .dup-run,
+    .dup-run.has-note {
         grid-template-columns: 1fr 1fr;
     }
 

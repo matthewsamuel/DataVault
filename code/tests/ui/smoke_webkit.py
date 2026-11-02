@@ -1648,11 +1648,19 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 page.wait_for_selector(".dup-run-note .fa-triangle-exclamation", timeout=5000)), 0.5)
             note = page.inner_text(".dup-run:first-child .dup-run-note")
             expect("1 veranderd of vervangen" in note, f"fingerprint: run note {note!r}")
-            step("fingerprint: Terugzetten, then confirm", lambda: (
+            step("fingerprint: Terugzetten", lambda: (
                 page.focus(".dup-run:first-child button"), page.keyboard.press("Enter"),
-                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
-                page.click("#modal-dv-confirm .btn-primary"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000)), 0.3)
+            confirm_text = page.inner_text("#modal-dv-confirm")
+            expect("1 bestand blijft in RAW_DUPLICATES" in confirm_text,
+                   f"fingerprint: the confirm dialog does not say the changed file stays ({confirm_text!r})")
+            step("fingerprint: confirm with the keyboard", lambda: (
+                page.focus("#modal-dv-confirm .btn-primary"), page.keyboard.press("Enter"),
                 page.wait_for_selector(".toast:has-text('bleef in RAW_DUPLICATES')", timeout=5000)), 0.8)
+            # The row was drawn again and its button is now disabled: focus lands on Herstelcentrum
+            focused = page.evaluate("document.activeElement && document.activeElement.className")
+            expect("dup-restore-all" in (focused or ""),
+                   f"fingerprint: after Terugzetten the keyboard focus was lost ({focused!r})")
             expect(Path(fp_moved[1][0]).exists() and not Path(fp_moved[0][0]).exists()
                    and Path(fp_moved[0][1]).exists(),
                    "fingerprint: the unchanged copy did not go back, or the changed one did")

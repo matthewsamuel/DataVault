@@ -78,6 +78,9 @@ def test_a_file_changed_in_place_is_not_restored(client, vault):
     entry = _recovery_entry(client, run_id)
     assert entry["files"][0]["state"] == "changed" and not entry["undoable"]
     assert "veranderd" in entry["files"][0]["reason"] or "veranderd" in entry["reason"]
+    # 'Kan niet terug:' already says it stays: the reason does not repeat it
+    assert entry["files"][0]["reason"] == (f"{os.path.basename(dst)} is in RAW_DUPLICATES veranderd sinds "
+                                           "het daar kwam (andere grootte)")
     assert client.post("/api/duplicates/undo", json={"run_id": run_id}).status_code == 410
     assert not src.exists() and os.path.getsize(dst) == 325
 
