@@ -468,7 +468,7 @@ function searchResultCard(item, index) {
     const where = copies ? `\nOok in: ${(item.copy_paths || []).map(p => displayPath(p.slice(0, p.lastIndexOf('/')))).join(', ')}` : '';
     const card = createEl('div', {
         class: 'search-result thumb-tile', role: 'listitem', tabindex: index === searchState.focusIndex ? '0' : '-1',
-        dataset: { index: String(index) }, 'aria-label': copies ? `${item.name}, ${copiesText}` : item.name,
+        dataset: { index: String(index), motionKey: item.path }, 'aria-label': copies ? `${item.name}, ${copiesText}` : item.name,
         title: item.name + where,
         onClick: () => searchOpen(index),
     }, img, createEl('div', { class: 'thumb-caption', text: item.name }));
@@ -488,7 +488,20 @@ function searchRenderResults(data, fresh) {
     const results = overlay.querySelector('#search-results');
     const start = fresh ? 0 : results.children.length;
     const cards = data.items.map((item, i) => searchResultCard(item, start + i));
-    if (fresh) results.replaceChildren(...cards); else results.append(...cards);
+    // De resultaten stromen binnen: de eerste keer een golf over wat in beeld staat (de rest bij
+    // het scrollen); verfijn je de zoekopdracht, dan schuift wat blijft naar zijn nieuwe plek
+    const root = results.closest('.search-scroll') || null;
+    const refine = fresh && results.querySelector('.search-result');
+    if (refine) {
+        MediaMotion.flipByKey(results.querySelectorAll('.search-result'), el => el.dataset.motionKey,
+            () => results.replaceChildren(...cards), { after: () => cards });
+    } else if (fresh) {
+        results.replaceChildren(...cards);
+        MediaMotion.cascade(cards, { revealRest: true, root });
+    } else {
+        results.append(...cards);
+        MediaMotion.revealTiles(cards, { root });
+    }
     const more = overlay.querySelector('#search-more');
     more.replaceChildren();
     const notice = overlay.querySelector('#search-notice');
@@ -564,7 +577,9 @@ function searchOpen(index) {
             if (at < 0) return;
             searchState.items.splice(at, 1);
             const results = document.getElementById('search-results');
-            results.replaceChildren(...searchState.items.map(searchResultCard));
+            // Het verplaatste bestand gaat zichtbaar weg, de rest schuift aan
+            MediaMotion.flipByKey(results.children, el => el.dataset.motionKey,
+                () => results.replaceChildren(...searchState.items.map(searchResultCard)), { after: () => results.children });
         },
     });
 }

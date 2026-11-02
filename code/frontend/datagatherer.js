@@ -93,6 +93,7 @@ function dgRender() {
             createEl('div', { class: 'dg-grid' }, ...sources.map(dgCard)));
     }));
     dgRestoreFocus(focused);
+    if (window.MotionData) MotionData.dgRendered(box, { filter: dgState.filter, sources: data.sources });
     dgRevealSource();
 }
 
@@ -111,7 +112,8 @@ function dgRevealSource() {
     const card = document.querySelector(`.dg-card[data-source="${CSS.escape(id)}"]`);
     if (!card) return;
     dgState.showSource = null;
-    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // (Beweging Rustig of Uit, of macOS 'minder beweging': meteen, zonder scrollanimatie)
+    const reduce = window.Motion ? !Motion.full() : (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     card.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
     const primary = card.querySelector('.dg-primary');
     if (primary) primary.focus({ preventScroll: true });
@@ -1144,8 +1146,11 @@ if (typeof jobsOnChange === 'function') {
         const id = (job.params && job.params.source) || job.type.split('.').pop();
         const card = document.querySelector(`.dg-card[data-source="${CSS.escape(id)}"]`);
         const progress = card && card.querySelector('.dg-progress');
-        if (progress) progress.replaceWith(dgProgress(job));
-        else dgRefreshSoon();
+        if (progress) {
+            const next = dgProgress(job);
+            progress.replaceWith(next);
+            if (window.MotionData) MotionData.dgProgress(progress, next);
+        } else dgRefreshSoon();
     });
 }
 

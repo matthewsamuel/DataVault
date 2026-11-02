@@ -16,8 +16,9 @@
     <link rel="icon" href="favicon.png" type="image/png" sizes="64x64">
     <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=74">
-    <link rel="stylesheet" href="styleguide.css?v=1">
+    <link rel="stylesheet" href="style.css?v=85">
+    <script src="motion.js?v=2"></script>
+    <link rel="stylesheet" href="styleguide.css?v=2">
 </head>
 
 <body class="sg-body">
@@ -226,13 +227,44 @@
                 <div class="progress is-indeterminate"><div class="progress-fill"></div></div>
                 <div class="spinner"></div>
             </section>
+
+            <section class="sg-section sg-motion">
+                <h2 class="section-title">Beweging</h2>
+                <p class="page-subtitle">Veren, ritme en tellers uit motion.js (docs/MOTION.md). De stand van
+                    Instellingen &gt; Beweging geldt ook hier: in Rustig vervaagt alles alleen, bij Uit staat alles stil.</p>
+                <p class="overline">Veren</p>
+                <div class="sg-springs">
+                    <div class="sg-spring-row"><span class="sg-spring-label">snappy</span><span class="sg-spring-track"><span class="sg-spring-dot" data-spring="snappy"></span></span></div>
+                    <div class="sg-spring-row"><span class="sg-spring-label">smooth</span><span class="sg-spring-track"><span class="sg-spring-dot" data-spring="smooth"></span></span></div>
+                    <div class="sg-spring-row"><span class="sg-spring-label">bouncy</span><span class="sg-spring-track"><span class="sg-spring-dot" data-spring="bouncy"></span></span></div>
+                    <div class="sg-spring-row"><span class="sg-spring-label">gentle</span><span class="sg-spring-track"><span class="sg-spring-dot" data-spring="gentle"></span></span></div>
+                </div>
+                <p class="overline">Ritme en tellen</p>
+                <div class="sg-grid">
+                    <div class="sg-stagger">
+                        <div class="thumb-tile"><img src="assets/audio_thumbs/audio_thumb_var1.png" alt=""></div>
+                        <div class="thumb-tile"><img src="assets/audio_thumbs/audio_thumb_var2.png" alt=""></div>
+                        <div class="thumb-tile"><img src="assets/audio_thumbs/audio_thumb_var3.png" alt=""></div>
+                        <div class="thumb-tile"><img src="assets/audio_thumbs/audio_thumb_var1.png" alt=""></div>
+                    </div>
+                    <div class="stat-tile">
+                        <div class="stat-tile-label"><i class="fas fa-image" aria-hidden="true"></i> Foto's</div>
+                        <div class="stat-tile-value sg-count" data-to="12480">12.480</div>
+                        <div class="stat-tile-meta">Telt op in --dur-6</div>
+                    </div>
+                </div>
+                <div class="sg-row">
+                    <button type="button" class="btn btn-primary sg-motion-play"><i class="fas fa-play" aria-hidden="true"></i> Afspelen</button>
+                    <button type="button" class="btn btn-secondary sg-motion-flip"><i class="fas fa-shuffle" aria-hidden="true"></i> Schudden (FLIP)</button>
+                </div>
+            </section>
         </template>
 
         <div class="theme-scope sg-column" data-theme="light"></div>
         <div class="theme-scope sg-column" data-theme="dark"></div>
     </div>
 
-    <script src="styleguide.js?v=1"></script>
+    <script src="styleguide.js?v=2"></script>
 </body>
 
 </html>

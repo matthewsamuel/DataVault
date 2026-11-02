@@ -187,6 +187,7 @@ function actRenderDays() {
                 createEl('span', { class: 'act-day-count mono', text: d.count.toLocaleString('nl-BE') }))));
     });
     box.replaceChildren(...children);
+    if (window.MotionData) MotionData.actDays(box);
 }
 
 function actSelectDay(day, focus = false) {
@@ -269,6 +270,7 @@ async function actLoadEvents() {
             createEl('ol', { class: 'act-list', 'aria-labelledby': 'act-day-title' }, ...data.events.map(actEvent)),
             data.truncated ? createEl('p', { class: 'act-more', text: 'Alleen de eerste 500 van deze dag: verfijn met de filters.' }) : null]
             .filter(Boolean));
+        if (window.MotionData) MotionData.actEvents(box);
     } catch (err) {
         if (seq !== actState.eventsSeq) return;
         box.replaceChildren(errorState('Deze dag kon niet geladen worden', err, actLoadEvents));

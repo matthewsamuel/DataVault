@@ -8,7 +8,7 @@
 //         id: 'kaart',                       // uniek; wordt id="settings-kaart"
 //         title: 'Kaart',
 //         icon: 'fa-map',                    // Font Awesome-icoon (lokaal in vendor/)
-//         order: 60,                         // 10 Weergave, 20 Taalmodel, 30 Bibliotheek,
+//         order: 60,                         // 10 Weergave, 15 Beweging, 20 Taalmodel, 30 Bibliotheek,
 //                                            // 40 Shows, 50 Herstel, 90 Over deze app
 //         description: 'Kaarttegels van OpenStreetMap (alleen als je dat aanzet).',
 //         render(body) { body.append(...); } // bij elk openen van Instellingen opnieuw
@@ -106,6 +106,60 @@ registerSettingsSection({
             createEl('div', { class: 'settings-actions' },
                 createEl('button', { type: 'button', class: 'btn btn-secondary', onClick: openShortcutHelp },
                     createEl('i', { class: 'fas fa-keyboard', 'aria-hidden': 'true' }), ' Sneltoetsen bekijken (?)')));
+    },
+});
+
+// Beweging: Volledig / Rustig / Uit (motion.js, docs/MOTION.md). Bewaard in app_settings; macOS
+// 'Minder beweging' maakt van Volledig vanzelf Rustig.
+const MOTION_CHOICES = [
+    ['volledig', 'Volledig', 'Vloeiende overgangen, veren en foto\u2019s die uit hun miniatuur groeien.'],
+    ['rustig', 'Rustig', 'Alleen korte vervagingen: niets schuift, schaalt of veert.'],
+    ['uit', 'Uit', 'Niets beweegt; alles staat er meteen.'],
+];
+
+function settingsMotionPreview(box) {
+    const tiles = [...box.querySelectorAll('.motion-preview-tile')];
+    Motion.stagger(tiles, 'rise', { spring: 'smooth', key: 'preview' });
+    Motion.animate(box.querySelector('.motion-preview-check'), Motion.presets.pop(), { spring: 'bouncy', key: 'preview', delay: Motion.ms('--dur-4', 280) });
+}
+
+registerSettingsSection({
+    id: 'beweging',
+    title: 'Beweging',
+    icon: 'fa-wand-magic-sparkles',
+    order: 15,
+    description: 'Hoeveel de app beweegt bij het wisselen van scherm, openen van vensters en foto\u2019s.',
+    render(body) {
+        const chosen = Motion.preference() || 'volledig';
+        const hint = createEl('p', { class: 'settings-hint', id: 'settings-motion-hint' });
+        const preview = createEl('div', { class: 'motion-preview', 'aria-hidden': 'true' },
+            ...[0, 1, 2, 3].map(() => createEl('span', { class: 'motion-preview-tile' })),
+            createEl('span', { class: 'motion-preview-check' }, createEl('i', { class: 'fas fa-check' })));
+        const describe = () => {
+            const current = Motion.mode();
+            const line = MOTION_CHOICES.find(([value]) => value === (Motion.preference() || 'volledig'))[2];
+            hint.textContent = Motion.systemReduced() && current === 'rustig' && (Motion.preference() || 'volledig') === 'volledig'
+                ? `${line} macOS vraagt om minder beweging, dus de app beweegt nu rustig.`
+                : line;
+        };
+        const choose = async (value) => {
+            try {
+                await Motion.setPreference(value);
+            } catch (err) {
+                toastFetchError('Beweging niet bewaard', err);
+            }
+            describe();
+            settingsMotionPreview(preview);
+        };
+        const group = createEl('div', { class: 'segmented settings-choice-group', role: 'radiogroup', 'aria-label': 'Beweging' },
+            ...MOTION_CHOICES.map(([value, label]) => createEl('label', { class: 'settings-choice' },
+                createEl('input', {
+                    type: 'radio', class: 'radio', name: 'settings-motion', value, checked: value === chosen,
+                    dataset: { motionChoice: value }, onChange: () => choose(value),
+                }),
+                createEl('span', { text: label }))));
+        describe();
+        body.append(createEl('div', { class: 'motion-setting' }, createEl('div', {}, group, hint), preview));
     },
 });
 

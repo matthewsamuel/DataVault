@@ -123,7 +123,8 @@ def test_spotify_without_plays_shows_the_shared_empty_state_with_a_way_to_dataga
 
 def test_albums_show_skeletons_not_a_false_empty_state_while_loading():
     js = _js("library.js")
-    draw = js.split("function drawSidebar")[1].split("\n    function ")[0]
+    # (drawSidebar measures the marker for its glide; drawSidebarItems draws the list)
+    draw = js.split("function drawSidebarItems")[1].split("\n    function ")[0]
     # The skeleton comes before the 'Nog geen albums' note and the restore link
     assert draw.index("sideSkeleton()") < draw.index("Nog geen albums") < draw.index("Standaardalbums terugzetten")
     assert "!state.albumsLoaded && !state.albumsError" in draw

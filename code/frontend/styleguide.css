@@ -127,3 +127,53 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* Beweging: vier veren naast elkaar, een rij tegels voor ritme en FLIP, een teller */
+.sg-springs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.sg-spring-row {
+    display: grid;
+    grid-template-columns: var(--space-4xl) 1fr;
+    align-items: center;
+    gap: var(--space-md);
+}
+
+.sg-spring-label {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.sg-spring-track {
+    position: relative;
+    height: var(--space-lg);
+    border-radius: var(--radius-full);
+    background: var(--surface-sunken);
+    border: 1px solid var(--border-hairline);
+}
+
+.sg-spring-dot {
+    position: absolute;
+    top: 50%;
+    right: var(--space-xs);
+    width: var(--space-md);
+    height: var(--space-md);
+    margin-top: calc(var(--space-md) / -2);
+    border-radius: var(--radius-full);
+    background: var(--accent);
+}
+
+.sg-stagger {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-sm);
+    align-content: start;
+}
+
+.sg-motion .page-subtitle {
+    margin: 0;
+}

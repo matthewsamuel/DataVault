@@ -87,7 +87,22 @@ function setTheme(theme, skipSave = false) {
     if (!skipSave) {
         try { localStorage.setItem('theme', theme); } catch (_) { /* alleen voor deze sessie */ }
     }
+    // Een keuze van de gebruiker: het nieuwe thema loopt als een cirkel uit vanaf de knop
+    // (of het keuzerondje) waarmee hij koos. Bij het laden van de pagina: meteen.
+    const before = document.documentElement.getAttribute('data-theme');
+    const after = theme === 'auto' ? null : theme;
+    if (!skipSave && before !== after && Motion.full()) {
+        const from = document.activeElement && document.activeElement !== document.body
+            ? document.activeElement : document.getElementById('theme-button');
+        const r = from.getBoundingClientRect();
+        Motion.viewTransition(() => applyTheme(theme), { kind: 'theme', origin: { x: r.left + r.width / 2, y: r.top + r.height / 2 } });
+        if (window.ShellMotion) ShellMotion.themeChanged();
+        return;
+    }
+    applyTheme(theme);
+}
 
+function applyTheme(theme) {
     const html = document.documentElement;
 
     if (theme === 'auto') {
@@ -196,6 +211,17 @@ const VIEW_TITLES = {
 // Het scherm waar een melding bij hoort: info en succes blijven niet hangen op een ander scherm
 let activeMainView = 'home';
 
+// Het menu-element van een onderdeel (Berichten en Activiteit horen bij DataGatherer)
+function navEntryFor(view) {
+    return [...document.querySelectorAll('.top-nav [data-view]')].find(tab =>
+        tab.dataset.view === view || (tab.dataset.also || '').split(' ').includes(view)) || null;
+}
+
+// Hoeveel de groene streep binnen een menu-element begint (zie .nav-tab.active::after)
+function navIndicatorInset(tab) {
+    return Motion.px(tab.classList.contains('nav-icon-btn') ? '--space-sm' : '--space-md');
+}
+
 // ---------- Terug en Vooruit van de browser ----------
 // Elk ander scherm is een stap in de geschiedenis ({view}), zodat ⌘[ of terugvegen in Safari naar
 // het vorige scherm gaat in plaats van de app uit. Albums houdt zijn eigen adres (#albums?...).
@@ -227,6 +253,8 @@ function navIsRestoring() {
 
 function switchMainView(view) {
     if (!MAIN_VIEWS.includes(view)) return;
+    const previousView = activeMainView;
+    const previousTab = document.querySelector('.top-nav [data-view].active');
     if (view !== activeMainView) {
         document.querySelectorAll('#toast-container .toast[data-view]').forEach(t => {
             if (t.dataset.view !== view) { clearTimeout(t._hideTimer); t.remove(); }
@@ -261,6 +289,26 @@ function switchMainView(view) {
 
     // Show/hide sidebar
     document.getElementById('sidebar').style.display = view === 'viewer' ? 'flex' : 'none';
+
+    // Beweging (docs/MOTION.md): de groene streep glijdt naar het nieuwe onderdeel en de pagina
+    // komt binnen vanuit de richting van het menu. Alles is synchroon klaar; alleen de
+    // weergave beweegt, dus code die na switchMainView meteen verder werkt, merkt er niets van.
+    if (view !== previousView) {
+        const nextTab = navEntryFor(view);
+        let direction = 0;
+        if (previousTab && nextTab && previousTab !== nextTab) {
+            direction = Math.sign(nextTab.getBoundingClientRect().left - previousTab.getBoundingClientRect().left);
+        }
+        // De schil (motion-shell.js): een elastische streep en een eigen ritme per onderdeel
+        const section = document.getElementById(`section-${view}`);
+        if (window.ShellMotion) {
+            ShellMotion.navGlide(previousTab, nextTab, { inset: navIndicatorInset });
+            ShellMotion.enterView(view, section, direction);
+        } else {
+            Motion.glide(previousTab, nextTab, { inset: navIndicatorInset });
+            Motion.enterPage(section, { direction });
+        }
+    }
 
     // Clear search
     document.getElementById('global-search').value = '';
@@ -415,7 +463,7 @@ function renderShows(data) {
         const hero = document.createElement('div');
         hero.className = 'shows-hero';
         const cover = featured.files[0];
-        hero.onclick = () => startShow(featured);
+        hero.onclick = () => startShow(featured, { from: hero.querySelector('.shows-hero-img'), fromPath: cover.path });
         makeActivatable(hero, `Afspelen: ${featured.title}`);
 
         hero.innerHTML = html`
@@ -431,6 +479,12 @@ function renderShows(data) {
         `;
         container.appendChild(hero);
         upgradeHeroImage(hero.querySelector('.shows-hero-img'), cover);
+        if (!showsFlip) {
+            // Eén heldenmoment: de foto zet zich langzaam neer, de tekst rijst er in ritme op
+            Motion.animate(hero.querySelector('.shows-hero-img'), [{ transform: 'scale(1.06)' }, { transform: 'none' }],
+                { duration: '--dur-6', easing: '--ease-emphasized', key: 'hero' });
+            Motion.stagger(hero.querySelector('.shows-hero-content').children, 'rise', { delay: Motion.ms('--dur-2', 140) });
+        }
     }
 
     // 2. Folder Shows Grid
@@ -446,7 +500,7 @@ function renderShows(data) {
         shows.forEach(show => {
             const card = document.createElement('div');
             card.className = 'show-card';
-            card.onclick = () => playFolderShow(show);
+            card.onclick = () => playFolderShow(show, card.querySelector('.show-card-thumb'));
             makeActivatable(card, `Afspelen: ${show.title}`);
 
             let thumbUrl = '';
@@ -454,21 +508,31 @@ function renderShows(data) {
                 thumbUrl = vaultFileUrl('thumb', show.preview.path);
             }
 
-            // Full thumbnail with transparent overlay + text shadow for readability
-            card.innerHTML = html`
-                ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" alt="" loading="lazy">` : html`<div class="show-card-empty"><i class="fas fa-images" aria-hidden="true"></i></div>`}
-                <div class="show-card-caption">
-                    <h4 class="show-card-title">${show.title}</h4>
-                    <span class="show-card-meta">Map</span>
+            // Een stapel foto's: de omslag voorop, nog twee uit de map erachter die bij hover
+            // uitwaaieren (alleen als de map ze heeft); tekst met schaduw op de omslag
+            const stack = thumbUrl ? (show.stack || []).slice(0, 2) : [];
+            card.classList.toggle('has-stack', stack.length > 0);
+            setHTML(card, html`
+                ${stack.length ? html`<div class="show-card-stack" aria-hidden="true">${stack.map(item => html`<img src="${vaultFileUrl('thumb', item.path)}" alt="" loading="lazy">`)}</div>` : ''}
+                <div class="show-card-face">
+                    ${thumbUrl ? html`<img src="${thumbUrl}" class="show-card-thumb" alt="" loading="lazy">` : html`<div class="show-card-empty"><i class="fas fa-images" aria-hidden="true"></i></div>`}
+                    <div class="show-card-caption">
+                        <h4 class="show-card-title">${show.title}</h4>
+                        <span class="show-card-meta">Map</span>
+                    </div>
                 </div>
-            `;
+            `);
 
             grid.appendChild(card);
         });
 
         container.appendChild(grid);
+        // De collecties komen als een golf binnen; na husselen glijden ze naar hun nieuwe plek
+        if (!showsFlip) MediaMotion.cascade(grid.children, { revealRest: true });
     }
 }
+
+let showsFlip = false;
 
 function shuffleShows() {
     if (!_lastShowsData || !_lastShowsData.shows || _lastShowsData.shows.length < 2) return;
@@ -489,10 +553,19 @@ function shuffleShows() {
         }, 800);
     }
 
-    renderShows(_lastShowsData);
+    // Elke collectie glijdt naar zijn nieuwe plek (FLIP op de titel)
+    const grid = document.querySelector('#shows-container .shows-grid-folders');
+    const key = el => (el.querySelector('.show-card-title') || {}).textContent;
+    showsFlip = true;
+    try {
+        MediaMotion.flipByKey(grid ? grid.children : [], key, () => renderShows(_lastShowsData),
+            { after: () => document.querySelectorAll('#shows-container .shows-grid-folders > .show-card'), spring: 'smooth' });
+    } finally {
+        showsFlip = false;
+    }
 }
 
-async function playFolderShow(showObj) {
+async function playFolderShow(showObj, coverImg = null) {
     try {
         // Fetch files for this folder
         const files = await fetchJSON(`${API_BASE}/api/shows/folder-content?path=${encodeURIComponent(showObj.path)}`);
@@ -501,7 +574,7 @@ async function playFolderShow(showObj) {
             startShow({
                 title: showObj.title,
                 files: files
-            });
+            }, { from: coverImg, fromPath: showObj.preview && showObj.preview.path });
         } else {
             showToast('Empty', 'No media found in this folder', 'warning');
         }
@@ -641,6 +714,7 @@ function showArchiveRoot() {
     currentMedia = (folderTree || []).map(f => ({ type: 'folder', name: f.name, path: f.path }));
     filteredMedia = [...currentMedia];
     gridFocusIndex = 0;
+    gridMotion = 'enter';
     const query = document.getElementById('global-search');
     if (query && query.value.trim()) handleGlobalSearch(query.value);
     else applySortAndRender();
@@ -779,6 +853,7 @@ async function loadMedia(folder) {
         currentMedia = data.files;
         filteredMedia = [...currentMedia];
         gridFocusIndex = 0;
+        gridMotion = 'enter';   // een andere map: de tegels komen als een golf binnen
 
         applySortAndRender();
         return true;
@@ -819,6 +894,7 @@ function sortMedia(criteria) {
 
 function handleSort(value) {
     currentSort = value;
+    gridMotion = 'flip';    // dezelfde tegels, een andere volgorde: ze glijden naar hun plek
     applySortAndRender();
 }
 
@@ -830,11 +906,13 @@ function toggleView(view) {
         btn.setAttribute('aria-pressed', String(btn.dataset.view === view));
     });
 
-    const grid = document.getElementById('media-grid');
-    grid.classList.toggle('list-view', view === 'list');
-    grid.classList.toggle('grid-view', view === 'grid');
-
-    renderMediaGrid();
+    // Raster en lijst vloeien in elkaar over (View Transition; zonder beweging meteen)
+    Motion.viewTransition(() => {
+        const grid = document.getElementById('media-grid');
+        grid.classList.toggle('list-view', view === 'list');
+        grid.classList.toggle('grid-view', view === 'grid');
+        renderMediaGrid();
+    }, { kind: 'swap' });
 }
 
 // ==================== MEDIA GRID RENDERING ====================
@@ -847,11 +925,32 @@ const GRID_CHUNK = 60;
 let gridItems = [];        // mappen eerst, dan bestanden: de volgorde van het raster
 let gridRendered = 0;      // zoveel kaarten van gridItems staan er nu
 let gridObserver = null;
+// Hoe de volgende keer tekenen beweegt (media-motion.js): 'enter' (een andere map: een golf),
+// 'flip' (sorteren, filteren, een bestand weg: de tegels glijden naar hun nieuwe plek) of
+// niets. Eén keer: renderMediaGrid zet hem terug.
+let gridMotion = null;
 
 // keepCount: na verplaatsen of verversen evenveel kaarten tonen als ervoor, zodat de
 // scrollpositie niet verspringt
 function renderMediaGrid(keepCount = false) {
+    const motion = gridMotion;
+    gridMotion = null;
+    if (motion === 'flip' && gridItems.length) {
+        const grid = document.getElementById('media-grid');
+        MediaMotion.flipByKey(grid.querySelectorAll('[data-grid-index]'), el => el.dataset.motionKey || el.dataset.filename,
+            () => drawMediaGrid(keepCount), { after: () => grid.querySelectorAll('[data-grid-index]') });
+        return;
+    }
+    drawMediaGrid(keepCount);
+    if (motion === 'enter') {
+        const grid = document.getElementById('media-grid');
+        MediaMotion.cascade(grid.querySelectorAll('[data-grid-index]'), { revealRest: true, owner: grid });
+    }
+}
+
+function drawMediaGrid(keepCount) {
     const grid = document.getElementById('media-grid');
+    MediaMotion.release(grid);   // wachtende 'in beeld scrollen' van de vorige tegels
     const previous = keepCount ? gridRendered : 0;
     if (gridObserver) {
         gridObserver.disconnect();
@@ -901,6 +1000,7 @@ function renderMoreGridCards(count = GRID_CHUNK) {
     const grid = document.getElementById('media-grid');
     const end = Math.min(gridItems.length, gridRendered + count);
     const fragment = document.createDocumentFragment();
+    const cards = [];
     for (let i = gridRendered; i < end; i++) {
         const item = gridItems[i];
         const card = item.type === 'folder' ? createFolderCard(item) : createMediaCard(item);
@@ -908,9 +1008,11 @@ function renderMoreGridCards(count = GRID_CHUNK) {
         card.dataset.gridIndex = String(i);
         card.tabIndex = i === gridFocusIndex ? 0 : -1;
         fragment.appendChild(card);
+        cards.push(card);
     }
     gridRendered = end;
     grid.appendChild(fragment);
+    return cards;
 }
 
 // ==================== RASTER MET HET TOETSENBORD ====================
@@ -1009,7 +1111,8 @@ function observeGridEnd(grid) {
     }
     gridObserver = new IntersectionObserver(entries => {
         if (!entries.some(e => e.isIntersecting)) return;
-        renderMoreGridCards();
+        // Het volgende stuk komt rij voor rij binnen zodra het in beeld scrolt
+        MediaMotion.revealTiles(renderMoreGridCards(), { owner: document.getElementById('media-grid') });
         if (gridRendered >= gridItems.length) {
             gridObserver.disconnect();
             gridObserver = null;
@@ -1081,6 +1184,7 @@ function createListMeta(file) {
 function createMediaCard(file) {
     const card = document.createElement('div');
     card.className = 'media-card thumb-tile';
+    card.dataset.motionKey = file.path;   // de viewer groeit hieruit en krimpt hierheen terug
     card.onclick = () => openMediaModal(file);
     card.setAttribute('role', 'button');
     card.setAttribute('aria-label', file.name);
@@ -1247,6 +1351,7 @@ function updateSearchFieldForView(view) {
 function handleGlobalSearch(query) {
     clearTimeout(searchTimer);
     query = searchKey(query);
+    if (gridMotion !== 'enter') gridMotion = 'flip';   // typen: wat blijft schuift aan, niets wacht
 
     if (!query) {
         filteredMedia = [...currentMedia];
@@ -1271,6 +1376,8 @@ const viewer = {
     index: -1,          // het bestand dat nu te zien is
     onRemoved: null,    // (file) => void: de opener haalt een verplaatst bestand uit zijn lijst
     more: null,         // async (richting -1|1) => [bestanden]: een lijst die per pagina laadt (Albums)
+    step: 0,            // de richting van het laatste bladeren (1, -1, 0): de foto schuift die kant op
+    carry: 0,           // zoveel px was de foto al weggeveegd (MediaMotion.viewerSwipe)
     moreDone: {},       // richting -> true als er aan die kant niets meer komt
 };
 
@@ -1296,10 +1403,70 @@ function openViewer(items, index, { onRemoved = null, more = null } = {}) {
     viewer.moreDone = {};
     renderViewerFile();
     const modal = document.getElementById('modal-viewer');
+    const wasOpen = modal.classList.contains('active');
     modal.classList.add('active');
+    if (!wasOpen) viewerMorph('open');
     // Focus uit een bedekt veld halen (bv. de chat-invoer), anders typt de gebruiker daar blind verder
     const focused = document.activeElement;
     if (focused && focused !== document.body && !modal.contains(focused)) focused.blur();
+}
+
+// ---------- Beweging: de foto groeit uit zijn miniatuur (en krimpt terug) ----------
+// De miniatuur is wat de gebruiker net aanklikte (of met Enter opende), of een tegel met
+// data-motion-key gelijk aan het pad van het bestand. Zonder miniatuur in beeld: gewoon het
+// venster dat invaagt. Zie Motion.sharedElement en docs/MOTION.md.
+let viewerSourceEl = null;
+document.addEventListener('pointerdown', (e) => { viewerSourceEl = e.target.closest ? e.target.closest('img, [data-motion-key]') : null; }, true);
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') viewerSourceEl = document.activeElement;
+}, true);
+
+let viewerMorphFrom = null;     // {file, thumb}: waar de geopende foto vandaan kwam
+
+function viewerThumbFor(file, opening) {
+    if (!file) return null;
+    const keyed = [...document.querySelectorAll('[data-motion-key]')].find(el => el.dataset.motionKey === file.path
+        && !el.closest('#modal-viewer'));
+    const usable = img => (img && img.tagName === 'IMG' && img.naturalWidth > 0 && img.isConnected ? img : null);
+    if (keyed) {
+        const img = usable(keyed.tagName === 'IMG' ? keyed : keyed.querySelector('img'));
+        if (img) return img;
+    }
+    if (!opening) return viewerMorphFrom && viewerMorphFrom.file === file ? usable(viewerMorphFrom.thumb) : null;
+    const src = viewerSourceEl && viewerSourceEl.isConnected && !viewerSourceEl.closest('#modal-viewer') ? viewerSourceEl : null;
+    if (!src) return null;
+    return usable(src.tagName === 'IMG' ? src : src.querySelector('img'));
+}
+
+function viewerMorph(direction) {
+    if (!Motion.full()) return;
+    const file = viewerFile();
+    if (!file || file.type === 'audio' || file.type === 'other') return;
+    const big = document.getElementById('modal-image') || document.querySelector('#modal-body video');
+    const thumb = viewerThumbFor(file, direction === 'open');
+    if (direction === 'open') viewerMorphFrom = thumb ? { file, thumb } : null;
+    if (!big || !thumb) return;
+    const radius = parseFloat(getComputedStyle(big).borderTopLeftRadius) || 0;
+    if (direction === 'open') {
+        // Nog niet geladen: de plek uit de verhouding van de miniatuur en het inhoudsvak van de
+        // viewer (zonder zijn opvulling; de foto is daar hooguit 100% hoog, zoals in de CSS)
+        let rect = null;
+        if (!(big.naturalWidth > 0)) {
+            const bodyEl = document.getElementById('modal-body');
+            const b = bodyEl.getBoundingClientRect();
+            const cs = getComputedStyle(bodyEl);
+            const pad = side => parseFloat(cs[`padding${side}`]) || 0;
+            const box = { left: b.left + pad('Left'), top: b.top + pad('Top'),
+                width: b.width - pad('Left') - pad('Right'), height: b.height - pad('Top') - pad('Bottom') };
+            const aspect = thumb.naturalWidth / thumb.naturalHeight;
+            let w = box.width, h = w / aspect;
+            if (h > box.height) { h = box.height; w = h * aspect; }
+            rect = { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h };
+        }
+        Motion.sharedElement(thumb, big, { direction: 'open', rect, radius, src: thumb.currentSrc || thumb.src });
+    } else {
+        Motion.sharedElement(thumb, big, { direction: 'close', radius, src: big.tagName === 'IMG' ? (big.currentSrc || big.src) : (thumb.currentSrc || thumb.src) });
+    }
 }
 
 // De bestanden zoals ze in de Files-grid staan (zonder mappen), in dezelfde volgorde
@@ -1334,6 +1501,7 @@ function removeFromFilesView(file) {
     if (!currentMedia.some(f => f.path === file.path)) return;
     currentMedia = currentMedia.filter(f => f.path !== file.path);
     filteredMedia = filteredMedia.filter(f => f.path !== file.path);
+    gridMotion = 'flip';    // de tegel gaat zichtbaar weg, de rest schuift aan
     renderMediaGrid(true);
 }
 
@@ -1366,6 +1534,13 @@ function renderViewerFile() {
     document.getElementById('modal-title').textContent = file.name;
 
     stopViewerMedia();
+    // Bij bladeren gaat de vorige foto als spook opzij (MediaMotion.viewerStep); meten vóór het vervangen
+    const step = viewer.step;
+    const carry = viewer.carry;
+    viewer.step = 0;
+    viewer.carry = 0;
+    const oldMedia = step ? modalBody.querySelector(':scope > #modal-image') : null;
+    const oldRect = oldMedia ? oldMedia.getBoundingClientRect() : null;
     // Alles behalve de navigatiezones vervangen
     const zones = [...modalBody.querySelectorAll(':scope > .modal-nav-zone')];
     modalBody.replaceChildren(...zones);
@@ -1409,6 +1584,8 @@ function renderViewerFile() {
         modalControls.style.display = 'flex';
     }
     if (media) modalBody.insertBefore(media, modalBody.firstChild);
+    if (step) MediaMotion.viewerStep(modalBody, oldMedia, oldRect, media, step, carry);
+    else MediaMotion.clearViewerGhost();
 
     modalMetadata.replaceChildren(viewerMetadata(file));
     if (typeof searchViewerChanged === 'function') searchViewerChanged(file);
@@ -1479,6 +1656,7 @@ function viewerAddDetails(file, found) {
 
 function closeModal() {
     stopViewerMedia();
+    viewerMorph('close');
     document.getElementById('modal-viewer').classList.remove('active');
     viewer.items = [];
     viewer.index = -1;
@@ -2148,18 +2326,22 @@ function updateImageTransform() {
     }
 }
 
-function prevFile() {
+function prevFile(carry = 0) {
     if (viewer.index > 0) {
         viewer.index--;
+        viewer.step = -1;
+        viewer.carry = carry;
         renderViewerFile();
     } else if (viewer.index === 0) {
         viewerLoadMore(-1);
     }
 }
 
-function nextFile() {
+function nextFile(carry = 0) {
     if (viewer.index >= 0 && viewer.index < viewer.items.length - 1) {
         viewer.index++;
+        viewer.step = 1;
+        viewer.carry = carry;
         renderViewerFile();
     } else if (viewer.index >= 0) {
         viewerLoadMore(1);
@@ -2184,6 +2366,7 @@ async function viewerLoadMore(step) {
             viewer.items = files.concat(viewer.items);
             viewer.index += files.length - 1;
         }
+        viewer.step = files.length ? step : 0;
         renderViewerFile();
     } catch (e) {
         toastFetchError('Volgende bestanden laden mislukt', e);
@@ -2191,6 +2374,16 @@ async function viewerLoadMore(step) {
         viewerMoreBusy = false;
     }
 }
+
+// Vegen met de muis of twee vingers op het trackpad (alleen zonder zoom, niet bij video)
+document.addEventListener('DOMContentLoaded', () => {
+    MediaMotion.viewerSwipe(document.getElementById('modal-body'), {
+        canSwipe: () => isViewerOpen() && !isMoveModalOpen() && modalZoom <= 1,
+        hasNext: () => viewer.index < viewer.items.length - 1 || !!(viewer.more && !viewer.moreDone[1]),
+        hasPrev: () => viewer.index > 0 || !!(viewer.more && !viewer.moreDone[-1]),
+        go: (step, carry) => (step > 0 ? nextFile(carry) : prevFile(carry)),
+    });
+});
 
 // Keyboard navigation (niet terwijl de verplaats-modal erboven open is)
 document.addEventListener('keydown', (e) => {
@@ -2238,11 +2431,15 @@ function showToast(title, message, type = 'info', action = null) {
     const container = document.getElementById('toast-container');
     const duration = TOAST_MS[type] || TOAST_MS.info;
     // Dezelfde melding nog in beeld (bijv. tien mislukte miniaturen): niet opstapelen, alleen langer tonen
-    const same = [...container.children].find(t => t.dataset.title === String(title) && t.dataset.message === String(message));
+    const same = [...container.children].find(t => !t._leaving && t.dataset.title === String(title) && t.dataset.message === String(message));
     if (same) {
         same.style.opacity = '1';
         clearTimeout(same._hideTimer);
         same._hideTimer = setTimeout(() => hideToast(same), duration);
+        restartToastTimer(same);
+        // Dezelfde melding nog eens: een kort knikje in plaats van een tweede melding
+        Motion.animate(same, [{ transform: 'none' }, { transform: `translate3d(${-Motion.px('--motion-distance-sm', 6)}px, 0, 0)` }, { transform: 'none' }],
+            { spring: 'snappy', key: 'nudge', calm: false });
         return;
     }
     const toast = document.createElement('div');
@@ -2258,8 +2455,10 @@ function showToast(title, message, type = 'info', action = null) {
             // Het soort melding zit in het icoon en de balk links; de titel blijft rustig
             createEl('i', { class: `fas ${TOAST_ICONS[type] || TOAST_ICONS.info} toast-icon`, 'aria-hidden': 'true' }),
             createEl('strong', { text: title }),
-            createEl('button', { onClick: () => toast.remove(), 'aria-label': 'Melding sluiten', title: 'Sluiten' }, '\u00d7')),
-        createEl('div', { class: 'toast-body', text: message }));
+            createEl('button', { onClick: () => hideToast(toast), 'aria-label': 'Melding sluiten', title: 'Sluiten' }, '\u00d7')),
+        createEl('div', { class: 'toast-body', text: message }),
+        createEl('div', { class: 'toast-timer', 'aria-hidden': 'true' }));
+    toast.style.setProperty('--toast-ms', `${duration}ms`);
     if (action) {
         toast.append(createEl('div', { class: 'toast-actions' },
             createEl('button', {
@@ -2272,13 +2471,37 @@ function showToast(title, message, type = 'info', action = null) {
 
     // Met de muis erop blijft hij staan, zodat een lange melding uit te lezen is
     toast._hideTimer = setTimeout(() => hideToast(toast), duration);
-    toast.addEventListener('mouseenter', () => { clearTimeout(toast._hideTimer); toast.style.opacity = '1'; });
-    toast.addEventListener('mouseleave', () => { toast._hideTimer = setTimeout(() => hideToast(toast), duration); });
+    toast.addEventListener('mouseenter', () => { if (!toast._leaving) { clearTimeout(toast._hideTimer); toast.style.opacity = '1'; } });
+    toast.addEventListener('mouseleave', () => {
+        if (toast._leaving) return;
+        clearTimeout(toast._hideTimer);
+        toast._hideTimer = setTimeout(() => hideToast(toast), duration);
+        restartToastTimer(toast);
+    });
 }
 
+// De leeglopende lijn opnieuw vol: de melding blijft weer de hele tijd staan
+function restartToastTimer(toast) {
+    const timer = toast.querySelector('.toast-timer');
+    if (!timer) return;
+    timer.style.animation = 'none';
+    void timer.offsetWidth;   // de animatie echt opnieuw laten beginnen
+    timer.style.animation = '';
+}
+
+// Weg naar rechts, versnellend; de meldingen eronder schuiven daarna op hun veer omhoog
 function hideToast(toast) {
-    toast.style.opacity = '0';
-    toast._hideTimer = setTimeout(() => toast.remove(), 300);
+    if (!toast || toast._leaving) return;
+    toast._leaving = true;
+    clearTimeout(toast._hideTimer);
+    const container = toast.parentElement;
+    const leave = Motion.exit(toast, {
+        to: { opacity: 0, transform: `translate3d(${Motion.px('--motion-distance-lg', 24) * 1.5}px, 0, 0) scale(0.96)` },
+    });
+    leave.finished.then(() => {
+        const others = container ? [...container.children].filter(t => t !== toast) : [];
+        Motion.flip(others, () => toast.remove());
+    }, () => toast.remove());
 }
 
 // Eén manier om een mislukt verzoek te melden (FRONTEND-ERR-1): de melding van de server in
@@ -2405,7 +2628,8 @@ function homeRenderGreeting() {
     const greeting = hour < 6 ? 'Goedenacht' : hour < 12 ? 'Goedemorgen' : hour < 18 ? 'Goedemiddag' : 'Goedenavond';
     const title = document.getElementById('home-greeting');
     const date = document.getElementById('home-date');
-    if (title) title.textContent = greeting;
+    // Alleen als het anders is: zo blijft de letter-voor-letter-begroeting (motion-shell.js) staan
+    if (title && title.textContent !== greeting) title.textContent = greeting;
     if (date) date.textContent = now.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
@@ -2415,8 +2639,10 @@ function homeRenderLibraryStats(lib) {
     const show = (id, value) => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.textContent = ready ? Number(value || 0).toLocaleString('nl-NL') : '–';
         el.classList.toggle('is-empty', !ready);
+        // De eerste keer dat Home in beeld is, telt het getal op (motion-shell.js)
+        if (ready && window.ShellMotion) ShellMotion.statValue(el, value);
+        else el.textContent = ready ? Number(value || 0).toLocaleString('nl-NL') : '–';
     };
     show('home-stat-photos', lib && lib.photos);
     show('home-stat-videos', lib && lib.videos);
@@ -2502,12 +2728,14 @@ function homeRenderStorage(data, error) {
         return;
     }
     meta.removeAttribute('title');
-    used.textContent = gb(data.used_gb);
+    if (window.ShellMotion) ShellMotion.storageValue(used, Number(data.used_gb), gb);
+    else used.textContent = gb(data.used_gb);
     meta.replaceChildren('van ', createEl('span', { text: gb(data.total_gb) }), ' · ',
         createEl('span', { text: gb(data.free_gb) }), ' vrij');
     bar.style.width = `${data.percent_used}%`;
     bar.classList.toggle('critical', data.percent_used > 90);
     bar.classList.toggle('warning', data.percent_used > 75 && data.percent_used <= 90);
+    if (window.ShellMotion) ShellMotion.storageFill(bar);
 }
 
 // Spotify op deze dag: de albumhoes die de Spotify-sync op deze Mac bewaarde (Home zelf gaat
@@ -2575,6 +2803,7 @@ function homeOtdShow(loadingId, contentId, ...nodes) {
     document.getElementById(loadingId).style.display = 'none';
     content.style.display = 'block';
     content.replaceChildren(...nodes);
+    if (window.ShellMotion) ShellMotion.otdShow(content);
 }
 
 // Een lege of mislukte staat, compact genoeg voor een kaart op Home
@@ -2663,6 +2892,7 @@ async function loadPhotoOtdWidget() {
                     createEl('div', { class: 'otd-large-subtitle', text: p.year }));
                 content.append(image, overlay);
             });
+            if (window.ShellMotion) ShellMotion.otdShow(content);
 
             if (data.photos.length > 1) {
                 let currentOtd = 0;
@@ -2686,6 +2916,7 @@ async function loadPhotoOtdWidget() {
                     images[currentOtd].classList.add('active');
                     images[currentOtd].tabIndex = 0;
                     overlays[currentOtd].style.display = 'flex';
+                    if (window.ShellMotion) ShellMotion.otdText(overlays[currentOtd]);
                 };
                 homeOtdCycle(!document.getElementById('section-home').classList.contains('hidden'));
             }
@@ -2920,6 +3151,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     loadFolders();
     switchMainView('home');
+    // De eerste indruk: het menu valt op zijn plek, de begroeting rijst op, dan de kaarten
+    // (motion-shell.js; docs/MOTION.md)
+    if (window.ShellMotion) ShellMotion.homeIntro();
+    else Motion.enterPage(document.getElementById('section-home'));
     fetchHomeWidgets();
     loadChatModels();
     checkServerStatus();
@@ -3512,9 +3747,14 @@ function slidePlaysAsVideo(file) {
 }
 
 class CinematicPlayer {
-    constructor(story) {
+    // opts.from: de omslag waarop geklikt werd (<img>), opts.fromPath: welk bestand die toont.
+    // De show begint dan met die foto, en de omslag groeit uit tot de eerste dia (één object).
+    constructor(story, opts = {}) {
         this.story = story;
         this.files = (story.files || []).filter(f => f && (f.type === 'photo' || f.type === 'video'));
+        const first = opts.fromPath ? this.files.findIndex(f => f.path === opts.fromPath) : -1;
+        if (first > 0) this.files = [...this.files.slice(first), ...this.files.slice(0, first)];
+        this.from = first >= 0 && this.files[0].type === 'photo' ? opts.from : null;
         this.currentIndex = 0;
         this.isPlaying = true;
         this.timer = null;
@@ -3529,7 +3769,10 @@ class CinematicPlayer {
     createUI() {
         const overlay = document.createElement('div');
         overlay.id = 'cinematic-player';
-        overlay.className = 'cinematic-overlay active';
+        // Zonder 'active' erin, en die in het volgende beeld erbij: het zwart vaagt op (--dur-4)
+        // in plaats van in één beeld te verschijnen
+        overlay.className = 'cinematic-overlay';
+        requestAnimationFrame(() => { if (overlay.isConnected) overlay.classList.add('active'); });
         overlay.innerHTML = `
 <div id="slide-container"></div>
  
@@ -3576,47 +3819,79 @@ class CinematicPlayer {
     close() {
         this.stopLoop();
         document.removeEventListener('keydown', this.keyHandler);
+        // Weg in --dur-3 (sneller dan het openen); niet meer klikbaar en niet meer in de Tab-volgorde
         this.playerEl.classList.remove('active');
-        setTimeout(() => this.playerEl.remove(), 500);
+        this.playerEl.inert = true;
+        setTimeout(() => this.playerEl.remove(), Motion.ms('--dur-3', 200) + 40);
         activeShow = null;
+    }
+
+    // De eerste dia: de omslag groeit uit tot de foto (gedeeld element). De dia staat meteen
+    // helemaal zichtbaar en de Ken Burns begint pas als de omslag geland is.
+    morphIn(slide, img) {
+        const cover = this.from;
+        this.from = null;
+        if (!cover || !cover.isConnected || !cover.naturalWidth || !Motion.full()) return false;
+        const box = document.getElementById('slide-container').getBoundingClientRect();
+        const aspect = cover.naturalWidth / cover.naturalHeight;
+        let w = box.width, h = w / aspect;
+        if (h > box.height) { h = box.height; w = h * aspect; }
+        const rect = { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h };
+        slide.classList.add('active', 'is-first');
+        img.classList.add('kb-hold');
+        const anim = Motion.sharedElement(cover, img, { direction: 'open', rect, className: 'mm-show-ghost' });
+        const go = () => { img.classList.remove('kb-hold'); slide.classList.remove('is-first'); };
+        anim.finished.then(go, go);
+        return true;
     }
 
     startLoop() {
         if (!this.isPlaying) return;
         this.stopLoop();
 
-        // Progress animation
+        // De groene lijn loopt vol met een transform (geen breedte: die zou elk beeld de layout
+        // raken); zonder beweging staat hij gewoon vol
         const bar = document.getElementById('player-progress');
-        bar.style.transition = 'none';
-        bar.style.width = '0%';
-        setTimeout(() => {
-            bar.style.transition = `width ${this.duration}ms linear`;
-            bar.style.width = '100%';
-        }, 50);
+        bar.classList.add('mm-progress');
+        bar.style.opacity = '1';
+        if (this.progressAnim) this.progressAnim.cancel();
+        this.progressAnim = Motion.off() ? null
+            : bar.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration: this.duration, easing: 'linear', fill: 'forwards' });
+        bar.style.transform = Motion.off() ? 'none' : '';
 
         this.timer = setTimeout(() => this.next(), this.duration);
     }
 
     stopLoop() {
         clearTimeout(this.timer);
+        if (this.progressAnim) { this.progressAnim.cancel(); this.progressAnim = null; }
         const bar = document.getElementById('player-progress');
-        if (bar) {
-            bar.style.transition = 'none';
-            bar.style.width = '0%';
-        }
+        if (bar) bar.style.transform = '';
     }
 
     resetProgress() {
         if (this.isPlaying) this.startLoop();
+        else this.stopLoop();   // gepauzeerd naar een andere dia: de lijn begint weer leeg
     }
 
     togglePlay() {
         this.isPlaying = !this.isPlaying;
         const icon = document.getElementById('btn-play-pause').querySelector('i');
         icon.className = this.isPlaying ? 'fas fa-pause' : 'fas fa-play';
-
-        if (this.isPlaying) this.startLoop();
-        else this.stopLoop();
+        // Pauze houdt alles stil waar het is (de lijn en de Ken Burns); afspelen gaat daar verder
+        this.playerEl.classList.toggle('is-paused', !this.isPlaying);
+        const anim = this.progressAnim;
+        if (this.isPlaying && anim && anim.playState === 'paused') {
+            const left = Math.max(0, this.duration - (Number(anim.currentTime) || 0));
+            anim.play();
+            clearTimeout(this.timer);
+            this.timer = setTimeout(() => this.next(), left);
+        } else if (this.isPlaying) {
+            this.startLoop();
+        } else {
+            clearTimeout(this.timer);
+            if (anim) anim.pause();
+        }
     }
 
     next() {
@@ -3691,11 +3966,28 @@ class CinematicPlayer {
         setTimeout(() => el.remove(), 1000);
     }
 
+    // Titel en gegevens van de dia
+    showMeta(file) {
+        const titleEl = document.getElementById('player-slide-title');
+        const metaEl = document.getElementById('player-slide-meta');
+        // Show folder name (from API or extracted from path)
+        const folderName = file.folder || file.path.split(/[/\\\\]/).slice(-2, -1)[0] || 'Onbekende map';
+
+        MediaMotion.rollText(titleEl, folderName, 1);
+
+        metaEl.innerHTML = html`
+<span class="player-meta-item"><i class="fas fa-folder" aria-hidden="true"></i> ${folderName}</span>
+<span class="player-meta-item"><i class="fas fa-camera" aria-hidden="true"></i> ${file.name}</span>
+<span class="player-meta-item"><i class="fas fa-calendar" aria-hidden="true"></i> ${new Date(file.modified * 1000).toLocaleDateString('nl-NL')}</span>
+${file.size ? html`<span class="player-meta-item"><i class="fas fa-hard-drive" aria-hidden="true"></i> ${formatBytes(file.size)}</span>` : ''}
+<div class="elo-rating-badge"></div>
+`;
+        setScoreBadge(metaEl.querySelector('.elo-rating-badge'), file.rating || 1000);
+    }
+
     renderSlide() {
         const file = this.files[this.currentIndex];
         const container = document.getElementById('slide-container');
-        const titleEl = document.getElementById('player-slide-title');
-        const metaEl = document.getElementById('player-slide-meta');
 
         // Reset vote state for new slide
         this._votedOnSlide = false;
@@ -3740,6 +4032,13 @@ class CinematicPlayer {
                 class: `cinematic-media ${kbEffect}`,
                 src: vaultFileUrl(file.type === 'video' ? 'thumb' : 'file', file.path),
             });
+            // Ken Burns vanuit een willekeurig punt (nooit de rand), zo lang als de dia plus de overgang
+            img.style.setProperty('--kb-x', `${Math.round(20 + Math.random() * 60)}%`);
+            img.style.setProperty('--kb-y', `${Math.round(25 + Math.random() * 50)}%`);
+            img.style.setProperty('--kb-dur', `${this.duration + 2000}ms`);
+            // Een kleine drift (hooguit 2% opzij en 1,5% op of neer): een camera die meebeweegt
+            img.style.setProperty('--kb-tx', `${(Math.random() * 4 - 2).toFixed(2)}%`);
+            img.style.setProperty('--kb-ty', `${(Math.random() * 3 - 1.5).toFixed(2)}%`);
             img.addEventListener('error', () => {
                 const thumb = vaultFileUrl('thumb', file.path);
                 if (!img.src.endsWith(thumb)) img.src = thumb;
@@ -3748,29 +4047,27 @@ class CinematicPlayer {
         }
 
         container.appendChild(slide);
+        if (!oldSlide && !isVideo && this.morphIn(slide, slide.querySelector('img'))) {
+            this.showMeta(file);
+            this.resetProgress();
+            return;
+        }
+        // De eerste dia zonder omslag: hij vaagt op met het zwart mee, niet in de trage overgang
+        if (!oldSlide) slide.classList.add('is-opening');
 
-        // Force reflow and activate
-        setTimeout(() => {
+        // Kruisvervagen: de nieuwe dia komt erover, de oude gaat pas weg als de nieuwe er staat.
+        // Snel bladeren: dia's die nog aan het vertrekken waren, gaan meteen weg.
+        container.querySelectorAll('.cinematic-slide.is-leaving').forEach(el => el.remove());
+        if (oldSlide) oldSlide.classList.add('is-leaving');
+        requestAnimationFrame(() => requestAnimationFrame(() => {
             slide.classList.add('active');
             if (oldSlide) {
-                oldSlide.classList.remove('active');
-                setTimeout(() => oldSlide.remove(), 1500);
+                oldSlide.classList.remove('active', 'is-opening', 'is-first');
+                setTimeout(() => oldSlide.remove(), Motion.ms('--dur-6', 640) * 1.5 + 100);
             }
-        }, 50);
+        }));
 
-        // Show folder name (from API or extracted from path)
-        const folderName = file.folder || file.path.split(/[/\\\\]/).slice(-2, -1)[0] || 'Onbekende map';
-
-        titleEl.textContent = folderName;
-
-        metaEl.innerHTML = html`
-<span class="player-meta-item"><i class="fas fa-folder" aria-hidden="true"></i> ${folderName}</span>
-<span class="player-meta-item"><i class="fas fa-camera" aria-hidden="true"></i> ${file.name}</span>
-<span class="player-meta-item"><i class="fas fa-calendar" aria-hidden="true"></i> ${new Date(file.modified * 1000).toLocaleDateString('nl-NL')}</span>
-${file.size ? html`<span class="player-meta-item"><i class="fas fa-hard-drive" aria-hidden="true"></i> ${formatBytes(file.size)}</span>` : ''}
-<div class="elo-rating-badge"></div>
-`;
-        setScoreBadge(metaEl.querySelector('.elo-rating-badge'), file.rating || 1000);
+        this.showMeta(file);
 
         // For videos: don't start the timer (video 'ended' event handles advancement)
         // For photos: use normal timer
@@ -3779,26 +4076,24 @@ ${file.size ? html`<span class="player-meta-item"><i class="fas fa-hard-drive" a
             // Show indeterminate progress for video
             const bar = document.getElementById('player-progress');
             if (bar) {
-                bar.style.transition = 'none';
-                bar.style.width = '100%';
+                bar.classList.add('mm-progress');
+                bar.style.transform = 'none';
                 bar.style.opacity = '0.3';
             }
         } else {
-            const bar = document.getElementById('player-progress');
-            if (bar) bar.style.opacity = '1';
             this.resetProgress();
         }
     }
 }
 
-function startShow(story) {
+function startShow(story, opts = {}) {
     if (activeShow) activeShow.close();
     const playable = (story.files || []).some(f => f && (f.type === 'photo' || f.type === 'video'));
     if (!playable) {
         showToast('Leeg', "Geen foto's of video's in deze show", 'warning');
         return;
     }
-    activeShow = new CinematicPlayer(story);
+    activeShow = new CinematicPlayer(story, opts);
 }
 
 
@@ -3979,7 +4274,7 @@ function renderSpotifyStats(data) {
         // Record Day
         if (insights.record_day) {
             const hoursEl = document.getElementById('stat-record-day-hours');
-            if (hoursEl) hoursEl.replaceChildren(formatNumberNl(insights.record_day.hours, 1),
+            if (hoursEl) hoursEl.replaceChildren(createEl('span', { class: 'stat-number', text: formatNumberNl(insights.record_day.hours, 1) }),
                 createEl('span', { class: 'stat-unit', text: 'uur' }));
             updateText('stat-record-day-date', `Recorddag: ${formatDateNl(insights.record_day.date)}`);
         }
@@ -4122,6 +4417,8 @@ function renderSpotifyStats(data) {
     renderSimpleChart('hourly-chart', data.hourly_activity,
         i => (i % 6 === 0 ? `${i}:00` : ''),
         (i, n) => `${i}:00–${(i + 1) % 24}:00: ${formatNumberNl(n)} nummers`);
+    // Beweging (motion-data.js): tellers, kaarten in ritme, groeiende staafjes, de DNA-helix
+    if (window.MotionData) MotionData.spotifyRendered(data);
 }
 
 // De server noemt luistertypes in het Engels (met een emoji); op het scherm staat Nederlands

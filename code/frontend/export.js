@@ -197,11 +197,34 @@
         return bar;
     }
 
+    let shownCount = 0;
+    let barLeaving = null;
     function renderBar() {
         const el = ensureBar();
         const n = selection.size;
-        el.hidden = n === 0;
-        if (!n) { el.replaceChildren(); return; }
+        const before = shownCount;
+        shownCount = n;
+        if (!n) {
+            // De balk zakt weg (korter dan hij kwam) en is meteen niet meer klikbaar
+            if (el.hidden || !before) { el.hidden = true; el.replaceChildren(); return; }
+            el.style.pointerEvents = 'none';
+            const leaving = barLeaving = Motion.animate(el, [
+                { opacity: 1, transform: 'translate3d(-50%, 0, 0)' },
+                { opacity: 0, transform: `translate3d(-50%, ${Motion.px('--motion-distance-lg', 24)}px, 0) scale(0.96)` },
+            ], { duration: '--dur-3', easing: '--ease-exit', fill: 'forwards', key: 'bar' });
+            leaving.finished.then(() => {
+                if (barLeaving !== leaving) return;
+                barLeaving = null;
+                el.hidden = true;
+                el.replaceChildren();
+                el.style.pointerEvents = '';
+                leaving.cancel();
+            }, () => {});
+            return;
+        }
+        // Weer iets gekozen terwijl de balk wegzakte: hij blijft gewoon staan
+        if (barLeaving) { const leaving = barLeaving; barLeaving = null; leaving.cancel(); el.style.pointerEvents = ''; }
+        el.hidden = false;
         const buttons = [];
         if (selectAllFn && selectAllCount && selectAllCount > n) {
             buttons.push(createEl('button', {
@@ -229,6 +252,8 @@
                 `${n.toLocaleString('nl-NL')} geselecteerd`,
                 createEl('span', { class: 'export-bar-size', text: ` · ${formatBytes(totalBytes())}` })),
             createEl('span', { class: 'export-bar-spacer' }), ...buttons);
+        // Het aantal tikt mee: omhoog bij erbij, omlaag bij eraf
+        if (before && before !== n) MediaMotion.nudge(el.querySelector('.export-bar-count'), n > before ? 1 : -1);
     }
 
     // Een tegel met modifiers selecteert; zolang er iets geselecteerd is, selecteert een gewone klik ook
@@ -430,7 +455,14 @@
             return { date_from: state.from || null, date_to: state.to || null };
         };
 
-        const drawResult = (data) => {
+        // motion: 'enter' (een nieuw voorbeeld: de foto's komen als een golf binnen) of 'flip'
+        // (een foto weggelaten: hij gaat zichtbaar weg, de rest schuift aan)
+        const drawResult = (data, motion) => {
+            if (motion === 'flip') {
+                const tiles = () => result.querySelectorAll('.best-tile');
+                MediaMotion.flipByKey(tiles(), el => el.dataset.path, () => drawResult(data), { after: tiles });
+                return;
+            }
             if (!data) { result.replaceChildren(); return; }
             if (!state.items.length) {
                 result.replaceChildren(emptyState({ icon: 'fa-image', title: "Geen foto's gevonden", text: 'Probeer een andere periode of een ander filter.' }));
@@ -439,10 +471,10 @@
             }
             const bytes = state.items.reduce((n, i) => n + (i.size || 0), 0);
             const tiles = state.items.map(item => {
-                const tile = createEl('div', { class: 'best-tile thumb-tile', title: `${item.name}${item.reasons.length ? ' · ' + item.reasons.join(', ') : ''}` },
+                const tile = createEl('div', { class: 'best-tile thumb-tile', dataset: { path: item.path }, title: `${item.name}${item.reasons.length ? ' · ' + item.reasons.join(', ') : ''}` },
                     createEl('img', { src: vaultFileUrl('thumb', item.path), alt: item.name, loading: 'lazy' }),
                     createEl('button', { type: 'button', class: 'best-remove', 'aria-label': `${item.name} weglaten`, title: 'Weglaten',
-                        onClick: () => { state.items = state.items.filter(i => i.path !== item.path); drawResult(data); } }, icon('fa-xmark')));
+                        onClick: () => { state.items = state.items.filter(i => i.path !== item.path); drawResult(data, 'flip'); } }, icon('fa-xmark')));
                 return tile;
             });
             result.replaceChildren(
@@ -463,6 +495,7 @@
                 const data = await post('/api/export/best', body);
                 state.items = data.items;
                 drawResult(data);
+                MediaMotion.cascade(result.querySelectorAll('.best-tile'), { revealRest: true, root: result.closest('.modal-body') });
             } catch (e) {
                 result.replaceChildren(errorState('Kiezen mislukt', e, null));
             } finally { previewBtn.disabled = false; }

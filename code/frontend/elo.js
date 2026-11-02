@@ -23,8 +23,8 @@
 //
 // Beweging: de winnaar licht op (groene ring, vinkje, +N) en vliegt dan als miniatuur naar de
 // uitslag onderin; het volgende paar komt meteen omhoog, met de Web Animations API. Animaties blokkeren nooit: het nieuwe paar is
-// meteen te kiezen, en een volgende keuze breekt een lopende animatie af. Bij 'beweging verminderen'
-// (systeem of html[data-motion="reduce"]) wisselt alles zonder animatie.
+// meteen te kiezen, en een volgende keuze breekt een lopende animatie af. Bij Beweging Rustig of Uit
+// (Instellingen, of macOS 'minder beweging') wisselt alles zonder animatie.
 //
 // Andere collecties dan mappen melden zich met registerEloScopes(label, fn): fn() geeft
 // [{value: 'album:7', text: 'Mooiste'}]; de server kent ze via elo.register_scope. Slimme albums
@@ -79,8 +79,10 @@ function eloIcon(name) {
     return createEl('i', { class: `fas ${name}`, 'aria-hidden': 'true' });
 }
 
+// Beweging in Instellingen (motion.js): alleen bij Volledig; Rustig en Uit (en macOS 'minder
+// beweging', dat Volledig tot Rustig maakt) wisselen zonder animatie
 function eloMotionOK() {
-    if (document.documentElement.dataset.motion === 'reduce') return false;
+    if (window.Motion) return Motion.full();
     return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 

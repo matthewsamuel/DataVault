@@ -92,16 +92,56 @@
     --icon-2xl: 32px;
     --icon-3xl: 48px;
 
-    /* Beweging (prefers-reduced-motion zet ze op nul, zie onder) */
-    --duration-fast: 150ms;
-    --duration-base: 200ms;
-    --duration-slow: 250ms;
+    /* Beweging: de taal staat in docs/MOTION.md, de helpers in motion.js.
+       html[data-motion] (Volledig / Rustig / Uit, Instellingen > Beweging) en
+       prefers-reduced-motion stemmen ze af, zie onder het tokenblok. */
+    /* Duur: 1 micro (indrukken, kleur), 2 klein (chips, schakelaars), 3 standaard (menu's,
+       vertrek), 4 binnenkomst (vensters, pagina), 5 groot (gedeeld element), 6 sfeer (tellers) */
+    --dur-instant: 0ms;
+    --dur-1: 90ms;
+    --dur-2: 140ms;
+    --dur-3: 200ms;
+    --dur-4: 280ms;
+    --dur-5: 420ms;
+    --dur-6: 640ms;
+    /* Curves: standard voor alles wat binnen beeld verandert, emphasized voor binnenkomen,
+       exit (versnellend) voor vertrekken */
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+    --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
     --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
     --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
     --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);   /* licht doorverend: verschijnen, oppakken */
     --duration-ambient: 40s;      /* één rondgang van een drijvende achtergrondgloed */
     --duration-ambient-in: 900ms; /* het invloeien van die gloed */
     --tilt-perspective: 700px;    /* kantelende hoezen */
+    /* Veren (massa 1), bemonsterd met linear(); elk met de duur waarin ze tot rust komen.
+       snappy k420 c34: bediening, indicatoren. smooth k190 c25: pagina's en vensters.
+       bouncy k320 c20 (12% doorschieten): alleen voor een beloning (vinkje, winnaar).
+       gentle k150 c24: grote vlakken en het gedeelde element miniatuur -> viewer. */
+    --spring-snappy: linear(0, 0.054, 0.156, 0.294, 0.435, 0.564, 0.665, 0.759, 0.833, 0.884, 0.927, 0.957, 0.978, 0.991, 0.999, 1.004, 1.007, 1.007, 1.007, 1.006, 1.006, 1.005, 1.004, 1.003, 1.002, 1.001, 1.001, 1.001, 1);
+    --spring-snappy-dur: 450ms;
+    --spring-smooth: linear(0, 0.03, 0.099, 0.198, 0.297, 0.395, 0.488, 0.572, 0.648, 0.718, 0.773, 0.819, 0.858, 0.889, 0.914, 0.936, 0.952, 0.964, 0.974, 0.981, 0.987, 0.991, 0.994, 0.997, 0.998, 0.999, 1, 1, 1);
+    --spring-smooth-dur: 520ms;
+    --spring-bouncy: linear(0, 0.036, 0.136, 0.258, 0.394, 0.547, 0.678, 0.794, 0.902, 0.979, 1.043, 1.082, 1.105, 1.116, 1.116, 1.108, 1.094, 1.079, 1.063, 1.045, 1.031, 1.018, 1.007, 0.999, 0.993, 0.989, 0.987, 0.986, 0.987, 0.988, 0.99, 0.992, 0.994, 0.996, 0.997, 0.999, 1, 1.001, 1.001, 1.001, 1);
+    --spring-bouncy-dur: 620ms;
+    --spring-gentle: linear(0, 0.041, 0.132, 0.243, 0.356, 0.464, 0.56, 0.643, 0.714, 0.772, 0.82, 0.859, 0.89, 0.915, 0.934, 0.948, 0.96, 0.97, 0.977, 0.982, 0.987, 0.99, 0.992, 0.994, 0.996, 0.997, 0.998, 0.998, 1);
+    --spring-gentle-dur: 700ms;
+    /* Ritme en afstand: elk volgend element 28 ms later, hooguit 10 stappen; korte afstanden */
+    --stagger-step: 28ms;
+    --stagger-max: 10;
+    --motion-distance-xs: 2px;
+    --motion-distance-sm: 6px;
+    --motion-distance-md: 12px;
+    --motion-distance-lg: 24px;
+    --motion-scale-in: 0.96;
+    --motion-scale-press: 0.97;
+    --motion-scale-out: 0.98;
+    --motion-lift: -2px;
+    /* Oude namen, nu op de schaal hierboven */
+    --duration-fast: var(--dur-2);
+    --duration-base: var(--dur-3);
+    --duration-slow: var(--dur-4);
     --transition-fast: var(--duration-fast);
     --transition-normal: var(--duration-base);
 
@@ -396,12 +436,81 @@
     --border-hairline: var(--border-overlay);
 }
 
+/* ---------- Beweging: Volledig (standaard), Rustig en Uit ----------
+   motion.js zet html[data-motion] vóór de eerste weergave. Rustig: korte vervagingen, geen
+   verplaatsing, geen veren. Uit: niets beweegt. macOS 'Minder beweging' maakt van
+   Volledig vanzelf Rustig (motion.js) en zet hieronder alle CSS-animaties stil. */
+html[data-motion="rustig"] {
+    --dur-4: 160ms;
+    --dur-5: 200ms;
+    --dur-6: 240ms;
+    --spring-snappy: var(--ease-out);
+    --spring-smooth: var(--ease-out);
+    --spring-bouncy: var(--ease-out);
+    --spring-gentle: var(--ease-out);
+    --spring-snappy-dur: 160ms;
+    --spring-smooth-dur: 200ms;
+    --spring-bouncy-dur: 200ms;
+    --spring-gentle-dur: 240ms;
+    --stagger-step: 0ms;
+    --motion-distance-xs: 0px;
+    --motion-distance-sm: 0px;
+    --motion-distance-md: 0px;
+    --motion-distance-lg: 0px;
+    --motion-scale-in: 1;
+    --motion-scale-press: 1;
+    --motion-scale-out: 1;
+    --motion-lift: 0px;
+}
+
+html[data-motion="uit"] {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-4: 0ms;
+    --dur-5: 0ms;
+    --dur-6: 0ms;
+    --spring-snappy-dur: 0ms;
+    --spring-smooth-dur: 0ms;
+    --spring-bouncy-dur: 0ms;
+    --spring-gentle-dur: 0ms;
+    --stagger-step: 0ms;
+    --motion-distance-xs: 0px;
+    --motion-distance-sm: 0px;
+    --motion-distance-md: 0px;
+    --motion-distance-lg: 0px;
+    --motion-scale-in: 1;
+    --motion-scale-press: 1;
+    --motion-scale-out: 1;
+    --motion-lift: 0px;
+}
+
+html[data-motion="uit"] *,
+html[data-motion="uit"] *::before,
+html[data-motion="uit"] *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+}
+
 /* Minder beweging gevraagd (macOS: Toegankelijkheid > Beeldscherm): geen animaties */
 @media (prefers-reduced-motion: reduce) {
     :root {
         --duration-fast: 0ms;
         --duration-base: 0ms;
         --duration-slow: 0ms;
+        --stagger-step: 0ms;
+        --motion-distance-xs: 0px;
+        --motion-distance-sm: 0px;
+        --motion-distance-md: 0px;
+        --motion-distance-lg: 0px;
+        --motion-scale-in: 1;
+        --motion-scale-press: 1;
+        --motion-scale-out: 1;
+        --motion-lift: 0px;
     }
 
     *,
@@ -562,7 +671,7 @@ kbd {
         border-color var(--duration-fast) var(--ease-out),
         color var(--duration-fast) var(--ease-out),
         box-shadow var(--duration-fast) var(--ease-out),
-        transform var(--duration-fast) var(--ease-out);
+        transform var(--spring-snappy-dur) var(--spring-snappy);
 }
 
 .btn i {
@@ -574,8 +683,10 @@ kbd {
     border-color: var(--btn-border-hover);
 }
 
+/* Indrukken: de knop geeft even mee en veert terug (snappy) */
 .btn:active:not(:disabled) {
-    transform: translateY(1px);
+    transform: scale(var(--motion-scale-press));
+    transition-duration: var(--dur-1);
 }
 
 .btn:focus-visible {
@@ -1255,12 +1366,43 @@ textarea.input {
 
 .modal.active {
     display: flex;
-    animation: dv-fade-in var(--duration-base) var(--ease-out);
+    animation: dv-fade-in var(--dur-4) var(--ease-out);
 }
 
+/* Binnenkomen: het venster rijst op een zachte veer en zet zich neer (docs/MOTION.md) */
 .modal.active > .modal-container,
 .modal.active > .move-modal-container {
-    animation: dv-pop-in var(--duration-slow) var(--ease-out);
+    animation: dv-modal-in var(--spring-smooth-dur) var(--spring-smooth) both;
+}
+
+/* Vertrekken: motion.js geeft een venster dat 'active' verliest even 'is-leaving'; korter
+   dan binnenkomen, versnellend, en niet meer klikbaar */
+.modal.is-leaving:not(.active),
+.dv-overlay.is-leaving:not(.active) {
+    display: flex;
+    pointer-events: none;
+    animation: dv-fade-out var(--dur-3) var(--ease-exit) forwards;
+}
+
+.modal.is-leaving:not(.active) > .modal-container,
+.modal.is-leaving:not(.active) > .move-modal-container,
+.dv-overlay.is-leaving:not(.active) > .dv-overlay-panel {
+    animation: dv-modal-out var(--dur-3) var(--ease-exit) forwards;
+}
+
+@keyframes dv-modal-in {
+    0% { opacity: 0; transform: translate3d(0, var(--motion-distance-lg), 0) scale(var(--motion-scale-in)); }
+    35% { opacity: 1; }
+    100% { opacity: 1; transform: none; }
+}
+
+@keyframes dv-modal-out {
+    to { opacity: 0; transform: translate3d(0, var(--motion-distance-sm), 0) scale(var(--motion-scale-out)); }
+}
+
+@keyframes dv-fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
 }
 
 @keyframes dv-fade-in {
@@ -1427,7 +1569,7 @@ textarea.input {
 
 .dv-overlay.active {
     display: flex;
-    animation: dv-fade-in var(--duration-base) var(--ease-out);
+    animation: dv-fade-in var(--dur-4) var(--ease-out);
 }
 
 .dv-overlay-panel {
@@ -1440,7 +1582,7 @@ textarea.input {
     box-shadow: var(--shadow-xl);
     padding: var(--space-xl) var(--space-2xl) var(--space-2xl);
     color: var(--text-primary);
-    animation: dv-pop-in var(--duration-slow) var(--ease-out);
+    animation: dv-modal-in var(--spring-smooth-dur) var(--spring-smooth) both;
 }
 
 .dv-overlay-header {
@@ -1565,8 +1707,51 @@ textarea.input {
     gap: 2px;
     font-size: var(--fs-sm);
     overflow: hidden;
-    transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out);
-    animation: dv-toast-in var(--duration-slow) var(--ease-out);
+    transition: opacity var(--duration-base) var(--ease-out);
+    /* Komt van rechts op de snappy-veer; het icoon springt er een tel later in (beloning bij
+       succes, aandacht bij een fout). Vertrekken en opschuiven doet showToast via motion.js. */
+    animation: dv-toast-in var(--spring-snappy-dur) var(--spring-snappy) both;
+}
+
+.toast .toast-icon {
+    animation: dv-icon-pop var(--spring-bouncy-dur) var(--spring-bouncy) both;
+    animation-delay: var(--dur-1);
+}
+
+/* Hoe lang de melding nog blijft: een haarlijn in zijn eigen kleur die leegloopt;
+   met de muis erop staat hij stil */
+.toast-timer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--toast-tone);
+    opacity: 0.55;
+    transform-origin: left center;
+    animation: dv-toast-timer var(--toast-ms, 3500ms) linear forwards;
+    pointer-events: none;
+}
+
+.toast:hover .toast-timer,
+.toast:focus-within .toast-timer {
+    animation-play-state: paused;
+}
+
+@keyframes dv-toast-timer {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
+}
+
+@keyframes dv-icon-pop {
+    0% { opacity: 0; transform: scale(0.4) rotate(-12deg); }
+    40% { opacity: 1; }
+    100% { opacity: 1; transform: none; }
+}
+
+/* Rustig (ook macOS 'minder beweging'): het icoon vervaagt alleen, zonder sprong of draai */
+html[data-motion="rustig"] .toast .toast-icon {
+    animation-name: dv-fade-in;
 }
 
 /* Een smalle kleurstreep links geeft de soort aan */
@@ -1581,8 +1766,9 @@ textarea.input {
 }
 
 @keyframes dv-toast-in {
-    from { opacity: 0; transform: translateX(12px); }
-    to { opacity: 1; transform: none; }
+    0% { opacity: 0; transform: translate3d(calc(var(--motion-distance-lg) * 1.5), 0, 0) scale(var(--motion-scale-in)); }
+    30% { opacity: 1; }
+    100% { opacity: 1; transform: none; }
 }
 
 .toast.success { --toast-tone: var(--success); --toast-icon: var(--success-text); }
@@ -2453,9 +2639,9 @@ button.nav-brand {
     flex-direction: column;
     min-height: 0;
     flex: 1;
-    /* Een ander onderdeel komt rustig in beeld (alleen dekking: geen transform, die zou vaste
-       vensters en de kaart in de sectie verschuiven) */
-    animation: dv-fade-in var(--duration-base) var(--ease-out);
+    /* Een ander onderdeel komt in beeld via Motion.enterPage (switchMainView): de sectie zelf
+       alleen in dekking (een transform zou vaste vensters en de kaart erin verschuiven), zijn
+       blokken in ritme vanuit de richting van het menu */
 }
 
 /* ==================== ZIJBALK: MAPPEN ==================== */
@@ -14533,6 +14719,7 @@ button.storage-file-thumb:hover .storage-file-play {
 }
 
 .msg-list {
+    --msg-avatar-size: 40px;
     position: relative;
     flex: 1;
     min-height: 0;
@@ -14583,8 +14770,8 @@ button.storage-file-thumb:hover .storage-file-play {
     display: inline-grid;
     place-items: center;
     flex: none;
-    width: 40px;
-    height: 40px;
+    width: var(--msg-avatar-size, 40px);
+    height: var(--msg-avatar-size, 40px);
     border-radius: var(--radius-full);
     background: var(--surface-raised);
     border: 1px solid var(--border-hairline);
@@ -15448,4 +15635,1625 @@ a.act-title:focus-visible {
 .btn[hidden],
 .pill[hidden] {
     display: none;
+}
+
+/* ==================== BEWEGING: GEDEELDE STUKKEN (motion.js, docs/MOTION.md) ==================== */
+
+/* Gedeeld element: de foto die van zijn miniatuur naar de viewer groeit (Motion.sharedElement) */
+.dv-shared-ghost {
+    position: fixed;
+    z-index: 15050;
+    margin: 0;
+    object-fit: cover;
+    pointer-events: none;
+    transform-origin: center center;
+    will-change: transform, clip-path;
+    background: var(--media-bg);
+}
+
+/* Wat nog in beeld moet scrollen (Motion.reveal); alleen in Volledig, anders staat het er al */
+html[data-motion="volledig"] [data-reveal="pending"] {
+    opacity: 0;
+}
+
+/* De groene indicator onder het actieve onderdeel glijdt (Motion.glide) vanuit zijn midden */
+.nav-tab.active::after,
+.nav-icon-btn.active::after {
+    transform-origin: center;
+}
+
+/* ---------- View Transitions (Motion.viewTransition) ---------- */
+
+/* Een overgang houdt nooit een klik tegen: de muis gaat door de momentopnamen heen */
+::view-transition {
+    pointer-events: none;
+}
+
+::view-transition-group(*) {
+    animation-duration: var(--dur-4);
+    animation-timing-function: var(--ease-standard);
+}
+
+/* Thema wisselen: het nieuwe thema loopt als een cirkel uit vanaf de knop die je koos */
+html[data-vt="theme"]::view-transition-old(root) {
+    animation: none;
+}
+
+html[data-vt="theme"]::view-transition-new(root) {
+    animation: dv-theme-reveal var(--dur-6) var(--ease-emphasized) both;
+}
+
+@keyframes dv-theme-reveal {
+    from { clip-path: circle(0 at var(--vt-x, 50%) var(--vt-y, 0)); }
+    to { clip-path: circle(150vmax at var(--vt-x, 50%) var(--vt-y, 0)); }
+}
+
+/* Een kleine weergavewissel (raster/lijst, een ander album): oud en nieuw vloeien in elkaar */
+html[data-vt="swap"]::view-transition-old(root) {
+    animation: dv-fade-out var(--dur-3) var(--ease-exit) both;
+}
+
+html[data-vt="swap"]::view-transition-new(root) {
+    animation: dv-fade-in var(--dur-4) var(--ease-out) both;
+}
+
+/* ---------- Aan het scrollen gekoppeld (alleen waar de browser het zelf kan) ---------- */
+
+/* .motion-scroll-reveal: een blok rijst en verschijnt terwijl het in beeld scrolt */
+@supports (animation-timeline: view()) {
+    html[data-motion="volledig"] .motion-scroll-reveal {
+        animation: dv-scroll-reveal linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 60%;
+    }
+}
+
+@keyframes dv-scroll-reveal {
+    from { opacity: 0; transform: translate3d(0, var(--motion-distance-lg), 0) scale(0.985); }
+    to { opacity: 1; transform: none; }
+}
+
+/* Minder beweging: geen overgangen tussen momentopnamen */
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+        animation: none !important;
+    }
+}
+
+html[data-motion="uit"]::view-transition-group(*),
+html[data-motion="uit"]::view-transition-old(*),
+html[data-motion="uit"]::view-transition-new(*) {
+    animation: none !important;
+}
+
+/* ---------- Instellingen > Beweging: keuze en een klein voorbeeld ---------- */
+
+.motion-setting {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3xl);
+    flex-wrap: wrap;
+}
+
+/* Vier tegels en een vinkje die bij elke keuze opnieuw binnenkomen, in de gekozen stand */
+.motion-preview {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, var(--space-2xl));
+    gap: var(--space-sm);
+    padding: var(--space-md);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-card);
+    background: var(--surface-sunken);
+}
+
+.motion-preview-tile {
+    display: block;
+    aspect-ratio: 1;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-default);
+}
+
+.motion-preview-tile:first-child {
+    background: var(--accent-subtle);
+    border-color: var(--accent-border);
+}
+
+.motion-preview-check {
+    position: absolute;
+    top: calc(var(--space-xs) * -1);
+    right: calc(var(--space-xs) * -1);
+    display: grid;
+    place-items: center;
+    width: var(--icon-lg);
+    height: var(--icon-lg);
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    color: var(--text-on-accent);
+    font-size: var(--fs-2xs);
+    box-shadow: var(--shadow-sm);
+}
+
+/* ==================== BEWEGING: SCHIL (motion-shell.js) ====================
+   Menu, pagina's, Home, takenpaneel, meldingen, vensters, menu's, thema, segmenten,
+   sneltoetsen, Pasha en de lege, mislukte en ladende staten. De taal: docs/MOTION.md.
+   Alles hier gebruikt de bewegingstokens, dus Rustig en Uit kloppen vanzelf; waar een lus
+   verschuift (glans, puntjes) krijgt Rustig een rustige variant met alleen dekking. */
+
+:root {
+    /* Lussen van de schil: één glans over een lopende balk of een skelet, en de ademhaling
+       van Pasha's puntjes. Lussen mogen alleen bij voortgang en laden (docs/MOTION.md §10). */
+    --shell-sheen-period: 2200ms;
+    --shell-breathe-period: 1400ms;
+    /* De zachte rand van de cirkel waarmee een nieuw thema uitloopt */
+    --shell-reveal-feather: 32px;
+}
+
+/* ---------- Menu: een zwevende vlek onder de muis, indrukken ---------- */
+
+.nav-tabs.has-hover-pill {
+    position: relative;
+}
+
+.nav-hover-pill {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    height: 32px;
+    margin-top: -16px;
+    border-radius: var(--radius-sm);
+    background-color: var(--surface-hover);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.nav-hover-pill.is-shown {
+    opacity: 1;
+}
+
+.nav-tabs.has-hover-pill .nav-tab {
+    z-index: 1;
+}
+
+.nav-tabs.has-hover-pill .nav-tab:hover {
+    background-color: transparent;
+}
+
+.nav-tab,
+.nav-icon-btn {
+    transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out),
+        transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.nav-tab:active,
+.nav-icon-btn:active {
+    transform: scale(var(--motion-scale-press));
+    transition-duration: var(--dur-1);
+}
+
+/* ---------- Zoekveld bovenaan: het vergrootglas licht op, de toetshint wisselt ---------- */
+
+.nav-search > i {
+    transition: color var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.nav-search:focus-within > i {
+    color: var(--accent-text);
+    transform: scale(1.15);
+}
+
+/* De '/'-hint blijft staan en vervaagt (in plaats van te verdwijnen); de Enter-hint komt op.
+   Smaller dan 1100 px zijn de hints er niet (zie hierboven). */
+@media (min-width: 1101px) {
+    .nav-search .search-input:focus + .search-kbd,
+    .nav-search .search-input:not(:placeholder-shown) + .search-kbd {
+        display: inline-block;
+        opacity: 0;
+        transform: scale(var(--motion-scale-in));
+    }
+}
+
+.nav-search .search-kbd:not(.search-enter) {
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.nav-search.search-elsewhere .search-input:not(:placeholder-shown) ~ .search-enter {
+    animation: shell-kbd-in var(--spring-snappy-dur) var(--spring-snappy) both;
+}
+
+@keyframes shell-kbd-in {
+    from { opacity: 0; transform: translate3d(var(--motion-distance-sm), 0, 0); }
+    to { opacity: 1; transform: none; }
+}
+
+/* ---------- Home: de begroeting letter voor letter uit een masker ---------- */
+
+.hero-mask {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: top;
+    /* ruimte voor de staart van de g, zonder dat de regel hoger wordt */
+    padding-bottom: 0.14em;
+    margin-bottom: -0.14em;
+}
+
+.hero-letter {
+    display: inline-block;
+    transform-origin: left bottom;
+}
+
+/* 'Op deze dag': de foto's vloeien in elkaar over, op de tokens */
+.otd-large-image {
+    transition: opacity var(--dur-6) var(--ease-standard), transform var(--dur-5) var(--ease-out);
+}
+
+/* De opslagtegel is een knop: hij komt een tikje omhoog onder de muis */
+#widget-storage {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy), border-color var(--dur-2) var(--ease-out);
+}
+
+#widget-storage:hover {
+    transform: translate3d(0, var(--motion-lift), 0);
+}
+
+#widget-storage:active {
+    transform: scale(var(--motion-scale-press));
+    transition-duration: var(--dur-1);
+}
+
+/* ---------- Takenpaneel: een balk met leven, een feestje bij klaar ---------- */
+
+.job-bar {
+    position: relative;
+    overflow: hidden;
+    transform-origin: left center;
+}
+
+/* Eén glans die over een lopende balk trekt; motion-shell.js zet de vertraging zo dat hij
+   doorloopt als het paneel opnieuw getekend wordt */
+.job-running .job-bar:not(.indeterminate)::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--on-media) 45%, transparent) 50%, transparent 100%);
+    transform: translate3d(-100%, 0, 0);
+    animation: shell-sheen var(--shell-sheen-period) var(--ease-in-out) infinite;
+    animation-delay: var(--job-sheen-delay, 0ms);
+    pointer-events: none;
+}
+
+@keyframes shell-sheen {
+    from { transform: translate3d(-100%, 0, 0); }
+    to { transform: translate3d(100%, 0, 0); }
+}
+
+html[data-motion="rustig"] .job-running .job-bar::after {
+    display: none;
+    animation: none;
+}
+
+.job-dock.tiny .job-dock-title i {
+    transition: color var(--dur-5) var(--ease-out);
+}
+
+.job-dock.tiny.is-celebrating .job-dock-title i {
+    color: var(--accent-text);
+}
+
+.job-item.is-celebrating .job-status::before {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+/* De kring en de vonkjes staan los boven alles (het paneel tekent zich elke seconde opnieuw) */
+.job-burst {
+    position: fixed;
+    z-index: 2600;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+
+.job-burst-ring,
+.job-burst-spark {
+    position: absolute;
+    border-radius: var(--radius-full);
+    opacity: 0;
+}
+
+.job-burst-ring {
+    left: -6px;
+    top: -6px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--accent);
+}
+
+.job-burst-spark {
+    left: -2px;
+    top: -2px;
+    width: 4px;
+    height: 4px;
+    background: var(--accent);
+}
+
+/* ---------- Meldingen: wegvegen ---------- */
+
+.toast {
+    touch-action: pan-y;
+}
+
+.toast.is-dragging {
+    cursor: grabbing;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: none;
+}
+
+/* ---------- Menu's: openveren, wegvervagen ---------- */
+
+.theme-dropdown,
+.menu {
+    transform-origin: top right;
+}
+
+.theme-dropdown.open,
+.menu:not([hidden]) {
+    animation: shell-menu-in var(--spring-snappy-dur) var(--spring-snappy) both;
+}
+
+.theme-dropdown.open .theme-option,
+.menu:not([hidden]) > .menu-item {
+    animation: shell-menu-item-in var(--spring-smooth-dur) var(--spring-smooth) both;
+}
+
+.theme-dropdown.open .theme-option:nth-child(2),
+.menu:not([hidden]) > .menu-item:nth-child(2) {
+    animation-delay: var(--stagger-step);
+}
+
+.theme-dropdown.open .theme-option:nth-child(3),
+.menu:not([hidden]) > .menu-item:nth-child(3) {
+    animation-delay: calc(var(--stagger-step) * 2);
+}
+
+.theme-dropdown.open .theme-option:nth-child(n + 4),
+.menu:not([hidden]) > .menu-item:nth-child(n + 4) {
+    animation-delay: calc(var(--stagger-step) * 3);
+}
+
+.theme-dropdown.is-leaving:not(.open) {
+    display: block;
+    pointer-events: none;
+    animation: shell-menu-out var(--dur-3) var(--ease-exit) forwards;
+}
+
+@keyframes shell-menu-in {
+    0% { opacity: 0; transform: translate3d(0, calc(var(--motion-distance-sm) * -1), 0) scale(var(--motion-scale-in)); }
+    40% { opacity: 1; }
+    100% { opacity: 1; transform: none; }
+}
+
+@keyframes shell-menu-item-in {
+    from { opacity: 0; transform: translate3d(0, calc(var(--motion-distance-sm) * -0.5), 0); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes shell-menu-out {
+    to { opacity: 0; transform: translate3d(0, calc(var(--motion-distance-sm) * -0.5), 0) scale(var(--motion-scale-out)); }
+}
+
+/* ---------- Thema: de cirkel krijgt een zachte rand ---------- */
+
+@property --shell-reveal {
+    syntax: '<length>';
+    inherits: false;
+    initial-value: 0px;
+}
+
+html[data-vt="theme"]::view-transition-new(root) {
+    -webkit-mask-image: radial-gradient(circle at var(--vt-x, 50%) var(--vt-y, 0px),
+        black calc(var(--shell-reveal) - var(--shell-reveal-feather)), transparent var(--shell-reveal));
+    mask-image: radial-gradient(circle at var(--vt-x, 50%) var(--vt-y, 0px),
+        black calc(var(--shell-reveal) - var(--shell-reveal-feather)), transparent var(--shell-reveal));
+    animation: shell-theme-reveal var(--dur-6) var(--ease-standard) both;
+}
+
+/* Gewoon over elkaar, niet optellen (plus-lighter): anders licht de zachte rand wit op */
+html[data-vt="theme"]::view-transition-old(root),
+html[data-vt="theme"]::view-transition-new(root) {
+    mix-blend-mode: normal;
+}
+
+@keyframes shell-theme-reveal {
+    from { --shell-reveal: 0px; }
+    to { --shell-reveal: calc(var(--shell-reveal-end, 150vmax) + var(--shell-reveal-feather)); }
+}
+
+/* ---------- Segmenten: het gekozen vlak glijdt ---------- */
+
+.segmented,
+.view-toggle {
+    position: relative;
+}
+
+.seg-thumb {
+    position: absolute;
+    z-index: 0;
+    border-radius: var(--radius-sm);
+    background: var(--surface-card);
+    box-shadow: var(--shadow-sm);
+    transform-origin: top left;
+    pointer-events: none;
+}
+
+.segmented.is-gliding > :not(.seg-thumb),
+.view-toggle.is-gliding > :not(.seg-thumb) {
+    position: relative;
+    z-index: 1;
+}
+
+.segmented.is-gliding > button.active,
+.segmented.is-gliding > button[aria-pressed="true"],
+.segmented.is-gliding > .settings-choice:has(input:checked),
+.view-toggle.is-gliding > .view-toggle-btn.active {
+    background: transparent;
+    box-shadow: none;
+}
+
+/* Schakelaar: het bolletje veert, en rekt even uit terwijl je drukt */
+.switch .slider::before {
+    transform-origin: left center;
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.switch input:checked + .slider::before {
+    transform-origin: right center;
+}
+
+.switch:active .slider::before {
+    transform: scaleX(1.18);
+    transition-duration: var(--dur-2);
+}
+
+.switch:active input:checked + .slider::before {
+    transform: translateX(16px) scaleX(1.18);
+}
+
+/* ---------- Sneltoetsen: de toets die je indrukt licht op ---------- */
+
+.shortcut-help kbd {
+    transition: background-color var(--dur-4) var(--ease-out), border-color var(--dur-4) var(--ease-out),
+        color var(--dur-4) var(--ease-out);
+}
+
+.shortcut-help kbd.is-pressed {
+    background-color: var(--accent-subtle);
+    border-color: var(--accent-border);
+    color: var(--accent-text);
+    transition-duration: var(--dur-1);
+}
+
+/* ---------- Pasha: puntjes in Rustig ----------
+   Pasha zelf (kopje, bubbels, typende puntjes in Volledig) beweegt via motion-data.js; de schil
+   geeft de puntjes in Rustig alleen een rustige ademhaling zonder schalen. */
+
+html[data-motion="rustig"] .message-loading .dot {
+    animation: shell-breathe-calm var(--shell-breathe-period) var(--ease-in-out) infinite both;
+}
+
+html[data-motion="rustig"] .message-loading .dot:nth-child(1) {
+    animation-delay: calc(var(--shell-breathe-period) * -0.4);
+}
+
+html[data-motion="rustig"] .message-loading .dot:nth-child(2) {
+    animation-delay: calc(var(--shell-breathe-period) * -0.25);
+}
+
+html[data-motion="rustig"] .message-loading .dot:nth-child(3) {
+    animation-delay: calc(var(--shell-breathe-period) * -0.1);
+}
+
+@keyframes shell-breathe-calm {
+    0%, 70%, 100% { opacity: 0.35; }
+    35% { opacity: 1; }
+}
+
+/* ---------- Leeg, fout, laden ---------- */
+
+/* Een kring die één keer uitdijt rond het icoon van een lege staat (motion-shell.js zet
+   .is-arriving); Font Awesome tekent zijn glyph in ::before, de kring staat in ::after */
+.empty-state-icon {
+    position: relative;
+}
+
+.empty-state-icon.is-arriving::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid var(--border-strong);
+    pointer-events: none;
+    animation: shell-halo var(--dur-6) var(--ease-emphasized) var(--dur-2) both;
+}
+
+.empty-state-error .empty-state-icon.is-arriving::after {
+    border-color: var(--danger-text);
+}
+
+@keyframes shell-halo {
+    from { opacity: 0.9; transform: scale(1); }
+    to { opacity: 0; transform: scale(1.8); }
+}
+
+html[data-motion="rustig"] .empty-state-icon.is-arriving::after {
+    display: none;
+    animation: none;
+}
+
+/* Skeletten: een glans die via transform overtrekt (geen achtergrond die per beeld opnieuw
+   geschilderd wordt), in een golf schuin over het raster. Ze verschijnen pas na een tel,
+   zodat snel laden niet flitst. */
+.skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--skeleton-base);
+    animation: none;
+}
+
+.skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 15%,
+        color-mix(in srgb, var(--skeleton-highlight) 80%, transparent) 50%, transparent 85%);
+    transform: translate3d(-100%, 0, 0);
+    animation: shell-sheen var(--shell-sheen-period) var(--ease-in-out) infinite;
+    pointer-events: none;
+}
+
+.skeleton-grid > .skeleton:nth-child(6n + 2)::after,
+.skeleton-list > .skeleton-row:nth-child(2) .skeleton::after {
+    animation-delay: calc(var(--stagger-step) * 2);
+}
+
+.skeleton-grid > .skeleton:nth-child(6n + 3)::after,
+.skeleton-list > .skeleton-row:nth-child(3) .skeleton::after {
+    animation-delay: calc(var(--stagger-step) * 4);
+}
+
+.skeleton-grid > .skeleton:nth-child(6n + 4)::after,
+.skeleton-list > .skeleton-row:nth-child(4) .skeleton::after {
+    animation-delay: calc(var(--stagger-step) * 6);
+}
+
+.skeleton-grid > .skeleton:nth-child(6n + 5)::after {
+    animation-delay: calc(var(--stagger-step) * 8);
+}
+
+.skeleton-grid > .skeleton:nth-child(6n)::after {
+    animation-delay: calc(var(--stagger-step) * 10);
+}
+
+.skeleton-grid,
+.skeleton-list {
+    animation: dv-fade-in var(--dur-3) var(--ease-out) var(--dur-2) backwards;
+}
+
+/* Rustig: geen schuivende glans, alleen een zachte ademhaling */
+html[data-motion="rustig"] .skeleton::after,
+html[data-motion="rustig"] .skeleton-grid > .skeleton::after,
+html[data-motion="rustig"] .skeleton-list > .skeleton-row .skeleton::after {
+    display: none;
+    animation: none;
+}
+
+html[data-motion="rustig"] .skeleton {
+    animation: shell-breathe-calm var(--shell-sheen-period) var(--ease-in-out) infinite;
+}
+
+/* Laden: een boog met een staart die vervaagt (draait via transform) */
+.spinner,
+.loading-spinner {
+    border: none;
+    background: conic-gradient(from 0deg, transparent 0deg, var(--accent) 330deg, transparent 331deg);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 3px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), black calc(100% - 3px));
+}
+
+/* ---------- Herstelcentrum ---------- */
+
+.recovery-entry.is-changed {
+    animation: shell-changed calc(var(--dur-6) * 2) var(--ease-standard) both;
+}
+
+@keyframes shell-changed {
+    from { box-shadow: 0 0 0 3px var(--accent-subtle), var(--shadow-sm); }
+    to { box-shadow: 0 0 0 0 transparent, var(--shadow-sm); }
+}
+
+.recovery-chevron {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+/* Minder beweging gevraagd: de lussen hierboven staan stil */
+@media (prefers-reduced-motion: reduce) {
+    .job-running .job-bar::after,
+    .skeleton::after,
+    .empty-state-icon.is-arriving::after {
+        display: none;
+    }
+}
+
+/* ==================== BEWEGING: MEDIA (foto's: media-motion.js, docs/MOTION.md) ====================
+   Eigen sectie van de fotoschermen (Bestanden, Tijdlijn, Albums, Reeksen, Duplicaten, viewer,
+   Keurer, Shows, Slim zoeken, Exporteren). Alleen tokens; Rustig en Uit volgen vanzelf. */
+
+/* ---------- Fototegel: optillen, licht en selectie ---------- */
+
+/* Optillen op de snappy-veer; de schaduw (één tegel tegelijk) in --dur-2 */
+.thumb-tile {
+    transition:
+        transform var(--spring-snappy-dur) var(--spring-snappy),
+        box-shadow var(--dur-2) var(--ease-out);
+}
+
+.thumb-tile:hover {
+    transform: translate3d(0, var(--motion-lift), 0);
+}
+
+.thumb-tile:active:not(.is-placeholder) {
+    transform: translate3d(0, var(--motion-lift), 0) scale(var(--motion-scale-press));
+    transition-duration: var(--dur-1), var(--dur-2);
+}
+
+/* De foto zelf vaagt bij het laden alleen in: geen zoom op de foto, ook niet bij hover */
+.thumb-tile img,
+.thumb-tile video {
+    transition:
+        opacity var(--dur-4) var(--ease-out),
+        transform var(--dur-5) var(--ease-emphasized);
+}
+
+.thumb-tile:hover img {
+    transform: none;
+}
+
+/* Het licht onder de muis (één element, media-motion.js): een zachte glans boven de foto */
+.mm-light {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 1;
+    width: 200%;
+    height: 200%;
+    border-radius: var(--radius-full);
+    /* Wit licht (--on-media) dat zacht wegloopt; soft-light hoogt de foto op zonder hem te verkleuren */
+    --mm-light-core: color-mix(in srgb, var(--on-media) 90%, transparent);
+    --mm-light-mid: color-mix(in srgb, var(--on-media) 32%, transparent);
+    background: radial-gradient(closest-side, var(--mm-light-core), var(--mm-light-mid) 40%, transparent 75%);
+    mix-blend-mode: soft-light;
+    opacity: 0;
+    pointer-events: none;
+    will-change: transform;
+    transition: opacity var(--dur-3) var(--ease-out);
+}
+
+.mm-light.is-on {
+    opacity: 1;
+}
+
+html:not([data-motion="volledig"]) .mm-light {
+    display: none;
+}
+
+/* Selectie: de ring groeit in (--dur-2), het vinkje springt erin (bouncy) en gaat snel weg.
+   De rondjes bestaan altijd (onzichtbaar), zodat ze een overgang hebben in plaats van een
+   animatie: een tegel die opnieuw getekend wordt (virtuele lijst) springt dus niet opnieuw. */
+.thumb-tile::after {
+    content: '';
+    position: absolute;
+    z-index: 2;
+    top: var(--space-sm);
+    right: var(--space-sm);
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-full);
+    background-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--on-media);
+    opacity: 0;
+    transform: scale(0.4);
+    pointer-events: none;
+    transition:
+        opacity var(--dur-1) var(--ease-exit),
+        transform var(--dur-2) var(--ease-exit);
+}
+
+.thumb-tile::before {
+    content: '';
+    position: absolute;
+    z-index: 3;
+    top: calc(var(--space-sm) + 6px);
+    right: calc(var(--space-sm) + 6px);
+    width: 10px;
+    height: 6px;
+    border: 2px solid var(--text-on-accent);
+    border-top: none;
+    border-right: none;
+    opacity: 0;
+    transform: rotate(-45deg) scale(0.3);
+    pointer-events: none;
+    transition:
+        opacity var(--dur-1) var(--ease-exit),
+        transform var(--dur-2) var(--ease-exit);
+}
+
+.thumb-tile.selected::after {
+    opacity: 1;
+    transform: none;
+    transition:
+        opacity var(--dur-2) var(--ease-out),
+        transform var(--spring-bouncy-dur) var(--spring-bouncy);
+}
+
+.thumb-tile.selected::before {
+    z-index: 3;
+    opacity: 1;
+    transform: rotate(-45deg);
+    transition:
+        opacity var(--dur-2) var(--ease-out) var(--dur-1),
+        transform var(--spring-bouncy-dur) var(--spring-bouncy) var(--dur-1);
+}
+
+.thumb-tile.selected {
+    box-shadow: 0 0 0 3px var(--accent);
+}
+
+.thumb-tile.selected:hover {
+    box-shadow: 0 0 0 3px var(--accent), var(--shadow-md);
+}
+
+/* ---------- Spoken: wat weggaat terwijl de lijst al verder is ---------- */
+
+.mm-ghost-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 95;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+/* Keurer: de laag staat vóór het kaartvak en zonder z-index, dus de vliegende kaart gaat onder
+   de volgende kaart door (die nooit bedekt wordt) */
+.mm-ghost-layer.mm-ghost-under {
+    z-index: auto;
+}
+
+/* (ook onder de tellers door: die worden zo een eigen laag na het spook) */
+.keurer-layout > .keurer-stats-bar {
+    position: relative;
+}
+
+.mm-ghost-holder {
+    position: fixed;
+    display: flex;
+    pointer-events: none;
+    will-change: transform, opacity;
+}
+
+.mm-ghost-holder > .mm-ghost {
+    flex: 1 1 auto;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+}
+
+/* ---------- Viewer: de vorige foto als spook bij volgende en vorige ---------- */
+
+.mm-viewer-ghost {
+    position: absolute;
+    z-index: 0;
+    margin: 0;
+    max-width: none;
+    max-height: none;
+    object-fit: contain;
+    pointer-events: none;
+}
+
+/* ---------- Keurer: de kaart in de lucht ---------- */
+
+.mm-keurer-flying {
+    box-shadow: var(--shadow-xl);
+}
+
+.mm-keurer-flying .keurer-card-overlay {
+    transition: none;
+}
+
+/* De knop die bij een toets hoort geeft even mee (MediaMotion.press) */
+.keurer-btn {
+    transition:
+        transform var(--spring-snappy-dur) var(--spring-snappy),
+        background-color var(--dur-2) var(--ease-out),
+        border-color var(--dur-2) var(--ease-out),
+        color var(--dur-2) var(--ease-out);
+}
+
+/* ---------- Reeksen: de winnaar zet zich neer ---------- */
+
+.series-photo.mm-winner {
+    z-index: 2;
+}
+
+.series-photo.is-leaving img {
+    transition: opacity var(--dur-3) var(--ease-out), filter var(--dur-3) var(--ease-out), transform var(--dur-5) var(--ease-emphasized);
+}
+
+/* ---------- Tijdlijn en Albums: rijen die zich neerzetten tijdens het scrollen ----------
+   Aan de scrollpositie gekoppeld (animation-timeline: view()): de browser doet het zelf, buiten
+   de hoofdthread. Een rij is helemaal klaar zodra hij helemaal in beeld is. */
+@supports (animation-timeline: view()) {
+    html[data-motion="volledig"] .tl-photo-row,
+    html[data-motion="volledig"] .albums-row {
+        animation: mm-row-settle linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 100%;
+    }
+
+    html[data-motion="volledig"] .tl-group-header {
+        animation: mm-header-settle linear both;
+        animation-timeline: view();
+        animation-range: entry 0% cover 30%;
+    }
+}
+
+@keyframes mm-row-settle {
+    from { opacity: 0.2; transform: translate3d(0, var(--motion-distance-lg), 0) scale(0.97); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes mm-header-settle {
+    from { opacity: 0; transform: translate3d(calc(var(--motion-distance-md) * -1), var(--motion-distance-md), 0); }
+    to { opacity: 1; transform: none; }
+}
+
+/* Het label met de maand rolt (MediaMotion.rollText) */
+.tl-current-date {
+    display: inline-block;
+}
+
+/* ---------- Shows: de diavoorstelling ---------- */
+
+/* Ken Burns (alleen hier, docs/MOTION.md): langzaam in- of uitzoomen vanuit een willekeurig
+   punt, met een kleine drift (--kb-tx, --kb-ty) zodat het als een camerabeweging voelt */
+.cinematic-media.ken-burns-in,
+.cinematic-media.ken-burns-out {
+    transform-origin: var(--kb-x, 50%) var(--kb-y, 50%);
+    animation-duration: var(--kb-dur, calc(var(--dur-6) * 16));
+    animation-timing-function: var(--ease-in-out);
+}
+
+.cinematic-media.ken-burns-in {
+    animation-name: mm-kb-in;
+}
+
+.cinematic-media.ken-burns-out {
+    animation-name: mm-kb-out;
+}
+
+@keyframes mm-kb-in {
+    from { transform: scale(1); }
+    to { transform: scale(1.1) translate3d(var(--kb-tx, 0%), var(--kb-ty, 0%), 0); }
+}
+
+@keyframes mm-kb-out {
+    from { transform: scale(1.1) translate3d(var(--kb-tx, 0%), var(--kb-ty, 0%), 0); }
+    to { transform: scale(1); }
+}
+
+html:not([data-motion="volledig"]) .cinematic-media.ken-burns-in,
+html:not([data-motion="volledig"]) .cinematic-media.ken-burns-out {
+    animation: none;
+}
+
+/* Voortgang met transform (geen breedte die elke frame de layout raakt) */
+.player-progress-fill.mm-progress {
+    width: 100%;
+    transform: scaleX(0);
+    transform-origin: left center;
+}
+
+/* Shows: een collectie is een stapel foto's. De omslag ligt voorop (.show-card-face, die
+   knipt en rondt af); twee foto's uit de map steken er een randje onder uit en waaieren bij
+   hover of focus uit op de smooth-veer. */
+.show-card-face {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    overflow: hidden;
+    border-radius: inherit;
+    background: var(--thumb-bg);
+}
+
+.show-card.has-stack {
+    overflow: visible;
+    background: transparent;
+    box-shadow: none;
+}
+
+.show-card.has-stack .show-card-face {
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow var(--dur-2) var(--ease-out);
+}
+
+.show-card.has-stack:hover {
+    box-shadow: none;
+}
+
+.show-card.has-stack:hover .show-card-face,
+.show-card.has-stack:focus-visible .show-card-face {
+    box-shadow: var(--shadow-lg);
+}
+
+.show-card-stack {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+.show-card-stack img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+    border: 1px solid var(--border-hairline);
+    background: var(--thumb-bg);
+    box-shadow: var(--shadow-sm);
+    filter: brightness(0.82);
+    transform-origin: 50% 85%;
+    transition:
+        transform var(--spring-smooth-dur) var(--spring-smooth),
+        filter var(--dur-3) var(--ease-out);
+}
+
+/* In rust: twee dunne randjes boven de omslag, als een nette stapel afdrukken */
+.show-card-stack img:nth-child(1) {
+    /* Geschaald rond 85% van de hoogte: -12,5% omhoog laat 4% van de hoogte boven de omslag uitsteken */
+    transform: translate3d(0, -12.5%, 0) scale(0.9);
+    filter: brightness(0.62);
+}
+
+.show-card-stack img:nth-child(2) {
+    transform: translate3d(0, -6.25%, 0) scale(0.95);
+}
+
+.show-card.has-stack:hover,
+.show-card.has-stack:focus-visible {
+    z-index: 2;
+}
+
+.show-card.has-stack:hover .show-card-stack img,
+.show-card.has-stack:focus-visible .show-card-stack img {
+    filter: none;
+}
+
+.show-card.has-stack:hover .show-card-stack img:nth-child(1),
+.show-card.has-stack:focus-visible .show-card-stack img:nth-child(1) {
+    transform: rotate(-8deg) translate3d(calc(var(--motion-distance-lg) * -0.75), calc(var(--motion-distance-md) * -0.5), 0);
+}
+
+.show-card.has-stack:hover .show-card-stack img:nth-child(2),
+.show-card.has-stack:focus-visible .show-card-stack img:nth-child(2) {
+    transform: rotate(7deg) translate3d(calc(var(--motion-distance-lg) * 0.75), calc(var(--motion-distance-md) * -0.4), 0);
+}
+
+/* De kaart zelf tilt op de snappy-veer */
+.show-card {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy), box-shadow var(--dur-2) var(--ease-out);
+}
+
+.show-card:hover {
+    transform: translate3d(0, calc(var(--motion-lift) * 1.5), 0);
+}
+
+/* Rustig en Uit: de stapel ligt stil achter de omslag (niets draait of verschuift) */
+html:not([data-motion="volledig"]) .show-card.has-stack .show-card-stack img:nth-child(n) {
+    transform: none;
+}
+
+/* ---------- Exporteren: de selectiebalk ---------- */
+
+.export-bar:not([hidden]) {
+    animation: mm-bar-in var(--spring-smooth-dur) var(--spring-smooth) both;
+}
+
+@keyframes mm-bar-in {
+    0% { opacity: 0; transform: translate3d(-50%, var(--motion-distance-lg), 0) scale(var(--motion-scale-in)); }
+    35% { opacity: 1; }
+    100% { opacity: 1; transform: translate3d(-50%, 0, 0); }
+}
+
+/* Een spook binnen een venster of overlay ligt boven de inhoud daarvan */
+.modal > .mm-ghost-holder,
+.dv-overlay > .mm-ghost-holder {
+    z-index: 50;
+}
+
+/* Keurer: de dagbalk groeit vanaf links (MediaMotion via keurerStatsMotion) */
+.keurer-daily-fill {
+    transform-origin: left center;
+}
+
+/* Shows: pauze zet ook de Ken Burns stil; de dia's vervagen in elkaar (MediaMotion-sectie) */
+.cinematic-overlay {
+    --mm-slide-fade: calc(var(--dur-6) * 1.5);
+}
+
+.cinematic-overlay.is-paused .cinematic-media {
+    animation-play-state: paused;
+}
+
+/* De nieuwe dia zet zich neer terwijl hij invaagt (de foto zelf doet Ken Burns) */
+.cinematic-slide {
+    transform: scale(1.015);
+    transition:
+        opacity var(--mm-slide-fade) var(--ease-in-out),
+        transform var(--mm-slide-fade) var(--ease-emphasized);
+}
+
+.cinematic-slide.active {
+    transform: none;
+}
+
+html:not([data-motion="volledig"]) .cinematic-slide {
+    transform: none;
+}
+
+/* Openen: het zwart vaagt op in --dur-4 terwijl de omslag uitgroeit tot de eerste dia (een
+   gedeeld element boven de speler); sluiten gaat sneller, in --dur-3 */
+.cinematic-overlay {
+    transition: opacity var(--dur-4) var(--ease-out);
+}
+
+.cinematic-overlay:not(.active) {
+    transition: opacity var(--dur-3) var(--ease-exit);
+}
+
+.dv-shared-ghost.mm-show-ghost {
+    z-index: 20001;   /* boven .cinematic-overlay (20000) */
+}
+
+/* De eerste dia staat er meteen (geen vervaging uit het zwart); de Ken Burns wacht tot de
+   omslag geland is */
+.cinematic-slide.is-first {
+    transition: none;
+}
+
+.cinematic-slide.is-opening {
+    transition-duration: var(--dur-4);
+}
+
+.cinematic-media.kb-hold {
+    animation-play-state: paused;
+}
+
+/* Albums: de groene markering in de zijbalk is een eigen laag (::before), zodat hij naar het
+   gekozen album kan glijden (MediaMotion.slideMarker) in plaats van te verspringen */
+.albums-side-item {
+    position: relative;
+    isolation: isolate;
+}
+
+.albums-side-item.active {
+    background: transparent;
+}
+
+.albums-side-item.active::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--accent-subtle);
+    transform-origin: center;
+}
+
+/* Albums: ruimte boven de eerste rij, zodat de groene selectiering niet tegen de scrollrand
+   wordt afgesneden (de rijen rekenen met offsetTop, dus dit verschuift niets) */
+.albums-content {
+    margin-top: var(--space-xs);
+}
+
+/* Shows: ruimte voor de randjes van de stapels onder de kop 'Collecties' */
+.shows-grid-folders {
+    padding-top: var(--space-sm);
+}
+
+/* ==================== BEWEGING: GEGEVENSSCHERMEN (motion-data.js) ====================
+   Spotify, Kaart, DataGatherer, Berichten, Activiteit en Pasha. De JS staat in
+   motion-data.js (window.MotionData), de taal in docs/MOTION.md (sectie 8, Data). Alles hier
+   gebruikt de bewegingstokens, dus Rustig en Uit kloppen vanzelf; wat herhaalt of verschuift
+   staat achter html[data-motion="volledig"]. Dit blok staat los van de andere schermgroepen. */
+
+@keyframes md-fade {
+    from { opacity: 0; }
+}
+
+@keyframes md-pop {
+    from { opacity: 0; transform: scale(0.5); }
+}
+
+@keyframes md-rise {
+    from { opacity: 0; transform: translate3d(0, var(--motion-distance-md), 0) scale(var(--motion-scale-in)); }
+}
+
+/* ---------- Gedeeld: een klein feest (ring en stipjes) en een rand die even oplicht ---------- */
+
+.md-burst-layer {
+    position: fixed;
+    z-index: 90;
+    pointer-events: none;
+}
+
+.md-burst-ring,
+.md-burst-dot {
+    position: absolute;
+    pointer-events: none;
+    opacity: 0;
+}
+
+.md-burst-ring {
+    inset: calc(-1 * var(--space-2xs));
+    border: var(--space-2xs) solid var(--accent);
+    border-radius: inherit;
+}
+
+.md-burst-dot {
+    top: 50%;
+    left: 50%;
+    width: var(--space-sm);
+    height: var(--space-sm);
+    margin: calc(-1 * var(--space-xs)) 0 0 calc(-1 * var(--space-xs));
+    border-radius: var(--radius-full);
+    background: var(--accent);
+}
+
+.md-burst-dot.is-soft {
+    background: var(--accent-hover);
+}
+
+/* ---------- Spotify: tellers, toplijsten, staafjes en de DNA-helix ---------- */
+
+/* Het getal en de eenheid ('0,7 uur') staan los: alleen het getal tikt */
+#stat-record-day-hours .stat-number {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Een dun staafje onder elke regel: het aandeel ten opzichte van nummer één */
+.spotify-list-item {
+    position: relative;
+}
+
+.md-share {
+    position: absolute;
+    left: calc(2 * var(--space-md) + var(--space-2xl));
+    right: var(--space-md);
+    bottom: var(--space-xs);
+    height: var(--space-2xs);
+    border-radius: var(--radius-full);
+    background: var(--spotify-border);
+    transform: scaleX(var(--share, 0));
+    transform-origin: left center;
+    pointer-events: none;
+}
+
+.spotify-list-item:hover .md-share {
+    background: var(--spotify);
+}
+
+/* Staafjes groeien vanaf de basislijn; tot ze in beeld komen staan ze laag (alleen Volledig) */
+.simple-bar-chart .chart-bar {
+    transform-origin: 50% 100%;
+}
+
+html[data-motion="volledig"] .simple-bar-chart[data-md-pending] .chart-bar {
+    opacity: 0;
+    transform: scaleY(0);
+}
+
+html[data-motion="volledig"] .simple-bar-chart[data-md-pending] + .chart-axis {
+    opacity: 0;
+}
+
+/* Luister-DNA: een dubbele helix, één sport per uur; vollere stip = vaker op dat uur */
+.stat-card.listening-personality {
+    overflow: hidden;
+}
+
+.md-helix {
+    position: absolute;
+    top: var(--space-lg);
+    right: var(--space-lg);
+    width: min(56%, 184px);
+    height: auto;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.md-helix.is-drawing .md-helix-rung {
+    opacity: 0;
+}
+
+.md-helix-bar {
+    stroke: var(--spotify-border);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    opacity: calc(0.35 + var(--v, 0) * 0.65);
+    transform-box: fill-box;
+    transform-origin: center;
+}
+
+.md-helix-dot {
+    fill: var(--spotify);
+    opacity: calc(0.35 + var(--v, 0) * 0.65);
+}
+
+.md-helix-dot.is-b {
+    fill: var(--text-tertiary);
+}
+
+html[data-motion="volledig"] .md-helix-rung > * {
+    animation-duration: calc(var(--dur-6) * 2.5);
+    animation-timing-function: var(--ease-in-out);
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+    /* Een hele slag = twee keer heen; de fase zet elke sport op zijn eigen plek */
+    animation-delay: calc(var(--phase, 0) * var(--dur-6) * -5);
+    animation-play-state: paused;
+}
+
+html[data-motion="volledig"] .md-helix-bar { animation-name: md-helix-bar; }
+html[data-motion="volledig"] .md-helix-dot.is-a { animation-name: md-helix-a; }
+html[data-motion="volledig"] .md-helix-dot.is-b { animation-name: md-helix-b; }
+
+html[data-motion="volledig"] .md-helix.is-spinning .md-helix-rung > * {
+    animation-play-state: running;
+}
+
+@keyframes md-helix-a {
+    from { transform: translateY(calc(-1 * var(--amp))); }
+    to { transform: translateY(var(--amp)); }
+}
+
+@keyframes md-helix-b {
+    from { transform: translateY(var(--amp)); }
+    to { transform: translateY(calc(-1 * var(--amp))); }
+}
+
+@keyframes md-helix-bar {
+    from { transform: scaleY(-1); }
+    to { transform: scaleY(1); }
+}
+
+/* ---------- Kaart: groepen die splitsen en samenvloeien, popups, de route van een dag ---------- */
+
+/* markercluster zet .leaflet-cluster-anim tijdens het zoomen; zijn eigen 0,3 s blijft de grens */
+.map-canvas .leaflet-cluster-anim .leaflet-marker-icon,
+.map-canvas .leaflet-cluster-anim .leaflet-marker-shadow {
+    transition: transform var(--dur-4) var(--ease-emphasized), opacity var(--dur-3) var(--ease-out);
+}
+
+.map-canvas .leaflet-cluster-anim .leaflet-cluster-spider-leg {
+    transition: stroke-dashoffset var(--dur-4) var(--ease-emphasized), stroke-opacity var(--dur-3) var(--ease-out);
+}
+
+/* Rustig: groepen verschuiven niet, ze verschijnen en verdwijnen alleen */
+html[data-motion="rustig"] .map-canvas .leaflet-cluster-anim .leaflet-marker-icon,
+html[data-motion="rustig"] .map-canvas .leaflet-cluster-anim .leaflet-marker-shadow {
+    transition: opacity var(--dur-3) var(--ease-out);
+}
+
+/* Komt de kaart in beeld, dan ploffen de groepen en spelden zacht op hun plek (de buitenste
+   laag is van Leaflet). Alleen dan: bij het zoomen glijden ze al, en honderden tegelijk
+   laten ploffen kost beelden (motion-data.js zet .md-map-arriving even op de kaart) */
+html[data-motion="volledig"] .md-map-arriving .map-cluster,
+html[data-motion="volledig"] .md-map-arriving .map-pin {
+    animation: md-pop var(--spring-snappy-dur) var(--spring-snappy) backwards;
+}
+
+.map-cluster,
+.map-pin {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+/* Popup: rijst op vanaf de speld; de inhoud volgt in ritme */
+.map-popup .leaflet-popup-content-wrapper,
+.map-popup .leaflet-popup-tip-container {
+    transform-origin: 50% 100%;
+}
+
+html[data-motion="volledig"] .map-popup .leaflet-popup-content-wrapper,
+html[data-motion="volledig"] .map-popup .leaflet-popup-tip-container {
+    animation: md-rise var(--spring-smooth-dur) var(--spring-smooth) backwards;
+}
+
+html[data-motion="rustig"] .map-popup .leaflet-popup-content-wrapper,
+html[data-motion="rustig"] .map-popup .leaflet-popup-tip-container {
+    animation: md-fade var(--dur-3) var(--ease-out) backwards;
+}
+
+html[data-motion="volledig"] .map-popup-body > * {
+    animation: md-fade var(--dur-4) var(--ease-out) backwards;
+}
+
+html[data-motion="volledig"] .map-popup-body > :nth-child(2) { animation-delay: var(--stagger-step); }
+html[data-motion="volledig"] .map-popup-body > :nth-child(3) { animation-delay: calc(2 * var(--stagger-step)); }
+
+/* De route: een lichtpuntje loopt voorop; bezochte plekken schalen vanuit hun midden */
+.map-canvas .md-route-head {
+    fill: var(--info);
+    stroke: var(--surface-card);
+    stroke-width: 3;
+    pointer-events: none;
+}
+
+.map-canvas .map-track-visit {
+    transform-box: fill-box;
+    transform-origin: center;
+}
+
+/* ---------- DataGatherer: kaarten, een bron die bezig is, voortgang, een feestje ---------- */
+
+.dg-card {
+    position: relative;
+}
+
+/* De rand die even oplicht bij een beloning: een losse laag boven de pagina (motion-data.js glow) */
+.md-glow-layer {
+    position: fixed;
+    z-index: 90;
+    border: 1px solid var(--accent);
+    border-radius: inherit;
+    box-shadow: 0 0 0 var(--space-xs) var(--accent-subtle);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.dg-card-icon {
+    position: relative;
+}
+
+.dg-card-icon > i {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.dg-card:hover .dg-card-icon > i {
+    transform: scale(1.12) rotate(-6deg);
+}
+
+/* Bezig: een stipje draait als een satelliet om het icoon */
+.dg-card.is-busy .dg-card-icon::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: calc(var(--space-xs) + var(--space-2xs));
+    height: calc(var(--space-xs) + var(--space-2xs));
+    margin: calc(-0.5 * (var(--space-xs) + var(--space-2xs)));
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    box-shadow: 0 0 0 var(--space-2xs) var(--surface-card);
+    transform: rotate(-45deg) translateX(var(--space-xl));
+}
+
+html[data-motion="volledig"] .dg-card.is-busy .dg-card-icon::after {
+    animation: md-orbit calc(var(--dur-6) * 2.5) linear infinite;
+}
+
+@keyframes md-orbit {
+    from { transform: rotate(-45deg) translateX(var(--space-xl)); }
+    to { transform: rotate(315deg) translateX(var(--space-xl)); }
+}
+
+/* Voortgang met karakter: een lichte glans loopt over het gevulde deel */
+.dg-progress .progress-fill {
+    position: relative;
+    overflow: hidden;
+}
+
+html[data-motion="volledig"] .dg-progress .progress:not(.is-indeterminate) .progress-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+    mix-blend-mode: screen;
+    transform: translateX(-100%);
+    animation: md-sheen calc(var(--dur-6) * 2.5) var(--ease-in-out) infinite;
+}
+
+@keyframes md-sheen {
+    to { transform: translateX(100%); }
+}
+
+/* De dekkingsbalk groeit van links naar rechts (motion-data.js zet de animatie) */
+.dg-coverage-seg {
+    transform-origin: left center;
+}
+
+/* ---------- Berichten: de selectie glijdt mee, bubbels groeien uit hun staartje ---------- */
+
+/* Lange lijsten (5000 gesprekken, een gesprek van duizenden berichten, 1500 dagen) houden hun
+   tekenwerk binnen hun eigen kader: zonder deze afbakening kost het eerste beeld van elke
+   animatie in de lijst in WebKit tot 200 ms (gemeten met code/tests/ui/motion_perf.py) */
+.msg-list,
+.msg-scroll {
+    contain: strict;
+}
+
+/* Gesprekken buiten beeld slaat WebKit helemaal over (geen opmaak, geen tekenwerk): een lijst
+   van 5000 maakt zo nog maar een paar rijen echt, en de rijen die binnenkomen kosten geen
+   beelden meer. Het actieve item niet: zijn selectie in ::before glijdt buiten zijn rand. */
+.msg-list > .msg-item:not(.active) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto calc(var(--msg-avatar-size) + 2 * var(--space-sm) + 2px);
+}
+
+.act-days-panel {
+    contain: content;
+}
+
+/* De geselecteerde achtergrond staat in ::before, zodat hij van item naar item kan glijden.
+   Alleen het actieve item wordt een eigen laag: duizenden gestapelde lagen (een lijst van
+   5000 gesprekken) zouden WebKit bij elke animatie in de lijst laten haperen. */
+.msg-item.active,
+.act-day[aria-pressed="true"] {
+    position: relative;
+    isolation: isolate;
+    background: transparent;
+    border-color: transparent;
+}
+
+.msg-item.active::before,
+.act-day[aria-pressed="true"]::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border: 1px solid var(--accent-border);
+    border-radius: inherit;
+    background: var(--accent-subtle);
+    pointer-events: none;
+}
+
+.msg-row {
+    transform-origin: 0% 100%;
+}
+
+.msg-row.is-me {
+    transform-origin: 100% 100%;
+}
+
+/* Een gevonden bericht: een ring die één keer oplicht */
+.msg-bubble.md-spotlight::after {
+    content: '';
+    position: absolute;
+    inset: calc(-1 * var(--space-xs));
+    border: var(--space-2xs) solid var(--accent);
+    border-radius: inherit;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ---------- Activiteit: de dag als tijdlijn ---------- */
+
+.act-list {
+    position: relative;
+    isolation: isolate;
+}
+
+/* De lijn door de icoontjes (kolom tijd + tussenruimte + half icoon) */
+.act-list::before {
+    content: '';
+    position: absolute;
+    top: calc(var(--space-md) + var(--space-lg));
+    bottom: calc(var(--space-md) + var(--space-lg));
+    left: calc(var(--space-3xl) + var(--space-md) + var(--space-lg) - var(--space-2xs) / 2);
+    width: var(--space-2xs);
+    border-radius: var(--radius-full);
+    z-index: -1;
+    background: var(--border-hairline);
+    transform-origin: 50% 0%;
+    pointer-events: none;
+}
+
+/* De icoontjes liggen gewoon boven de lijn (die staat op z-index -1 in .act-list): geen laag per gebeurtenis */
+.act-icon {
+    box-shadow: 0 0 0 var(--space-xs) var(--surface-card);
+}
+
+/* ---------- Pasha: een levend kopje, een typende ballon, bubbels die opspringen ---------- */
+
+/* Losse transformaties: ademen (scale), luisteren (rotate, translate) en knikken (transform)
+   stapelen zonder elkaar te overschrijven */
+.chat-mascot {
+    transform-origin: 50% 85%;
+    transition: rotate var(--spring-snappy-dur) var(--spring-snappy), translate var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+/* Je typt: Pasha houdt zijn kopje schuin en spitst zijn oren */
+html[data-motion="volledig"] .chat-mascot.is-listening {
+    rotate: -10deg;
+    translate: 0 calc(-1 * var(--space-2xs));
+}
+
+/* Ademen zolang hij wakker is (eindigt vanzelf op zijn rustpunt) */
+html[data-motion="volledig"] .chat-mascot.is-awake {
+    animation: md-breathe calc(var(--dur-6) * 3.5) var(--ease-in-out) 10 alternate;
+}
+
+/* Nadenken (wachten op het eerste woord): zacht heen en weer, als voortgang */
+html[data-motion="volledig"] .chat-mascot.is-thinking {
+    animation: md-ponder calc(var(--dur-6) * 1.6) var(--ease-in-out) infinite alternate;
+}
+
+html[data-motion="volledig"] .chat-mascot.is-awake.is-thinking {
+    animation: md-breathe calc(var(--dur-6) * 3.5) var(--ease-in-out) 10 alternate,
+        md-ponder calc(var(--dur-6) * 1.6) var(--ease-in-out) infinite alternate;
+}
+
+@keyframes md-breathe {
+    from { scale: 1; }
+    to { scale: 1.045 1.06; }
+}
+
+@keyframes md-ponder {
+    from { rotate: -7deg; }
+    to { rotate: 7deg; }
+}
+
+/* De typende ballon: drie stipjes in een golf */
+html[data-motion="volledig"] .message-loading .dot {
+    animation: md-typing calc(var(--dur-6) * 2) var(--ease-in-out) infinite;
+}
+
+html[data-motion="volledig"] .message-loading .dot:nth-child(1) { animation-delay: 0s; }
+html[data-motion="volledig"] .message-loading .dot:nth-child(2) { animation-delay: calc(var(--stagger-step) * 5); }
+html[data-motion="volledig"] .message-loading .dot:nth-child(3) { animation-delay: calc(var(--stagger-step) * 10); }
+
+@keyframes md-typing {
+    0%, 60%, 100% { opacity: 0.35; transform: none; }
+    30% { opacity: 1; transform: translate3d(0, calc(-1 * var(--space-xs)), 0); }
+}
+
+/* Tijdens het binnenkomen van een antwoord: een zachte cursor achter de tekst */
+.message-bubble.md-streaming::after {
+    content: '';
+    display: inline-block;
+    width: 0.55em;
+    height: 0.55em;
+    margin-left: var(--space-xs);
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    vertical-align: 0.05em;
+}
+
+html[data-motion="volledig"] .message-bubble.md-streaming::after {
+    animation: md-caret calc(var(--dur-6) * 1.2) var(--ease-in-out) infinite alternate;
+}
+
+@keyframes md-caret {
+    from { opacity: 0.3; transform: scale(0.7); }
+    to { opacity: 1; transform: none; }
+}
+
+.md-confirm-check {
+    display: inline-block;
+    color: var(--accent-text);
 }

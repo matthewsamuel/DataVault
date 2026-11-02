@@ -9,6 +9,56 @@ reeks, Exporteren, het Herstelcentrum, DataGatherer, Pasha met voorstellen, Welk
 database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bewust niet gedaan is,
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
+### Beweging: vloeiend en met aandacht
+- De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
+- Een foto groeit vanuit zijn miniatuur in de viewer en krimpt bij het sluiten terug naar zijn plek in het raster.
+- Vensters komen op een zachte veer omhoog en gaan sneller weer weg. Meldingen schuiven van rechts binnen, tonen met een dunne lijn hoe lang ze nog blijven (stil zolang de muis erop staat) en de andere meldingen schuiven netjes op als er één verdwijnt. Dezelfde melding nog eens geeft een kort knikje in plaats van een tweede melding.
+- Wisselen tussen licht en donker loopt als een cirkel uit vanaf de knop die je gebruikte. Knoppen geven even mee als je ze indrukt.
+- Nieuw in Instellingen: **Beweging** met Volledig (standaard), Rustig (alleen korte vervagingen) en Uit, met een klein voorbeeld. Vraagt macOS om minder beweging, dan beweegt de app vanzelf rustig. Snelle toetsen in de Keurer en bij Welke is mooier? blijven meteen reageren.
+
+### Beweging: de schil van de app
+- Het groene streepje in het menu rekt elastisch mee naar het nieuwe onderdeel en een zachte vlek glijdt onder de muis van onderdeel naar onderdeel. Het icoon van de paginatitel zet zich met een kleine draai neer.
+- Bij het openen van de app valt het menu zacht op zijn plek, rijst de begroeting letter voor letter op en tellen de tegels op Home hun getal op. De opslagbalk vult zich en 'Op deze dag' opent als een gordijn.
+- Het takenpaneel leeft: een balk groeit vloeiend naar de nieuwe stand en er trekt een glans over zolang een taak bezig is. Klaar is een klein feestje met een groen vinkje. Uitklappen rolt de lijst onder de kop uit, inklappen laat de kop zakken.
+- Een melding veeg je met de muis of een vinger naar rechts weg. Vensters groeien uit de knop of de plek waar je klikte en krimpen daar weer naartoe. Het themamenu veert open.
+- Het nieuwe thema loopt als een cirkel met een zachte rand uit, terwijl het pictogram een halve slag draait. Het gekozen segment van een keuzeknop glijdt naar zijn plek.
+- Het zoekveld bovenaan licht op als je erin klikt. In het sneltoetsenoverzicht licht de toets op die je indrukt. Pasha knikt als zijn antwoord er is.
+- Lege en mislukte staten komen vriendelijk binnen en skeletten glanzen rustig. Instellingen en het Herstelcentrum komen in ritme binnen; in het Herstelcentrum glijden de acties naar hun nieuwe plek en licht een veranderde actie even op.
+- Rustig en Uit (Instellingen > Beweging) gelden ook hier. Niets houdt een klik of toets tegen.
+
+### Beweging: foto's en media
+- Een map, album, zoekresultaat of reeks komt binnen als een golf vanaf linksboven: alleen wat in beeld staat beweegt, de rest komt rij voor rij binnen zodra je ernaartoe scrolt. Ook mappen met duizenden foto's blijven vloeiend.
+- Fototegels komen bij hover een tikje omhoog met een zacht licht dat de muis volgt. Een gekozen foto krijgt zijn groene ring en het vinkje springt erin.
+- Sorteren, filteren tijdens het typen of een foto weghalen: de tegels glijden naar hun nieuwe plek en wat weggaat verdwijnt zichtbaar. Raster en lijst vloeien in elkaar over.
+- De viewer groeit nu ook vanuit de Tijdlijn, Albums en Slim zoeken uit de miniatuur. Volgende en vorige schuiven kort opzij (de pijltjes blijven meteen reageren), en je kunt met de muis of met twee vingers op het trackpad naar de volgende foto vegen.
+- Keurer: de kaart vliegt weg in de richting van je keuze terwijl de volgende foto er al staat; je hoeft nooit te wachten, ook niet als je snel achter elkaar beslist. Ongedaan maken haalt de foto terug uit de richting waar hij heen ging (en hij is dan ook echt weer de huidige foto). De knop van de toets geeft even mee en de dagbalk groeit mee.
+- Beste uit reeks: de foto's van een reeks waaieren uit vanaf de beste foto en komen daarop tot rust; de ster springt erop. Een afgehandelde reeks gaat zichtbaar weg en de volgende schuift op.
+- Duplicaten: de groepen komen in ritme binnen, na het opruimen schuift de rest op, en het label 'Blijft' springt naar de kopie die je kiest.
+- Tijdlijn en Albums: rijen zetten zich neer terwijl je scrolt en het label met de maand rolt mee. In de zijbalk van Albums glijdt de groene markering naar het album dat je kiest.
+- Shows: een collectie is nu een stapeltje foto's dat uitwaaiert als je erover gaat. De diavoorstelling vervaagt rustiger tussen de foto's, de Ken Burns begint telkens op een ander punt en drijft er zacht bij weg, als een camera die meebeweegt, en pauze zet alles stil waar het is (de voortgangslijn loopt daarna verder).
+- Exporteren: de selectiebalk komt omhoog en zakt weer weg, het aantal tikt mee, en weggelaten foto's bij 'Beste van een periode' verdwijnen zichtbaar.
+- In Rustig is dit alles een korte vervaging; in Uit staat alles meteen op zijn plek.
+
+### Beweging: de gegevensschermen (Spotify, Kaart, DataGatherer, Berichten, Activiteit en Pasha)
+- **Spotify**: de getallen tellen op als je het scherm opent (en tikken door naar de nieuwe waarde bij een ander jaar), de kaarten komen in ritme binnen, de staafjes van de grafieken groeien vanaf de basislijn zodra je ernaartoe scrolt en veranderen vloeiend van hoogte bij een ander jaar. Onder elke artiest en elk nummer in de toplijsten loopt een dun staafje met zijn aandeel. Luister-DNA heeft nu een kleine dubbele helix, één sport per uur van de dag: hoe voller de stip, hoe vaker je op dat uur luistert. Hij draait even als hij in beeld komt en opnieuw als je met de muis over de kaart gaat.
+- **Kaart**: groepen splitsen en vloeien samen op een zachte veer, ploffen op hun plek als de kaart opent, en een popup rijst op vanaf de speld. Bij **Route per dag** tekent de route zich langs het pad, met een lichtpuntje voorop, en elke bezochte plek springt op zodra de lijn er langskomt. Zoom of schuif je intussen, dan staat de route er meteen helemaal.
+- **DataGatherer**: de bronnen komen per groep in ritme binnen en hun dekkingsbalk groeit van links naar rechts. Een bron die bezig is krijgt een klein satellietje rond zijn icoon, de voortgang loopt vloeiend door met een zachte glans, en is een bron klaar, dan volgt een klein feestje: een ring en een krans van stipjes rond het icoon en een rand die even oplicht.
+- **Berichten**: de gesprekken stromen in ritme binnen en de groene selectie glijdt mee naar het gesprek dat je kiest. Een geopend gesprek laat zijn berichten van boven naar onder binnenkomen, elk vanuit zijn eigen kant; een gevonden bericht licht één keer op. Tijdens het zoeken staan de resultaten er meteen.
+- **Activiteit**: de dagen komen in ritme binnen, de selectie glijdt mee, en een dag tekent zich als tijdlijn: de lijn loopt naar beneden en elke gebeurtenis komt binnen als de lijn er langskomt.
+- **Pasha** leeft: hij ademt rustig na elk contact, houdt zijn kopje schuin als je typt, wiegt zachtjes terwijl hij nadenkt en knikt als zijn antwoord er is (of laat bij een fout even zijn kopje hangen). Berichten springen in vanuit hun eigen hoek, de drie puntjes golven, een antwoord dat binnenkomt heeft een zachte cursor, actiekaarten vouwen zich in ritme open en een uitgevoerde actie krijgt een groen vinkje.
+- Ook lange lijsten blijven vloeiend, zelfs met duizenden gesprekken. Alles volgt de instelling **Beweging** (Volledig, Rustig of Uit).
+
+### Beweging: reparaties na de controle
+- Spotify: de golven op de achtergrond staan stil bij Beweging Rustig of Uit, en beginnen of stoppen meteen als je de instelling wijzigt.
+- Een venster of het themamenu dat aan het verdwijnen is, kan de toetsenbordfocus niet meer krijgen: Tab direct na Escape springt er niet meer in en een schermlezer leest het niet meer voor.
+- Berichten: een lange lijst gesprekken bouwt sneller op en de gesprekken stromen binnen zonder te haperen, ook met duizenden.
+- Rustig (en macOS 'minder beweging') is nu echt alleen vervagen: het icoon van een melding springt en draait niet meer, vensters en het themamenu krimpen niet bij het sluiten, skeletten en lege staten hebben geen glans of kring meer, en een foto in het raster zoomt bij het laden niet meer in (ook niet in Volledig).
+- Keurer: de weggevlogen kaart gaat onder de volgende foto door in plaats van erover, er vliegt er maar één tegelijk, en de volgende twee foto's staan al klaar, zodat de nieuwe kaart nooit even leeg is.
+- Viewer: de foto die opent landt precies op zijn plek (geen sprongetje meer als hij geladen is), sluiten gaat sneller dan openen, en bij volgende en vorige liggen nooit twee halfdoorzichtige foto's over elkaar: de oude is weg voor de nieuwe opkomt.
+- Welke is mooier?: de beweging volgt nu ook de instelling Beweging; bij Rustig of Uit wisselen de paren zonder animatie.
+- Shows: een diavoorstelling begint met de foto waarop je klikte; de omslag groeit uit tot de eerste dia terwijl het zwart opkomt, en de Ken Burns begint pas als hij geland is. Sluiten gaat sneller dan openen.
+- Thema wisselen: de cirkel heeft een smalle zachte rand in plaats van een brede grijze waas, en loopt ook over een groot raster vloeiend.
+
 ### Verificatieronde
 - Database-updates die later zijn toegevoegd maar een lager nummer hebben (Slim zoeken en 'Welke is mooier?') worden nu altijd uitgevoerd, ook op een database die al verder was bijgewerkt. Ontbrak er zo een, dan vult de app hem bij de volgende start alsnog aan en blijven alle gegevens staan.
 - De veiligheidskopie die vlak voor een database-update wordt gemaakt, blijft nu bewaard; bij het opruimen gaan de oudste kopieën (op datum) weg in plaats van de kopie die net gemaakt is.

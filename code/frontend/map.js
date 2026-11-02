@@ -1118,13 +1118,14 @@
             if (token !== state.trackToken) return;
             const layer = L.layerGroup();
             const line = data.points.map(p => [p[1], p[2]]);
-            if (line.length > 1) L.polyline(line, { className: 'map-track-line', interactive: false, smoothFactor: 1.5 }).addTo(layer);
+            const route = line.length > 1 ? L.polyline(line, { className: 'map-track-line', interactive: false, smoothFactor: 1.5 }).addTo(layer) : null;
+            const visits = [];
             data.visits.forEach(v => {
                 const from = new Date(v.start).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
                 const until = new Date(v.end).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
-                L.circleMarker([v.lat, v.lon], { radius: 7, className: 'map-track-visit' })
+                visits.push(L.circleMarker([v.lat, v.lon], { radius: 7, className: 'map-track-visit' })
                     .bindTooltip(`${v.name || v.address || 'Bezochte plek'} · ${from}–${until}`, { className: 'map-track-tip', direction: 'top' })
-                    .addTo(layer);
+                    .addTo(layer));
             });
             if (line.length === 1) L.circleMarker(line[0], { radius: 5, className: 'map-track-visit' }).addTo(layer);
             layer.addTo(state.map);
@@ -1134,6 +1135,7 @@
                 ? `${fmt(data.points.length)} ${data.points.length === 1 ? 'punt' : 'punten'}, ${fmt(data.visits.length)} ${data.visits.length === 1 ? 'plek' : 'plekken'}`
                 : 'Geen locatie op deze dag';
             if (all.length) state.map.fitBounds(L.latLngBounds(all), { padding: [64, 64], maxZoom: 15 });
+            if (window.MotionData) MotionData.mapRoute(state.map, route, visits);
         } catch (err) {
             if (token !== state.trackToken) return;
             $('map-track-info').textContent = '';

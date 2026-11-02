@@ -3,7 +3,8 @@
  * Animated SVG waves with simplex noise and mouse interaction
  *
  * Kosten beperkt: de animatie loopt alleen als de achtergrond echt in beeld is (niet in een
- * verborgen tab of weergave), staat stil bij "beweging beperken" in de systeeminstellingen,
+ * verborgen tab of weergave), staat stil bij "beweging beperken" in de systeeminstellingen en
+ * bij Beweging 'Rustig' of 'Uit' in Instellingen (Motion.full()),
  * tekent hoogstens ~30 beelden per seconde en nooit meer dan MAX_POINTS punten.
  */
 
@@ -71,13 +72,16 @@ class WaveBackground {
         if (this.reducedMotion && this.reducedMotion.addEventListener) {
             this.reducedMotion.addEventListener('change', this.updateRunning);
         }
+        // Beweging in Instellingen: alleen bij 'Volledig' golven, 'Rustig' en 'Uit' staan stil
+        if (window.Motion && Motion.onChange) this.offMotion = Motion.onChange(this.updateRunning);
 
         // Eén stilstaand beeld; de animatie start zodra de container in beeld komt
         this.drawStill();
     }
 
     shouldAnimate() {
-        return this.inView && !document.hidden && !(this.reducedMotion && this.reducedMotion.matches);
+        const motionFull = window.Motion ? Motion.full() : true;
+        return motionFull && this.inView && !document.hidden && !(this.reducedMotion && this.reducedMotion.matches);
     }
 
     updateRunning() {
@@ -345,6 +349,7 @@ class WaveBackground {
         if (this.resizeObserver) this.resizeObserver.disconnect();
         if (this.intersectionObserver) this.intersectionObserver.disconnect();
         document.removeEventListener('visibilitychange', this.updateRunning);
+        if (this.offMotion) this.offMotion();
         if (this.reducedMotion && this.reducedMotion.removeEventListener) {
             this.reducedMotion.removeEventListener('change', this.updateRunning);
         }
