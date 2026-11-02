@@ -433,3 +433,68 @@ def test_indexed_paths_take_the_quick_check_and_the_rest_the_full_one(indexed, v
             target.unlink()
         moved.rename(target)
     assert paths_module.locate is real
+
+
+def _apfs_or_skip(path):
+    from backend import birthtime
+    if not birthtime.supported():
+        pytest.skip("Alleen macOS kent een instelbare birthtime (setattrlist); dit systeem niet")
+    fs = birthtime.filesystem_type(path)
+    if fs != "apfs":
+        pytest.skip(f"De birthtime-test vraagt APFS; {path} staat op {fs or 'een onbekend bestandssysteem'}")
+
+
+@pytest.mark.parametrize("birth, mtime", [
+    (1_300_000_000_123_456_789, 1_400_000_000_000_000_000),   # created before the last change
+    (1_450_000_000_987_654_321, 1_400_000_000_000_000_000),   # created after it (a copied file)
+])
+def test_originals_keep_the_birthtime_to_the_nanosecond_on_apfs(indexed, vault, tmp_path, birth, mtime):
+    """NIET_GEDAAN 'birthtime bij exporteren is niet bewezen': the copy's creation date
+    (Finder's Aanmaakdatum) equals the original's, read back with getattrlist."""
+    from backend import birthtime
+    dest = tmp_path / "out"
+    dest.mkdir()
+    _apfs_or_skip(vault)
+    _apfs_or_skip(dest)
+    rels = [STRAND, "RAW/video/clip één.mp4"]
+    for rel in rels:
+        os.utime(vault / rel, ns=(mtime, mtime))
+        assert birthtime.set_birthtime_ns(vault / rel, birth)
+        assert birthtime.get_birthtime_ns(vault / rel) == birth
+    before = _snapshot(vault)
+
+    result = _run(indexed, vault, rels, dest, mode="originals")
+    assert result["copied"] == 2 and result["errors"] == 0
+    for rel in rels:
+        copy = dest / Path(rel).name
+        assert birthtime.get_birthtime_ns(copy) == birth, rel
+        assert copy.stat().st_mtime_ns == mtime
+        assert copy.stat().st_birthtime == (vault / rel).stat().st_birthtime
+        assert birthtime.get_birthtime_ns(vault / rel) == birth          # the original is untouched
+    assert _snapshot(vault) == before
+
+
+def test_resized_photos_keep_the_birthtime_too(indexed, vault, tmp_path):
+    from backend import birthtime
+    dest = tmp_path / "klein"
+    dest.mkdir()
+    _apfs_or_skip(vault)
+    _apfs_or_skip(dest)
+    birth = 1_350_000_000_500_000_000
+    assert birthtime.set_birthtime_ns(vault / PORTRAIT, birth)
+    result = _run(indexed, vault, [PORTRAIT], dest, mode="resized", max_edge=256)
+    assert result["copied"] == 1
+    [copy] = [p for p in dest.iterdir() if p.suffix.lower() == ".jpg"]
+    assert birthtime.get_birthtime_ns(copy) == birth
+
+
+def test_birthtime_helpers_refuse_quietly_where_they_cannot_work(tmp_path, monkeypatch):
+    from backend import birthtime
+    missing = tmp_path / "bestaat-niet.jpg"
+    assert birthtime.get_birthtime_ns(missing) is None
+    assert birthtime.set_birthtime_ns(missing, 1) is False
+    monkeypatch.setattr(birthtime, "supported", lambda: False)
+    f = tmp_path / "a.txt"
+    f.write_text("a")
+    assert birthtime.get_birthtime_ns(f) is None and birthtime.set_birthtime_ns(f, 1) is False
+    assert birthtime.filesystem_type(f) is None

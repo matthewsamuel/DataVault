@@ -39,7 +39,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
 
-from backend import library_filters, media_index
+from backend import birthtime, library_filters, media_index
 from backend.config import Config, is_audio, is_photo, is_video
 from backend.file_ops import _exclusive_rename, is_inside
 from backend.jobs import JobContext, JobType, VaultUnavailable
@@ -332,12 +332,20 @@ def _place(tmp: Path, folder: Path, name: str) -> Path:
                 return target
 
 
-def _stamp(src_st: os.stat_result, dst: Path) -> None:
-    """mtime and, where the system has it, birthtime like the source (macOS lowers the birthtime with the mtime)."""
+def _stamp(src_st: os.stat_result, dst: Path, birth_ns: Optional[int] = None) -> None:
+    """
+    mtime and, where the system has it, birthtime like the source. birth_ns: the source's
+    birthtime to the nanosecond (backend/birthtime.py, macOS); set last with setattrlist,
+    because utime may lower the birthtime. Where that is refused (a FAT stick), the
+    fallback still gets close: macOS lowers the birthtime with the mtime, so setting the
+    times to the birthtime first leaves it there when it is older than the mtime.
+    """
     birth = getattr(src_st, "st_birthtime", None)
     if birth is not None and birth < src_st.st_mtime:
         os.utime(dst, (birth, birth))
     os.utime(dst, ns=(src_st.st_atime_ns, src_st.st_mtime_ns))
+    if birth_ns is not None:
+        birthtime.set_birthtime_ns(dst, birth_ns)
 
 
 def _copy(ctx: JobContext, src: Path, tmp: Path) -> None:
@@ -470,6 +478,7 @@ def run_export(ctx: JobContext, config: Config, db) -> Dict[str, Any]:
             try:
                 src = Path(item.path)
                 st = src.stat()
+                birth_ns = birthtime.get_birthtime_ns(src)
                 folder = _output_folder(dest, _safe_parts(_subfolder(item, structure)), config)
                 tmp = folder / f"{LOG_PREFIX}{ctx.job_id}-{index}.part"
                 if os.path.lexists(tmp):
@@ -491,7 +500,7 @@ def run_export(ctx: JobContext, config: Config, db) -> Dict[str, Any]:
                     _copy(ctx, src, tmp)
                 target = _place(tmp, folder, name)
                 tmp = None
-                _stamp(st, target)
+                _stamp(st, target, birth_ns)
                 size = target.stat().st_size
                 if not was_converted and size != st.st_size:
                     raise OSError("De kopie heeft een andere grootte dan het origineel")
