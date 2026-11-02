@@ -130,6 +130,7 @@ def test_locate_gives_the_position_of_one_file(indexed, config):
     # The viewer's details: an offline place name, the capture date, pixel size and camera
     found = r.json()
     assert found["place"].endswith(", Frankrijk")   # (the nearest larger city in the data)
+    assert found["place_parts"]["country"] == "Frankrijk" and found["place_parts"]["label"] == found["place"]
     assert found["details"]["width"] == 800 and found["details"]["height"] == 600
     assert found["details"]["camera"] == "Canon EOS 80D" and found["details"]["taken_source"] == "exif"
     no_gps = indexed.get("/api/map/locate", params={"path": str(config.VAULT_ROOT / "RAW/2021/🎉 feest/no exif.jpg")}).json()
@@ -171,7 +172,9 @@ def test_describe_gives_every_geotagged_photo_a_place():
     assert places.describe(0.0, 0.0) is None
     parts = places.describe_parts(37.02, -7.80)
     assert parts["town"] == "Olhão" and parts["direction"] == "oosten" and parts["country"] == "Portugal"
-    assert parts["region"] == "Faro" and parts["sea"] is False
+    assert parts["region"] == "Faro" and parts["region_kind"] == "district" and parts["sea"] is False
+    assert places.describe_parts(52.15, 5.85)["region_kind"] == "provincie"           # the Veluwe, Gelderland
+    assert places.describe_parts(37.75, -119.59)["region_kind"] == "staat"
     assert places.describe_parts(52.4, 4.3)["sea"] is True and places.describe_parts(52.4, 4.3)["coast"] is True
 
 

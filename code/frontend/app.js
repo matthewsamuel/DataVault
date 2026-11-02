@@ -1627,6 +1627,16 @@ function formatTimestampNl(seconds) {
 
 // Plaats, camera en afmetingen uit de bibliotheek (antwoord van /api/map/locate) boven het
 // pad in de gegevens van de viewer zetten; alleen wat bekend is
+// Wat de plaatsnaam zelf niet zegt, stil erachter: de provincie en of het aan de kust is
+// ('4 km ten oosten van Olhão, Portugal' + 'district Faro · aan de kust')
+function viewerPlaceNote(label, parts) {
+    if (!parts) return null;
+    const bits = [];
+    if (parts.region && !label.includes(parts.region)) bits.push(parts.region_kind ? `${parts.region_kind} ${parts.region}` : parts.region);
+    if (parts.coast && !parts.sea && !/kust/i.test(label)) bits.push('aan de kust');
+    return bits.length ? createEl('span', { class: 'metadata-note', text: bits.join(' · ') }) : null;
+}
+
 function viewerAddDetails(file, found) {
     const grid = document.querySelector('#modal-metadata .metadata-grid');
     if (!grid || viewerFile() !== file || grid.querySelector('.metadata-details')) return;
@@ -1643,7 +1653,7 @@ function viewerAddDetails(file, found) {
     const add = (label, ...value) => rows.push(
         createEl('span', { class: 'metadata-label metadata-details', text: label }),
         createEl('span', { class: 'metadata-value' }, ...value));
-    if (found.place) add('Plaats', found.place);
+    if (found.place) add('Plaats', found.place, viewerPlaceNote(found.place, found.place_parts));
     if (d.camera) add('Camera', d.camera);
     if (d.width && d.height) {
         const mp = d.width * d.height / 1e6;

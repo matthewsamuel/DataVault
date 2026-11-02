@@ -15,7 +15,7 @@ Uitvoer:
     plekken voor de provincienamen en de grote steden.
     De kaart laadt zo'n bestand pas als het land aangeduid wordt of in beeld is bij ver inzoomen.
   - ../../../backend/data/places_detail.json (alleen voor de server, backend/places.describe): de
-    provincies als vlakken, de kustlijn en de plaatsen vanaf 15.000 inwoners, voor 'een plaatsnaam
+    provincies als vlakken (met hun soort: provincie, staat, regio, ...), de kustlijn en de plaatsen vanaf 15.000 inwoners, voor 'een plaatsnaam
     bij elke foto' ('12 km ten oosten van Faro, Portugal'). Coördinaten als gehele getallen in
     duizendsten van een graad, per ring het eerste punt en daarna de verschillen.
 
@@ -43,6 +43,10 @@ REGION_NL = {
     'England': 'Engeland', 'Scotland': 'Schotland', 'Northern Ireland': 'Noord-Ierland',
 }
 PROVINCE_NL = {('BEL', 'Brussels'): 'Brussel', ('FRA', 'Nord'): 'Nord'}
+# Wat voor gebied het is, voor 'provincie Gelderland' bij een foto (alleen de gewone soorten)
+KIND_NL = {'Province': 'provincie', 'State': 'staat', 'Region': 'regio', 'District': 'district', 'County': 'graafschap',
+           'Department': 'departement', 'Canton': 'kanton', 'Prefecture': 'prefectuur', 'Voivodeship|Province': 'woiwodschap'}
+KIND_BY_COUNTRY = {'ESP': 'provincie', 'DEU': 'deelstaat', 'AUT': 'deelstaat', 'FRA': 'regio', 'ITA': 'regio', 'GBR': ''}
 CITY_NL = {
     'Brussels': 'Brussel', 'Antwerp': 'Antwerpen', 'Ghent': 'Gent', 'Bruges': 'Brugge', 'Ostend': 'Oostende',
     'Liège': 'Luik', 'Namur': 'Namen', 'Mons': 'Bergen', 'Tournai': 'Doornik', 'Mouscron': 'Moeskroen',
@@ -149,6 +153,7 @@ def build_countries(src, out):
 def build_provinces(src):
     data = json.loads((src / 'ne_10m_admin_1_states_provinces.geojson').read_text())
     groups = defaultdict(lambda: defaultdict(list))   # a3 -> naam -> [(geometrie, labelpunt)]
+    kinds = {}                                        # a3 -> naam -> 'provincie', 'staat', ... of ''
     for f in data['features']:
         p = f['properties']
         a3 = p['adm0_a3']
@@ -161,6 +166,7 @@ def build_provinces(src):
             name = clean_name(a3, p['name'], p.get('name_nl'))
             label = (p['longitude'], p['latitude']) if p.get('longitude') is not None else None
         groups[a3][name].append((g, label))
+        kinds.setdefault(a3, {})[name] = KIND_BY_COUNTRY.get(a3, KIND_NL.get(p.get('type_en') or '', ''))
     result, shapes = {}, {}
     for a3, units in groups.items():
         polys = {name: unary_union([g for g, _ in parts]) for name, parts in units.items()}
@@ -188,7 +194,7 @@ def build_provinces(src):
                 borders = geom(inner, digits) if inner.geom_type in ('LineString', 'MultiLineString') else None
         labels.sort(key=lambda x: -x[3])           # grote provincies eerst: die krijgen bij weinig plek voorrang
         result[a3] = {'borders': borders, 'labels': [x[:3] for x in labels]}
-        shapes[a3] = polys
+        shapes[a3] = {name: (g, kinds[a3].get(name, '')) for name, g in polys.items()}
     return result, shapes
 
 
@@ -237,6 +243,7 @@ def build_cities(src, iso2):
 
 
 TOWN_MIN_POP = 15000
+TOWN_NEAR_KM = 3          # dichter bij een grotere plaats: een wijk daarvan
 DETAIL_TOL = 0.01          # ~1 km: genoeg om te zeggen in welke provincie en hoe ver van de kust
 DETAIL_SCALE = 1000        # coördinaten in duizendsten van een graad
 ISLAND_MIN = 0.0005        # kleinere eilandjes (vierkante graden, ~6 km2) laat de kustlijn weg
@@ -284,6 +291,14 @@ def build_towns(src, iso2, cities):
         for name, lon, lat, _zoom, _cap in kept:
             if not any(km((lon, lat), (t[1], t[2])) < 2 for t in towns[a3]):
                 towns[a3].append([name, lon, lat, TOWN_MIN_POP])
+    # Een kleinere plaats vlak naast een grotere is een wijk of deelgemeente (Porto de Mós bij Lagos)
+    for a3, rows in towns.items():
+        rows.sort(key=lambda t: -t[3])
+        kept = []
+        for t in rows:
+            if not any(km((t[1], t[2]), (k[1], k[2])) < TOWN_NEAR_KM for k in kept):
+                kept.append(t)
+        towns[a3] = kept
     return towns
 
 
@@ -293,7 +308,7 @@ def build_detail(shapes, towns, path):
     index = {a3: i for i, a3 in enumerate(codes)}
     provinces, wholes = [], []
     for a3 in sorted(shapes):
-        for name, g in shapes[a3].items():
+        for name, (g, kind) in shapes[a3].items():
             parts = []
             for part in getattr(g, 'geoms', [g]):
                 if true_area(part) < ISLAND_MIN / 20:
@@ -303,7 +318,7 @@ def build_detail(shapes, towns, path):
                     continue
                 parts.append([encode(part.exterior.coords)] + [encode(h.coords) for h in part.interiors])
             if parts:
-                provinces.append([index[a3], name, parts])
+                provinces.append([index[a3], name, parts, kind])
             wholes.append(g)
     land = unary_union(wholes)
     coast = []

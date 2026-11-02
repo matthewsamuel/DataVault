@@ -175,7 +175,7 @@ def _find_detail(key: str) -> Optional[Place]:
     for i, tname in enumerate(d["town_names"]):
         if fold(tname) == key and (town is None or d["town_pop"][i] > d["town_pop"][town]):
             town = i
-    regions = [(code, name, shapes) for code, name, shapes in d["provinces"] if fold(name) == key]
+    regions = [(code, name, shapes) for code, name, shapes, _kind in d["provinces"] if fold(name) == key]
     if town is not None and (d["town_pop"][town] >= BIG_TOWN or not regions):
         pop = float(d["town_pop"][town])
         lon, lat = (float(v) for v in d["town_xy"][town])
@@ -266,11 +266,11 @@ def _load_detail() -> Dict[str, Any]:
             return a if len(a) > 2 and (a[0] == a[-1]).all() else np.vstack([a, a[:1]])
 
         provinces, boxes = [], []
-        for code, name, parts in raw["provinces"]:
+        for code, name, parts, kind in raw["provinces"]:
             shapes = [[ring(r) for r in part] for part in parts]
             outer = np.vstack([part[0] for part in shapes])
             boxes.append([outer[:, 0].min(), outer[:, 1].min(), outer[:, 0].max(), outer[:, 1].max()])
-            provinces.append((raw["codes"][code], name, shapes))
+            provinces.append((raw["codes"][code], name, shapes, kind))
         a, b = [], []
         for flat in raw["coast"]:
             line = np.cumsum(np.asarray(flat, dtype=np.int64).reshape(-1, 2), axis=0) / scale
@@ -316,19 +316,19 @@ def _segment_km(lat: float, lon: float, a, b):
     return np.hypot(ax + t * dx, ay + t * dy) * KM_PER_DEG
 
 
-def _province_at(d: Dict[str, Any], lat: float, lon: float) -> Optional[Tuple[str, str]]:
+def _province_at(d: Dict[str, Any], lat: float, lon: float) -> Optional[Tuple[str, str, str]]:
     import numpy as np
     box = d["boxes"]
     hits = np.nonzero((box[:, 0] <= lon) & (lon <= box[:, 2]) & (box[:, 1] <= lat) & (lat <= box[:, 3]))[0]
     for i in hits:
-        code, name, shapes = d["provinces"][i]
+        code, name, shapes, kind = d["provinces"][i]
         for part in shapes:
             if _pip(lon, lat, part[0]) and not any(_pip(lon, lat, hole) for hole in part[1:]):
-                return code, name
+                return code, name, kind
     return None
 
 
-def _nearest_province(d: Dict[str, Any], lat: float, lon: float, max_km: float) -> Optional[Tuple[str, str, float]]:
+def _nearest_province(d: Dict[str, Any], lat: float, lon: float, max_km: float) -> Optional[Tuple[str, str, str, float]]:
     import numpy as np
     pad_lat = max_km / KM_PER_DEG
     pad_lon = pad_lat / max(0.05, math.cos(math.radians(lat)))
@@ -337,12 +337,12 @@ def _nearest_province(d: Dict[str, Any], lat: float, lon: float, max_km: float) 
                       & (box[:, 1] - pad_lat <= lat) & (lat <= box[:, 3] + pad_lat))[0]
     best = None
     for i in near:
-        code, name, shapes = d["provinces"][i]
+        code, name, shapes, kind = d["provinces"][i]
         for part in shapes:
             outer = part[0]
             km = float(_segment_km(lat, lon, outer[:-1], outer[1:]).min())
-            if km <= max_km and (best is None or km < best[2]):
-                best = (code, name, km)
+            if km <= max_km and (best is None or km < best[3]):
+                best = (code, name, kind, km)
     return best
 
 
@@ -404,7 +404,8 @@ def _km_text(km: float) -> str:
 
 def describe_parts(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     """
-    Where a position is, in Dutch and offline: {label, town, km, direction, region, country, coast, sea}.
+    Where a position is, in Dutch and offline: {label, town, km, direction, region, region_kind ('provincie',
+    'staat', ... or None), country, coast, sea}.
     label is the one line the viewer and Pasha show:
       - in a town: 'Faro, Portugal'
       - near one (TOWN_KM): '12 km ten oosten van Faro, Portugal'
@@ -418,12 +419,12 @@ def describe_parts(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     d = _load_detail()
     names = d["country_nl"]
     found = _province_at(d, lat, lon)
-    code, region, sea, offshore = (found[0], found[1], False, None) if found else (None, None, True, None)
+    code, region, kind, sea = (*found, False) if found else (None, None, "", True)
     if found is None:
         # The province shapes are simplified to about a kilometre: a harbour or beach can fall just outside
         near = _nearest_province(d, lat, lon, OFFSHORE_KM)
         if near is not None:
-            code, region, offshore = near
+            code, region, kind, offshore = near
             sea = offshore > SHORE_KM
         else:
             for c in _countries:
@@ -438,7 +439,7 @@ def describe_parts(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     town = _town_near(d, lat, lon, code, 0.0 if sea else 0.3) if code else None
     parts: Dict[str, Any] = {"town": town and town["name"], "km": town and round(town["km"], 1),
                              "direction": town and not town["inside"] and town["direction"] or None,
-                             "region": region, "country": country, "coast": bool(coast or (sea and code)),
+                             "region": region, "region_kind": (region and kind) or None, "country": country, "coast": bool(coast or (sea and code)),
                              "sea": sea}
     tail = f", {country}" if country else ""
     if sea:
