@@ -49,6 +49,11 @@ def _browser(work, bin_dir, config=None, env_config=None):
     ({"vault_root": "/tmp/x", "browser": "Firefox"}, "Firefox"),
     ({"vault_root": "/tmp/x", "browser": "Google Chrome"}, "Google Chrome"),
     ({"vault_root": "/tmp/x", "browser": ""}, "Safari"),              # empty: Safari
+    ({"vault_root": "/tmp/x", "browser": "   "}, "Safari"),           # blank: Safari
+    ({"vault_root": "/tmp/x", "browser": {"a": 1}}, "Safari"),        # not a string: Safari
+    ({"vault_root": "/tmp/x", "browser": ["Firefox"]}, "Safari"),
+    ({"vault_root": "/tmp/x", "browser": 5}, "Safari"),
+    ({"vault_root": "/tmp/x", "browser": True}, "Safari"),
     ("{dit is geen json", "Safari"),                                    # unreadable config: Safari
 ])
 def test_the_browser_comes_from_the_config_or_is_safari(tmp_path, config, expected):

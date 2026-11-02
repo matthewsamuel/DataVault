@@ -13,10 +13,12 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 # Browser from config.json ("browser" key), Safari by default. plutil prints its error on
-# stdout when the key is missing, so its output only counts when it exits 0 and is not empty.
+# stdout when the key is missing, so its output only counts when it exits 0 and is not blank.
+# -expect string: a number, true/false, list or object is not a browser name either.
 config_browser() {
     local value
-    if value=$(plutil -extract browser raw -o - "$CONFIG_FILE" 2>/dev/null) && [ -n "$value" ]; then
+    if value=$(plutil -extract browser raw -expect string -o - "$CONFIG_FILE" 2>/dev/null) \
+            && [ -n "${value//[[:space:]]/}" ]; then
         printf '%s\n' "$value"
     else
         printf '%s\n' "Safari"
