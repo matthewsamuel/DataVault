@@ -75,6 +75,19 @@ A11Y_CHECKS = Path(__file__).with_name("a11y_checks.js")
 
 
 def free_port() -> int:
+    # DATAVAULT_TEST_PORTS=9950-9959 keeps the throwaway server inside a range (when other
+    # sessions on this machine own other ports); without it the OS picks a free port.
+    span = os.environ.get("DATAVAULT_TEST_PORTS", "")
+    if "-" in span:
+        low, high = (int(p) for p in span.split("-", 1))
+        for port in range(low, high + 1):
+            with socket.socket() as s:
+                try:
+                    s.bind(("127.0.0.1", port))
+                except OSError:
+                    continue
+                return port
+        raise RuntimeError(f"no free port in {span}")
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
