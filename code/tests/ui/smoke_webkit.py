@@ -223,6 +223,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
     proc, base, vault = start_server(workdir)
     problems = []
     where = {"step": "start"}
+    shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
+    shots.mkdir(parents=True, exist_ok=True)
     guard = watchdog(float(os.environ.get("DATAVAULT_SMOKE_MAX_SECONDS", "1500")) * SLOW, proc, workdir, where)
     try:
         with sync_playwright() as p:
@@ -332,6 +334,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     page.wait_for_timeout(nominal * 1000)
                 deadline = time.monotonic() + (2.0 + 3 * nominal) * SLOW
                 started, waited_for = time.monotonic(), set()
+                # One that has been open for a minute (a stream, or one the browser never closed) is
+                # no reason to wait after every later step
+                for r in [r for r, since in inflight.items() if started - since > 60 * SLOW]:
+                    del inflight[r]
                 while inflight and time.monotonic() < deadline:
                     waited_for.update(r.url.replace(origin, "") for r in inflight)
                     page.wait_for_timeout(50)
@@ -344,7 +350,16 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 before = len(problems)
                 started = time.monotonic()
                 where["step"] = name
-                action()
+                try:
+                    action()
+                except PlaywrightError:
+                    # What the page showed when a step failed, next to the screenshots
+                    try:
+                        page.screenshot(path=str(shots / "failed-step.png"))
+                        print(f"  FAILED  {name}; the page then: {shots / 'failed-step.png'}", flush=True)
+                    except PlaywrightError:
+                        pass
+                    raise
                 extra, waited_for = settle(wait)
                 if expected:
                     problems[before:] = [p for p in problems[before:] if not expected(p)]
@@ -814,9 +829,19 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.input_value("#search-input") == "zzz" and page.evaluate(view_now) == "home",
                    f"search: the window did not open with the query ({page.input_value('#search-input')!r})")
             expect_focus_trapped("search-overlay", "search: window")
+            # File names are looked up in the library: on a busy machine its first pass (on start, and
+            # the one the search window asks for) may still be going, so wait for it first
+            library_wait = time.monotonic()
+            try:
+                page.wait_for_function("fetch('/api/library/status').then(r => r.json()).then(s => s.ready && !s.job)",
+                                       timeout=T(60000), polling=500)
+            except PlaywrightError:
+                problems.append("search: the library was not ready within a minute")
+            if time.monotonic() - library_wait >= 0.5:
+                print(f"          (waited {time.monotonic() - library_wait:.1f} s for the library pass)", flush=True)
             step("search: by file name", lambda: (
                 page.click(".search-mode[data-mode='filename']"), page.fill("#search-input", "burst"),
-                page.keyboard.press("Enter"), page.wait_for_selector(".search-result", timeout=T(5000))), 0.6)
+                page.keyboard.press("Enter"), page.wait_for_selector(".search-result", timeout=T(10000))), 0.6)
             expect(page.locator(".search-result").count() == 5,
                    f"search: 'burst' found {page.locator('.search-result').count()} files, not 5")
             step("search: arrow down to the results, Enter opens the viewer", lambda: (
@@ -1218,7 +1243,6 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
             # and a screenshot to look at
-            shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
             shots.mkdir(parents=True, exist_ok=True)
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
@@ -1571,7 +1595,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # ... except on pages that are exactly as high as the window: they keep it free inside
             for view in ("keurer", "duplicates"):
                 page.evaluate(f"switchMainView('{view}')")
-                page.wait_for_timeout(300)
+                # (until the new view has settled: on a busy machine 300 ms was not always enough)
+                try:
+                    page.wait_for_function("document.documentElement.scrollHeight - innerHeight <= 1",
+                                           timeout=T(3000), polling=100)
+                except PlaywrightError:
+                    pass   # reported below
                 extra = page.evaluate("document.documentElement.scrollHeight - innerHeight")
                 expect(extra <= 1, f"job dock: the {view} page scrolls the window by {extra} px")
 
@@ -2369,6 +2398,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             proc.wait(10)
         except subprocess.TimeoutExpired:
             proc.kill()
+        if problems or sys.exc_info()[0] is not None:
+            # The server's own log says what it was doing; keep it with the screenshots
+            for name in ("uvicorn.log", "server.log"):
+                if (workdir / name).exists():
+                    shutil.copy(workdir / name, shots / name)
+            print(f"\nserver log kept in {shots}", flush=True)
         shutil.rmtree(workdir, ignore_errors=True)
 
     if problems:
