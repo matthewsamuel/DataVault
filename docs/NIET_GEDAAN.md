@@ -37,6 +37,11 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 - **Sneller zoeken naar paren bij 100.000 scheve hashes.** 7 tot 10 s in het slechtste geval; het geheugen is wel begrensd.
 - **Videodata voor avi, mkv en mts, en RAW-miniaturen met echte camerabestanden.** Alleen de QuickTime-familie wordt
   gelezen; RAW via `sips` is getest met een nagebootste fout, niet met echte RAW. *Goede volgende stap met echte bestanden.*
+- **Namen van zeeën bij een foto op het water.** Een foto op zee heet "Voor de kust van Zeeland, Nederland" of
+  "Op zee, 80 km uit de kust van Portugal", niet "Noordzee" of "Middellandse Zee": de vlakken van de zeeën (Natural
+  Earth marine polys) zitten niet in de offline kaartdata. *Kan later met een extra bestand van ongeveer 1 MB.*
+- **Het land over de datumgrens heen.** De offline kaart tekent elk land één keer; wie voorbij 180 graden schuift
+  (Japan naar de Stille Oceaan), ziet daar lege zee en geen namen, tot de kaart terugspringt.
 
 ## Assistent (Pasha)
 

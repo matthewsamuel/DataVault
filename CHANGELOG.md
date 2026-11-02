@@ -29,6 +29,20 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
   "Limburg" telt beide Limburgen) of bij een kleinere plaats ("Olhão"); onder het antwoord staat
   waar ze genomen zijn ("Amsterdam: 12 foto's"). Een bezochte plek zonder naam in je
   locatiegeschiedenis krijgt dezelfde plaatsnaam.
+- **De juiste plaats bij een naam die vaker voorkomt.** Middelburg, Ede of Soest zoekt Pasha in
+  Nederland, niet in Zuid-Afrika, Nigeria of Duitsland; Bali is het Indonesische eiland. Bestaat een
+  naam op meer plekken (Lagos in Portugal en in Nigeria), dan kiest Pasha de plek waar jouw foto's zijn.
+  "Holland" is Nederland. Bij een stad telt Pasha eerst de stad zelf ("Amsterdam: 2 foto's") en
+  zegt "1 foto" in plaats van "1 foto's".
+- **Plaatsnamen kloppen beter.** De Burj Khalifa ligt in Dubai en Asakusa in Tokio, niet "14 km ten
+  noorden van Dubai"; een voorstad met een eigen centrum houdt zijn naam (Schiedam, Amstelveen).
+  Monaco en Singapore staan er één keer, het Sint-Pietersplein is Vaticaanstad, en het is Almere,
+  niet "Almere Stad". Noorse en Zweedse provincies heten provincie ("provincie Stockholm"), en
+  "Voor de kust van de Zuid-Egeïsche Eilanden".
+- **Namen op de kaart blijven leesbaar.** Een land- of plaatsnaam valt niet meer onder een groep foto's,
+  onder de zoomknoppen of half buiten de kaart; een landnaam schuift dan net boven of onder de groep.
+  Over de datumgrens (Japan, de Stille Oceaan) staan weer de steden in beeld. Een geschatte locatie in
+  de viewer toont de plaats als hoofdregel, met de provincie en de positie stil eronder.
 
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
