@@ -380,14 +380,68 @@ function msgFoot(m, when) {
         }));
     const button = createEl('button', {
         type: 'button', class: 'msg-edited is-toggle', title, 'aria-expanded': 'false', 'aria-controls': list.id,
-        onClick: () => {
-            const open = list.hidden;
-            list.hidden = !open;
-            button.setAttribute('aria-expanded', String(open));
-            if (open && window.Motion) Motion.enter(list, 'rise');
-        },
+        onClick: () => msgToggleEdits(button, list),
     }, createEl('span', { text: label }), createEl('i', { class: 'fas fa-chevron-down msg-edited-chevron', 'aria-hidden': 'true' }));
     return { list, el: createEl('div', { class: 'msg-foot' }, button, time) };
+}
+
+// De eerdere versies open of dicht. Open: ze komen omhoog en het gesprek eronder glijdt opzij
+// (Motion.flip); wat open ging blijft in beeld, met de knop en zijn focusring. Dicht: korter dan
+// open en versnellend, daarna sluit het gat; opnieuw openen onderbreekt dat. Uit: meteen.
+function msgToggleEdits(button, list) {
+    const M = window.Motion;
+    const open = list.hidden || list.dataset.closing === '1';
+    const foot = button.closest('.msg-foot');
+    const scroller = button.closest('.msg-scroll');
+    button.setAttribute('aria-expanded', String(open));
+    if (open) {
+        delete list.dataset.closing;
+        const play = M ? M.flipCapture(msgBelow(foot, scroller)) : null;
+        list.hidden = false;
+        msgKeepInView(scroller, foot);       // gemeten voor de flip iets verschuift
+        if (M) {
+            M.enter(list, 'rise', { fromCurrent: true });
+            play();
+        }
+        return;
+    }
+    list.dataset.closing = '1';
+    let leaving = null;
+    const close = () => {
+        if (list.dataset.closing !== '1') return;
+        delete list.dataset.closing;
+        const play = M ? M.flipCapture(msgBelow(foot, scroller)) : null;
+        list.hidden = true;
+        if (leaving) leaving.cancel();       // de vervaagde eindstand hoort niet bij de volgende keer open
+        if (play) play();
+    };
+    if (!M || M.off()) { close(); return; }
+    leaving = M.exit(list);
+    leaving.finished.then(close, () => {});
+}
+
+// De voet van de bubbel en wat eronder in beeld staat: dat schuift mee als de versies open- of dichtgaan
+function msgBelow(foot, scroller) {
+    const out = [foot];
+    if (!scroller) return out;
+    const bottom = scroller.getBoundingClientRect().bottom;
+    let el = foot.closest('.msg-row, .msg-system')?.nextElementSibling;
+    for (let n = 0; el && n < 40; el = el.nextElementSibling, n++) {
+        if (el.getBoundingClientRect().top > bottom) break;
+        out.push(el);
+    }
+    return out;
+}
+
+// Houd de voet (met de knop) binnen het gesprek in beeld: alleen schuiven als hij eronder valt
+function msgKeepInView(scroller, foot) {
+    if (!scroller) return;
+    const view = scroller.getBoundingClientRect();
+    const gap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-md')) || 12;
+    const over = foot.getBoundingClientRect().bottom + gap - view.bottom;
+    if (over > 0) {
+        scroller.scrollBy({ top: over, behavior: window.Motion && Motion.full() ? 'smooth' : 'auto' });
+    }
 }
 
 function msgBubble(m, conv, prev) {
