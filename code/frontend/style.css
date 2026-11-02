@@ -12302,11 +12302,153 @@ button.storage-file-thumb:hover .storage-file-play {
     gap: var(--space-sm);
 }
 
+/* De collectiekiezer: een knop met de huidige collectie en een lijst om in te zoeken (c) */
+.elo-scope-wrap {
+    position: relative;
+}
+
 .elo-scope {
-    max-width: 240px;
+    max-width: 280px;
+    gap: var(--space-sm);
+}
+
+.elo-scope-icon {
+    flex: none;
+    font-size: var(--icon-xs);
+    color: var(--text-secondary);
+}
+
+.elo-scope-label {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.elo-scope-chevron {
+    flex: none;
+    font-size: var(--fs-2xs);
+    color: var(--text-tertiary);
+    transition: transform var(--dur-2) var(--ease-standard);
+}
+
+.elo-scope[aria-expanded="true"] .elo-scope-chevron {
+    transform: rotate(180deg);
+}
+
+.elo-scope kbd {
+    flex: none;
+}
+
+.elo-scope-pop {
+    position: absolute;
+    top: calc(100% + var(--space-xs));
+    right: 0;
+    width: 320px;
+    flex-direction: column;
+    gap: var(--space-xs);
+    transform-origin: top right;
+}
+
+.elo-scope-pop:not([hidden]) {
+    display: flex;
+    animation: shell-menu-in var(--spring-snappy-dur) var(--spring-snappy) both;
+}
+
+/* Sluiten: kort vervagen en wegzakken, zoals elk menu (geen klikken meer tijdens het vertrek) */
+.elo-scope-pop.is-leaving {
+    pointer-events: none;
+    animation: shell-menu-out var(--dur-3) var(--ease-exit) forwards;
+}
+
+.elo-scope-search {
+    display: flex;
+    padding: var(--space-xs) var(--space-xs) 0;
+}
+
+.elo-scope-search .input {
+    width: 100%;
+}
+
+.elo-scope-list {
+    max-height: min(360px, 55vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--space-xs) 0;
+}
+
+.elo-scope-group {
+    padding: var(--space-sm) var(--space-sm) var(--space-xs);
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+}
+
+.elo-scope-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    height: 32px;
+    padding: 0 var(--space-sm);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: background-color var(--dur-1) var(--ease-standard);
+}
+
+.elo-scope-option.is-active {
+    background-color: var(--surface-hover);
+}
+
+/* De focus staat in het zoekveld (met zijn ring); de keuze waar Enter naartoe gaat licht op */
+.elo-scope-pop:focus-within .elo-scope-option.is-active {
+    background-color: var(--surface-active);
+}
+
+.elo-scope-option-icon {
+    flex: none;
+    font-size: var(--icon-xs);
+    color: var(--text-secondary);
+}
+
+.elo-scope-option-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.elo-scope-option-check {
+    flex: none;
+    font-size: var(--icon-xs);
+    color: var(--accent-text);
+    visibility: hidden;
+}
+
+.elo-scope-option[aria-selected="true"] {
+    font-weight: var(--fw-medium);
+}
+
+.elo-scope-option[aria-selected="true"] .elo-scope-option-icon,
+.elo-scope-option[aria-selected="true"] .elo-scope-option-check {
+    color: var(--accent-text);
+    visibility: visible;
+}
+
+.elo-scope-empty {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-sm);
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+}
+
+.elo-scope-empty i {
+    color: var(--text-tertiary);
+    font-size: var(--icon-xs);
 }
 
 .elo-body {
@@ -13243,7 +13385,8 @@ html[data-motion="rustig"] .elo-trash:hover i {
     .elo-subtitle,
     .elo-keys,
     .elo-board-band,
-    .elo-actions kbd {
+    .elo-actions kbd,
+    .elo-scope kbd {
         display: none;
     }
 

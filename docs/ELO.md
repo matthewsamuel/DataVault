@@ -142,6 +142,18 @@ test checks this.
   count that does not match rebuilds it. Migration 161 adds covering indexes for reading every
   rating below a folder. With 10,000 photos and 75,000 comparisons (7.5 per photo), the next-pair
   request went from 159 to 40 ms (median, over HTTP) and saving a pick from 88 to 31 ms.
+- **An album as the range.** A smart album is a registered scope (`elo.register_scope('album', ...)`,
+  key `album:<id>`), so its duels, history, progress and Ranglijst are its own. Its photos are asked
+  of the index and kept per selection version (plus the album's `updated_at` and the disabled show
+  folders), like a folder's: an album of all 10,000 photos (75,000 comparisons) answers the
+  next-pair request in 36 ms (was 86 ms), a pick in 24 ms (was 76 ms) and the Ranglijst in 41 ms
+  (was 91 ms), medians over HTTP, against 27, 16 and 29 ms for the same photos as a folder.
+- **Choosing the range.** The collection picker at the top (`c` from the duel or the Ranglijst) lists
+  the whole library, every show and every smart album that can hold photos. Typing filters it,
+  `↑`/`↓` and Enter choose, and the keys go straight back to the duel. `Esc` closes only the
+  picker. The last choice is remembered in the browser for the next time the window opens; an album
+  that no longer exists falls back to the whole library with a short notice. An open album also has
+  a **Welke is mooier?** button in Albums.
 - **Far-apart ratings.** Votes have no upper cap, so two photos can be thousands of points apart.
   The expected score is clamped just inside 0 and 1, so the update never divides by zero, also not
   while migration 160 replays an old history.

@@ -71,8 +71,6 @@ Terug naar de [README](../README.md) of het [CHANGELOG](../CHANGELOG.md).
 
 - **Een eigen tekstonderdeel in het menu voor Berichten, DataGatherer en Reeksen en een overloopmenu "Meer".** Er is geen ruimte in het
   menu bij 1024 px; de onderdelen zitten daarom in andere schermen (Reeksen bij Duplicaten; DataGatherer is een icoon in de menubalk). *Goede volgende stap.*
-- **Een album als bereik in Welke is mooier?** De haak (`elo.register_scope`) bestaat; een album-scope is nog niet
-  geregistreerd.
 - **Lange titels in het takenpaneel inkorten.** Ze worden netjes afgekapt met een beletselteken.
 - **Een keuze voor de back-upmap in de interface.** Ze staat in `config.json`.
 - **Een melding met "Ongedaan maken" na bepaalde acties.** De gedeelde melding heeft geen knop.
