@@ -195,6 +195,15 @@ cp config.example.json config.json   # en daarna de paden aanpassen
   aanmaakdatum (of aan de inhoud als die al bekend was), en gaat de waardering ook mee.
 - Een bestand dat weg is, wordt eerst verborgen en pas aan het eind van een ronde uit de index
   gehaald. De index leest alleen; hij verplaatst of wist nooit een bestand.
+- Video's: mp4, mov, m4v en 3gp leest de index zelf (de QuickTime-boxen). Voor avi, mkv, mts, m2ts,
+  webm, wmv, flv en mpg vraagt de indextaak het aan `ffprobe` (als het er is, hooguit 10 s per
+  bestand): de opnamedatum als de container er een heeft (mkv DateUTC en creation_time als UTC, een
+  AVI-datum als lokale tijd, zoals EXIF), duur, afmetingen en draaiing. Zonder ffprobe, of als een
+  verzoek het bestand leest (een verplaatsing in de app), krijgt de regel `meta_status = 'probe'` en
+  leest de eerste ronde met ffprobe hem opnieuw (migratie 180 zet bestaande regels zo). Camcorder-
+  mts zonder datum in de container houdt de bestandsdatum; de MDPM-datum in de H.264-stroom wordt
+  niet gelezen. De tijdlijn-wandeling (voor de index klaar is) start geen proces per bestand en
+  houdt voor deze formaten de bestandsdatum.
 - `DATAVAULT_AUTO_INDEX=0` zet het automatisch bijwerken uit (de tests doen dat).
 
 ### Albums: filters, slimme albums en op deze dag

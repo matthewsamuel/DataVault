@@ -837,6 +837,10 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - **Sneller reeksen zoeken in een groot archief.** Bij 100.000 foto's met veel gelijkende scans of
   screenshots duurt het zoeken naar paren nu 6 s in plaats van 12 s, met minder geheugen. Bij
   gewone foto's is het bijna twee keer zo snel, en de app blijft ondertussen even vlot.
+- **Datum, duur en afmetingen van avi-, mkv- en mts-video's.** Als ffprobe (onderdeel van ffmpeg)
+  geïnstalleerd is, leest de bibliotheek nu ook bij deze video's de opnamedatum, de duur en het
+  formaat. Ze staan daardoor op de juiste plek in de tijdlijn. Video's die al in de bibliotheek
+  stonden worden bij de volgende ronde één keer opnieuw gelezen.
 
 ## Fase 2 – Stabiliseren
 

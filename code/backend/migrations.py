@@ -1068,6 +1068,22 @@ def _m161_elo_state_indexes(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_ratings_state ON elo_ratings(path, mu, rd, vol, public, games)")
 
 
+def _m180_media_probe_videos(conn: sqlite3.Connection):
+    """
+    Videos the index now reads with ffprobe (avi, mkv, mts, m2ts, webm, wmv, flv, mpg,
+    mpeg: backend/media_meta.FFPROBE_EXTENSIONS) were indexed with their file date only
+    (meta_status 'none'). They get meta_status 'probe', so the next index pass that can
+    run ffprobe reads their date, duration and dimensions. Only that column of those rows
+    changes; nothing else is touched.
+    """
+    has_media = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media'").fetchone()
+    if not has_media:
+        return
+    exts = ('.avi', '.mkv', '.mts', '.m2ts', '.webm', '.wmv', '.flv', '.mpg', '.mpeg')
+    conn.execute(f"UPDATE media SET meta_status = 'probe' WHERE meta_status = 'none' AND kind = 'video' "
+                 f"AND ext IN ({', '.join('?' * len(exts))})", exts)
+
+
 # The kinds google_formats.activity_item makes (My Activity and YouTube's own history)
 _ACTIVITY_ITEM_KINDS = ("youtube_watch", "youtube_search", "search", "maps", "web_visit", "activity")
 
@@ -1169,6 +1185,8 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (161, "elo_state_indexes", _m161_elo_state_indexes),
     # 170-179: Spotify covers on Home
     (170, "spotify_covers", _m170_spotify_covers),
+    # 180-189: search and series (video frames, ffprobe for other videos)
+    (180, "media_probe_videos", _m180_media_probe_videos),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
