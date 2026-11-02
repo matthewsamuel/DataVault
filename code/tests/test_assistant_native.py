@@ -204,3 +204,22 @@ def test_the_chat_hides_every_tool_name_while_streaming():
     names = set(re.findall(r"'(\w+)'", re.search(r"const CHAT_TOOL_NAMES = \[(.*?)\];", js, re.S).group(1)))
     assert {t["function"]["name"] for t in assistant.NATIVE_TOOLS} | set(assistant.TOOLS) | set(assistant.CLIENT_ACTIONS) <= names
     assert f"const CHAT_NO_ANSWER = '{assistant.NO_ANSWER}';" in js
+
+
+def test_the_tool_format_is_chosen_in_instellingen(indexed, fake_ollama, app):
+    models = indexed.get("/api/chat/models").json()
+    assert models["tool_format"] == "native" and models["tool_format_used"] == "native"
+    r = indexed.post("/api/chat/tool-format", json={"format": "tags"})
+    assert r.status_code == 200 and r.json() == {"tool_format": "tags", "tool_format_used": "tags"}
+    assert app.state.db.get_setting(chat.TOOL_FORMAT_SETTING) == "tags"
+    _post(indexed)
+    assert "tools" not in _chat_bodies(fake_ollama)[-1]
+    for bad in ("json", "", None, 3):
+        assert indexed.post("/api/chat/tool-format", json={"format": bad}).status_code == 400
+    assert indexed.post("/api/chat/tool-format", json=["tags"]).status_code in (400, 422)
+    # Back to native; a model without tool support still gets the tags, and the page can say so
+    indexed.post("/api/chat/tool-format", json={"format": "native"})
+    fake_ollama.capabilities = {"qwen2.5:3b": ["completion"]}
+    chat.forget_ollama_status()
+    models = indexed.get("/api/chat/models").json()
+    assert models["tool_format"] == "native" and models["tool_format_used"] == "tags"

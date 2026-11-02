@@ -100,7 +100,11 @@ The 3.8 measurement of the tags (85 to 90% on its 20 requests) agrees with the t
 
 ## Fallback
 
-- The format is a setting (`app_settings.chat_tool_format`: `native` or `tags`, default native).
+- The format is a setting (`app_settings.chat_tool_format`: `native` or `tags`, default native),
+  chosen in Instellingen > Taalmodel van Pasha > Acties ("Ollama-gereedschap" or "Tekstcode",
+  `POST /api/chat/tool-format`). `GET /api/chat/models` reports the choice and what the current
+  model really gets (`tool_format_used`), and the page says so when a model without tool support
+  falls back to the tags.
 - A model whose Ollama `capabilities` do not include `tools` gets the tags.
 - When Ollama answers "does not support tools", the same question is asked again in the tag
   format, and that model is remembered until the server restarts.

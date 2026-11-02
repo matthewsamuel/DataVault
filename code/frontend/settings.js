@@ -163,6 +163,41 @@ registerSettingsSection({
     },
 });
 
+// Hoe Pasha zijn acties doorgeeft (docs/PASHA_TOOLS.md); bewaard via /api/chat/tool-format
+const TOOL_FORMAT_CHOICES = [
+    ['native', 'Ollama-gereedschap', 'Pasha geeft zijn acties door via Ollama zelf. Aanbevolen.'],
+    ['tags', 'Tekstcode', 'Pasha schrijft een actie als code in zijn antwoord. Kies dit als een model met het gereedschap vaak niets doet.'],
+];
+
+// Zet de keuze en de uitleg goed (ook na loadChatModels en na het kiezen van een ander model)
+function renderChatToolFormat() {
+    const chosen = chatModelState.tool_format || 'native';
+    document.querySelectorAll('[data-tool-format]').forEach(input => { input.checked = input.value === chosen; });
+    const hint = document.getElementById('settings-tool-format-hint');
+    if (!hint) return;
+    const line = TOOL_FORMAT_CHOICES.find(([value]) => value === chosen)[2];
+    hint.textContent = chosen === 'native' && chatModelState.tool_format_used === 'tags'
+        ? `${line} Dit model kan geen Ollama-gereedschap gebruiken, dus Pasha gebruikt nu de tekstcode.`
+        : line;
+}
+
+async function chooseChatToolFormat(value) {
+    try {
+        const data = await fetchJSON(`${API_BASE}/api/chat/tool-format`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ format: value }),
+        });
+        chatModelState.tool_format = data.tool_format;
+        chatModelState.tool_format_used = data.tool_format_used;
+        const label = TOOL_FORMAT_CHOICES.find(([v]) => v === data.tool_format)[1];
+        showToast('Pasha', `Acties nu via ${label.toLowerCase()}`, 'success');
+    } catch (err) {
+        toastFetchError('Keuze niet bewaard', err);
+    }
+    renderChatToolFormat();
+}
+
 registerSettingsSection({
     id: 'taalmodel',
     title: 'Taalmodel van Pasha',
@@ -177,14 +212,24 @@ registerSettingsSection({
         });
         select.setAttribute('data-chat-model', '');
         const status = createEl('span', { class: 'chat-status', 'data-chat-status': '', 'data-state': 'pending', text: 'Verbinden…' });
+        const formats = createEl('div', { class: 'segmented settings-choice-group', role: 'radiogroup', 'aria-label': 'Acties van Pasha' },
+            ...TOOL_FORMAT_CHOICES.map(([value, label]) => createEl('label', { class: 'settings-choice' },
+                createEl('input', {
+                    type: 'radio', class: 'radio', name: 'settings-tool-format', value,
+                    checked: value === (chatModelState.tool_format || 'native'),
+                    dataset: { toolFormat: value }, onChange: () => chooseChatToolFormat(value),
+                }),
+                createEl('span', { text: label }))));
         body.append(
             settingsRow('Model', select),
             settingsRow('Status', status),
+            Object.assign(settingsRow('Acties', createEl('span', { class: 'settings-tool-format' }, formats,
+                createEl('span', { class: 'settings-hint', id: 'settings-tool-format-hint' }))), { className: 'settings-row settings-row-top' }),
             createEl('div', { class: 'settings-actions' },
                 createEl('button', { type: 'button', class: 'btn btn-secondary', id: 'settings-chat-reload',
                     text: 'Opnieuw controleren', onClick: loadChatModels })));
         // Pas als het stuk op de pagina staat: renderChatModelSelects vult alle [data-chat-model]
-        queueMicrotask(renderChatModelSelects);
+        queueMicrotask(() => { renderChatModelSelects(); renderChatToolFormat(); });
     },
 });
 

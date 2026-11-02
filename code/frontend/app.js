@@ -4535,6 +4535,7 @@ function renderChatModelSelects() {
     else if ((models || []).some(m => m.name === current && m.cloud)) {
         setChatStatus('In de cloud (ollama.com)', 'warning', `Taalmodel: ${current}. Het draait bij ollama.com: je vragen en wat Pasha uit je archief meestuurt gaan naar internet.`);
     } else setChatStatus('Online', 'ok', `Taalmodel: ${current}`);
+    if (typeof renderChatToolFormat === 'function') renderChatToolFormat();   // settings.js
 }
 
 async function loadChatModels() {
@@ -4568,6 +4569,7 @@ async function chooseChatModel(model) {
             body: JSON.stringify(cloud ? { model, allow_cloud: true } : { model }),
         });
         chatModelState.current = data.current;
+        if (data.tool_format_used) chatModelState.tool_format_used = data.tool_format_used;
         showToast('Pasha', data.cloud ? `Gebruikt nu ${data.current}, in de cloud bij ollama.com` : `Gebruikt nu het model ${data.current}`,
             data.cloud ? 'warning' : 'success');
     } catch (e) {

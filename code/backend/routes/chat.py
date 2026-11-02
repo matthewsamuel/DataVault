@@ -182,18 +182,22 @@ def forget_ollama_status() -> None:
 _no_native_tools: set = set()     # models whose Ollama answered 'does not support tools'
 
 
-def tool_format(model: str) -> str:
-    """'native' or 'tags' for this model: the setting (default DEFAULT_TOOL_FORMAT), but the tags
-    for a model that cannot call tools (its capabilities lack 'tools', or Ollama refused them)."""
-    chosen = DEFAULT_TOOL_FORMAT
+def chosen_tool_format() -> str:
+    """The setting (Instellingen > Taalmodel van Pasha > Acties), default DEFAULT_TOOL_FORMAT."""
     if db is not None:
         try:
             value = db.get_setting(TOOL_FORMAT_SETTING)
             if value in TOOL_FORMATS:
-                chosen = value
+                return value
         except Exception:
             pass
-    if chosen != "native" or model in _no_native_tools:
+    return DEFAULT_TOOL_FORMAT
+
+
+def tool_format(model: str) -> str:
+    """'native' or 'tags' for this model: the setting (default DEFAULT_TOOL_FORMAT), but the tags
+    for a model that cannot call tools (its capabilities lack 'tools', or Ollama refused them)."""
+    if chosen_tool_format() != "native" or model in _no_native_tools:
         return "tags"
     for m in ollama_status()["models"]:
         if m["name"] == model and m.get("capabilities") is not None and "tools" not in m["capabilities"]:
@@ -237,7 +241,22 @@ def chat_models():
         "error": status["error"],
         "models": status["models"],
         "suggested": SUGGESTED_MODELS,
+        # How Pasha writes his actions: the choice, and what the current model really gets
+        "tool_format": chosen_tool_format(),
+        "tool_format_used": tool_format(current_model()),
     }
+
+
+@router.post("/api/chat/tool-format")
+def set_tool_format(body: Dict[str, Any]):
+    """{format: 'native' | 'tags'}: Ollama's own tool calling, or the <<ACTION>> tags in the text."""
+    value = body.get("format") if isinstance(body, dict) else None
+    if value not in TOOL_FORMATS:
+        raise HTTPException(status_code=400, detail="Kies 'native' of 'tags'")
+    if db is None:
+        raise HTTPException(status_code=503, detail="Instelling kan niet bewaard worden: geen database")
+    db.set_setting(TOOL_FORMAT_SETTING, value)
+    return {"tool_format": value, "tool_format_used": tool_format(current_model())}
 
 
 @router.post("/api/chat/model")
@@ -258,7 +277,7 @@ def set_chat_model(body: Dict[str, Any]):
     db.set_setting(MODEL_SETTING, model)
     # The confirmation is for this one model; choosing a local model withdraws it
     db.set_setting(CLOUD_OK_SETTING, model if cloud else "")
-    return {"current": model, "cloud": cloud}
+    return {"current": model, "cloud": cloud, "tool_format_used": tool_format(model)}
 
 
 # Characters a name in the prompt may not contain: control characters (no fake new
