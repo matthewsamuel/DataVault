@@ -628,7 +628,7 @@ def test_keeping_the_best_moves_the_rest_as_one_undo_and_undo_restores_exactly(c
     # One entry in the recovery center, with every file
     entries = client.get("/api/recovery").json()["entries"]
     entry = next(e for e in entries if e["source"] == "near_dup")
-    assert entry["label"] == "Beste uit reeks" and entry["file_count"] == 3 and entry["restorable"] == 3
+    assert entry["label"] == "Reeksen" and entry["file_count"] == 3 and entry["restorable"] == 3
     assert entry["undo"]["url"] == "/api/recovery/undo"
     r = client.post(entry["undo"]["url"], json=entry["undo"]["body"])
     assert r.status_code == 200 and r.json()["restored"] == 3, r.text

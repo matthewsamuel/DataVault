@@ -1717,7 +1717,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("series: undo in the Herstelcentrum", lambda: (
                 nav_click("recovery"),
                 page.wait_for_selector(".recovery-entry"),
-                page.click(".recovery-entry:has-text('Beste uit reeks') .recovery-undo"),
+                page.click(".recovery-entry:has-text('Reeksen') .recovery-undo"),
                 page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
                 page.click("#modal-dv-confirm .btn-primary")), 1.5)
             expect(klein.exists() and not (holding / "2022" / "bursts" / "strand klein.jpg").exists(),
