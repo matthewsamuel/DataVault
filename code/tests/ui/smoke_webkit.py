@@ -1975,7 +1975,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             with open(fp_moved[0][1], "ab") as f:
                 f.write(b"later bewerkt")
             step("fingerprint: the run says a file changed", lambda: (
-                page.click(".top-nav [data-view='duplicates']"), page.click("#dup-tab-exact"),
+                nav_click("duplicates"),
                 page.evaluate("loadDuplicateRuns()"),
                 page.wait_for_selector(".dup-run-note .fa-triangle-exclamation", timeout=5000)), 0.5)
             note = page.inner_text(".dup-run:first-child .dup-run-note")
@@ -2000,7 +2000,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    and "blijft staan" in page.inner_text(".dup-run:first-child .dup-run-note"),
                    "fingerprint: the run with only a changed file left can still be undone")
             step("fingerprint: the Herstelcentrum gives the reason", lambda: (
-                page.click(".top-nav [data-view='recovery']"),
+                nav_click("recovery"),
                 page.wait_for_selector(".recovery-entry[data-key^='duplicates:'].is-blocked .recovery-status.blocked", timeout=5000)), 0.5)
             reason = page.inner_text(".recovery-entry[data-key^='duplicates:'].is-blocked .recovery-status.blocked")
             expect("veranderd sinds het daar kwam" in reason, f"fingerprint: Herstelcentrum reason {reason!r}")
