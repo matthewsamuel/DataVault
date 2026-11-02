@@ -252,9 +252,9 @@ def test_outside_answer_does_not_reveal_existence(client, vault, outside):
         assert existing.status_code == missing.status_code == 403, url
         assert existing.json() == missing.json(), url
     for folder in ["/etc", "/nonexistent-folder"]:
-        r = client.post("/api/duplicates/scan_folder", params={"folder_path": folder})
+        r = client.post("/api/duplicates/scan_folder", json={"folder_path": folder})
         assert r.status_code == 403, folder
-    r = client.post("/api/duplicates/delete_single", params={"file_path": "/nonexistent/x.jpg"})
+    r = client.post("/api/duplicates/delete_single", json={"file_path": "/nonexistent/x.jpg"})
     assert r.status_code == 403
 
 

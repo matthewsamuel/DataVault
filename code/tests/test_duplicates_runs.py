@@ -71,7 +71,7 @@ def test_batch_in_chunks_is_one_run_and_undo_restores_content_and_dates(client, 
 
 
 def test_per_group_override_keeps_the_copy_the_user_chose(client, vault):
-    scan = client.post("/api/duplicates/scan_folder", params={"folder_path": str(vault / "RAW")}).json()
+    scan = client.post("/api/duplicates/scan_folder", json={"folder_path": str(vault / "RAW")}).json()
     [group] = [g for g in scan["groups"] if str(vault / STRAND) in {c["path"] for c in g["copies"]}]
     default = group["copies"][group["keep"]]["path"]
     chosen = next(c["path"] for c in group["copies"] if c["path"] != default)
@@ -213,7 +213,7 @@ def test_a_hidden_copy_never_stays_in_place_of_a_visible_one(client, vault):
     in_dot_folder.parent.mkdir()
     in_dot_folder.write_bytes(visible.read_bytes())
     assert _move(client, [(in_dot_folder, [visible])]).json()["failed"][0]["status"] == 409
-    assert client.post("/api/duplicates/delete_single", params={
+    assert client.post("/api/duplicates/delete_single", json={
         "file_path": str(visible), "duplicate_of": str(hidden)}).status_code == 409
     assert visible.exists() and _runs(client) == []
 
@@ -275,7 +275,7 @@ def test_an_unreadable_keeper_refuses_its_group_and_the_rest_still_runs(client, 
     assert [f["status"] for f in r.json()["failed"]] == [409] and r.json()["failed"][0]["path"] == str(d1)
     assert [m["path"] for m in r.json()["moved"]] == [str(d2)]
     assert d1.exists() and k1.exists()
-    r = client.post("/api/duplicates/delete_single", params={"file_path": str(d1), "duplicate_of": str(k1)})
+    r = client.post("/api/duplicates/delete_single", json={"file_path": str(d1), "duplicate_of": str(k1)})
     assert r.status_code == 409 and "niet lezen" in r.json()["detail"]
 
 

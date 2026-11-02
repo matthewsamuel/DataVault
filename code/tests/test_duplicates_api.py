@@ -8,7 +8,7 @@ def _delete_single(client, path, duplicate_of=None):
     params = {"file_path": str(path)}
     if duplicate_of is not None:
         params["duplicate_of"] = str(duplicate_of)
-    return client.post("/api/duplicates/delete_single", params=params)
+    return client.post("/api/duplicates/delete_single", json=params)
 
 
 def test_delete_single_moves_identical_duplicate_and_undo_restores(client, vault):
@@ -27,7 +27,7 @@ def test_delete_single_moves_identical_duplicate_and_undo_restores(client, vault
 
 def test_delete_single_uses_keeper_from_last_scan(client, vault):
     folder = vault / "RAW"
-    scan = client.post("/api/duplicates/scan_folder", params={"folder_path": str(folder)}).json()
+    scan = client.post("/api/duplicates/scan_folder", json={"folder_path": str(folder)}).json()
     group = scan["groups"][0]
     keep = group["copies"][group["keep"]]["path"]
     dup = next(c for i, c in enumerate(group["copies"]) if i != group["keep"])
@@ -149,3 +149,31 @@ def test_undo_last_keeps_records_of_files_it_could_not_restore(client, vault, mo
     r = client.post("/api/raw_duplicates/undo_last")
     assert r.status_code == 200 and r.json()["restored"] == 1
     assert d1.read_bytes() == b"eerste"
+
+
+def test_the_old_endpoints_take_their_paths_in_the_body_never_in_the_url(client, vault):
+    """NIET_GEDAAN: delete_single and scan_folder took their path as a URL parameter."""
+    keeper, dup = vault / STRAND, vault / STRAND_COPIES[0]
+    for params in ({"file_path": str(dup), "duplicate_of": str(keeper)}, {"file_path": str(dup)}):
+        r = client.post("/api/duplicates/delete_single", params=params)
+        assert r.status_code == 400 and "JSON-body" in r.json()["error"]["message"], r.text
+        # also when a body is sent as well: a path in the URL is never accepted
+        r = client.post("/api/duplicates/delete_single", params=params, json=params)
+        assert r.status_code == 400
+    assert dup.exists()
+    r = client.post("/api/duplicates/scan_folder", params={"folder_path": str(vault / "RAW")})
+    assert r.status_code == 400 and "folder_path" in r.json()["error"]["message"]
+
+    for body in (None, [], "pad", {}, {"file_path": ""}, {"file_path": 5}, {"file_path": str(dup), "duplicate_of": 1},
+                 {"file_path": str(dup), "extra": 1}):
+        r = client.post("/api/duplicates/delete_single", json=body)
+        assert r.status_code == 400, (body, r.text)
+        assert r.json()["error"]["code"] == "bad_request"
+    for body in ({}, {"folder_path": str(vault / "RAW"), "rule": 3}, {"folder_path": str(vault / "RAW"), "x": 1}):
+        assert client.post("/api/duplicates/scan_folder", json=body).status_code == 400, body
+    assert dup.exists()
+
+    r = client.post("/api/duplicates/scan_folder", json={"folder_path": str(vault / "RAW"), "rule": "newest"})
+    assert r.status_code == 200 and r.json()["rule"] == "newest"
+    r = client.post("/api/duplicates/delete_single", json={"file_path": str(dup), "duplicate_of": str(keeper)})
+    assert r.status_code == 200 and not dup.exists()

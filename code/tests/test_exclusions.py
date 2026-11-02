@@ -131,7 +131,7 @@ def test_duplicates_scan_never_picks_hidden_or_excluded_files(client, vault, con
     """LIVE-PROBE-10: the hidden copy (.hidden.jpg) was chosen as the keeper of every visible copy."""
     for rel in ["RAW/2019/._strand.jpg", "RAW/a/.strand.jpg"]:
         _plant(vault / rel, (vault / STRAND).read_bytes())
-    scan = client.post("/api/duplicates/scan_folder", params={"folder_path": str(vault)}).json()
+    scan = client.post("/api/duplicates/scan_folder", json={"folder_path": str(vault)}).json()
     involved = {c["path"] for g in scan["groups"] for c in g["copies"]}
     assert not any("/." in p for p in involved), involved
     for p in planted["hidden"].values():

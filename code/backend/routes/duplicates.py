@@ -8,7 +8,7 @@ before every move it checks, under ARCHIVE_LOCK, that the copy that stays still
 exists and is byte-for-byte identical. Moved files go to RAW_DUPLICATES (never
 deleted) and one user action is one undo run, however many requests it takes.
 """
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import os
@@ -141,7 +141,39 @@ def get_duplicates_endpoint() -> Dict[str, Any]:
     }
 
 
+def _body_fields(request: Request, body: Any, required: str, optional: Tuple[str, ...]) -> Dict[str, Any]:
+    """
+    The fields of a JSON body for the two older single-call endpoints. Paths travel in the
+    body only, never in the URL (where they would end up in logs and history): a call that
+    still sends them as URL parameters gets a 400 that says so, not a silent default.
+    """
+    in_url = [name for name in (required, *optional) if name in request.query_params]
+    if in_url:
+        _bad_request(f"Stuur {', '.join(in_url)} in de JSON-body, niet in de URL")
+    if not isinstance(body, dict):
+        _bad_request(f'Body must be a JSON object with "{required}"')
+    unknown = set(body) - {required, *optional}
+    if unknown:
+        _bad_request(f"Unknown field(s): {', '.join(sorted(unknown))}")
+    value = body.get(required)
+    if not isinstance(value, str) or not value:
+        _bad_request(f"{required} must be a path")
+    fields = {required: value}
+    for name in optional:
+        value = body.get(name)
+        if value is not None and not isinstance(value, str):
+            _bad_request(f"{name} must be a string")
+        fields[name] = value
+    return fields
+
+
 @router.post("/api/duplicates/scan_folder")
+def scan_folder_endpoint(request: Request, body: Any = Body(None)) -> Dict[str, Any]:
+    """Body: {"folder_path": path, "rule": optional, "prefer_folder": optional}. See scan_folder_for_duplicates."""
+    fields = _body_fields(request, body, "folder_path", ("rule", "prefer_folder"))
+    return scan_folder_for_duplicates(fields["folder_path"], fields["rule"] or "oldest", fields["prefer_folder"])
+
+
 def scan_folder_for_duplicates(
     folder_path: str, rule: str = "oldest", prefer_folder: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -355,6 +387,12 @@ def _record_or_move_back(run_id: Optional[str], src_path: Path, dst_path: Path, 
 
 
 @router.post("/api/duplicates/delete_single")
+def delete_single_endpoint(request: Request, body: Any = Body(None)) -> Dict[str, Any]:
+    """Body: {"file_path": path, "duplicate_of": optional path}. See delete_single_duplicate."""
+    fields = _body_fields(request, body, "file_path", ("duplicate_of",))
+    return delete_single_duplicate(fields["file_path"], fields["duplicate_of"])
+
+
 def delete_single_duplicate(file_path: str, duplicate_of: Optional[str] = None) -> Dict[str, Any]:
     """
     Move a single duplicate file to RAW_DUPLICATES (one file, its own undo run).
