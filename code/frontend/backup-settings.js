@@ -477,6 +477,9 @@ async function backupFolderCreate() {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: parent, name }),
         });
         backupFolder.loaded.delete(parent);
+        // Hij heeft nu (minstens) één submap: opnieuw ophalen
+        const parentEntry = backupFolder.nodes.get(parent);
+        if (parentEntry) parentEntry.has_children = true;
         const parentRow = bfRow(parent);
         // Had de map nog geen pijltje (geen submappen), dan krijgt hij er nu een
         if (parentRow) {
