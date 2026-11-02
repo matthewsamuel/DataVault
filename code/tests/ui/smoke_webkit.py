@@ -573,6 +573,27 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 page.click("#settings-backup-folder"), page.wait_for_selector("#modal-backup-folder.active"),
                 page.wait_for_timeout(600), page.keyboard.press("Escape")), 0.5)
             expect(not page.is_visible("#modal-backup-folder"), "backups: Escape did not close the folder window")
+            # A second and third folder in the same session: after 'Klaar' and after Escape on the
+            # success state, 'Gebruiken en testen' still saves and tests the new folder
+            for round_name, close_key in (("DataVault-backups-2", "Escape"), ("DataVault-backups-3", None)):
+                step(f"backups: again with {round_name}", lambda: (
+                    page.click("#settings-backup-folder"),
+                    page.wait_for_selector(f"#backup-folder-tree .folder-item[data-path='{bf_parent}']", timeout=10000),
+                    page.click(f"#backup-folder-tree .folder-item[data-path='{bf_parent}']"),
+                    page.fill("#backup-folder-new-name", round_name),
+                    page.click("#backup-folder-create"),
+                    page.wait_for_selector("#backup-folder-check.is-ok, #backup-folder-check.is-warn", timeout=5000),
+                    page.click("#backup-folder-use"),
+                    page.wait_for_selector("#backup-folder-check.is-done", timeout=30000)), 0.3)
+                again = bf_parent / round_name
+                saved_folder = page.evaluate("fetchJSON(`${API_BASE}/api/backup/status`).then(s => s.folder)")
+                expect(saved_folder == str(again) and len(list(again.glob("datavault-*-handmatig.db.gz"))) == 1,
+                       f"backups: a later 'Gebruiken en testen' did not save {again} (status says {saved_folder!r})")
+                if close_key:
+                    step(f"backups: {close_key} on the success state", lambda: page.keyboard.press(close_key), 0.5)
+                else:
+                    step("backups: Klaar again", lambda: page.click("#backup-folder-use"), 0.5)
+                expect(not page.is_visible("#modal-backup-folder"), f"backups: the window did not close ({round_name})")
             page.evaluate("""fetchJSON(`${API_BASE}/api/backup/folder`, {method: 'PUT', headers: {'Content-Type': 'application/json'},
                                                                          body: JSON.stringify({path: null})})""")
             shutil.rmtree(bf_parent, ignore_errors=True)

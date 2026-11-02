@@ -510,6 +510,8 @@ async function backupFolderCreate() {
 
 // 'Gebruiken en testen': de keuze bewaren en meteen een back-up daar maken
 async function backupFolderUse() {
+    // Na een gelukte test heet de knop 'Klaar' en sluit hij alleen het venster
+    if (backupFolder.phase === 'done') { backupFolderClose(); return; }
     const check = backupFolder.check;
     if (!check || !check.ok || check.current || backupFolder.phase !== 'choose' || backupFolder.busy) return;
     const use = document.getElementById('backup-folder-use');
@@ -571,7 +573,6 @@ function backupFolderTestFinished(job) {
     if (ok) {
         use.textContent = 'Klaar';
         use.disabled = false;
-        use.onclick = () => { use.onclick = null; backupFolderClose(); };
         document.getElementById('backup-folder-cancel').hidden = true;
         use.focus();
     } else {
