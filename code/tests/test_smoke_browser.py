@@ -20,6 +20,11 @@ import pytest
 SMOKE = Path(__file__).resolve().parent / "ui" / "smoke_webkit.py"
 REPO = SMOKE.parents[3]
 TIMEOUT = int(os.environ.get("DATAVAULT_SMOKE_TIMEOUT", "1800"))
+# conftest.py turns these off or points them at a test's temp folder for the in-process tests; the
+# smoke's server is a whole app (automatic index passes, the DataGatherer watcher, backups) and sets
+# what it needs itself
+NOT_FOR_THE_SMOKE = ("DATAVAULT_AUTO_INDEX", "DATAVAULT_GATHER_DAEMON", "DATAVAULT_AUTO_BACKUP", "DATAVAULT_CONFIG",
+                     "DATAVAULT_GATHER_HOME", "DATAVAULT_LAUNCH_AGENTS_DIR", "OTEL_SDK_DISABLED")
 
 
 def _has_playwright(python: str) -> bool:
@@ -41,8 +46,9 @@ def test_browser_smoke_webkit():
     if python is None:
         pytest.skip("no Python with Playwright found (set DATAVAULT_SMOKE_PYTHON, or pip install playwright)")
     lines = []
+    env = {k: v for k, v in os.environ.items() if k not in NOT_FOR_THE_SMOKE}
     with subprocess.Popen([python, "-u", str(SMOKE), "webkit"], cwd=REPO, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, text=True) as proc:
+                          stderr=subprocess.STDOUT, text=True, env=env) as proc:
         try:
             for line in proc.stdout:
                 lines.append(line)
