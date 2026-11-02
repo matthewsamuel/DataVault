@@ -929,10 +929,8 @@ async function undoDuplicateRun(run, button) {
         if (beside) message += ` ${beside} kwam${beside === 1 ? '' : 'en'} naast een bestaand bestand (_RESTORED_).`;
         const changed = (data.changed || []).length;
         if (changed) {
-            message += ` ${changed} bestand${changed === 1 ? ' is' : 'en zijn'} niet teruggezet: `
-                + `veranderd of vervangen sinds het opruimen (${data.changed[0].dst_path.split('/').pop()}`
-                + `${changed > 1 ? ', …' : ''}). ${changed === 1 ? 'Het blijft' : 'Ze blijven'} in RAW_DUPLICATES; `
-                + 'het Herstelcentrum toont de reden.';
+            message += ` ${changed} ${changed === 1 ? 'bleef' : 'bleven'} in RAW_DUPLICATES: veranderd of vervangen `
+                + `sinds het opruimen (${data.changed[0].dst_path.split('/').pop()}${changed > 1 ? ', …' : ''}).`;
         }
         if (data.errors && data.errors.length) message += ` ${data.errors.length} fout(en): ${data.errors[0]}`;
         if (dupState.folder && data.restored) message += ' Scan opnieuw om ze weer als duplicaat te zien.';

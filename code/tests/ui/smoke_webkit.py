@@ -1621,6 +1621,50 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect("strand klein.jpg" in back and "burst_00.jpg" not in back,
                    f"series: after the undo the series did not come back on the tab, or the skipped one did ({back})")
 
+            # Duplicates undo checks inode and size (migration 171): a copy that was changed in
+            # RAW_DUPLICATES after the cleanup stays there; the run, the toast and the
+            # Herstelcentrum say why, and the unchanged copy does go back
+            fp_dir = vault / "RAW" / "smoke-fingerprint"
+            fp_dir.mkdir()
+            fp_data = os.urandom(4096)
+            for name in ("origineel.jpg", "kopie 1.jpg", "kopie 2.jpg"):
+                (fp_dir / name).write_bytes(fp_data)
+            fp_moved = page.evaluate("""async (folder) => {
+                const post = (url, body) => fetchJSON(`${API_BASE}${url}`, {method: 'POST',
+                    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+                const scan = await post('/api/duplicates/scan_folder', {folder_path: folder});
+                const g = scan.groups[0];
+                const keep = g.copies.find(c => c.path.endsWith('origineel.jpg')).path;
+                const move = g.copies.map(c => c.path).filter(p => p !== keep);
+                const r = await post('/api/duplicates/move', {groups: [{keep, move}], folder});
+                return r.moved.map(m => [m.src_path, m.dst_path]);
+            }""", str(fp_dir))
+            expect(len(fp_moved) == 2, f"fingerprint: the two copies were not moved ({fp_moved})")
+            with open(fp_moved[0][1], "ab") as f:
+                f.write(b"later bewerkt")
+            step("fingerprint: the run says a file changed", lambda: (
+                page.click(".top-nav [data-view='duplicates']"), page.click("#dup-tab-exact"),
+                page.evaluate("loadDuplicateRuns()"),
+                page.wait_for_selector(".dup-run-note .fa-triangle-exclamation", timeout=5000)), 0.5)
+            note = page.inner_text(".dup-run:first-child .dup-run-note")
+            expect("1 veranderd of vervangen" in note, f"fingerprint: run note {note!r}")
+            step("fingerprint: Terugzetten, then confirm", lambda: (
+                page.focus(".dup-run:first-child button"), page.keyboard.press("Enter"),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#modal-dv-confirm .btn-primary"),
+                page.wait_for_selector(".toast:has-text('bleef in RAW_DUPLICATES')", timeout=5000)), 0.8)
+            expect(Path(fp_moved[1][0]).exists() and not Path(fp_moved[0][0]).exists()
+                   and Path(fp_moved[0][1]).exists(),
+                   "fingerprint: the unchanged copy did not go back, or the changed one did")
+            expect(page.is_disabled(".dup-run:first-child button")
+                   and "blijft staan" in page.inner_text(".dup-run:first-child .dup-run-note"),
+                   "fingerprint: the run with only a changed file left can still be undone")
+            step("fingerprint: the Herstelcentrum gives the reason", lambda: (
+                page.click(".top-nav [data-view='recovery']"),
+                page.wait_for_selector(".recovery-entry[data-key^='duplicates:'].is-blocked .recovery-status.blocked", timeout=5000)), 0.5)
+            reason = page.inner_text(".recovery-entry[data-key^='duplicates:'].is-blocked .recovery-status.blocked")
+            expect("veranderd sinds het daar kwam" in reason, f"fingerprint: Herstelcentrum reason {reason!r}")
+
             # Timeline of the whole vault from the index: only what is in view is drawn
             page.evaluate(f"localStorage.setItem('timeline_folders', JSON.stringify([{json.dumps(str(vault))}]))")
             page.reload()
