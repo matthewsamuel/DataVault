@@ -131,9 +131,11 @@
         } else if (!moved.length) {
             showToast(trashed ? 'Niets verwijderd' : 'Niets verplaatst', skippedText.trim() || 'Er was niets om te verplaatsen.', 'warning');
         } else {
+            // Eén bestand: bij naam, zodat de melding zegt wélk bestand weg is
+            const what = moved.length === 1 ? moved[0].path.split('/').pop() : plural(moved.length);
             showUndoToast({
                 title: trashed ? 'Naar de prullenmand' : 'Verplaatst',
-                message: `${plural(moved.length)} ${trashed ? 'in de prullenmand' : `naar ${where}`}.${skippedText}`,
+                message: `${what} ${trashed ? 'in de prullenmand' : `naar ${where}`}.${skippedText}`,
                 type: skipped.length ? 'warning' : 'success', ...undo,
             });
         }

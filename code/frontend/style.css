@@ -156,6 +156,8 @@
     --on-media-muted: rgba(255, 255, 255, 0.78);
     --media-control: rgba(255, 255, 255, 0.12);
     --media-control-hover: rgba(255, 255, 255, 0.22);
+    --danger-on-media: #ff8599;
+    --danger-media-hover: rgba(255, 107, 133, 0.22);
     --media-scrim: rgba(0, 0, 0, 0.55);
     --media-scrim-soft: rgba(0, 0, 0, 0.32);
     --media-scrim-strong: rgba(0, 0, 0, 0.78);
@@ -3689,11 +3691,9 @@ a.breadcrumb-item:hover {
     min-width: 0;
 }
 
-.viewer-actions #btn-move-file {
-    grid-column: auto;
-}
-
-.viewer-actions:has(#btn-show-on-map:not([hidden])) #btn-move-file {
+/* Onderaan altijd naast elkaar: Verwijderen en Verplaatsen. Zonder 'Op kaart tonen' neemt
+   'In Bestanden' de hele rij erboven. */
+.viewer-actions:not(:has(#btn-show-on-map:not([hidden]))) #btn-show-in-files {
     grid-column: span 2;
 }
 
@@ -3712,6 +3712,15 @@ a.breadcrumb-item:hover {
     --btn-fg: var(--on-media);
     --btn-border: transparent;
     --btn-bg-hover: var(--media-control-hover);
+    --btn-border-hover: transparent;
+    box-shadow: none;
+}
+
+#modal-viewer .btn-danger {
+    --btn-bg: var(--media-control);
+    --btn-fg: var(--danger-on-media);
+    --btn-border: transparent;
+    --btn-bg-hover: var(--danger-media-hover);
     --btn-border-hover: transparent;
     box-shadow: none;
 }

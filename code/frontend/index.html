@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=94">
+    <link rel="stylesheet" href="style.css?v=95">
     <!-- Beweging: als eerste, zodat html[data-motion] klopt vóór de eerste weergave (docs/MOTION.md) -->
     <script src="motion.js?v=2"></script>
 </head>
@@ -1256,6 +1256,9 @@
                     <button class="btn btn-secondary" id="btn-show-on-map" onclick="mapShowViewerFile()" hidden title="Toon deze foto op de kaart">
                         <i class="fas fa-location-dot" aria-hidden="true"></i> Op kaart tonen
                     </button>
+                    <button class="btn btn-danger" id="btn-trash-file" onclick="trashViewerFile()" title="Naar de prullenmand (⌫); terugzetten kan in het Herstelcentrum">
+                        <i class="fas fa-trash-can" aria-hidden="true"></i> Verwijderen
+                    </button>
                     <button class="btn btn-primary" id="btn-move-file" onclick="openMoveFileModal()" title="Verplaatsen (m)">
                         <i class="fas fa-folder-open" aria-hidden="true"></i> Verplaatsen
                     </button>
@@ -1685,7 +1688,7 @@
     <script src="media-motion.js?v=3"></script>
     <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
     <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
-    <script src="app.js?v=88"></script>
+    <script src="app.js?v=89"></script>
     <script src="nav-more.js?v=2"></script>
     <script src="undo-toast.js?v=3"></script>
     <script src="pasha-tools.js?v=3"></script>
@@ -1699,8 +1702,8 @@
     <script src="recovery.js?v=12"></script>
     <script src="settings.js?v=7"></script>
     <script src="map.js?v=15"></script>
-    <script src="shortcuts.js?v=11"></script>
-    <script src="export.js?v=8"></script>
+    <script src="shortcuts.js?v=12"></script>
+    <script src="export.js?v=9"></script>
     <script src="library.js?v=11"></script>
     <script src="datagatherer.js?v=9"></script>
     <script src="activity.js?v=7"></script>

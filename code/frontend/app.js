@@ -2255,6 +2255,50 @@ function finishMoveOut(file) {
     closeMoveFileModal();
 }
 
+// 'Verwijderen' in de viewer: naar de prullenmand (er wordt nooit iets gewist); de melding
+// heeft 'Ongedaan maken'. De viewer blijft open en toont het volgende bestand.
+let viewerTrashBusy = false;
+async function trashViewerFile() {
+    const file = viewerFile();
+    if (!file || viewerTrashBusy || !window.DVExport) return;
+    viewerTrashBusy = true;
+    const btn = document.getElementById('btn-trash-file');
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+    const moved = await DVExport.trashFiles([file]);
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
+    viewerTrashBusy = false;
+    if (!moved.length) return;
+    const onRemoved = viewer.onRemoved;
+    viewerDropFile(file);
+    if (onRemoved) onRemoved(file);
+}
+
+// Na 'Ongedaan maken' van een verwijdering (export.js): de open map in Bestanden opnieuw
+// inlezen, zodat het bestand er weer in staat
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.DVExport) DVExport.onRestored(() => { if (currentFolder) loadMedia(currentFolder); });
+});
+
+// Een bestand uit de lijst van de viewer halen. Was het het getoonde, dan schuift het volgende
+// op zijn plek (aan het eind het vorige); was het het laatste, dan gaat de viewer dicht.
+function viewerDropFile(file) {
+    const at = viewer.items.indexOf(file);
+    if (at < 0 || !isViewerOpen()) return;
+    viewer.items.splice(at, 1);
+    if (!viewer.items.length) { closeModal(); return; }
+    if (at < viewer.index) { viewer.index--; return; }
+    if (at > viewer.index) return;
+    if (viewer.index >= viewer.items.length) {
+        viewer.index = viewer.items.length - 1;
+        viewer.step = -1;
+    } else {
+        viewer.step = 1;
+    }
+    renderViewerFile();
+}
+
 // De melding als dezelfde bytes al in de doelmap staan (null: weg). De hoofdknop heet dan
 // 'Toch verplaatsen'; naar de prullenmand gaat alleen met de eigen knop, nooit met ⌘Enter
 function showMoveTwin(twin) {
@@ -2462,6 +2506,7 @@ document.addEventListener('keydown', (e) => {
         else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); openMoveFileModal(); }
         else if (e.key === 'f' || e.key === 'F') openInFinder();
         else if (e.key === 'b' || e.key === 'B') { e.preventDefault(); showViewerFileInFiles(); }
+        else if ((e.key === 'Backspace' || e.key === 'Delete') && tag !== 'BUTTON') { e.preventDefault(); trashViewerFile(); }
     }
     if (e.key === 'Escape') {
         // Alleen de viewer sluiten, niet ook de chat of slideshow eronder

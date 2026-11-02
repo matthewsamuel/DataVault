@@ -76,6 +76,7 @@ const SHORTCUT_GROUPS = [
             [['←', '→'], 'Vorige of volgende foto'],
             [['+', '−', '0'], 'Inzoomen, uitzoomen, passend'],
             [['m'], 'Verplaatsen'],
+            [['⌫'], 'Naar de prullenmand'],
             [['f'], 'Toon in Finder'],
             [['b'], 'Toon in Bestanden'],
             [['spatie'], 'Audio pauzeren of afspelen'],
