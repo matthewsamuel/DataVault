@@ -45,8 +45,9 @@ def _fake_smoke(tmp_path):
 def test_a_hanging_smoke_is_stopped_at_the_limit_with_its_server(tmp_path):
     script, seen = _fake_smoke(tmp_path)
     started = time.monotonic()
-    returncode, output = runner.run_smoke([sys.executable, "-u", str(script), str(seen)], dict(os.environ), 3,
-                                          cwd=tmp_path)
+    # (its temp folder goes under tmp_path, not into the system temp folder it never gets to clean)
+    env = dict(os.environ, DATAVAULT_SMOKE_TMP=str(tmp_path))
+    returncode, output = runner.run_smoke([sys.executable, "-u", str(script), str(seen)], env, 3, cwd=tmp_path)
     spent = time.monotonic() - started
     assert returncode is None
     assert spent < 20, f"stopped after {spent:.1f} s instead of at the 3 s limit"
