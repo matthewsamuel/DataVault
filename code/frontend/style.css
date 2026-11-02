@@ -3373,6 +3373,63 @@ a.breadcrumb-item:hover {
     display: none;
 }
 
+/* Selecteren in de lijst: het rondje is de laatste kolom (midden in de rij, naast de datum) en
+   een gekozen rij krijgt een zacht groen vlak in plaats van de ring en het vinkje op de foto */
+.media-grid.list-view .thumb-select {
+    position: relative;
+    top: auto;
+    right: auto;
+    flex: none;
+    order: 1;
+}
+
+.media-grid.list-view .thumb-select::before {
+    border-color: var(--border-strong);
+    background-color: transparent;
+    box-shadow: none;
+}
+
+.media-grid.list-view .media-card:hover .thumb-select::before {
+    border-color: var(--text-secondary);
+}
+
+.media-grid.list-view .media-card.selected {
+    box-shadow: none;
+    background-color: var(--accent-subtle);
+}
+
+.media-grid.list-view .media-card.selected:hover {
+    background-color: var(--accent-subtle-hover);
+}
+
+.media-grid.list-view .media-card.selected::before,
+.media-grid.list-view .media-card.selected::after {
+    content: none;
+}
+
+.media-grid.list-view .media-card.selected .thumb-select::before {
+    border-color: transparent;
+    background-color: var(--accent);
+}
+
+.media-grid.list-view .media-card.selected .thumb-select::after {
+    content: '';
+    position: absolute;
+    top: 12px;
+    left: 11px;
+    width: 10px;
+    height: 6px;
+    border: 2px solid var(--text-on-accent);
+    border-top: none;
+    border-right: none;
+    transform: rotate(-45deg);
+}
+
+.media-grid.list-view .media-card.selected img {
+    transform: none;
+    border-radius: var(--radius-sm);
+}
+
 /* ==================== VIEWER (foto groot op een donkere achtergrond) ==================== */
 
 .modal-no-preview {

@@ -1035,8 +1035,8 @@ function renderMoreGridCards(count = GRID_CHUNK) {
 
 // ==================== RASTER MET HET TOETSENBORD ====================
 // Pijltjes bewegen door de kaarten (ook naar kaarten die nog getekend moeten worden),
-// Home/End naar het begin of eind, Enter of spatie opent (een map of de viewer) en
-// Backspace gaat een map omhoog.
+// Home/End naar het begin of eind, Enter opent (een map of de viewer), spatie selecteert een
+// bestand (spatie op een map opent hem) en Backspace gaat een map omhoog.
 
 let gridFocusIndex = 0;
 
@@ -1089,10 +1089,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key in moves) {
             e.preventDefault();
             focusGridCard(moves[e.key]);
+        } else if (e.key === ' ' && window.DVExport && gridItems[index] && gridItems[index].type !== 'folder') {
+            // Spatie selecteert een bestand (zoals in Albums en de tijdlijn); Enter opent het
+            e.preventDefault();
+            selectGridFile(gridItems[index], e.shiftKey);
         } else if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             card.click();
-        } else if (e.key === 'Backspace' && currentFolder) {
+        } else if (e.key === 'Backspace' && currentFolder && !(window.DVExport && DVExport.count)) {
             const parent = parentFolder(currentFolder);
             const root = folderTree.length ? parentFolder(folderTree[0].path) : '';
             if (parent && parent.length > root.length) {
@@ -1203,9 +1207,20 @@ function createMediaCard(file) {
     const card = document.createElement('div');
     card.className = 'media-card thumb-tile';
     card.dataset.motionKey = file.path;   // de viewer groeit hieruit en krimpt hierheen terug
-    card.onclick = () => openMediaModal(file);
     card.setAttribute('role', 'button');
     card.setAttribute('aria-label', file.name);
+    // Klikken opent de viewer; met ⇧ of ⌘ (of zolang er iets geselecteerd is) selecteert hij,
+    // en het rondje rechtsboven selecteert altijd
+    card.onclick = (e) => {
+        if (window.DVExport && DVExport.wantsSelect(e)) return selectGridFile(file, e.shiftKey);
+        openMediaModal(file);
+    };
+    if (window.DVExport) {
+        const on = DVExport.has(file.path);
+        card.classList.toggle('selected', on);
+        card.setAttribute('aria-pressed', on ? 'true' : 'false');
+        card.appendChild(DVExport.selectButton((e) => selectGridFile(file, e.shiftKey)));
+    }
 
     // Thumbnail
     const img = document.createElement('img');
@@ -1279,6 +1294,46 @@ function createMediaCard(file) {
 
     return card;
 }
+
+// ==================== SELECTEREN ====================
+// Net als in Albums en de tijdlijn: de selectie (export.js) kun je exporteren, verplaatsen of
+// naar de prullenmand doen. Shift-klik neemt alle bestanden tussen de vorige keuze en deze mee
+// (mappen tellen niet mee).
+
+let gridAnchorPath = null;
+
+function selectGridFile(file, range) {
+    const from = range && gridAnchorPath ? gridItems.findIndex(item => item.path === gridAnchorPath) : -1;
+    const to = gridItems.indexOf(file);
+    if (from >= 0 && to >= 0) {
+        DVExport.selectRange(gridItems.slice(Math.min(from, to), Math.max(from, to) + 1)
+            .filter(item => item.type !== 'folder'));
+    } else {
+        DVExport.toggle(file);
+    }
+    gridAnchorPath = file.path;
+}
+
+function paintGridSelection() {
+    const grid = document.getElementById('media-grid');
+    if (!grid) return;
+    grid.classList.toggle('is-selecting', DVExport.count > 0);
+    grid.querySelectorAll('.media-card[data-grid-index]').forEach(card => {
+        const item = gridItems[Number(card.dataset.gridIndex)];
+        if (!item || item.type === 'folder') return;
+        const on = DVExport.has(item.path);
+        card.classList.toggle('selected', on);
+        card.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+}
+
+// export.js laadt na dit bestand: pas dan bestaat DVExport. Na verplaatsen of verwijderen met
+// de selectiebalk de open map opnieuw inlezen
+document.addEventListener('DOMContentLoaded', () => {
+    if (!window.DVExport) return;
+    DVExport.onChange(paintGridSelection);
+    DVExport.onMoved(() => { if (currentFolder) loadMedia(currentFolder); });
+});
 
 // Een vaste hoes per audiobestand (een van 15 varianten, gekozen op de naam)
 function audioThumbUrl(name) {

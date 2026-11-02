@@ -9,7 +9,7 @@
 //   ?                   dit overzicht
 //   Esc                 het bovenste venster sluiten (ui.js), of uit een invoerveld
 // In de rasters (Bestanden, Tijdlijn) bewegen de pijltjes, Home/End en PageUp/PageDown;
-// Enter of spatie opent. De viewer, Keurer en de slideshow hebben hun eigen toetsen,
+// Enter opent, spatie selecteert een bestand (⇧ voor een reeks). De viewer, Keurer en de slideshow hebben hun eigen toetsen,
 // die ook in het overzicht staan.
 //
 // Geen sneltoets doet iets terwijl je typt (invoerveld, tekstvak, keuzelijst) of samen
@@ -67,8 +67,10 @@ const SHORTCUT_GROUPS = [
             [['←', '→', '↑', '↓'], 'Naar de volgende kaart'],
             [['Home', 'End'], 'Eerste of laatste kaart'],
             [['PageUp', 'PageDown'], 'Een scherm verder'],
-            [['Enter'], 'Openen (map of viewer); ook spatie'],
-            [['Backspace'], 'Bestanden: een map omhoog'],
+            [['Enter'], 'Openen (map of viewer)'],
+            [['spatie'], 'Selecteren; met ⇧ alles ertussen'],
+            [['Esc'], 'Selectie wissen'],
+            [['Backspace'], 'Een map omhoog; met een selectie: naar de prullenmand'],
         ],
     },
     {
