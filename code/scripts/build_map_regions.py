@@ -25,6 +25,7 @@ Vereist shapely (systeem-python3 heeft het; de venv van de app niet, en heeft he
 
 import json
 import math
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -256,6 +257,7 @@ def build_cities(src, iso2):
 
 TOWN_MIN_POP = 15000
 TOWN_NEAR_KM = 3          # dichter bij een grotere plaats: een wijk daarvan
+DISTRICT_KM = 25          # zo ver kan een genummerd stadsdeel van zijn stad liggen
 DETAIL_TOL = 0.01          # ~1 km: genoeg om te zeggen in welke provincie en hoe ver van de kust
 DETAIL_SCALE = 1000        # coördinaten in duizendsten van een graad
 ISLAND_MIN = 0.0005        # kleinere eilandjes (vierkante graden, ~6 km2) laat de kustlijn weg
@@ -308,8 +310,12 @@ def build_towns(src, iso2, cities):
         rows.sort(key=lambda t: -t[3])
         kept = []
         for t in rows:
-            if not any(km((t[1], t[2]), (k[1], k[2])) < TOWN_NEAR_KM for k in kept):
-                kept.append(t)
+            if any(km((t[1], t[2]), (k[1], k[2])) < TOWN_NEAR_KM for k in kept):
+                continue
+            # Een genummerd stadsdeel van een grotere stad ('Paris 16 Passy', 'Lyon 03'): die stad, geen eigen plaats
+            if re.search(r' \d{1,2}( |$)', t[0]) and any(k[3] > t[3] and km((t[1], t[2]), (k[1], k[2])) < DISTRICT_KM for k in kept):
+                continue
+            kept.append(t)
         towns[a3] = kept
     return towns
 
