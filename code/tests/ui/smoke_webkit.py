@@ -1252,7 +1252,9 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 if at != "ok":
                     missing_rings.append(at)
             expect(not missing_rings, f"elo: no visible focus ring on {missing_rings}")
-            for _ in range(8):
+            # One full round of the window's Tab stops (with the trash buttons there are 12; a shorter
+            # loop ended on × and Enter closed the window)
+            for _ in range(24):
                 if page.evaluate("!!document.activeElement.closest('.elo-choice')"):
                     break
                 page.keyboard.press("Tab")
