@@ -592,6 +592,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("keurer: Enter on Annuleren in the move window", lambda: (
                 page.evaluate("document.activeElement.blur()"), page.keyboard.press("ArrowUp"),
                 page.wait_for_selector("#keurer-move-folder-tree .folder-item", timeout=5000),
+                # The window puts focus in its search field a moment after opening: wait for that,
+                # or it can take the focus back from Annuleren between the focus and the Enter
+                page.wait_for_function("document.activeElement && document.activeElement.id === 'keurer-move-search'",
+                                       timeout=5000),
                 page.keyboard.press("ArrowDown"),
                 page.focus("#modal-keurer-move .modal-footer .btn-secondary"), page.keyboard.press("Enter")), 0.8)
             expect(page.evaluate(keurer_state) == base and Path(current).exists(),
