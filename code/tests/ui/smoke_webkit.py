@@ -13,19 +13,28 @@ Herstelcentrum, compares photos on the Beste uit reeks tab and keeps the best of
 with the keyboard (and undoes that), checks Instellingen and the storage window, walks through
 DataGatherer (help, the menu, the connect window, reading the existing Spotify export, the network log,
 the Dutch Takeout and Chrome history, the Activiteit view, the Tijdlijn route on the Kaart),
-makes a backup from Instellingen, compares photos in 'Welke is mooier?' (keys, undo, leaderboard), checks that
+makes a backup from Instellingen, compares photos in 'Welke is mooier?' (keys, undo, leaderboard), pulls the
+archive out from under the running app (the vault folder is renamed) while a job runs and puts it back
+(the job waits, the banner and the job dock say so, nothing is written, everything resumes), checks that
 nothing on a main view sticks out of a 1024 px window, the tab title per view and the favicon, and runs
 a11y_checks.js on every screen in the light and the dark theme:
 all visible text must reach WCAG AA contrast and every control must have a name. On the way
 it saves a screenshot of every screen in both themes (for a look at the design), in a temp
 folder it prints at the end, or in $DATAVAULT_SMOKE_SHOTS when that is set.
 
-Not collected by pytest (the name does not start with test_). Run it from the repo root
-with a Python that has Playwright (`pip install playwright && playwright install webkit`):
+pytest runs it only when asked: `pytest -m smoke` (tests/test_smoke_browser.py). Or run it from the
+repo root with a Python that has Playwright (`pip install playwright && playwright install webkit`):
 
     python3 code/tests/ui/smoke_webkit.py              # WebKit
     python3 code/tests/ui/smoke_webkit.py chromium     # or Chromium / Firefox
     python3 code/tests/ui/smoke_webkit.py --headed     # watch it click
+
+Under load: after each step's own pause it waits as long as requests to the app are still on their
+way, every Playwright time-out is stretched by the machine's load (or $DATAVAULT_SMOKE_SLOW, e.g. 2),
+and a fetch that a reload cut off is asked again (GET only): an answer below 500 is printed as
+'transient', anything else stays a problem. A console or page error during a reload is only let go when
+it names such a fetch (tests/ui/smoke_cutoff.py); one the app logs itself, or one without an address,
+stays a problem. Each step prints its time; the slowest are listed at the end.
 
 If the installed WebKit build does not match Playwright's expected version, point
 PLAYWRIGHT_WEBKIT_EXECUTABLE at a pw_run.sh (the script tries the newest one in
@@ -40,11 +49,14 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
+
+from smoke_cutoff import ABORTED, sort_out
 
 CODE_DIR = Path(__file__).resolve().parents[2]
 
@@ -73,14 +85,36 @@ VIEWS = ["home", "viewer", "duplicates", "spotify", "shows", "keurer", "timeline
          "berichten", "map", "series"]
 A11Y_CHECKS = Path(__file__).with_name("a11y_checks.js")
 
+# Under load (other test runs, a build) everything is slower. The fixed pauses of a step stay as
+# they are, but every Playwright time-out is multiplied by SLOW: from $DATAVAULT_SMOKE_SLOW, else
+# from the machine's load (1 when idle, at most 3). A slower machine waits longer before it calls
+# something missing; nothing that fails is let through.
+def load_factor() -> float:
+    if os.environ.get("DATAVAULT_SMOKE_SLOW"):
+        return max(1.0, float(os.environ["DATAVAULT_SMOKE_SLOW"]))
+    try:
+        return round(min(3.0, max(1.0, os.getloadavg()[0] / (os.cpu_count() or 1) * 2)), 2)
+    except OSError:
+        return 1.0
 
-def free_port() -> int:
+
+SLOW = load_factor()
+
+
+def T(ms: int) -> int:
+    """A Playwright time-out (ms), stretched by SLOW."""
+    return int(ms * SLOW)
+
+
+def free_port(avoid=()) -> int:
     # DATAVAULT_TEST_PORTS=9950-9959 keeps the throwaway server inside a range (when other
     # sessions on this machine own other ports); without it the OS picks a free port.
     span = os.environ.get("DATAVAULT_TEST_PORTS", "")
     if "-" in span:
         low, high = (int(p) for p in span.split("-", 1))
         for port in range(low, high + 1):
+            if port in avoid:
+                continue
             with socket.socket() as s:
                 try:
                     s.bind(("127.0.0.1", port))
@@ -135,25 +169,36 @@ def start_server(workdir: Path):
     fake_exports.chrome_history_db(workdir / "Chrome" / "Default" / "History",
                                    [(1563091200, "https://voorbeeld.be/", "Voorbeeld")] +
                                    [(1563091200 + i * 1800, f"https://voorbeeld{i}.be/", f"Pagina {i}") for i in range(12)])
-    port = free_port()
     env = dict(os.environ, DATAVAULT_TESTING="1", DATAVAULT_CONFIG=str(workdir / "vault_config.json"),
                DATAVAULT_LOG_FILE=str(workdir / "server.log"), DATAVAULT_GATHER_HOME=str(workdir / "home"),
                DATAVAULT_CHROME_DIR=str(workdir / "Chrome"))
     log = open(workdir / "uvicorn.log", "w")
-    proc = subprocess.Popen(
-        [python, "-m", "uvicorn", "--factory", "backend.main:create_app",
-         "--host", "127.0.0.1", "--port", str(port)],
-        cwd=CODE_DIR, env=env, stdout=log, stderr=subprocess.STDOUT)
-    base = f"http://127.0.0.1:{port}"
-    for _ in range(60):
-        try:
-            with urllib.request.urlopen(base + "/api/health", timeout=1) as r:
-                if r.status == 200:
-                    return proc, base, vault.resolve()
-        except OSError:
+    tried = set()
+    for _ in range(4):
+        # Two smokes that start together can both find the same port free; the one whose server
+        # cannot bind it would then test the other one's server. So only our own process counts
+        # (its pid in /api/health), and a server that exits (port taken) gets the next port.
+        port = free_port(avoid=tried)
+        tried.add(port)
+        proc = subprocess.Popen(
+            [python, "-m", "uvicorn", "--factory", "backend.main:create_app",
+             "--host", "127.0.0.1", "--port", str(port)],
+            cwd=CODE_DIR, env=env, stdout=log, stderr=subprocess.STDOUT)
+        base = f"http://127.0.0.1:{port}"
+        deadline = time.monotonic() + 60 * SLOW
+        while time.monotonic() < deadline and proc.poll() is None:
+            try:
+                with urllib.request.urlopen(base + "/api/health", timeout=2) as r:
+                    if r.status == 200 and json.loads(r.read()).get("pid") == proc.pid:
+                        return proc, base, vault.resolve()
+            except (OSError, ValueError):
+                pass
             time.sleep(0.5)
-    proc.terminate()
-    raise RuntimeError(f"server did not start, see {workdir / 'uvicorn.log'}")
+        if proc.poll() is None:
+            proc.terminate()
+            raise RuntimeError(f"server did not start, see {workdir / 'uvicorn.log'}")
+        print(f"port {port} was taken; trying another", flush=True)
+    raise RuntimeError(f"no port for the server, see {workdir / 'uvicorn.log'}")
 
 
 def launch(p, engine: str, headed: bool):
@@ -172,10 +217,38 @@ def launch(p, engine: str, headed: bool):
     return browser_type.launch(headless=not headed, executable_path=exe)
 
 
+def watchdog(seconds: float, proc, workdir: Path, where: dict) -> threading.Timer:
+    """
+    A Playwright call that never returns (an evaluate awaiting a promise that never settles) would hang
+    the smoke for good. After `seconds` this says where it was, stops the test server, removes the temp
+    folder and ends the run with exit code 2.
+    """
+    def fire():
+        print(f"\nFAILED: the smoke hung for {seconds:.0f} s; the last step was {where.get('step')!r}", flush=True)
+        proc.kill()
+        shutil.rmtree(workdir, ignore_errors=True)
+        os._exit(2)
+
+    timer = threading.Timer(seconds, fire)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 def run(engine: str = "webkit", headed: bool = False) -> int:
-    workdir = Path(tempfile.mkdtemp(prefix="datavault-smoke-"))
+    # (pytest -m smoke points DATAVAULT_SMOKE_TMP at a folder it removes itself, should it have to stop us)
+    workdir = Path(tempfile.mkdtemp(prefix="datavault-smoke-", dir=os.environ.get("DATAVAULT_SMOKE_TMP") or None))
     proc, base, vault = start_server(workdir)
     problems = []
+    where = {"step": "start"}
+    shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
+    shots.mkdir(parents=True, exist_ok=True)
+    # 1500 s (stretched by SLOW), at most DATAVAULT_SMOKE_WALL_SECONDS of wall-clock time (pytest -m smoke
+    # sets that a minute below its own limit, so this clean-up runs before pytest has to stop us)
+    limit = float(os.environ.get("DATAVAULT_SMOKE_MAX_SECONDS", "1500")) * SLOW
+    if os.environ.get("DATAVAULT_SMOKE_WALL_SECONDS"):
+        limit = min(limit, float(os.environ["DATAVAULT_SMOKE_WALL_SECONDS"]))
+    guard = watchdog(limit, proc, workdir, where)
     try:
         with sync_playwright() as p:
             browser = launch(p, engine, headed)
@@ -184,24 +257,62 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # tests/ui/motion_perf.py.
             page = browser.new_page(viewport={"width": 1400, "height": 900}, reduced_motion="reduce")
             page.add_init_script("try { localStorage.setItem('motion', 'uit'); } catch (e) {}")
+            page.set_default_timeout(T(30000))
             # WebKit reports a background poll (jobs, library status) that a navigation or the
             # teardown cut off as an 'access control checks' error: that is not a bug in the app
             def aborted_poll(text):
                 return "access control checks" in text and any(
                     f"/api/{name}" in text for name in ("jobs", "library/status"))
 
-            page.on("pageerror", lambda e: None if aborted_poll(str(e)) else problems.append(f"page error: {e}"))
-            page.on("console", lambda m: problems.append(f"console {m.type}: {m.text}")
-                    if m.type == "error" and not aborted_poll(m.text) else None)
+            origin = base                        # ('base' is reused for other things further on)
+            # Requests in flight (for the adaptive wait after a step) and what a navigation cut off
+            inflight = {}
+            navigation = {"until": 0.0}          # monotonic time up to which a navigation is going on
+            cut_off = []                         # (method, url, text): requests a navigation cut off
+            suspects = []                        # (text, location): errors during a navigation that read like an abort
+            transient = []                       # what a navigation cut off and a retry answered fine
+            timings = []                         # (seconds, step name)
+
+            def navigating():
+                return time.monotonic() <= navigation["until"]
+
+            def report(text, location=None):
+                """
+                A console or page error: a problem. During a navigation one that reads like an abort
+                waits for resolve_cut_off(), which lets it go only when it names a fetch that was cut
+                off and answered a retry (smoke_cutoff.py has the rules).
+                """
+                if aborted_poll(text):
+                    return
+                if navigating() and ABORTED.search(text):
+                    suspects.append((text, location))
+                    return
+                problems.append(text)
+
+            def on_request(r):
+                if r.url.startswith(origin) and r.resource_type in ("fetch", "xhr", "document"):
+                    inflight[r] = time.monotonic()
+
+            def on_failed(r):
+                inflight.pop(r, None)
+                if r.url.startswith(origin) and navigating():
+                    cut_off.append((r.method, r.url, f"{r.method} {r.url.replace(origin, '')} {r.failure}"))
+
+            page.on("request", on_request)
+            page.on("requestfinished", lambda r: inflight.pop(r, None))
+            page.on("requestfailed", on_failed)
+            page.on("pageerror", lambda e: report(f"page error: {e}"))
+            # (the location is the script that logged it, or for 'Failed to load resource' the resource)
+            page.on("console", lambda m: report(f"console {m.type}: {m.text}", (m.location or {}).get("url"))
+                    if m.type == "error" else None)
             page.on("response", lambda r: problems.append(f"HTTP {r.status} {r.url}")
                     if "/api/" in r.url and r.status >= 500 else None)
 
-            def step(name, action, wait=1.0):
-                before = len(problems)
-                action()
-                time.sleep(wait)
-                status = "ok" if len(problems) == before else "PROBLEM"
-                print(f"  {status:7} {name}")
+            def retry(url):
+                try:
+                    return page.request.get(url, timeout=T(10000)).status
+                except PlaywrightError as e:
+                    return f"failed ({e})"
 
             # A menu item as a user reaches it: its own button, or 'Meer' and then the item
             def nav_click(view):
@@ -212,13 +323,129 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     page.click("#nav-more-btn")
                     page.click(f"#nav-more-menu [data-more-view='{view}']")
 
-            # Screenshots of every screen (and some windows) to look at, in both themes
-            shots = Path(os.environ.get("DATAVAULT_SMOKE_SHOTS") or tempfile.mkdtemp(prefix="datavault-shots-"))
-            shots.mkdir(parents=True, exist_ok=True)
+            def resolve_cut_off():
+                """
+                Every request a navigation cut off is asked again at its own address (GET only, it
+                changes nothing). An answer below 500 makes it a transient abort, printed but not a
+                problem; a failed retry or a POST stays a problem, and so does every console or page
+                error that does not name such a request (an error the app logs itself, one without
+                an address).
+                """
+                found, explained = sort_out(cut_off, suspects, retry, origin)
+                problems.extend(found)
+                transient.extend(explained)
+                cut_off.clear()
+                suspects.clear()
 
-            page.goto(base)
-            page.wait_for_load_state("networkidle")
-            print(f"{engine} against {base}")
+            def navigate(action, name="navigation"):
+                """page.reload() or page.goto(): once more when WebKit itself cancels the load."""
+                navigation["until"] = float("inf")
+                try:
+                    try:
+                        action()
+                    except PlaywrightError as e:
+                        if not ABORTED.search(str(e)):
+                            raise
+                        print(f"  retry   {name}: {str(e).splitlines()[0]}", flush=True)
+                        action()
+                    page.wait_for_load_state("networkidle")
+                finally:
+                    navigation["until"] = time.monotonic() + 0.5
+                page.wait_for_timeout(500)
+                resolve_cut_off()
+
+            def settle(nominal):
+                """
+                The step's own pause (in Playwright time, so route handlers and events keep running),
+                then as long as requests to the app are still on their way (up to 3x the pause plus
+                2 s, times SLOW), then one quiet frame. Returns the extra seconds and what it waited for.
+                """
+                if nominal > 0:
+                    page.wait_for_timeout(nominal * 1000)
+                deadline = time.monotonic() + (2.0 + 3 * nominal) * SLOW
+                started, waited_for = time.monotonic(), set()
+                # One that has been open for a minute (a stream, or one the browser never closed) is
+                # no reason to wait after every later step
+                for r in [r for r, since in inflight.items() if started - since > 60 * SLOW]:
+                    del inflight[r]
+                while inflight and time.monotonic() < deadline:
+                    waited_for.update(r.url.replace(origin, "") for r in inflight)
+                    page.wait_for_timeout(50)
+                if waited_for:
+                    page.wait_for_timeout(100)
+                return time.monotonic() - started, waited_for
+
+            def step(name, action, wait=1.0, expected=None):
+                """expected(problem) -> True for what this step causes on purpose (a refused request)."""
+                before = len(problems)
+                started = time.monotonic()
+                where["step"] = name
+                try:
+                    action()
+                except PlaywrightError:
+                    # What the page showed when a step failed, next to the screenshots
+                    try:
+                        page.screenshot(path=str(shots / "failed-step.png"))
+                        print(f"  FAILED  {name}; the page then: {shots / 'failed-step.png'}", flush=True)
+                    except PlaywrightError:
+                        pass
+                    raise
+                extra, waited_for = settle(wait)
+                if expected:
+                    problems[before:] = [p for p in problems[before:] if not expected(p)]
+                spent = time.monotonic() - started
+                timings.append((spent, name))
+                status = "ok" if len(problems) == before else "PROBLEM"
+                note = f"  (+{extra:.1f} s for {len(waited_for)} request(s))" if extra >= 0.2 else ""
+                print(f"  {status:7} {name:<58} {spent:5.1f} s{note}", flush=True)
+
+            run_started = time.monotonic()
+            navigate(lambda: page.goto(base), "open the app")
+            print(f"{engine} against {base} (time-outs x{SLOW})", flush=True)
+
+            # The harness itself: a fetch that a reload cuts off is asked again and only printed (the
+            # route holds it until the reload cancels it; the retry does not go through the route).
+            # In the same reload app.js logs an error of its own that reads like an abort (as it does
+            # when /api/shows really fails) and a handler throws one without an address: both must
+            # stay problems, although a GET was cut off and retried in that navigation.
+            held = []
+            page.route("**/api/health?cut-off", lambda route: held.append(route))
+            fake_errors = ("console error: Error loading shows: TypeError: Load failed",
+                           "smoke self-check: upload Load failed in a broken handler")   # (a page error)
+            once = ("\n;(function () { if (sessionStorage.getItem('smoke-self-check')) {"
+                    " sessionStorage.removeItem('smoke-self-check');"
+                    " console.error('Error loading shows:', new TypeError('Load failed'));"
+                    " setTimeout(function () { throw new Error('smoke self-check: upload Load failed in a broken handler'); });"
+                    " } })();\n")
+
+            def app_js_with_errors(route):
+                response = route.fetch()
+                route.fulfill(response=response, body=response.text() + once)
+
+            page.route("**/app.js*", app_js_with_errors)
+            page.evaluate("() => { sessionStorage.setItem('smoke-self-check', '1');"
+                          " fetch('/api/health?cut-off').catch(() => {}); }")   # (not awaited)
+            page.wait_for_timeout(200)
+            before = len(problems)
+            navigate(page.reload, "reload with a fetch on its way")
+            for route in held:
+                try:
+                    route.abort()       # already cancelled; this only ends the handler quietly
+                except PlaywrightError:
+                    pass
+            page.unroute("**/api/health?cut-off")
+            page.unroute("**/app.js*", app_js_with_errors)
+            if not any("/api/health?cut-off" in t and "retried, 200" in t for t in transient):
+                problems.append(f"smoke: a fetch cut off by a reload was not asked again ({transient})")
+            caught = problems[before:]
+            for fake in fake_errors:
+                if not any(fake in p for p in caught):
+                    problems.append(f"smoke: a real error during a reload was let through as cut off: {fake!r} "
+                                    f"(problems {caught}, transient {transient})")
+            problems[before:] = [p for p in problems[before:] if not any(fake in p for fake in fake_errors)]
+            status = "ok" if len(problems) == before else "PROBLEM"
+            print(f"  {status:7} self-check: a cut-off fetch is retried, real errors in that reload stay problems",
+                  flush=True)
 
             # Every tab, by clicking it like a user: in the menu bar, or under Meer when it does not fit
             for view in VIEWS:
@@ -476,7 +703,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             first_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
             step("recovery: Enter on Terugzetten asks in the app's own window", lambda: (
                 page.focus(".recovery-entry .recovery-undo"), page.keyboard.press("Enter"),
-                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000)), 0.3)
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=T(3000))), 0.3)
             expect(page.evaluate("document.activeElement.textContent") == "Annuleren"
                    and "terugzetten" in page.text_content("#dv-confirm-title"),
                    f"recovery: the question does not start on Annuleren ({page.evaluate('document.activeElement.textContent')!r})")
@@ -484,14 +711,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(not Path(second_src).exists() and page.evaluate(focused) == first_key,
                    f"recovery: Escape still undid the move, or the focus did not come back ({page.evaluate(focused)})")
             step("recovery: Terugzetten, then confirm", lambda: (
-                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=T(3000)),
                 page.click("#modal-dv-confirm .btn-primary")), 1.2)
             expect(Path(second_src).exists(), "recovery: the newest move did not go back")
             left_key = page.evaluate("document.querySelector('.recovery-entry').dataset.key")
             expect(left_key != first_key and page.evaluate(focused) == left_key,
                    f"recovery: focus not on the next entry after the undo ({page.evaluate(focused)})")
             step("recovery: Enter on the last Terugzetten", lambda: (
-                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.keyboard.press("Enter"), page.wait_for_selector("#modal-dv-confirm.active", timeout=T(3000)),
                 page.click("#modal-dv-confirm .btn-primary")), 1.2)
             expect(Path(moved_src).exists(), "recovery: the file did not go back")
             expect(page.is_visible("#recovery-list .empty-state"), "recovery: the list did not show its empty state")
@@ -514,8 +741,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 step("settings: Nu back-uppen", lambda: (
                     page.focus("#settings-backup-now"), page.keyboard.press("Enter"),
                     page.wait_for_function("jobDock.jobs.some(j => j.type === 'backup' && j.status === 'done')",
-                                           timeout=30000, polling=250),
-                    page.wait_for_selector("#settings-backups .backup-kind", timeout=15000)), 1.0)
+                                           timeout=T(30000), polling=250),
+                    page.wait_for_selector("#settings-backups .backup-kind", timeout=T(15000))), 1.0)
             except PlaywrightError:
                 problems.append("settings: 'Nu back-uppen' did not finish as a job or did not show the new backup")
             top_after = page.evaluate(button_top)
@@ -614,7 +841,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("keurer: open a folder", lambda: (
                 page.keyboard.press("6"),
                 page.evaluate(f"keurerSelectedFolderForModal = {json.dumps(folder)}; keurerConfirmFolderSelection()"),
-                page.wait_for_selector("#keurer-card-area .keurer-card", timeout=10000)), 0.8)
+                page.wait_for_selector("#keurer-card-area .keurer-card", timeout=T(10000))), 0.8)
             before = page.evaluate(keurer_state)
             keurer_file = page.evaluate("keurerFileQueue[keurerIndex].path")
             step("keurer: theme menu with the keyboard", lambda: (
@@ -696,11 +923,11 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             current = page.evaluate("keurerFileQueue[keurerIndex].path")
             step("keurer: Enter on Annuleren in the move window", lambda: (
                 page.evaluate("document.activeElement.blur()"), page.keyboard.press("ArrowUp"),
-                page.wait_for_selector("#keurer-move-folder-tree .folder-item", timeout=5000),
+                page.wait_for_selector("#keurer-move-folder-tree .folder-item", timeout=T(5000)),
                 # The window puts focus in its search field a moment after opening: wait for that,
                 # or it can take the focus back from Annuleren between the focus and the Enter
                 page.wait_for_function("document.activeElement && document.activeElement.id === 'keurer-move-search'",
-                                       timeout=5000),
+                                       timeout=T(5000)),
                 page.keyboard.press("ArrowDown"),
                 page.focus("#modal-keurer-move .modal-footer .btn-secondary"), page.keyboard.press("Enter")), 0.8)
             expect(page.evaluate(keurer_state) == base and Path(current).exists(),
@@ -709,7 +936,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # A folder with only subfolders: a calm 'nothing here' state, never 'fully reviewed'
             step("keurer: a folder without photos", lambda: (
                 page.evaluate(f"keurerSelectedFolderForModal = {json.dumps(str(vault / 'RAW'))}; keurerConfirmFolderSelection()"),
-                page.wait_for_selector("#keurer-card-area .keurer-state-card h3", timeout=10000)), 0.6)
+                page.wait_for_selector("#keurer-card-area .keurer-state-card h3", timeout=T(10000))), 0.6)
             title = page.text_content("#keurer-card-area .keurer-state-card h3")
             expect(title == "Geen foto's of video's in deze map", f"keurer: a folder without photos says {title!r}")
             chip = page.text_content("#keurer-folder-display")
@@ -723,7 +950,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 "year": 2020, "date_source": "exif"}]}))
             step("home: 'op deze dag' photo", lambda: (
                 page.evaluate("switchMainView('home'); loadPhotoOtdWidget()"),
-                page.wait_for_selector(".otd-large-image.active", timeout=10000)), 0.3)
+                page.wait_for_selector(".otd-large-image.active", timeout=T(10000))), 0.3)
             step("home: Enter on the photo", lambda: (page.focus(".otd-large-image.active"), page.keyboard.press("Enter")), 0.8)
             expect(page.evaluate("isViewerOpen()"), "home: Enter on the 'op deze dag' photo did not open it")
             step("home: close the photo", lambda: page.keyboard.press("Escape"), 0.4)
@@ -731,7 +958,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # Storage per folder: the list starts at the top (nothing cut off) and fills the width
             step("storage: open the window", lambda: (
                 page.evaluate("switchMainView('home'); openStorageModal()"),
-                page.wait_for_selector("#storage-breakdown-content", state="visible", timeout=10000)), 0.8)
+                page.wait_for_selector("#storage-breakdown-content", state="visible", timeout=T(10000))), 0.8)
             storage = page.evaluate("""(() => {
                 const body = document.querySelector('#modal-storage-details .modal-body');
                 const first = [...body.children].find(c => c.getClientRects().length);
@@ -746,13 +973,23 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # library. Without the model: file names work, Slim zoeken explains how to install it.
             step("search: Enter on Home opens the search window", lambda: (
                 page.focus("#global-search"), page.keyboard.type("zzz"), page.keyboard.press("Enter"),
-                page.wait_for_selector("#search-overlay.active", timeout=5000)), 0.8)
+                page.wait_for_selector("#search-overlay.active", timeout=T(5000))), 0.8)
             expect(page.input_value("#search-input") == "zzz" and page.evaluate(view_now) == "home",
                    f"search: the window did not open with the query ({page.input_value('#search-input')!r})")
             expect_focus_trapped("search-overlay", "search: window")
+            # File names are looked up in the library: on a busy machine its first pass (on start, and
+            # the one the search window asks for) may still be going, so wait for it first
+            library_wait = time.monotonic()
+            try:
+                page.wait_for_function("fetch('/api/library/status').then(r => r.json()).then(s => s.ready && !s.job)",
+                                       timeout=T(60000), polling=500)
+            except PlaywrightError:
+                problems.append("search: the library was not ready within a minute")
+            if time.monotonic() - library_wait >= 0.5:
+                print(f"          (waited {time.monotonic() - library_wait:.1f} s for the library pass)", flush=True)
             step("search: by file name", lambda: (
                 page.click(".search-mode[data-mode='filename']"), page.fill("#search-input", "burst"),
-                page.keyboard.press("Enter"), page.wait_for_selector(".search-result", timeout=5000)), 0.6)
+                page.keyboard.press("Enter"), page.wait_for_selector(".search-result", timeout=T(10000))), 0.6)
             expect(page.locator(".search-result").count() == 5,
                    f"search: 'burst' found {page.locator('.search-result').count()} files, not 5")
             step("search: arrow down to the results, Enter opens the viewer", lambda: (
@@ -768,7 +1005,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"search: focus did not go back to the result ({page.evaluate('document.activeElement.className')})")
             step("search: Slim zoeken without the model", lambda: (
                 page.click(".search-mode[data-mode='semantic']"),
-                page.wait_for_selector("#search-more .empty-state", timeout=5000)), 0.5)
+                page.wait_for_selector("#search-more .empty-state", timeout=T(5000))), 0.5)
             title = page.evaluate("(document.querySelector('#search-more .empty-state-title') || {}).textContent")
             expect(title == "Slim zoeken is nog niet geïnstalleerd", f"search: without the model it says {title!r}")
             step("search: Naar Instellingen", lambda: page.click("#search-more .empty-state-action"), 0.8)
@@ -782,7 +1019,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # The install button asks first, with where it downloads from; 'Annuleren' downloads nothing
             asked = []
             step("settings: install asks first", lambda: (
-                page.click("#settings-search-install"), page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.click("#settings-search-install"), page.wait_for_selector("#modal-dv-confirm.active", timeout=T(3000)),
                 asked.append(page.text_content("#modal-dv-confirm")),
                 page.click("#modal-dv-confirm .btn-secondary")), 0.6)
             jobs_now = page.evaluate("fetch('/api/jobs?type=model_download').then(r => r.json()).then(d => d.jobs.length)")
@@ -792,7 +1029,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # Closing the search window gives the focus back to the field that opened it
             step("search: open and close with the keyboard", lambda: (
                 page.focus("#global-search"), page.keyboard.type("zzz"), page.keyboard.press("Enter"),
-                page.wait_for_selector("#search-overlay.active", timeout=5000), page.keyboard.press("Escape"),
+                page.wait_for_selector("#search-overlay.active", timeout=T(5000)), page.keyboard.press("Escape"),
                 page.wait_for_timeout(300)), 0.3)
             expect(page.evaluate("document.activeElement.id") == "global-search",
                    f"search: Escape left the focus on {page.evaluate('document.activeElement.id || document.activeElement.tagName')}")
@@ -820,7 +1057,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 page.route(pattern, handler)
             page.evaluate("switchMainView('home')")
             step("search: s opens the window", lambda: (page.focus("body"), page.keyboard.press("s"),
-                                                       page.wait_for_selector("#search-overlay.active", timeout=5000)), 0.5)
+                                                       page.wait_for_selector("#search-overlay.active", timeout=T(5000))), 0.5)
             step("search: Slim zoeken shows results", lambda: (
                 page.click(".search-mode[data-mode='semantic']"), page.fill("#search-input", "hond op het strand"),
                 page.keyboard.press("Enter"), page.wait_for_timeout(800)), 0.3)
@@ -830,10 +1067,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"search: results not drawn as expected ({page.locator('.search-result').count()}, {status_text!r})")
             def open_similar():
                 try:
-                    page.click(".search-result >> nth=0", timeout=5000)
+                    page.click(".search-result >> nth=0", timeout=T(5000))
                     page.wait_for_timeout(600)
                     page.keyboard.press("v")
-                    page.wait_for_selector("#search-similar:not([hidden])", timeout=5000)
+                    page.wait_for_selector("#search-similar:not([hidden])", timeout=T(5000))
                 except PlaywrightError as e:
                     problems.append(f"search: Vergelijkbaar: {str(e).splitlines()[0]}")
             step("search: open a result, then Vergelijkbaar (v)", open_similar, 0.6)
@@ -863,10 +1100,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # saved from the filters, an address that can be bookmarked, and 'op deze dag' per year
             # (the server indexes the vault by itself; each poll asks once more whether it is done)
             page.wait_for_function("fetchJSON(`${API_BASE}/api/library/status`).then(s => { window.__libReady = s.ready; })"
-                                   " && window.__libReady === true", timeout=30000, polling=500)
+                                   " && window.__libReady === true", timeout=T(30000), polling=500)
             tiles = "document.querySelectorAll('#albums-content .albums-tile').length"
             step("albums: open", lambda: (page.keyboard.press("g"), page.keyboard.press("a"),
-                                          page.wait_for_selector("#albums-content .albums-tile img", timeout=10000)), 0.6)
+                                          page.wait_for_selector("#albums-content .albums-tile img", timeout=T(10000))), 0.6)
             total = page.evaluate("fetchJSON(`${API_BASE}/api/library/browse?limit=1`).then(d => d.total)")
             count = page.evaluate("document.querySelector('#albums-count .albums-count-number').textContent")
             expect(total > BIG_FILES and count == f"{total:,}".replace(",", "."),
@@ -913,19 +1150,19 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("export: select all of the filter", lambda: page.click("#export-select-all"), 1.0)
             expect(page.evaluate("DVExport.count") == 4, "export: 'alles selecteren' did not select all 4 photos")
             step("export: open the window", lambda: (page.click("#export-open"),
-                                                     page.wait_for_selector("#export-status.is-ok", timeout=8000)), 0.3)
+                                                     page.wait_for_selector("#export-status.is-ok", timeout=T(8000))), 0.3)
             expect_focus_trapped("modal-export", "export: window")
             step("export: refuses a destination in the archive", lambda: (
-                page.fill("#export-base", str(vault / "RAW")), page.wait_for_selector("#export-status.is-error", timeout=5000)), 0.2)
+                page.fill("#export-base", str(vault / "RAW")), page.wait_for_selector("#export-status.is-error", timeout=T(5000))), 0.2)
             expect(not page.is_enabled("#export-start"), "export: a destination inside the archive can be started")
             step("export: start", lambda: (page.fill("#export-base", str(export_dir.parent)), page.fill("#export-name", export_dir.name),
-                                           page.wait_for_selector("#export-status.is-ok", timeout=5000),
+                                           page.wait_for_selector("#export-status.is-ok", timeout=T(5000)),
                                            page.click("#export-start")), 2.0)
             copied = sorted(p.name for p in export_dir.iterdir() if p.suffix.lower() in (".jpg", ".jpeg")) if export_dir.exists() else []
             expect(len(copied) == 4 and (export_dir / "manifest.csv").exists(), f"export: copied {copied}")
             step("export: best of a period window", lambda: (page.keyboard.press("Escape"), page.click("#albums-best"),
                                                              page.click("#best-preview"),
-                                                             page.wait_for_selector("#best-summary", timeout=8000)), 0.3)
+                                                             page.wait_for_selector("#best-summary", timeout=T(8000))), 0.3)
             expect_focus_trapped("modal-best", "export: best window")
             step("export: close", lambda: page.keyboard.press("Escape"), 0.3)
             # A finished export stays in the job dock (with 'Toon in Finder')
@@ -944,8 +1181,8 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                                   " [...document.querySelectorAll('#albums-side-albums .albums-side-name')].map(e => e.textContent)]")
             expect(saved[0].startswith("#albums/album/") and saved[1] == "Zomer smoke" and "Zomer smoke" in saved[2],
                    f"albums: saving the album gave {saved}")
-            step("albums: bookmark reload", lambda: (page.reload(), page.wait_for_load_state("networkidle"),
-                                                     page.wait_for_selector("#albums-content .albums-tile img", timeout=10000)), 0.5)
+            step("albums: bookmark reload", lambda: (navigate(page.reload, "albums: bookmark reload"),
+                                                     page.wait_for_selector("#albums-content .albums-tile img", timeout=T(10000))), 0.5)
             expect(page.evaluate("[currentMainView(), location.hash, document.getElementById('albums-title-text').textContent]")
                    == ["albums", saved[0], "Zomer smoke"], "albums: a bookmarked album did not open again")
             step("albums: change the album", lambda: page.click("#albums-kinds [data-kind='video']"), 0.8)
@@ -957,7 +1194,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect("Zomer smoke" not in page.evaluate("[...document.querySelectorAll('#albums-side-albums .albums-side-name')]"
                                                       ".map(e => e.textContent)"), "albums: the album was not deleted")
             step("albums: folder window", lambda: (page.click("#albums-folder-btn"),
-                                                   page.wait_for_selector("#albums-folder-tree .folder-item", timeout=5000)), 0.3)
+                                                   page.wait_for_selector("#albums-folder-tree .folder-item", timeout=T(5000))), 0.3)
             expect_focus_trapped("modal-albums-folder", "albums: folder window")
             step("albums: close the folder window", lambda: page.keyboard.press("Escape"), 0.3)
             # Op deze dag: from Home, and for 14 July (the beach photos of 2019), per year
@@ -966,7 +1203,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("[currentMainView(), location.hash]") == ["albums", "#albums/op-deze-dag"],
                    f"albums: 'Alles bekijken' opened {page.evaluate('location.hash')}")
             step("albums: 14 July", lambda: (page.evaluate("location.hash = '#albums/op-deze-dag/07-14'"),
-                                             page.wait_for_selector(".albums-otd-year", timeout=5000)), 0.6)
+                                             page.wait_for_selector(".albums-otd-year", timeout=T(5000))), 0.6)
             otd = page.evaluate("""(async () => {
                 const d = await fetchJSON(`${API_BASE}/api/library/on-this-day?date=07-14`);
                 return {api: d.years.map(g => [g.year, g.items.length]),
@@ -980,7 +1217,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("location.hash") == "#albums/op-deze-dag/07-15", "albums: the next day did not open")
             step("albums: op deze dag in the viewer", lambda: (
                 page.evaluate("location.hash = '#albums/op-deze-dag/07-14'"),
-                page.wait_for_selector(".albums-otd-year .albums-tile", timeout=5000),
+                page.wait_for_selector(".albums-otd-year .albums-tile", timeout=T(5000)),
                 page.focus(".albums-otd-year .albums-tile[tabindex='0']"), page.keyboard.press("ArrowRight"),
                 page.keyboard.press("Enter")), 0.6)
             expect(page.evaluate("isViewerOpen() && viewer.index === 1 && viewer.items.length") == sum(n for _, n in otd["api"]),
@@ -999,9 +1236,9 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             try:
                 step("albums: 'Alle N bekijken'", lambda: (
                     page.evaluate("albumsOtdShift(0)"),
-                    page.wait_for_selector(".albums-otd-year-head .btn", timeout=5000),
+                    page.wait_for_selector(".albums-otd-year-head .btn", timeout=T(5000)),
                     page.click(".albums-otd-year-head .btn"),
-                    page.wait_for_selector("#albums-count .albums-count-number", timeout=5000),
+                    page.wait_for_selector("#albums-count .albums-count-number", timeout=T(5000)),
                     page.wait_for_timeout(600)), 0.2)
             except PlaywrightError as e:
                 problems.append(f"albums: 'Alle N bekijken' did not show or open: {str(e).splitlines()[0]}")
@@ -1046,14 +1283,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             try:
                 step("albums: hide the iPhone album", lambda: (
                     page.click("#albums-edit"), page.click("#album-hidden-row"), page.click("#album-save"),
-                    page.wait_for_selector(".toast .toast-action", timeout=5000)), 0.3)
+                    page.wait_for_selector(".toast .toast-action", timeout=T(5000))), 0.3)
             except PlaywrightError as e:
                 problems.append(f"albums: hiding showed no toast with an action: {str(e).splitlines()[0]}")
             expect("iPhone" not in page.evaluate(side_names) and page.evaluate("document.activeElement.id") == "albums-title",
                    f"albums: hiding left {page.evaluate(side_names)} with focus on {page.evaluate('document.activeElement.id')}")
             try:
                 step("albums: undo hiding from the toast", lambda: (
-                    page.click(".toast .toast-action", timeout=5000), page.wait_for_timeout(800)), 0.2)
+                    page.click(".toast .toast-action", timeout=T(5000)), page.wait_for_timeout(800)), 0.2)
             except PlaywrightError:
                 problems.append("albums: no 'Ongedaan maken' in a toast after hiding")
             expect("iPhone" in page.evaluate(side_names), f"albums: 'Ongedaan maken' left {page.evaluate(side_names)}")
@@ -1079,7 +1316,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             page.on("request", lambda r: outside.append(r.url) if not r.url.startswith(local) else None)
             pins = "document.querySelectorAll('#map-canvas .map-pin-wrap, #map-canvas .map-cluster-wrap').length"
             step("map: open (g m)", lambda: (page.keyboard.press("g"), page.keyboard.press("m"),
-                                             page.wait_for_selector("#map-canvas .map-pin-wrap, #map-canvas .map-cluster-wrap", timeout=10000)), 0.8)
+                                             page.wait_for_selector("#map-canvas .map-pin-wrap, #map-canvas .map-cluster-wrap", timeout=T(10000))), 0.8)
             geo = page.evaluate("fetchJSON(`${API_BASE}/api/map/points`).then(d => [d.total, d.without_gps])")
             expect(geo[0] >= 2 and geo[1] > 0 and f"{geo[1]:,}".replace(",", ".") in page.text_content("#map-nogps"),
                    f"map: {geo} points and the 'zonder locatie' button says {page.text_content('#map-nogps')!r}")
@@ -1088,20 +1325,20 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(not page.is_checked("#map-osm-toggle") and page.evaluate("mapView().tiles") is False,
                    "map: the OpenStreetMap tiles are not off by default")
             step("map: a pin opens a popup", lambda: page.locator("#map-canvas .map-pin-wrap").first.click(), 1.0)
-            page.wait_for_selector(".map-popup .map-popup-open", timeout=8000)
+            page.wait_for_selector(".map-popup .map-popup-open", timeout=T(8000))
             expect(page.is_visible(".map-popup .map-popup-thumb img"), "map: the popup shows no thumbnail")
             step("map: the popup opens the viewer", lambda: page.click(".map-popup .map-popup-open"), 0.8)
             expect(page.evaluate("isViewerOpen() && viewer.items.length >= 1"), "map: Openen did not open the viewer")
-            page.wait_for_function("!document.getElementById('btn-show-on-map').hidden", timeout=5000)
+            page.wait_for_function("!document.getElementById('btn-show-on-map').hidden", timeout=T(5000))
             # Every geotagged photo gets a Dutch place name in the viewer (places.describe, offline)
-            page.wait_for_function("[...document.querySelectorAll('#modal-metadata .metadata-label')].some(e => e.textContent === 'Plaats')", timeout=5000)
+            page.wait_for_function("[...document.querySelectorAll('#modal-metadata .metadata-label')].some(e => e.textContent === 'Plaats')", timeout=T(5000))
             place = page.evaluate("[...document.querySelectorAll('#modal-metadata .metadata-label')].find(e => e.textContent === 'Plaats').nextElementSibling.textContent")
             expect(len(place) > 3 and any(w in place for w in ("Nederland", "Frankrijk", "km", "kust", "zee")),
                    f"map: the viewer's place reads {place!r}")
             step("map: 'Op kaart tonen' goes back to the photo", lambda: page.click("#btn-show-on-map"), 1.5)
             expect(page.evaluate("currentMainView()") == "map" and not page.evaluate("isViewerOpen()"),
                    "map: 'Op kaart tonen' did not return to the map")
-            page.wait_for_selector(".map-popup .map-popup-open", timeout=8000)
+            page.wait_for_selector(".map-popup .map-popup-open", timeout=T(8000))
             page.keyboard.press("Escape")
             zoom, alone = page.evaluate("mapView().zoom"), page.evaluate("document.querySelectorAll('#map-canvas .map-pin-wrap').length")
             # (the test vault's three beach photos share one spot: that cluster fans out instead of zooming)
@@ -1205,6 +1442,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Every screen in both themes: all visible text reaches WCAG AA, every control has a name,
             # and a screenshot to look at
+            shots.mkdir(parents=True, exist_ok=True)
             for theme in ("light", "dark"):
                 page.evaluate(f"setTheme('{theme}')")
                 for view in VIEWS + ["activity"]:    # Activiteit has no menu tab of its own (it hangs under DataGatherer)
@@ -1254,7 +1492,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     expect(rows[0] <= rows[1] + 1 and rows[2] <= rows[3] + 1,
                            f"shows: slideshow chrome overlaps the photo at height {height} ({rows})")
                 page.set_viewport_size({"width": 1400, "height": 900})
-                expect((page.get_attribute(".elo-rating-badge", "aria-label", timeout=2000) or "").startswith("Score "),
+                expect((page.get_attribute(".elo-rating-badge", "aria-label", timeout=T(2000)) or "").startswith("Score "),
                        "shows: the score badge has no name")
                 step("shows: next slide", lambda: page.keyboard.press("ArrowRight"), 0.8)
                 step("shows: close slideshow", lambda: page.keyboard.press("Escape"), 0.8)
@@ -1281,7 +1519,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             try:
                 step("elo: open from Shows", lambda: (
                     nav_click("shows"), page.click("#btn-elo"),
-                    page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=10000)), 0.6)
+                    page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=T(10000))), 0.6)
             except PlaywrightError:
                 problems.append("elo: the window showed no pair")
             expect(page.evaluate("document.getElementById('elo-overlay').contains(document.activeElement)"),
@@ -1426,7 +1664,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("window.__eloPosts") == 3,
                    f"elo: keys while the next pair loaded made {page.evaluate('window.__eloPosts') - 2} comparisons (expected 1)")
             page.evaluate("() => { fetchJSON = window.__realFetchJSON; }")
-            page.wait_for_selector("#elo-body .elo-stage:not(.is-leaving) .elo-choice:not(.is-loading)", timeout=5000)
+            page.wait_for_selector("#elo-body .elo-stage:not(.is-leaving) .elo-choice:not(.is-loading)", timeout=T(5000))
             page.wait_for_timeout(400)
 
             # Tab to a photo, Enter picks it, and the keys still work after that (focus stays on a photo);
@@ -1440,7 +1678,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 const ok = (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 && cs.outlineColor === colour)
                     || cs.boxShadow.includes(rgb);
                 return ok ? 'ok' : (a.id || a.className || a.tagName); })()"""
-            page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=5000)
+            page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=T(5000))
             page.focus("#elo-overlay")
             missing_rings = []
             for _ in range(8):
@@ -1466,7 +1704,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Ranglijst right after a pick (during the short pause before the next pair): the board
             # stays, no dead pair is drawn over it, and Vergelijken then shows a new pair
-            page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=5000)
+            page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=T(5000))
             picked = shown_pair()
             page.focus("#elo-overlay")
             page.keyboard.press("1")
@@ -1477,7 +1715,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(race["tab"] == "board" and race["rows"] > 0 and race["choices"] == 0,
                    f"elo: Ranglijst right after a pick showed a pair instead of the board ({race})")
             step("elo: back to Vergelijken", lambda: (page.click("#elo-tab-compare"),
-                 page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=5000)), 0.3)
+                 page.wait_for_selector("#elo-body .elo-choice:not(.is-loading)", timeout=T(5000))), 0.3)
             expect(len(shown_pair()) == 2 and set(shown_pair()) != set(picked),
                    f"elo: after the board the pair just compared came back ({picked})")
 
@@ -1654,7 +1892,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # ... except on pages that are exactly as high as the window: they keep it free inside
             for view in ("keurer", "duplicates", "series"):
                 page.evaluate(f"switchMainView('{view}')")
-                page.wait_for_timeout(300)
+                # (until the new view has settled: on a busy machine 300 ms was not always enough)
+                try:
+                    page.wait_for_function("document.documentElement.scrollHeight - innerHeight <= 1",
+                                           timeout=T(3000), polling=100)
+                except PlaywrightError:
+                    pass   # reported below
                 extra = page.evaluate("document.documentElement.scrollHeight - innerHeight")
                 expect(extra <= 1, f"job dock: the {view} page scrolls the window by {extra} px")
 
@@ -1665,12 +1908,12 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                           ".forEach(j => jobDock.dismissed.add(j.id)); renderJobDock()")
             step("library: line after the automatic pass", lambda: page.wait_for_function(
                 "/Bibliotheek: \\d/.test((document.getElementById('job-library') || {}).textContent || '')",
-                timeout=60000, polling=250), 0.2)
+                timeout=T(60000), polling=250), 0.2)
             step("library: start a pass with the keyboard", lambda: (
                 page.focus("#btn-library-update"), page.keyboard.press("Enter")), 0.5)
             step("library: pass done", lambda: page.wait_for_function(
                 "[...document.querySelectorAll('#toast-container .toast')]"
-                ".some(t => t.textContent.includes('Bibliotheek bijwerken: Klaar'))", timeout=60000, polling=250), 0.2)
+                ".some(t => t.textContent.includes('Bibliotheek bijwerken: Klaar'))", timeout=T(60000), polling=250), 0.2)
 
             # A run that finished with read errors stays in view: the dock does not fold away, the
             # run is not put under 'eerder klaar', and an incomplete library pass is named too.
@@ -1737,7 +1980,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             try:
                 page.wait_for_function("document.getElementById('series-progress').hidden"
                                        " && !document.getElementById('btn-series-compare').disabled"
-                                       " && !!document.querySelector('.series-card')", timeout=120000, polling=250)
+                                       " && !!document.querySelector('.series-card')", timeout=T(120000), polling=250)
             except PlaywrightError:
                 problems.append("series: comparing never showed a series")
             # (the big folder's 1500 files are copies of corrupt.jpg: not decodable, so no series)
@@ -1865,7 +2108,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 nav_click("recovery"),
                 page.wait_for_selector(".recovery-entry"),
                 page.click(".recovery-entry:has-text('Reeksen') .recovery-undo"),
-                page.wait_for_selector("#modal-dv-confirm.active", timeout=3000),
+                page.wait_for_selector("#modal-dv-confirm.active", timeout=T(3000)),
                 page.click("#modal-dv-confirm .btn-primary")), 1.5)
             expect(klein.exists() and not (holding / "2022" / "bursts" / "strand klein.jpg").exists(),
                    "series: the Herstelcentrum did not put the resized photo back")
@@ -2007,8 +2250,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Timeline of the whole vault from the index: only what is in view is drawn
             page.evaluate(f"localStorage.setItem('timeline_folders', JSON.stringify([{json.dumps(str(vault))}]))")
-            page.reload()
-            page.wait_for_load_state("networkidle")
+            navigate(page.reload)
             step("timeline: whole vault", lambda: (nav_click("timeline"),
                                                    page.wait_for_selector(".tl-photo-card")), 1.5)
             drawn = page.evaluate("document.querySelectorAll('.tl-photo-card').length")
@@ -2241,11 +2483,10 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             vault.rename(unplugged)
             try:
                 seen = len(problems)
-                page.reload()
-                page.wait_for_load_state("networkidle")
+                navigate(page.reload)
                 page.evaluate("switchMainView('home')")
-                page.wait_for_selector("#spotify-otd-content .empty-state", timeout=10000)
-                page.wait_for_selector("#photo-otd-content .empty-state", timeout=10000)
+                page.wait_for_selector("#spotify-otd-content .empty-state", timeout=T(10000))
+                page.wait_for_selector("#photo-otd-content .empty-state", timeout=T(10000))
                 page.wait_for_timeout(500)
                 home = page.evaluate("""(() => ({
                     spinners: [...document.querySelectorAll('#section-home .loading-spinner')]
@@ -2261,7 +2502,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 # Bestanden: not a blank page and an empty folder column, but say what is going on
                 page.evaluate("switchMainView('viewer')")
                 try:
-                    page.wait_for_selector("#media-grid .empty-state", timeout=10000)
+                    page.wait_for_selector("#media-grid .empty-state", timeout=T(10000))
                 except PlaywrightError:
                     pass   # reported below
                 files = page.evaluate("[(document.querySelector('#media-grid .empty-state-title') || {}).textContent || '',"
@@ -2274,18 +2515,119 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             finally:
                 unplugged.rename(vault)
 
+            # Unplugged and plugged back in while the app runs (the page is not reloaded): a job
+            # that was going waits for the archive, the banner and the job dock say so, nothing is
+            # written (no folder made at the old place, no file in the unplugged vault changes),
+            # and once the disk is back the banner goes, the folder comes back and the job finishes.
+            # (A job cannot be resumed without the disk: its state is in the database on it. So the
+            # disk goes right after the start, while some 1300 thumbnails are still to be made.)
+            navigate(page.reload)
+            misc = str(vault / "RAW" / "misc")
+            page.evaluate(f"switchMainView('viewer'), selectFolder({json.dumps(misc)})")
+            page.wait_for_selector("#media-grid .media-card:not(.folder-card)", timeout=T(10000))
+
+            def job_now(job_id):
+                return page.evaluate(f"fetch('/api/jobs/{job_id}').then(r => r.json())")
+
+            def tree(root, cache):
+                found = {}
+                for dirpath, dirnames, filenames in os.walk(root):
+                    rel = Path(dirpath).relative_to(root)
+                    if not cache and rel.parts[:1] == (".datavault_cache",):
+                        dirnames[:] = []
+                        continue
+                    for name in filenames:
+                        st = os.lstat(Path(dirpath) / name)
+                        found[str(rel / name)] = (st.st_size, st.st_mtime_ns)
+                return found
+
+            seen = len(problems)
+            unplug_started = time.monotonic()
+            archive_before = tree(vault, cache=False)
+            job_id = page.evaluate(f"jobsStart('thumbnails', {{folder: {json.dumps(big)}}}).then(j => j.id)")
+            away = vault.with_name("vault-los")
+            vault.rename(away)
+            try:
+                at_unplug = job_now(job_id)
+                expect(at_unplug.get("status") in ("queued", "running", "waiting_for_vault"),
+                       f"unplug: the job was already {at_unplug.get('status')} when the disk went")
+                try:
+                    page.wait_for_selector(f"#job-dock .job-item.job-waiting_for_vault[data-id='{job_id}']",
+                                           state="attached", timeout=T(15000))
+                except PlaywrightError:
+                    pass   # reported below
+                # A click in Bestanden meets the 503 and shows the banner at once
+                nav_click("viewer")
+                page.evaluate(f"selectFolder({json.dumps(misc)})")
+                try:
+                    page.wait_for_selector("#vault-banner:not([hidden])", timeout=T(20000))
+                except PlaywrightError:
+                    pass   # reported below
+                waiting = job_now(job_id)
+                expect(waiting.get("status") == "waiting_for_vault" and waiting.get("total") is None,
+                       f"unplug: the job does not wait for the archive ({waiting.get('status')}, {waiting.get('message')})")
+                dock = page.evaluate(f"""(() => {{ const i = document.querySelector("#job-dock .job-item[data-id='{job_id}']");
+                    return i ? i.querySelector('.job-status').textContent.trim() : null; }})()""")
+                expect(dock == "Wacht op archief", f"unplug: the job dock says {dock!r}, not 'Wacht op archief'")
+                expect(page.is_visible("#vault-banner"), "unplug: no banner while the archive is gone")
+                for theme in ("light", "dark"):
+                    page.evaluate(f"setTheme('{theme}')")
+                    page.evaluate("jobDock.collapsed = false; renderJobDock()")
+                    page.wait_for_timeout(300)
+                    page.screenshot(path=str(shots / f"unplugged_live_{theme}.png"))
+                page.evaluate("setTheme('auto')")
+                # Nothing writes while the disk is gone: three polls of the job (2 s each), the page's
+                # own polls (3 s) and the index watcher
+                frozen = tree(away, cache=True)
+                page.wait_for_timeout(T(7000))
+                expect(not vault.exists(), "unplug: something made the vault folder again while the disk was gone")
+                after = tree(away, cache=True)
+                changed = sorted(k for k in set(frozen) | set(after) if frozen.get(k) != after.get(k))
+                expect(not changed, f"unplug: files in the unplugged vault changed: {changed[:5]}")
+                expect(job_now(job_id).get("status") == "waiting_for_vault", "unplug: the job left its wait without the disk")
+            finally:
+                if away.exists() and not vault.exists():
+                    away.rename(vault)
+            # Back: the banner goes (the page polls every 3 s), a toast says so, the folder is shown again
+            try:
+                page.wait_for_selector("#vault-banner", state="hidden", timeout=T(15000))
+                page.wait_for_function("[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('weer bereikbaar'))",
+                                       timeout=T(5000), polling=200)
+                page.wait_for_selector("#media-grid .media-card:not(.folder-card)", timeout=T(15000))
+            except PlaywrightError as e:
+                problems.append(f"unplug: after the disk came back: {str(e).splitlines()[0]}")
+            try:
+                page.wait_for_function(f"fetch('/api/jobs/{job_id}').then(r => r.json()).then(j => ['done', 'failed', 'cancelled'].includes(j.status))",
+                                       timeout=T(90000), polling=500)
+            except PlaywrightError:
+                pass   # reported below
+            done = job_now(job_id)
+            summary = done.get("summary") or {}
+            expect(done.get("status") == "done" and summary.get("complete") and summary.get("errors") == 0
+                   and summary.get("files", 0) >= BIG_FILES,
+                   f"unplug: the job did not finish once the disk was back ({done.get('status')}, {summary}, "
+                   f"{done.get('message')!r}; vault there: {vault.is_dir()}, health: "
+                   f"{page.evaluate('fetch(`/api/health`).then(r => r.json()).then(h => h.vault_available)')})")
+            expect(tree(vault, cache=False) == archive_before, "unplug: the archive itself changed")
+            # (the 503s of an unplugged archive are expected here; nothing else is)
+            problems[seen:] = [p for p in problems[seen:]
+                               if not ("HTTP 503" in p or ("Failed to load resource" in p and "503" in p))]
+            spent = time.monotonic() - unplug_started
+            timings.append((spent, "unplug and plug back in"))
+            print(f"  {'ok' if len(problems) == seen else 'PROBLEM':7} {'unplug and plug back in while the app runs':<58} {spent:5.1f} s",
+                  flush=True)
+
             # DataGatherer: cards built from the connectors' metadata, g v, the help and the 'Meer'
             # menu with the keyboard, the connect window (Tab stays inside), reading the export that
             # is already in the archive (in place), the Spotify chip, the network log, Instellingen.
             # Nothing here goes online: the test server refuses every request of the network guard.
-            page.reload()
-            page.wait_for_load_state("networkidle")
+            navigate(page.reload)
             nav_click("home")
             step("datagatherer: g v opens it", lambda: (page.keyboard.press("g"), page.keyboard.press("v")), 0.6)
             expect(page.evaluate(view_now) == "datagatherer", "datagatherer: g v did not open the tab")
             spotify_card = ".dg-card[data-source='spotify']"
             try:
-                page.wait_for_selector(spotify_card, timeout=10000)
+                page.wait_for_selector(spotify_card, timeout=T(10000))
             except PlaywrightError:
                 pass   # reported below
             cards = page.evaluate("[...document.querySelectorAll('.dg-card')].map(c => c.dataset.source)")
@@ -2374,7 +2716,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # Bijwerken is refused by the test server: the card says why, in a red note under the next step
             step("datagatherer: Bijwerken Last.fm (refused here)", lambda: page.click(".dg-card[data-source='lastfm'] .dg-primary"), 0.4)
             try:
-                page.wait_for_selector(".dg-card[data-source='lastfm'] .dg-note-danger", timeout=10000)
+                page.wait_for_selector(".dg-card[data-source='lastfm'] .dg-note-danger", timeout=T(10000))
             except PlaywrightError:
                 pass   # reported below
             note = page.evaluate("(document.querySelector(\".dg-card[data-source='lastfm'] .dg-note-danger\") || {}).textContent || ''")
@@ -2382,7 +2724,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("datagatherer: read the existing Spotify export", lambda: page.click(primary), 0.4)
             try:
                 page.wait_for_function(f"(document.querySelector({json.dumps(primary)}) || {{dataset: {{}}}}).dataset.action !== 'import'",
-                                       timeout=20000)
+                                       timeout=T(20000))
             except PlaywrightError:
                 pass   # reported below
             until = page.evaluate(f"(document.querySelector({json.dumps(spotify_card + ' .dg-until-date')}) || {{}}).textContent")
@@ -2403,14 +2745,14 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # Berichten: read the synthetic Messages database, then the list, the thread, search and Pasha
             page.evaluate("switchMainView('datagatherer')")
-            page.wait_for_selector(".dg-card[data-source='imessage'] .dg-primary", timeout=10000)
+            page.wait_for_selector(".dg-card[data-source='imessage'] .dg-primary", timeout=T(10000))
             label = page.inner_text(".dg-card[data-source='imessage'] .dg-primary").strip()
             expect(label == "Bijwerken", f"berichten: the iMessage card offers {label!r}, not Bijwerken")
             step("berichten: Bijwerken iMessage", lambda: page.click(".dg-card[data-source='imessage'] .dg-primary"), 2.5)
             step("berichten: g e opens it", lambda: (page.click("#dg-title"), page.keyboard.press("g"), page.keyboard.press("e")), 1.2)
             expect(page.evaluate(view_now) == "berichten", "berichten: g e did not open the view")
             try:
-                page.wait_for_selector("#msg-list .msg-item", timeout=10000)
+                page.wait_for_selector("#msg-list .msg-item", timeout=T(10000))
             except PlaywrightError:
                 pass   # reported below
             expect(page.locator("#msg-list .msg-item").count() == 2, "berichten: the list does not show both conversations")
@@ -2456,13 +2798,13 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             # toggle and the inline folder error in a source's settings
             page.evaluate("switchMainView('datagatherer')")
             takeout = ".dg-card[data-source='google_takeout'] .dg-primary"
-            page.wait_for_selector(takeout, timeout=10000)
+            page.wait_for_selector(takeout, timeout=T(10000))
             expect(page.evaluate(f"document.querySelector({json.dumps(takeout)}).dataset.action") == "import",
                    "takeout: the Takeout in RAW_google does not ask to be read")
             step("takeout: read RAW_google in place", lambda: page.click(takeout), 0.4)
             try:
                 page.wait_for_function(f"(document.querySelector({json.dumps(takeout)}) || {{dataset: {{}}}}).dataset.action !== 'import'",
-                                       timeout=30000)
+                                       timeout=T(30000))
             except PlaywrightError:
                 pass   # reported below
             expect((vault / "data" / "Matthew" / "RAW_google" / "takeout-20190801T000000Z-001").is_dir(),
@@ -2473,7 +2815,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             step("chrome: Bijwerken reads a copy", lambda: page.click(chrome), 0.4)
             try:
                 page.wait_for_function("(document.querySelector(\".dg-card[data-source='chrome_history'] .dg-until-date\") || {}).textContent",
-                                       timeout=20000)
+                                       timeout=T(20000))
             except PlaywrightError:
                 problems.append("chrome: after Bijwerken the card shows no 'Gegevens t/m'")
             step("activity: the switch in the header", lambda: page.click("#section-datagatherer .dg-switch [data-view='activity']"), 0.6)
@@ -2481,7 +2823,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate("navEntryFor('activity').classList.contains('active')"),
                    "activity: the DataGatherer menu entry (or Meer, when it is under Meer) is not lit")
             try:
-                page.wait_for_selector(".act-event", timeout=10000)
+                page.wait_for_selector(".act-event", timeout=T(10000))
             except PlaywrightError:
                 pass   # reported below
             days = page.evaluate("[...document.querySelectorAll('.act-day')].map(b => b.dataset.day)")
@@ -2516,7 +2858,7 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect(page.evaluate(view_now) == "activity", "activity: g c did not open it")
             step("map: the Tijdlijn layer", lambda: nav_click("map"), 1.2)
             try:
-                page.wait_for_selector("#map-layers:not([hidden]) #map-track", timeout=10000)
+                page.wait_for_selector("#map-layers:not([hidden]) #map-track", timeout=T(10000))
             except PlaywrightError:
                 pass   # reported below
             expect(page.is_visible("#map-track"), "map: the route button is missing")
@@ -2534,15 +2876,16 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
             expect((page.evaluate("window.mapView()") or {}).get("trackDay") != view.get("trackDay"),
                    "map: the previous-day button did not change the day")
             page.evaluate("switchMainView('datagatherer')")
-            page.wait_for_selector(".dg-card[data-source='google_timeline']", timeout=10000)
+            page.wait_for_selector(".dg-card[data-source='google_timeline']", timeout=T(10000))
             step("timeline: its settings", lambda: page.evaluate("dgOpenSettings('google_timeline')"), 0.8)
             expect(page.is_visible("#dg-settings-pasha") or page.evaluate("!!document.getElementById('dg-settings-pasha')"),
                    "timeline: no Pasha switch in the settings")
             page.fill("#dg-settings-watch_folder", "/bestaat/niet")
             seen = len(problems)
-            step("timeline: a folder that does not exist", lambda: page.click("#dg-settings .btn-primary"), 0.8)
+            step("timeline: a folder that does not exist", lambda: page.click("#dg-settings .btn-primary"), 0.8,
+                 expected=lambda p: "400" in p)
             try:
-                page.wait_for_selector("#dg-settings-watch_folder-error:not([hidden])", timeout=5000)
+                page.wait_for_selector("#dg-settings-watch_folder-error:not([hidden])", timeout=T(5000))
             except PlaywrightError:
                 pass   # reported below
             page.wait_for_timeout(500)
@@ -2606,23 +2949,38 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
 
             # An archive without any folder: 'Het archief is leeg', not 'Kies een map'
             page.route("**/api/folders", lambda route: route.fulfill(json={"folders": []}))
-            page.reload()
-            page.wait_for_load_state("networkidle")
+            navigate(page.reload)
             page.evaluate("switchMainView('viewer')")
             try:
-                page.wait_for_selector("#media-grid .empty-state", timeout=10000)
+                page.wait_for_selector("#media-grid .empty-state", timeout=T(10000))
             except PlaywrightError:
                 pass   # reported below
             empty = page.evaluate("(document.querySelector('#media-grid .empty-state-title') || {}).textContent")
             expect(empty == "Het archief is leeg", f"files: an empty archive says {empty!r}")
             page.unroute("**/api/folders")
+            resolve_cut_off()
             browser.close()
+            total = time.monotonic() - run_started
+            print(f"\ntiming: {len(timings)} steps in {total:.0f} s (time-outs x{SLOW}); the slowest:")
+            for spent, name in sorted(timings, reverse=True)[:8]:
+                print(f"  {spent:5.1f} s  {name}")
+            if transient:
+                print(f"transient: {len(transient)} fetch(es) cut off by a navigation, each asked again and answered:")
+                for text in transient:
+                    print(f"  - {text}")
     finally:
+        guard.cancel()
         proc.terminate()
         try:
             proc.wait(10)
         except subprocess.TimeoutExpired:
             proc.kill()
+        if problems or sys.exc_info()[0] is not None:
+            # The server's own log says what it was doing; keep it with the screenshots
+            for name in ("uvicorn.log", "server.log"):
+                if (workdir / name).exists():
+                    shutil.copy(workdir / name, shots / name)
+            print(f"\nserver log kept in {shots}", flush=True)
         shutil.rmtree(workdir, ignore_errors=True)
 
     if problems:

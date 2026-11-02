@@ -201,11 +201,13 @@ cd code
 venv/bin/pip install -r requirements-dev.txt
 venv/bin/python -m pytest                    # backend and static frontend tests, on a generated test vault
 python3 tests/ui/smoke_webkit.py             # browser smoke test in WebKit (needs: pip install playwright && playwright install webkit)
+venv/bin/python -m pytest -m smoke           # the same smoke through pytest (skipped in a plain run)
 ```
 
 pytest never touches your archive: every test builds a throwaway vault, and the chat tests use a fake Ollama.
 The smoke test starts its own server, clicks through every screen in both themes and fails on any JavaScript
-error, failed request, WCAG AA contrast problem or control without a name. More in `code/README.md`.
+error, failed request, WCAG AA contrast problem or control without a name. It also pulls the archive out from
+under the running app and puts it back (`tests/test_unplug.py` does the same for the backend). More in `code/README.md`.
 
 ## Performance
 

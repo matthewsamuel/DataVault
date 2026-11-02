@@ -622,15 +622,23 @@ cd code
 venv/bin/python -m pytest                      # alle tests (tijdelijke testkluis, nooit je archief)
 python3 tests/ui/smoke_webkit.py               # browser-rooktest in WebKit (Safari-engine)
 python3 tests/ui/smoke_webkit.py chromium      # of in Chromium; --headed om mee te kijken
+venv/bin/python -m pytest -m smoke             # de rooktest via pytest (in een gewone ronde overgeslagen)
 ```
 
 De rooktest bouwt zelf een wegwerp-testkluis, start een eigen server op een vrije poort
 (`DATAVAULT_TESTING=1`), klikt door alle tabbladen (en viewer, verplaatsvenster, chat,
 thema's, Shows en Welke is mooier?, sneltoetsen, Herstelcentrum, Instellingen met een back-up,
-DataGatherer, contrast in beide thema's) en faalt bij elke JavaScript-fout, consolefout of mislukte API-aanroep. Hij
-heeft een Python met Playwright nodig (`pip install playwright && playwright install webkit`)
-en wordt niet door pytest meegenomen. Voor de server gebruikt hij `code/venv`, of de Python in
-`DATAVAULT_PYTHON` (handig in een git worktree zonder eigen venv).
+DataGatherer, contrast in beide thema's, de schijf loskoppelen en terugplaatsen terwijl een taak loopt) en faalt bij
+elke JavaScript-fout, consolefout of mislukte API-aanroep. Hij heeft een Python met Playwright nodig
+(`pip install playwright && playwright install webkit`); pytest draait hem alleen met `-m smoke`
+(`tests/test_smoke_browser.py`, die zoekt een Python met Playwright: `DATAVAULT_SMOKE_PYTHON`, deze Python of
+`python3`). Voor de server gebruikt hij `code/venv`, of de Python in `DATAVAULT_PYTHON` (handig in een git
+worktree zonder eigen venv); `DATAVAULT_TEST_PORTS=10120-10129` houdt hem binnen een poortbereik.
+
+Op een druk bezette machine: na elke stap wacht hij zolang er nog verzoeken naar de app onderweg zijn, alle
+time-outs van Playwright rekken mee met de belasting (of met `DATAVAULT_SMOKE_SLOW`, bijvoorbeeld `2`), en een
+`fetch` die door herladen werd afgebroken wordt opnieuw gevraagd (alleen GET): een antwoord onder 500 staat als
+'transient' in de uitvoer, al het andere blijft een fout. Elke stap toont zijn duur; de traagste staan aan het einde.
 
 Voor schermafbeeldingen en ontwerpreviews is er een voller voorbeeldarchief:
 `tests/fixtures/showcase_vault.py DIR` maakt ongeveer 190 gegenereerde foto's over 2015-2025 en een
