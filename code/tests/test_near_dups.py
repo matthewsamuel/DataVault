@@ -951,6 +951,61 @@ def test_past_the_memory_guard_pairs_are_thinned_but_every_series_stays_the_same
         assert _components(thin, n, strictness) == _components(full, n, strictness), strictness
 
 
+def _spread_fingerprints(n=900, groups=12, seed=5):
+    """Look-alike groups whose photos are 0 to 12 phash bits apart: every strictness has its own series."""
+    rng = np.random.default_rng(seed)
+    g = rng.integers(0, groups, n)
+    phashes = rng.integers(0, 2 ** 63, groups, dtype=np.uint64)[g]
+    dhashes = rng.integers(0, 2 ** 63, groups, dtype=np.uint64)[g]
+    for i in range(n):
+        for bit in rng.choice(64, int(rng.integers(0, 7)), replace=False):
+            phashes[i] ^= np.uint64(1) << np.uint64(int(bit))
+        for bit in rng.choice(64, int(rng.integers(0, 8)), replace=False):
+            dhashes[i] ^= np.uint64(1) << np.uint64(int(bit))
+    colors = (rng.integers(20, 200, (groups, 12))[g] + rng.integers(-8, 9, (n, 12))).astype(np.int16)
+    flat = rng.random(n) < 0.05
+    return phashes, dhashes, colors, flat
+
+
+def test_thinning_while_pairs_come_in_keeps_every_series(monkeypatch):
+    # Past the guard, a new pair that joins nothing new is dropped at once (union-find per
+    # strictness), over many small slices, for a full lookup and for new photos only
+    monkeypatch.setattr(near_dups, "CANDIDATE_BUDGET", 64)
+    for fp in (_crowded_fingerprints(seed=9), _crowded_fingerprints(seed=12), _spread_fingerprints()):
+        n = len(fp[0])
+        full = near_dups.near_pairs(*fp)
+        for limit in (50, 400):
+            thin = near_dups.near_pairs(*fp, limit=limit)
+            assert len(thin["a"]) <= 3 * n
+            for strictness in near_dups.STRICTNESS:
+                assert _components(thin, n, strictness) == _components(full, n, strictness), (limit, strictness)
+        queries = np.arange(1, n, 3)
+        wanted = {k: v[np.isin(full["a"], queries) | np.isin(full["b"], queries)] for k, v in full.items()}
+        thin = near_dups.near_pairs(*fp, queries=queries, limit=60)
+        assert (np.isin(thin["a"], queries) | np.isin(thin["b"], queries)).all()
+        for strictness in near_dups.STRICTNESS:
+            assert _components(thin, n, strictness) == _components(wanted, n, strictness), strictness
+
+
+def test_the_vector_spanning_forest_is_the_forest_of_the_edges_in_order():
+    def kruskal(a, b, n):
+        parent, keep = list(range(n)), []
+        for x, y in zip(a.tolist(), b.tolist()):
+            while parent[x] != x:
+                x = parent[x]
+            while parent[y] != y:
+                y = parent[y]
+            keep.append(x != y)
+            if x != y:
+                parent[x] = y
+        return np.array(keep, dtype=bool)
+    rng = np.random.default_rng(2)
+    for _ in range(200):
+        n, m = int(rng.integers(2, 40)), int(rng.integers(0, 120))
+        a, b = rng.integers(0, n, m), rng.integers(0, n, m)
+        assert np.array_equal(near_dups.spanning_forest(a, b, n), kruskal(a, b, n))
+
+
 def _fingerprint_db(tmp_path, fp, ids):
     from backend.database import Database
     db = Database(tmp_path / "pairs.db")

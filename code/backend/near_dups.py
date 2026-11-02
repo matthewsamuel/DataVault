@@ -234,6 +234,7 @@ class HashIndex:
             counts = np.bincount(keys, minlength=size)
             starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
             self.parts.append((keys, order, counts, starts))
+        self._sorted = [self.hashes[order] for _, order, _, _ in self.parts]   # hashes in bucket order, per part
 
     def pairs(self, radius: int, queries: Optional[np.ndarray] = None,
               check: Optional[Callable[[], None]] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -269,6 +270,11 @@ class HashIndex:
                 look = qkeys ^ mask
                 cnt = counts[look]
                 hit = cnt > 0
+                # A full scan meets two buckets that differ by `mask` from both sides: look
+                # only from the bucket without the mask's top bit (each pair comes up once)
+                lower = mask and is_query is None
+                if lower:
+                    hit &= (qkeys & (1 << (int(mask).bit_length() - 1))) == 0
                 if not hit.any():
                     continue
                 hq, hlook, hcnt = q[hit], look[hit], cnt[hit]
@@ -279,32 +285,44 @@ class HashIndex:
                     base = int(ends[begin - 1]) if begin else 0
                     end = max(begin + 1, int(np.searchsorted(ends, base + CANDIDATE_BUDGET, side="right")))
                     self._check_slice(p, per_part, hq[begin:end], starts[hlook[begin:end]], hcnt[begin:end],
-                                      order, is_query, radius, sink)
+                                      order, is_query, radius, sink, lower)
                     begin = end
                     if check is not None and begin < len(hq):
                         check()
 
-    def _check_slice(self, part, per_part, qs, firsts, cnt, order, is_query, radius, sink) -> None:
-        total = int(cnt.sum())
-        qi = np.repeat(qs, cnt)
-        offset = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(cnt) - cnt, cnt)
-        cj = order[np.repeat(firsts, cnt) + offset]
-        # Each unordered pair once: from its lower position, or from the query side
-        if is_query is None:
-            keep = qi < cj
+    def _check_slice(self, part, per_part, qs, firsts, cnt, order, is_query, radius, sink, lower=False) -> None:
+        # Candidate k is query qs[i] against bucket position pos[k] (i from the cumulative
+        # counts); only the hashes are gathered for every candidate, positions only for the
+        # few that are close
+        ends = np.cumsum(cnt)
+        pos = np.repeat(firsts - (ends - cnt), cnt) + np.arange(int(ends[-1]), dtype=np.int64)
+        x = np.repeat(self.hashes[qs], cnt) ^ self._sorted[part][pos]
+        dist = popcount(x)
+        close = np.flatnonzero(dist <= radius)
+        if not len(close):
+            return
+        if len(close) * 8 < len(pos):            # few close: find their query by bisection
+            qi = qs[np.searchsorted(ends, close, side="right")]
         else:
-            keep = (qi != cj) & ((qi < cj) | ~is_query[cj])
-        qi, cj = qi[keep], cj[keep]
-        x = self.hashes[qi] ^ self.hashes[cj]
-        dist = popcount(x).astype(np.int64)
-        close = dist <= radius
+            qi = np.repeat(qs, cnt)[close]
+        cj = order[pos[close]]
+        x, dist = x[close], dist[close]
+        # Each unordered pair once: from its lower position, or from the query side (two
+        # different buckets in a full scan already come up once: see `lower` in scan)
+        if is_query is None:
+            once = None if lower else qi < cj
+        else:
+            once = (qi != cj) & ((qi < cj) | ~is_query[cj])
         # ... and only in the first part where it is within per_part bits
         for earlier in range(part):
             shift = np.uint64(earlier * _PART_BITS)
-            close &= popcount((x >> shift) & np.uint64((1 << _PART_BITS) - 1)) > per_part
-        if close.any():
-            a, b = qi[close], cj[close]
-            sink(np.minimum(a, b), np.maximum(a, b), dist[close])
+            later = popcount((x >> shift) & np.uint64((1 << _PART_BITS) - 1)) > per_part
+            once = later if once is None else once & later
+        if once is not None:
+            if not once.any():
+                return
+            qi, cj, dist = qi[once], cj[once], dist[once]
+        sink(np.minimum(qi, cj), np.maximum(qi, cj), dist.astype(np.int64))
 
 
 # ---------- strictness ----------
@@ -695,6 +713,75 @@ def _passes(phash_d: np.ndarray, dhash_d: np.ndarray, color_d: np.ndarray, flat:
     return (phash_d <= p) & (dhash_d <= d) & (color_d <= np.where(flat, min(c, FLAT_COLOR), c))
 
 
+def _roots(label: np.ndarray) -> np.ndarray:
+    """Pointer jumping until every entry points at its root."""
+    while True:
+        up = label[label]
+        if np.array_equal(up, label):
+            return label
+        label = up
+
+
+def spanning_forest(a: np.ndarray, b: np.ndarray, n: int) -> np.ndarray:
+    """
+    Mask of the edges (a[k], b[k]) that Kruskal would keep when it takes them in index
+    order (the first edge that joins two trees wins), computed with Borůvka rounds in
+    numpy: every tree picks its lowest-index edge to another tree. With the index as a
+    unique weight that is the same minimum spanning forest, in O(log n) vector steps
+    instead of a Python loop over every edge.
+    """
+    keep = np.zeros(len(a), dtype=bool)
+    label = np.arange(n, dtype=np.int64)
+    alive = np.arange(len(a), dtype=np.int64)
+    none = np.int64(len(a))
+    while len(alive):
+        la, lb = label[a[alive]], label[b[alive]]
+        apart = la != lb
+        alive, la, lb = alive[apart], la[apart], lb[apart]
+        if not len(alive):
+            break
+        best = np.full(n, none, dtype=np.int64)
+        np.minimum.at(best, la, alive)
+        np.minimum.at(best, lb, alive)
+        chosen = np.unique(best[best < none])
+        keep[chosen] = True
+        # Hook the trees along the chosen edges (a forest, so no cycles), larger root under smaller
+        x, y = label[a[chosen]], label[b[chosen]]
+        while len(x):
+            lo, hi = np.minimum(x, y), np.maximum(x, y)
+            np.minimum.at(label, hi, lo)
+            label = _roots(label)
+            x, y = label[x], label[y]
+            joined = x != y
+            x, y = x[joined], y[joined]
+        label = _roots(label)
+    return keep
+
+
+def _find(parent: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """The roots of x in a union-find parent array (parent[i] <= i), compressing their paths."""
+    root = parent[x]
+    while True:
+        up = parent[root]
+        if np.array_equal(up, root):
+            break
+        root = up
+    parent[x] = root
+    return root
+
+
+def _join(parent: np.ndarray, x: np.ndarray, y: np.ndarray) -> None:
+    """Union the trees of x[k] and y[k] for every k, in place (the smaller root wins)."""
+    rx, ry = _find(parent, x), _find(parent, y)
+    while True:
+        apart = rx != ry
+        if not apart.any():
+            return
+        rx, ry = rx[apart], ry[apart]
+        np.minimum.at(parent, np.maximum(rx, ry), np.minimum(rx, ry))
+        rx, ry = _find(parent, rx), _find(parent, ry)
+
+
 def _forest(found: Dict[str, np.ndarray], n: int) -> Dict[str, np.ndarray]:
     """
     Only the pairs that join photos into series: per strictness, a pair whose two photos
@@ -705,16 +792,8 @@ def _forest(found: Dict[str, np.ndarray], n: int) -> Dict[str, np.ndarray]:
     """
     keep = np.zeros(len(found["a"]), dtype=bool)
     for strictness in STRICTNESS:
-        parent = list(range(n))
         passing = np.flatnonzero(_passes(found["phash_d"], found["dhash_d"], found["color_d"], found["flat"], strictness))
-        for k, a, b in zip(passing.tolist(), found["a"][passing].tolist(), found["b"][passing].tolist()):
-            while parent[a] != a:
-                parent[a] = a = parent[parent[a]]
-            while parent[b] != b:
-                parent[b] = b = parent[parent[b]]
-            if a != b:
-                parent[a] = b
-                keep[k] = True
+        keep[passing[spanning_forest(found["a"][passing], found["b"][passing], n)]] = True
     return {key: value[keep] for key, value in found.items()}
 
 
@@ -748,14 +827,35 @@ def near_pairs(phashes: np.ndarray, dhashes: np.ndarray, colors: np.ndarray, fla
     found: Dict[str, List[np.ndarray]] = {k: [] for k in ("a", "b", "phash_d", "dhash_d", "color_d", "flat")}
     kept = 0
     compact_at = limit
+    # Once thinned: per strictness (strictest first) a union-find of the series so far. A
+    # new pair that joins nothing new at the strictest setting it passes is dropped right
+    # away, before its dhash and colours are even compared when its phash says enough
+    levels = list(STRICTNESS)
+    level_phash = np.array([STRICTNESS[s]["near"][0] for s in levels])
+    parents: Optional[List[np.ndarray]] = None
 
     def compact() -> None:
-        nonlocal kept, compact_at
+        nonlocal kept, compact_at, parents
         forest = _forest({k: np.concatenate(v) for k, v in found.items()}, n)
         for k, v in forest.items():
             found[k] = [v]
         kept = len(forest["a"])
         compact_at = max(limit, 2 * kept)
+        parents = []
+        for strictness in levels:
+            ok = _passes(forest["phash_d"], forest["dhash_d"], forest["color_d"], forest["flat"], strictness)
+            parent = np.arange(n, dtype=np.int64)
+            _join(parent, forest["a"][ok], forest["b"][ok])
+            parents.append(parent)
+
+    def joins_something(r: np.ndarray, c: np.ndarray, level: np.ndarray) -> np.ndarray:
+        """Whether r[k] and c[k] are still apart at strictness levels[level[k]]."""
+        apart = np.ones(len(r), dtype=bool)
+        for k, parent in enumerate(parents):
+            at = np.flatnonzero(level == k)
+            if len(at):
+                apart[at] = _find(parent, r[at]) != _find(parent, c[at])
+        return apart
     if n >= 2:
         values, value_of = np.unique(phashes, return_inverse=True)
         value_of = value_of.reshape(-1)
@@ -783,17 +883,24 @@ def near_pairs(phashes: np.ndarray, dhashes: np.ndarray, colors: np.ndarray, fla
         def spread(firsts: np.ndarray, sizes: np.ndarray) -> np.ndarray:
             """firsts[k], firsts[k] + 1, ..., firsts[k] + sizes[k] - 1 for every k."""
             total = int(sizes.sum())
+            if total == len(sizes):                     # one each (most phash values have one photo)
+                return firsts
             return np.repeat(firsts, sizes) + (np.arange(total, dtype=np.int64)
                                                - np.repeat(np.cumsum(sizes) - sizes, sizes))
 
-        def pair_photos(rows: np.ndarray, with_value: np.ndarray, mode: int) -> None:
+        def pair_photos(rows: np.ndarray, with_value: np.ndarray, mode: int, value_d: np.ndarray) -> None:
             nonlocal kept
             sizes = counts[with_value]
+            single = int(sizes.sum()) == len(sizes)
             for begin, end in slices(sizes):
                 if check is not None:
                     check()
-                r = np.repeat(rows[begin:end], sizes[begin:end])
-                c = members[spread(starts[with_value[begin:end]], sizes[begin:end])]
+                if single:
+                    r, c, pd = rows[begin:end], members[starts[with_value[begin:end]]], value_d[begin:end]
+                else:
+                    r = np.repeat(rows[begin:end], sizes[begin:end])
+                    c = members[spread(starts[with_value[begin:end]], sizes[begin:end])]
+                    pd = np.repeat(value_d[begin:end], sizes[begin:end])
                 if mode == _OTHERS:
                     keep = ~is_query[c]                     # query pairs come from the other side
                 elif mode == _SAME:
@@ -801,46 +908,71 @@ def near_pairs(phashes: np.ndarray, dhashes: np.ndarray, colors: np.ndarray, fla
                 else:
                     keep = None
                 if keep is not None:
-                    r, c = r[keep], c[keep]
-                dd = popcount(dhashes[r] ^ dhashes[c]).astype(np.int64)
+                    r, c, pd = r[keep], c[keep], pd[keep]
+                if parents is not None:      # already together at the strictest setting this phash allows
+                    level = np.zeros(len(pd), dtype=np.int64)
+                    for limit_p in level_phash[:-1]:
+                        level += pd > limit_p
+                    new = joins_something(r, c, level)
+                    r, c, pd = r[new], c[new], pd[new]
+                dd = popcount(dhashes[r] ^ dhashes[c])
                 ok = dd <= loose_d
-                r, c, dd = r[ok], c[ok], dd[ok]
+                r, c, dd, pd = r[ok], c[ok], dd[ok], pd[ok]
                 if not len(r):
                     continue
-                cd = np.abs(colors[r] - colors[c]).mean(axis=1)
+                # The mean colour distance, compared as a sum of 12 integers (exact, no floats)
+                cs = np.abs(colors[r] - colors[c]).sum(axis=1, dtype=np.int32)
                 fl = flat[r] | flat[c]
-                ok = cd <= np.where(fl, flat_c, loose_c)
+                ok = cs <= np.where(fl, 12 * flat_c, 12 * loose_c)
                 if not ok.any():
                     continue
-                r, c = r[ok], c[ok]
+                r, c, pd, dd, cd, fl = r[ok], c[ok], pd[ok], dd[ok], cs[ok] / 12.0, fl[ok]
+                if parents is not None:
+                    strictest = np.full(len(r), len(levels) - 1, dtype=np.int64)
+                    for k in range(len(levels) - 2, -1, -1):
+                        strictest[_passes(pd, dd, cd, fl, levels[k])] = k
+                    new = joins_something(r, c, strictest)
+                    if not new.any():
+                        continue
+                    r, c, pd, dd, cd, fl, strictest = (v[new] for v in (r, c, pd, dd, cd, fl, strictest))
+                    for k, parent in enumerate(parents):
+                        at = strictest <= k
+                        _join(parent, r[at], c[at])
                 kept += len(r)
                 found["a"].append(np.minimum(r, c))
                 found["b"].append(np.maximum(r, c))
-                found["phash_d"].append(popcount(phashes[r] ^ phashes[c]).astype(np.int8))
-                found["dhash_d"].append(dd[ok].astype(np.int8))
-                found["color_d"].append(cd[ok])
-                found["flat"].append(fl[ok])
+                found["phash_d"].append(pd.astype(np.int8))
+                found["dhash_d"].append(dd.astype(np.int8))
+                found["color_d"].append(cd)
+                found["flat"].append(fl)
                 if kept > compact_at:
                     compact()
 
-        def pair_values(x: np.ndarray, y: np.ndarray, mode: int) -> None:
-            """The query photos of value x[k] with the photos of value y[k]."""
+        def pair_values(x: np.ndarray, y: np.ndarray, mode: int, d: np.ndarray) -> None:
+            """The query photos of value x[k] with the photos of value y[k] (phash distance d[k])."""
             sizes = q_counts[x]
             use = (sizes > 0) & (counts[y] > 0)
-            x, y, sizes = x[use], y[use], sizes[use]
+            x, y, sizes, d = x[use], y[use], sizes[use], d[use]
+            single = int(sizes.sum()) == len(sizes)
             for begin, end in slices(sizes):
                 rows = q_members[spread(q_starts[x[begin:end]], sizes[begin:end])]
-                pair_photos(rows, np.repeat(y[begin:end], sizes[begin:end]), mode)
+                if single:
+                    pair_photos(rows, y[begin:end], mode, d[begin:end])
+                else:
+                    pair_photos(rows, np.repeat(y[begin:end], sizes[begin:end]), mode,
+                                np.repeat(d[begin:end], sizes[begin:end]))
 
-        def close_values(u: np.ndarray, v: np.ndarray, _d: np.ndarray) -> None:
-            pair_values(u, v, _ALL)
+        def close_values(u: np.ndarray, v: np.ndarray, d: np.ndarray) -> None:
+            pair_values(u, v, _ALL, d)
             if queries is not None:
-                pair_values(v, u, _OTHERS)
+                pair_values(v, u, _OTHERS, d)
 
         query_values = None if queries is None else np.flatnonzero(q_counts)
         HashIndex(values).scan(PAIR_RADIUS, close_values, query_values, check)
         same = np.flatnonzero((q_counts > 0) & (counts > 1))   # photos with the same phash as each other
-        pair_values(same, same, _SAME)
+        pair_values(same, same, _SAME, np.zeros(len(same), dtype=np.int64))
+        if parents is not None:
+            compact()          # pairs of one slice can still join the same two series
     if not kept:
         return {"a": np.zeros(0, dtype=np.int64), "b": np.zeros(0, dtype=np.int64),
                 "phash_d": np.zeros(0, dtype=np.int8), "dhash_d": np.zeros(0, dtype=np.int8),
