@@ -857,6 +857,21 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
   vaste favorieten of brede ontdekker, seizoensstemming) vertelt nu wat het meet, wat het voor jou
   is en hoe DataVault het uitrekent, met dezelfde grenzen als de berekening zelf. Het luister-DNA zegt
   hoe je type bepaald wordt.
+- **Back-upmap: ook een tweede keer.** **Gebruiken en testen** bewaart en test ook een tweede of
+  derde map in dezelfde sessie, ook als je het venster na de eerste test met Esc sloot.
+- **Ongedaan maken lukt ook na een hapering.** Is de schijf even los of antwoordt de server niet, dan
+  blijft de knop **Ongedaan maken** staan en kun je het nog eens proberen; bij Reeksen blijven de
+  link en de melding staan tot het lukt. Staat de muis op de melding, dan blijft de uitkomst staan.
+- **Keurer: de melding staat naast de foto.** Zo blijven de map en **Andere map** vrij tijdens een
+  snelle reeks beslissingen. Na meer dan twintig beslissingen zet de knop in de melding de oudere
+  beslissing nog steeds terug; alleen als hij echt al terug is, staat er "Al ongedaan".
+- **Menu: een breder venster toont nooit minder.** Is de ruimte krap, dan gaat eerst het woordmerk
+  DATAVAULT weg en pas daarna schuiven onderdelen naar **Meer**; de ruimtes en het zoekveld groeien
+  vloeiend mee. Wordt het venster breder terwijl je in Meer zit, dan blijft de focus op dat
+  onderdeel in de balk.
+- **Kleine dingen.** Het Herstelcentrum noemt acties uit Reeksen nu ook "Reeksen". **⌘Z** staat in
+  het sneltoetsenoverzicht. In het luister-DNA zijn de typen knoppen (Tab en Enter werken) en de
+  uitleg zegt: "volgens de tijden in je Spotify-export".
 
 ## Fase 2 – Stabiliseren
 
