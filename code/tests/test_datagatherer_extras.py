@@ -9,6 +9,7 @@ import json
 import os
 import sqlite3
 import time
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -55,7 +56,7 @@ def _sync(client, app, source, ok=True):
 def test_every_new_source_is_its_own_connector_file():
     folder = Path(registry.__file__).parent / "connectors"
     for source in ("google_timeline", "chrome_history", "safari_history", "netflix", "snapchat", "tiktok",
-                   "apple_privacy", "apple_health"):
+                   "apple_privacy", "apple_health", "swarm"):
         assert (folder / f"{source}.py").is_file()
         connector = registry.get(source)
         assert connector is not None and not registry.validate(connector)
@@ -213,3 +214,56 @@ def test_apple_health_memory_does_not_grow_with_the_export():
         tracemalloc.stop()
     assert len(events) == 28 and events[0]["details"]["stappen"] > 0
     assert peak < 8 * 1024 * 1024, peak
+
+
+def test_swarm_checkins_become_activity_places_and_points_and_twice_adds_nothing(client, app, tmp_path):
+    connector = registry.get("swarm")
+    assert connector.category == "Locatie" and not registry.validate(connector)
+    path = fx.swarm_zip(tmp_path / "foursquare-data.zip")
+    assert connector.detect(path, zipfile.ZipFile(path).namelist()) == "gegevens"
+    result = _upload(client, app, "swarm", path)
+    assert result["import"]["added"] == 3                   # the check-in without place or text is left out
+    rows = _rows(app, "SELECT ts_ms, title, url, details FROM activity_events WHERE source = 'swarm' ORDER BY ts_ms")
+    assert [r[1] for r in rows] == ["Café Het Spijker", "Sint-Pietersstation", "Op weg naar zee"]
+    assert rows[0][0] == 1563098400000 and rows[0][2] == "https://foursquare.com/v/4b5c"   # 10:00 UTC
+    assert json.loads(rows[0][3]) == {"tekst": "Eindelijk terras", "lat": 51.0543, "lon": 3.7174}
+    assert json.loads(rows[2][3]) == {"lat": 51.2, "lon": 3.2}          # a venueless check-in: its text is the title
+    visits = _rows(app, "SELECT name, place_key, start_ms = end_ms FROM location_visits WHERE origin = 'swarm' "
+                        "ORDER BY start_ms")
+    assert visits[0] == ("Café Het Spijker", "4b5c", 1) and len(visits) == 3
+    # three check-ins plus the visit the app noticed by itself
+    assert _rows(app, "SELECT COUNT(*) FROM location_points WHERE origin = 'swarm'")[0][0] == 4
+    _upload(client, app, "swarm", fx.write_zip(tmp_path / "again.zip", {"export/checkins1.json": fx.swarm_checkins()}))
+    assert _count(app, "swarm") == 3
+    assert _rows(app, "SELECT COUNT(*) FROM location_visits WHERE origin = 'swarm'")[0][0] == 3
+
+
+def test_swarm_recognises_its_export_and_nothing_else(tmp_path):
+    connector = registry.get("swarm")
+    single = tmp_path / "checkins2.json"
+    single.write_text(json.dumps(fx.swarm_checkins()))
+    assert connector.detect(single, None) == "gegevens"
+    other = tmp_path / "checkins.json"
+    other.write_text(json.dumps({"checkins": [1, 2]}))
+    assert connector.detect(other, None) is None
+    timeline = tmp_path / "location-history.json"
+    timeline.write_text(json.dumps([{"startTime": "2019-07-14T10:00:00Z", "visit": {}}]))
+    assert connector.detect(timeline, None) is None
+    zipped = fx.write_zip(tmp_path / "checkins.zip", {"checkins1.json": "{\"rows\": []}"})
+    assert connector.detect(zipped, ["checkins1.json"]) is None
+    # and the Google Tijdlijn does not take a Swarm export for its own
+    path = fx.swarm_zip(tmp_path / "data.zip")
+    assert registry.get("google_timeline").detect(path, zipfile.ZipFile(path).namelist()) is None
+
+
+def test_swarm_times_from_the_export_and_from_the_api():
+    from backend.datagatherer.connectors import swarm
+    assert swarm.parse_time("2019-07-14 10:00:00.000000") == 1563098400000
+    assert swarm.parse_time("2019-07-14 10:00:00") == 1563098400000
+    assert swarm.parse_time(1563098400) == 1563098400000
+    assert swarm.parse_time("2019-07-14T12:00:00+02:00") == 1563098400000
+    assert swarm.parse_time(None) is None and swarm.parse_time(True) is None
+    api = {"response": {"checkins": {"items": [{"id": "a", "createdAt": 1563098400, "venue": {
+        "id": "v", "name": "Plek", "location": {"lat": 51.0, "lng": 3.7}}}]}}}
+    events, points, visits = swarm.parse_checkins(api)
+    assert len(events) == 1 and points == [(1563098400000, 51.0, 3.7, None)] and visits[0]["name"] == "Plek"

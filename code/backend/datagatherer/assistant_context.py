@@ -27,7 +27,7 @@ _WORDS = re.compile(r"\b(\d{1,2})\s+([a-zA-Z]+)\.?\s+(\d{4})\b")
 _WORDS_EN = re.compile(r"\b([a-zA-Z]+)\.?\s+(\d{1,2}),?\s+(\d{4})\b")
 _ISO = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
 _NUMERIC = re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b")
-LOCATION_SOURCES = ("google_timeline", "google_takeout")
+LOCATION_SOURCES = ("google_timeline", "google_takeout", "swarm")
 MAX_PLACES = 8
 MAX_TITLES = 6
 

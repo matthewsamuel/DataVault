@@ -51,6 +51,7 @@ KINDS: Dict[str, Tuple[str, str]] = {
     "music": ("Muziek", "fa-music"),
     "steps": ("Stappen", "fa-shoe-prints"),
     "workout": ("Training", "fa-person-running"),
+    "checkin": ("Ingecheckt", "fa-location-dot"),
 }
 
 

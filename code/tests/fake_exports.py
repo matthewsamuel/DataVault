@@ -337,3 +337,28 @@ HEALTH_XML = """<?xml version="1.0" encoding="UTF-8"?>
 
 def health_zip(path: Path, xml_name="apple_health_export/exporteren.xml") -> Path:
     return write_zip(path, {xml_name: HEALTH_XML, "apple_health_export/export_cda.xml": "<ClinicalDocument/>"})
+
+
+def swarm_checkins():
+    """checkins1.json of a Foursquare data download: UTC 'createdAt', a venueless check-in, one without a place."""
+    return {"count": 4, "items": [
+        {"id": "5d2b0c1a", "createdAt": "2019-07-14 10:00:00.000000", "type": "checkin", "visibility": "public",
+         "timeZoneOffset": 120, "venue": {"id": "4b5c", "name": "Café Het Spijker",
+                                          "url": "https://foursquare.com/v/4b5c"},
+         "lat": 51.0543, "lng": 3.7174, "hacc": 12.0, "shout": "Eindelijk terras"},
+        {"id": "5d2b0c1b", "createdAt": "2019-07-14 18:30:00.000000", "type": "checkin",
+         "timeZoneOffset": 120, "venue": {"id": "4b5d", "name": "Sint-Pietersstation"}, "lat": 51.0359, "lng": 3.7108},
+        {"id": "5d2b0c1c", "createdAt": "2019-07-15 08:00:00", "type": "venueless", "shout": "Op weg naar zee",
+         "lat": 51.2, "lng": 3.2},
+        {"id": "5d2b0c1d", "createdAt": "2019-07-15 09:00:00.000000", "type": "checkin"}]}
+
+
+def swarm_zip(path: Path) -> Path:
+    return write_zip(path, {
+        "checkins1.json": swarm_checkins(),
+        "checkins1.csv": "id,createdAt\n5d2b0c1a,2019-07-14 10:00:00\n",
+        "visits.json": {"count": 1, "items": [{"id": "v1", "createdAt": "2019-07-14 12:00:00.000000",
+                                               "lat": 51.05, "lng": 3.72}]},
+        "photos.json": {"count": 0, "items": []},
+        "readme.html": "<html></html>",
+    })
