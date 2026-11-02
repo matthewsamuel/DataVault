@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pathlib import Path
 from typing import Optional
 import os
@@ -116,7 +115,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     app.add_middleware(security.ContentSecurityPolicyMiddleware)
     security.strip_query_strings_from_access_log()
     # Added last = outermost: a foreign Host header (DNS rebinding) is refused first
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=security.allowed_hosts())
+    app.add_middleware(security.TrustedHostMiddleware, allowed_hosts=security.allowed_hosts())
 
     config = None
     app.state.jobs = None

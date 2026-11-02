@@ -5,7 +5,8 @@ The dashboard is served by its own server on 127.0.0.1, so the browser page and
 the API share one origin. That lets us lock the HTTP layer down:
 - No CORS headers at all: other websites cannot read any API response.
 - Trusted hosts only (127.0.0.1, localhost): a DNS-rebinding page whose Host
-  header is its own domain gets 400 before reaching any route.
+  header is its own domain gets 400 (the uniform JSON error, code 'invalid_host')
+  before reaching any route.
 - A per-process session token: every request that can change something (any
   method other than GET/HEAD/OPTIONS) must carry it in X-DataVault-Token. Only
   same-origin JavaScript can read it (GET /api/session), so a cross-site form or
@@ -41,6 +42,56 @@ def allowed_hosts() -> List[str]:
     if os.environ.get("DATAVAULT_TESTING") == "1":
         hosts.append("testserver")
     return hosts
+
+
+def host_name(header) -> str:
+    """The name part of a Host header, lowercased: '127.0.0.1:8000' -> '127.0.0.1',
+    '[::1]:8000' -> '::1'. '' for a missing or malformed header."""
+    if not header:
+        return ""
+    host = header.strip().lower()
+    if host.startswith("["):
+        end = host.find("]")
+        if end < 0 or (host[end + 1:] and not host[end + 1:].startswith(":")):
+            return ""
+        return host[1:end]
+    name, _, port = host.partition(":")
+    if port and not port.isdigit():
+        return ""
+    return name
+
+
+class TrustedHostMiddleware:
+    """
+    Answers only to the hosts of allowed_hosts() (DNS rebinding: a page on another domain that
+    resolves to 127.0.0.1 sends its own name in Host). Starlette's version refuses with plain
+    text; this one gives the app's uniform JSON error (backend/errors.py), code 'invalid_host',
+    like every other refusal. A WebSocket with a foreign Host is closed before it is accepted.
+    """
+
+    def __init__(self, app, allowed_hosts: List[str]):
+        self.app = app
+        self.allowed = frozenset(h.lower() for h in allowed_hosts)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        header = None
+        for name, value in scope.get("headers") or ():
+            if name == b"host":
+                header = value.decode("latin-1")
+                break
+        if host_name(header) in self.allowed:
+            await self.app(scope, receive, send)
+            return
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        from backend.errors import error_response
+        response = error_response(
+            400, "Onbekende host: DataVault antwoordt alleen op 127.0.0.1 en localhost", code="invalid_host")
+        await response(scope, receive, send)
 
 
 class SessionTokenMiddleware:
