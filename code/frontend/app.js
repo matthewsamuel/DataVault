@@ -267,6 +267,9 @@ function switchMainView(view) {
         });
     }
     activeMainView = view;
+    // Sommige onderdelen zetten de meldingen op een eigen plek (de Keurer: naast de kaart)
+    const toasts = document.getElementById('toast-container');
+    if (toasts) toasts.dataset.view = view;
     navRecord(view);
     document.title = view === 'home' ? 'DataVault' : `${VIEW_TITLES[view]} · DataVault`;
     // Update tabs (ook de tandwielknop van Instellingen)

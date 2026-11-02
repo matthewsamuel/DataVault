@@ -60,6 +60,7 @@
     --input-date-w: 150px;
     --page-gutter: 32px;
     --page-max: 1200px;
+    --keurer-card-max: 480px;    /* de Keurer-kaart; de meldingen staan ernaast */
     --nav-h: 56px;
 
     /* Bediening */
@@ -1696,6 +1697,18 @@ textarea.input {
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
+}
+
+/* Keurer: naast de kaart (max. 480 px breed, gecentreerd), op de hoogte van de kaart, zodat de
+   map, de cijfers en 'Andere map' vrij blijven; keurer.js zet --toast-keurer-top */
+#toast-container[data-view="keurer"] {
+    top: var(--toast-keurer-top, calc(var(--nav-h) + var(--space-md)));
+    right: var(--space-md);
+    max-width: calc((100vw - var(--keurer-card-max)) / 2 - var(--space-md) * 2);
+}
+
+#toast-container[data-view="keurer"] .toast {
+    min-width: 0;
 }
 
 .toast {
@@ -8870,7 +8883,7 @@ button.storage-file-thumb:hover .storage-file-play {
 .keurer-card {
     position: relative;
     width: 100%;
-    max-width: 480px;
+    max-width: var(--keurer-card-max);
     height: 100%;
     max-height: 600px;
     border-radius: var(--radius-xl);

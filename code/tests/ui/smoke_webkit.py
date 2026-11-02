@@ -664,6 +664,27 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                    f"keurer: Space on Houden did not keep ({pressed} vs {base})")
             step("keurer: undo the keep", lambda: page.keyboard.press("ArrowDown"), 1.0)
             expect(page.evaluate(keurer_state)[1] == base[1], "keurer: ArrowDown did not undo the keep")
+            # A trash decision: the undo toast stands beside the card, clear of the folder bar and
+            # 'Andere map'; its button still undoes the decision after it fell off the local
+            # 20-step stack (simulated by emptying keurerHistory): the server decides
+            trashed = page.evaluate("keurerFileQueue[keurerIndex].path")
+            page.evaluate("document.activeElement.blur(); document.querySelectorAll('#toast-container .toast').forEach(t => t.remove())")
+            step("keurer: ArrowRight trashes", lambda: page.keyboard.press("ArrowRight"), 1.2)
+            overlap = page.evaluate("""(() => { const t = document.querySelector('#toast-container .toast-undo');
+                const a = t && t.getBoundingClientRect(), b = document.querySelector('.keurer-folder-bar').getBoundingClientRect();
+                const c = document.getElementById('keurer-card').getBoundingClientRect();
+                return !t ? 'no toast' : [a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top,
+                                          a.left < c.right - 1 && a.right > c.left && a.top < c.bottom && a.bottom > c.top]; })()""")
+            expect(overlap == [False, False] and not Path(trashed).exists(),
+                   f"keurer: the undo toast covers the folder bar or the card ([folder bar, card] = {overlap})")
+            step("keurer: the toast undoes a decision no longer on the local stack", lambda: (
+                page.evaluate("keurerHistory = []"), page.click("#toast-container .toast-undo .toast-action")), 1.2)
+            toast_title = page.evaluate("(document.querySelector('#toast-container .toast strong') || {}).textContent")
+            expect(Path(trashed).exists() and toast_title == "Ongedaan gemaakt",
+                   f"keurer: the toast did not undo the older decision ({toast_title!r}, back: {Path(trashed).exists()})")
+            step("keurer: the mouse leaves the outcome", lambda: page.mouse.move(10, 600), 4.5)
+            expect(not page.evaluate("[...document.querySelectorAll('#toast-container .toast')].some(t => !t._leaving)"),
+                   "keurer: the undo outcome stayed after the mouse left it")
             # Move window: a highlighted folder and Enter on Annuleren: closed, nothing moved
             base = page.evaluate(keurer_state)
             current = page.evaluate("keurerFileQueue[keurerIndex].path")
