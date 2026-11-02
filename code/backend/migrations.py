@@ -1214,6 +1214,31 @@ def _m196_message_edits(conn: sqlite3.Connection):
             conn.execute(f"ALTER TABLE msg_messages ADD COLUMN {name} {kind}")
 
 
+def _m197_own_sources(conn: sqlite3.Connection):
+    """
+    The user's own list of sources DataGatherer cannot reach (an old iPad, a phone in a
+    drawer, a USB stick, an account without an export page): where their back-up is, when it
+    was made and how far it is (backend/datagatherer/backups.py). status: 'te_doen' (no
+    back-up yet), 'bezig' (partly) or 'veilig' (everything is in a back-up). in_use: 1 when
+    the source still gets new data, so an old back-up gets old. Only a new table.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_own_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            location TEXT,
+            note TEXT,
+            status TEXT NOT NULL,
+            in_use INTEGER NOT NULL DEFAULT 0,
+            backup_at REAL,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+
 # (version, name, function) - append only, never renumber or edit an applied migration
 MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "baseline", _m001_baseline),
@@ -1259,6 +1284,8 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     # 195-199: DataGatherer, what was left (web visits from two sources, edited iMessages)
     (195, "activity_duplicate_of", _m195_activity_duplicate_of),
     (196, "message_edits", _m196_message_edits),
+    # 197: the user's own sources and their back-ups (Home and DataGatherer > Back-ups)
+    (197, "own_sources", _m197_own_sources),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

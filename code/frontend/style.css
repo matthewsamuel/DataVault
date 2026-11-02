@@ -71,6 +71,9 @@
     /* Kleine vierkante miniaturen in lijsten (ranglijst) */
     --thumb-sm: 56px;
 
+    /* Een statusstip (Back-ups: recent, een tijd geleden, lang geleden) */
+    --dot-size: 8px;
+
     /* Rondingen */
     --radius-xs: 4px;
     --radius-sm: 6px;
@@ -18230,3 +18233,316 @@ html[data-motion="volledig"] .message-bubble.md-streaming::after {
     display: inline-block;
     color: var(--accent-text);
 }
+
+/* ==================== BACK-UPS ====================
+ * Hoe lang geleden elke bron veiliggesteld is (backups.js): een stip per stand, op Home kort
+ * en in DataGatherer > Back-ups met je eigen lijst. Alleen gedeelde bouwstenen: .card,
+ * .segmented, .progress, .badge, .btn; groen alleen voor 'recent' en de voortgang. */
+
+.bk-dot {
+    flex: none;
+    width: var(--dot-size);
+    height: var(--dot-size);
+    border-radius: var(--radius-full);
+    background: var(--border-strong);
+}
+
+.bk-dot-goed { background: var(--success); }
+.bk-dot-let_op { background: var(--warning); }
+.bk-dot-oud { background: var(--danger); }
+.bk-dot-aangevraagd { background: var(--info); }
+
+/* ---- Home: één rustige kaart, twee of drie kolommen rijen ---- */
+
+.home-backups-meta {
+    margin-left: var(--space-xs);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-regular);
+    color: var(--text-tertiary);
+}
+
+.home-backups .otd-header-flex {
+    margin-bottom: var(--space-sm);
+}
+
+.bk-home-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: var(--space-2xs) var(--space-xl);
+}
+
+.bk-home-row {
+    display: grid;
+    grid-template-columns: auto var(--icon-md) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+    height: var(--control-h);
+    padding: 0 var(--space-sm);
+    margin: 0 calc(-1 * var(--space-sm));
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--dur-1) var(--ease-standard);
+}
+
+.bk-home-row:hover {
+    background: var(--surface-hover);
+}
+
+.bk-home-row:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-shadow);
+}
+
+.bk-home-icon {
+    font-size: var(--icon-xs);
+    color: var(--text-tertiary);
+    text-align: center;
+}
+
+.bk-home-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bk-home-when {
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.bk-home-when.is-requested {
+    color: var(--info-text);
+}
+
+.bk-home-more {
+    grid-template-columns: 1fr;
+    color: var(--text-secondary);
+}
+
+/* ---- De pagina ---- */
+
+.bk-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xl);
+}
+
+.bk-progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.bk-progress-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-md) var(--space-xl);
+}
+
+.bk-progress-value {
+    margin-top: var(--space-xs);
+    color: var(--text-primary);
+    line-height: var(--lh-tight);
+}
+
+.bk-progress-value .mono {
+    font-size: var(--fs-3xl);
+    font-weight: var(--fw-semibold);
+    letter-spacing: var(--tracking-tight);
+    font-variant-numeric: tabular-nums;
+}
+
+.bk-progress-of {
+    font-size: var(--fs-md);
+    color: var(--text-secondary);
+}
+
+.bk-progress-bar {
+    height: var(--dot-size);
+}
+
+.bk-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-lg);
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+}
+
+.bk-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.bk-legend-item .mono {
+    color: var(--text-primary);
+    font-weight: var(--fw-semibold);
+}
+
+.bk-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    min-height: var(--control-h);
+}
+
+.bk-section-title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+    margin: 0;
+}
+
+.bk-section-text {
+    max-width: 680px;
+    margin: var(--space-xs) 0 var(--space-lg);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-normal);
+    color: var(--text-secondary);
+}
+
+.bk-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    background: var(--surface-card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.bk-row {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-xl);
+    transition: background-color var(--dur-4) var(--ease-standard);
+}
+
+.bk-row-own {
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
+}
+
+.bk-row + .bk-row {
+    border-top: 1px solid var(--border-hairline);
+}
+
+.bk-row.is-flash {
+    background: var(--accent-subtle);
+}
+
+.bk-row-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-h);
+    height: var(--control-h);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-hairline);
+    color: var(--text-secondary);
+    font-size: var(--icon-sm);
+}
+
+.bk-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+
+.bk-row-name {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+    color: var(--text-primary);
+}
+
+.bk-row-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+}
+
+.bk-path {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--text-secondary);
+}
+
+.bk-row-when {
+    font-size: var(--fs-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.bk-row-actions {
+    display: flex;
+    gap: var(--space-2xs);
+}
+
+.bk-remove:hover {
+    color: var(--danger-text);
+}
+
+/* ---- Het venster ---- */
+
+.bk-field-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-md);
+}
+
+.bk-field-pair .select,
+.bk-date {
+    width: 100%;
+}
+
+.bk-note {
+    width: 100%;
+    font-size: var(--fs-sm);
+    resize: vertical;
+}
+
+.dg-field > .segmented.bk-status {
+    align-self: flex-start;
+}
+
+@media (max-width: 1180px) {
+    .bk-row-own {
+        grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+        row-gap: var(--space-sm);
+    }
+
+    .bk-row-own .bk-status {
+        grid-column: 3 / 5;
+        grid-row: 2;
+        justify-self: start;
+    }
+
+    .bk-row-own .bk-row-actions {
+        grid-column: 5;
+        grid-row: 1;
+    }
+}
+

@@ -192,7 +192,7 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== VIEW SWITCHING ====================
 
-const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map', 'berichten', 'activity', 'series'];
+const MAIN_VIEWS = ['home', 'viewer', 'duplicates', 'spotify', 'shows', 'keurer', 'timeline', 'recovery', 'settings', 'albums', 'datagatherer', 'map', 'berichten', 'activity', 'series', 'backups'];
 
 function currentMainView() {
     return MAIN_VIEWS.find(v => {
@@ -205,7 +205,7 @@ function currentMainView() {
 const VIEW_TITLES = {
     home: 'Home', viewer: 'Bestanden', duplicates: 'Duplicaten', spotify: 'Spotify', shows: 'Shows', keurer: 'Keurer',
     timeline: 'Tijdlijn', recovery: 'Herstelcentrum', settings: 'Instellingen', albums: 'Albums', datagatherer: 'DataGatherer',
-    map: 'Kaart', berichten: 'Berichten', activity: 'Activiteit', series: 'Reeksen',
+    map: 'Kaart', berichten: 'Berichten', activity: 'Activiteit', series: 'Reeksen', backups: 'Back-ups',
 };
 
 // Het scherm waar een melding bij hoort: info en succes blijven niet hangen op een ander scherm
@@ -363,6 +363,10 @@ function switchMainView(view) {
         if (typeof activityInit === 'function') activityInit();
     } else if (view === 'series') {
         if (typeof seriesInit === 'function') seriesInit();
+    } else if (view === 'backups') {
+        if (typeof backupsInit === 'function') backupsInit();
+    } else if (view === 'home') {
+        if (typeof homeLoadBackups === 'function') homeLoadBackups();
     }
 }
 
@@ -2797,6 +2801,9 @@ async function fetchHomeWidgets() {
 
     // 2. Photo OTD
     loadPhotoOtdWidget();
+
+    // Back-ups: hoe lang geleden elke bron veiliggesteld is (backups.js)
+    if (typeof homeLoadBackups === 'function') homeLoadBackups();
 
     // 3. Spotify OTD
     homeOtdLoading('spotify-otd-loading', 'spotify-otd-content');

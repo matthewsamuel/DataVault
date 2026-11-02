@@ -21,6 +21,11 @@ POST   /api/datagatherer/sources/{id}/upload?name=     the request body is an ex
 GET    /api/datagatherer/network-log?source&limit      every request DataGatherer made (or refused)
 GET    /api/datagatherer/launchd                       the optional launchd agent
 POST   /api/datagatherer/launchd/install | /uninstall  only on a click in Instellingen
+GET    /api/datagatherer/backups                       how long ago every source was last saved (Home)
+GET    /api/datagatherer/own-sources                   the user's own list (old devices, drives, accounts)
+POST   /api/datagatherer/own-sources                   {name, kind, location, note, status, in_use, backup_at}
+PATCH  /api/datagatherer/own-sources/{id}              the same fields, each optional
+DELETE /api/datagatherer/own-sources/{id}              returns the removed row; POST .../restore puts it back
 
 The app never opens a web page itself: request-export and connect return the URL, and the
 page opens it in the user's browser after their click.
@@ -35,7 +40,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from backend.datagatherer import cards, daemon, keychain, launchd, oauth, raw_store, registry, state
+from backend.datagatherer import backups, cards, daemon, keychain, launchd, oauth, raw_store, registry, state
 from backend.datagatherer import jobs as gather_jobs
 from backend.datagatherer.base import CATEGORIES, ConnectorError, GatherContext
 from backend.datagatherer.jobs import WATCH_TYPE, import_type_name, sync_type_name
@@ -412,6 +417,64 @@ def get_network_log(source: Optional[str] = None, limit: int = 100) -> Dict[str,
     for entry in entries:
         entry["source_name"] = names.get(entry["source_id"], entry["source_id"])
     return {"entries": entries}
+
+
+@router.get("/backups")
+def backup_overview() -> Dict[str, Any]:
+    """Every source with how long ago it was last saved, worst first (Home and Back-ups)."""
+    return backups.overview(config, db)
+
+
+@router.get("/own-sources")
+def own_sources() -> Dict[str, Any]:
+    return {"sources": backups.list_own(db), "kinds": [{"id": k, "label": v[0], "icon": f"fas {v[1]}"}
+                                                        for k, v in backups.KINDS.items()],
+            "statuses": [{"id": k, "label": v} for k, v in backups.STATUSES.items()]}
+
+
+def _own_body(body: Any) -> Dict[str, Any]:
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Verwacht een object")
+    return body
+
+
+@router.post("/own-sources")
+def add_own_source(body: Any = Body(...)) -> Dict[str, Any]:
+    try:
+        return {"source": backups.add_own(db, _own_body(body))}
+    except backups.OwnSourceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/own-sources/{source_id}")
+def update_own_source(source_id: int, body: Any = Body(...)) -> Dict[str, Any]:
+    if backups.get_own(db, source_id) is None:
+        raise HTTPException(status_code=404, detail="Deze bron staat niet in je lijst")
+    try:
+        return {"source": backups.update_own(db, source_id, _own_body(body))}
+    except backups.OwnSourceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/own-sources/{source_id}")
+def remove_own_source(source_id: int) -> Dict[str, Any]:
+    row = backups.remove_own(db, source_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Deze bron staat niet in je lijst")
+    return {"removed": row}
+
+
+@router.post("/own-sources/restore")
+def restore_own_source(body: Any = Body(...)) -> Dict[str, Any]:
+    """The undo of a removal: the row the DELETE returned."""
+    row = _own_body(body)
+    if not all(c in row for c in backups.COLUMNS) or not isinstance(row["id"], int):
+        raise HTTPException(status_code=400, detail="Dit is geen verwijderde bron")
+    try:
+        backups._clean(row, partial=False)
+    except backups.OwnSourceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"source": backups.restore_own(db, row)}
 
 
 @router.get("/launchd")

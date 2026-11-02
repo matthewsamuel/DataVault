@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
     <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
     <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
-    <link rel="stylesheet" href="style.css?v=95">
+    <link rel="stylesheet" href="style.css?v=96">
     <!-- Beweging: als eerste, zodat html[data-motion] klopt vóór de eerste weergave (docs/MOTION.md) -->
     <script src="motion.js?v=2"></script>
 </head>
@@ -69,7 +69,7 @@
                 <button type="button" class="nav-tab" data-view="berichten" data-icon="fas fa-comments" onclick="switchMainView('berichten')" title="Berichten: je gesprekken doorzoeken (g e)">
                     Berichten
                 </button>
-                <button type="button" class="nav-tab" data-view="datagatherer" data-also="activity" data-icon="fas fa-cloud-arrow-down" onclick="switchMainView('datagatherer')" title="DataGatherer: je gegevens bijwerken (g v)">
+                <button type="button" class="nav-tab" data-view="datagatherer" data-also="activity backups" data-icon="fas fa-cloud-arrow-down" onclick="switchMainView('datagatherer')" title="DataGatherer: je gegevens bijwerken (g v)">
                     DataGatherer
                 </button>
                 <button type="button" class="nav-tab" data-view="recovery" data-icon="fas fa-clock-rotate-left" onclick="switchMainView('recovery')" title="Herstelcentrum: alles terugzetten wat de app verplaatste (8)">
@@ -225,6 +225,18 @@
                                         <div class="storage-text stat-tile-meta" id="storage-meta"></div>
                                     </div>
                                 </div>
+                            </section>
+
+                            <!-- Back-ups: per bron hoe lang geleden hij veiliggesteld is, het oudste eerst (backups.js) -->
+                            <section class="dynamic-widget home-backups" id="widget-backups" aria-labelledby="home-backups-title">
+                                <div class="otd-header-flex">
+                                    <h4 id="home-backups-title"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups
+                                        <span class="home-backups-meta" id="home-backups-meta"></span></h4>
+                                    <button type="button" class="btn btn-ghost btn-sm otd-see-all" onclick="switchMainView('backups')">
+                                        Alles bekijken <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                                <div class="home-backups-list" id="home-backups-list"></div>
                             </section>
 
                             <!-- Pasha, de assistent -->
@@ -965,6 +977,7 @@
                         <div class="segmented dg-switch" role="group" aria-label="DataGatherer-weergave">
                             <button type="button" class="" aria-pressed="false" onclick="switchMainView('datagatherer')"><i class="fas fa-plug" aria-hidden="true"></i> Bronnen</button>
                             <button type="button" class="active" aria-pressed="true" data-view="activity" onclick="switchMainView('activity')"><i class="fas fa-wave-square" aria-hidden="true"></i> Activiteit</button>
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('backups')"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups</button>
                         </div>
                     </div>
                 </div>
@@ -999,6 +1012,7 @@
                         <div class="segmented dg-switch" role="group" aria-label="DataGatherer-weergave">
                             <button type="button" class="active" aria-pressed="true" onclick="switchMainView('datagatherer')"><i class="fas fa-plug" aria-hidden="true"></i> Bronnen</button>
                             <button type="button" class="" aria-pressed="false" data-view="activity" onclick="switchMainView('activity')"><i class="fas fa-wave-square" aria-hidden="true"></i> Activiteit</button>
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('backups')"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups</button>
                         </div>
                         <button type="button" class="btn btn-secondary" onclick="switchMainView('berichten')" title="Berichten (g e)">
                             <i class="fas fa-comments" aria-hidden="true"></i> Berichten
@@ -1016,6 +1030,27 @@
                     <div class="dg-filters" id="dg-filters" role="group" aria-label="Categorie"></div>
                 </div>
                 <div class="dg-groups" id="dg-groups"></div>
+            </div>
+        </div>
+
+        <!-- BACK-UPS: hoe lang geleden elke bron veiliggesteld is, en je eigen lijst (backups.js) -->
+        <div id="section-backups" class="section hidden">
+            <div class="page bk-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="bk-title" tabindex="-1"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups</h1>
+                        <p class="page-subtitle">Wanneer je elke bron voor het laatst veiligstelde, en waar de back-ups
+                            van je oude toestellen staan.</p>
+                    </div>
+                    <div class="dg-header-actions">
+                        <div class="segmented dg-switch" role="group" aria-label="DataGatherer-weergave">
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('datagatherer')"><i class="fas fa-plug" aria-hidden="true"></i> Bronnen</button>
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('activity')"><i class="fas fa-wave-square" aria-hidden="true"></i> Activiteit</button>
+                            <button type="button" class="active" aria-pressed="true" onclick="switchMainView('backups')"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="bk-content" id="bk-content" aria-live="polite"></div>
             </div>
         </div>
 
@@ -1688,7 +1723,7 @@
     <script src="media-motion.js?v=3"></script>
     <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
     <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
-    <script src="app.js?v=89"></script>
+    <script src="app.js?v=90"></script>
     <script src="nav-more.js?v=2"></script>
     <script src="undo-toast.js?v=3"></script>
     <script src="pasha-tools.js?v=3"></script>
@@ -1702,11 +1737,12 @@
     <script src="recovery.js?v=12"></script>
     <script src="settings.js?v=7"></script>
     <script src="map.js?v=15"></script>
-    <script src="shortcuts.js?v=12"></script>
+    <script src="shortcuts.js?v=13"></script>
     <script src="export.js?v=9"></script>
     <script src="library.js?v=11"></script>
     <script src="datagatherer.js?v=9"></script>
     <script src="activity.js?v=7"></script>
+    <script src="backups.js?v=2"></script>
     <script src="elo.js?v=14"></script>
     <script src="backup-settings.js?v=10"></script>
     <script src="search.js?v=6"></script>

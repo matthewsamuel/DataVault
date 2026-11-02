@@ -37,6 +37,7 @@ const SHORTCUT_VIEWS = [
     { view: 'berichten', key: null, g: 'e', label: 'Berichten' },
     { view: 'activity', key: null, g: 'c', label: 'Activiteit' },
     { view: 'series', key: null, g: 'n', label: 'Reeksen' },
+    { view: 'backups', key: null, g: 'u', label: 'Back-ups' },
 ];
 
 // ⌘Z op een Mac, Ctrl+Z elders (zoals de hint in de melding, undo-toast.js)
