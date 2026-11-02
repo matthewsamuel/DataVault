@@ -242,8 +242,10 @@ function dgDataBlock(src) {
     if (until) {
         line.append(createEl('span', { class: 'dg-until-label', text: 'Gegevens t/m ' }),
             createEl('span', { class: 'mono dg-until-date', text: until }));
-        // 'N dagen achter' staat al op het label; hier alleen 'vandaag' of hoe lang geleden
-        if (typeof src.gap_days === 'number' && src.status !== 'achter') {
+        // 'N dagen achter' staat al op het label; hier alleen 'vandaag', hoe lang geleden of 'compleet'
+        if (src.complete) {
+            line.append(createEl('span', { class: 'dg-gap', text: ' · compleet' }));
+        } else if (typeof src.gap_days === 'number' && src.status !== 'achter') {
             line.append(createEl('span', {
                 class: 'dg-gap',
                 text: src.gap_days === 0 ? ' · vandaag' : ` · ${dgDays(src.gap_days)} geleden`,
@@ -262,7 +264,22 @@ function dgDataBlock(src) {
     return createEl('div', { class: 'dg-data' }, line, dgCoverageBar(src),
         src.records ? createEl('div', { class: 'dg-records' },
             createEl('span', { class: 'mono', text: formatNumberNl(src.records) }),
-            ` ${src.records === 1 ? src.record_label[0] : src.record_label[1]}`) : null);
+            ` ${src.records === 1 ? src.record_label[0] : src.record_label[1]}`) : null,
+        dgAccountList(src));
+}
+
+// Per account (twee Instagram-accounts): tot wanneer het loopt, en of het nog actief is
+function dgAccountList(src) {
+    const accounts = src.accounts || [];
+    if (!accounts.length) return null;
+    return createEl('ul', { class: 'dg-accounts', 'aria-label': 'Accounts' }, ...accounts.map(a => createEl('li', { class: 'dg-account' },
+        createEl('i', { class: 'fas fa-circle-user dg-account-icon', 'aria-hidden': 'true' }),
+        createEl('span', { class: 'dg-account-name', text: a.name }),
+        createEl('span', { class: 'dg-account-meta' },
+            a.until ? 't/m ' : '', a.until ? createEl('span', { class: 'mono', text: dgDate(a.until) }) : null,
+            a.until ? ' · ' : '', createEl('span', { class: 'mono', text: formatNumberNl(a.records) }),
+            ` ${a.records === 1 ? src.record_label[0] : src.record_label[1]}`),
+        a.closed ? createEl('span', { class: 'badge dg-account-badge', text: 'Niet meer actief' }) : null)));
 }
 
 // De dekkingsbalk: van de eerste gegevens tot vandaag; gestreept waar de luistertijd een schatting is
@@ -992,6 +1009,17 @@ async function dgOpenSettings(id) {
         body.push(createEl('h3', { class: 'dg-modal-section', text: 'Gegevens' }),
             createEl('div', { class: 'dg-fields' }, ...plain.map(f => dgField(f, 'dg-settings'))));
     }
+    const accounts = detail.accounts || [];
+    if (accounts.length) {
+        body.push(createEl('h3', { class: 'dg-modal-section', text: 'Accounts' }),
+            ...accounts.map((a, i) => createEl('div', { class: 'dg-schedule-row dg-account-row' },
+                createEl('label', { class: 'switch' }, createEl('input', { type: 'checkbox', id: `dg-account-${i}`, role: 'switch',
+                    checked: !a.closed, dataset: { account: a.name } }), createEl('span', { class: 'slider' })),
+                createEl('label', { for: `dg-account-${i}`, class: 'dg-schedule-label' }, a.name,
+                    a.until ? createEl('span', { class: 'dg-account-meta' }, ' · t/m ', createEl('span', { class: 'mono', text: dgDate(a.until) })) : null))),
+            createEl('p', { class: 'dg-field-help', text: 'Aan: het account is nog in gebruik. Zet een account uit als het niet meer '
+                + 'actief is: zijn gegevens zijn dan compleet, en staan alleen zulke accounts op de kaart, dan is die actueel.' }));
+    }
     if (secrets.length && detail.keychain_available === false) {
         body.push(createEl('h3', { class: 'dg-modal-section', text: 'Sleutels' }),
             dgNote({ tone: 'warning', text: 'De Sleutelhanger van macOS is niet bereikbaar (vergrendeld, of toegang geweigerd). '
@@ -1058,7 +1086,7 @@ async function dgOpenSettings(id) {
             } }, createEl('i', { class: 'fas fa-user-slash', 'aria-hidden': 'true' }), 'Vergeet dit account'));
     }
     footer.push(createEl('span', { class: 'dg-actions-spacer' }));
-    if (!plain.length && !detail.schedule.available) {
+    if (!plain.length && !detail.schedule.available && !accounts.length) {
         footer.push(createEl('button', { type: 'button', class: 'btn btn-secondary', text: 'Sluiten', 'data-autofocus': '',
             onClick: () => dgCloseModal('dg-settings') }));
         dgModal('dg-settings', `Instellingen: ${detail.name}`, 'fa-sliders', body, footer, true);
@@ -1071,6 +1099,13 @@ async function dgOpenSettings(id) {
                 button.disabled = true;
                 try {
                     await dgSaveFields(id, [...document.querySelectorAll('#dg-settings .dg-field input')]);
+                    if (accounts.length) {
+                        await fetchJSON(`${API_BASE}/api/datagatherer/sources/${encodeURIComponent(id)}/settings`, {
+                            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ closed_accounts: [...document.querySelectorAll('#dg-settings [data-account]')]
+                                .filter(input => !input.checked).map(input => input.dataset.account) }),
+                        });
+                    }
                     if (detail.schedule.available) {
                         await fetchJSON(`${API_BASE}/api/datagatherer/sources/${encodeURIComponent(id)}/settings`, {
                             method: 'PUT', headers: { 'Content-Type': 'application/json' },

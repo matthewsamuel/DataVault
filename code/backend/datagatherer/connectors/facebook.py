@@ -12,16 +12,27 @@ chats in the export (msg_* tables, source 'messenger', next to the encrypted cha
 Messenger card). Text is repaired from Meta's mojibake; Dutch and English folder names work
 because files are recognised by their content (formats/meta_dyi.py).
 """
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from backend.datagatherer import meta_import, messages_store
+from backend.datagatherer import meta_import, messages_store, raw_store
 from backend.datagatherer.base import Connector, Coverage, ExportKind, GatherContext, HelpOption, SettingField
 from backend.datagatherer.formats import meta_dyi
 
 DYI_URL = "https://accountscenter.facebook.com/info_and_permissions/dyi/"
 FB_MARKERS = ("profile_information/", "your_posts", "comments_and_reactions/", "your_facebook_activity/",
               "jouw_facebook_activiteit/", "je_facebook_activiteit/")
+
+
+# Meta names an export after the account: 'instagram-<account>-2026-11-02-H2hiDYbU(.zip)'
+EXPORT_NAME = re.compile(r"^(facebook|instagram)-(.+)-\d{4}-\d{2}-\d{2}-[A-Za-z0-9]+(?:-\d+)?(?: \d+)?(?:\.zip)?$", re.IGNORECASE)
+
+
+def meta_account(raw: Dict[str, Any]) -> Optional[str]:
+    """The account a Meta export belongs to, from the name Meta gave it (None when renamed)."""
+    m = EXPORT_NAME.match(raw_store.original_name(raw))
+    return m.group(2) if m else None
 
 
 def _activity_folders(names: List[str]) -> tuple:
@@ -121,6 +132,9 @@ class Facebook(Connector):
 
     def detect(self, path: Path, names: Optional[List[str]]) -> Optional[str]:
         return "dyi" if names and is_facebook(path, names) else None
+
+    def account_of(self, raw: Dict[str, Any]) -> Optional[str]:
+        return meta_account(raw)
 
     def import_raw(self, ctx: GatherContext, raw: Dict[str, Any]) -> Dict[str, Any]:
         return meta_import.import_export(ctx, raw, social_source="facebook", message_source="messenger",

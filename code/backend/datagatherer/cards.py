@@ -198,6 +198,12 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         status = "actueel"
     else:
         status = "achter"
+    accounts = account_list(connector, raws, st["settings"])
+    # Every read export is of an account the user marked as no longer active: nothing new can come
+    complete = (status == "achter" and bool(accounts) and all(a["closed"] for a in accounts)
+                and all(connector.account_of(r) for r in raws if r["status"] == "imported"))
+    if complete:
+        status = "actueel"
     status_label, tone = STATUS[status]
     if status == "achter" and gap_days is not None:
         status_label = f"{_days(gap_days)} achter"
@@ -290,6 +296,10 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
     else:
         primary = "upload"
         step = "Kies een exportbestand om in te lezen."
+    if complete:
+        names = " en ".join(a["name"] for a in accounts)
+        step = (f"{names} {'is' if len(accounts) == 1 else 'zijn'} niet meer actief: alles is binnen en er komt niets "
+                "meer bij.")
     if failed and status != "export_binnen" and primary != "import":
         step += f" Een export kon niet gelezen worden: {failed['error']}"
 
@@ -349,6 +359,8 @@ def card(config, db, connector: Connector, daemon_tick: Optional[float] = None) 
         "gap_days": gap_days,
         "stale_days": connector.stale_days,
         "records": cov.records,
+        "accounts": accounts,
+        "complete": complete,
         "record_label": list(connector.record_label),
         "coverage": {
             "first": cov.first, "last": cov.last, "estimated_since": cov.estimated_since,
@@ -396,6 +408,25 @@ def _request_view(connector: Connector, request: Dict[str, Any]) -> Dict[str, An
     return {"id": request["id"], "kind": request["kind"], "label": kind.label if kind else request["kind"],
             "requested_at": request["requested_at"], "since": request["since"],
             "expected_days": list(kind.expected_days) if kind else None}
+
+
+def account_list(connector: Connector, raws: List[Dict[str, Any]], settings: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The accounts of the read exports, newest data first, and whether the user marked them as no longer active."""
+    closed = set(settings.get("closed_accounts") or [])
+    found: Dict[str, Dict[str, Any]] = {}
+    for raw in raws:
+        if raw["status"] != "imported":
+            continue
+        name = connector.account_of(raw)
+        if not name:
+            continue
+        stats = raw.get("stats") or {}
+        account = found.setdefault(name, {"name": name, "until": None, "records": 0, "closed": name in closed})
+        until = stats.get("covers_until")
+        if isinstance(until, (int, float)) and (account["until"] is None or until > account["until"]):
+            account["until"] = until
+        account["records"] += int(stats.get("added") or 0)
+    return sorted(found.values(), key=lambda a: -(a["until"] or 0))
 
 
 def skipped_note(raws: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:

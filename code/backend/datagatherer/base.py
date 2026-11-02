@@ -174,6 +174,14 @@ class Connector:
         """
         return None
 
+    def account_of(self, raw: Dict[str, Any]) -> Optional[str]:
+        """
+        The account a read export belongs to, for a source where one person can have several
+        (two Instagram accounts), else None. An account the user marked as no longer active
+        adds nothing new: a card with only such accounts is up to date.
+        """
+        return None
+
     def find_existing(self, ctx: "GatherContext") -> List[Tuple[Path, str]]:
         """Folders of earlier exports already in the vault, as (folder, kind): registered in place."""
         found = []

@@ -128,6 +128,15 @@ def save_settings(source_id: str, body: Any = Body(...)) -> Dict[str, Any]:
                     _check_watch_folder(value)
             current[key] = value
         state.set_settings(db, connector.id, current)
+    if "closed_accounts" in body:
+        # Accounts that are no longer active (a closed Instagram account): their data is complete
+        names = body["closed_accounts"]
+        if not isinstance(names, list) or len(names) > 100 \
+                or not all(isinstance(n, str) and 0 < len(n) <= 200 for n in names):
+            raise HTTPException(status_code=400, detail="closed_accounts moet een lijst met accountnamen zijn")
+        current = state.get_settings(db, connector.id)
+        current["closed_accounts"] = sorted(set(names))
+        state.set_settings(db, connector.id, current)
     fields = {}
     if "schedule_enabled" in body:
         if not isinstance(body["schedule_enabled"], bool):

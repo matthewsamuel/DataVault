@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.datagatherer import meta_import, messages_store
 from backend.datagatherer.base import Connector, Coverage, ExportKind, GatherContext, HelpOption, SettingField
-from backend.datagatherer.connectors.facebook import is_instagram
+from backend.datagatherer.connectors.facebook import is_instagram, meta_account
 
 DYI_URL = "https://accountscenter.instagram.com/info_and_permissions/dyi/"
 
@@ -75,6 +75,9 @@ class Instagram(Connector):
         if names and any(n.lower().endswith(".json") for n in names) and is_instagram(path, names):
             return "dyi"
         return None
+
+    def account_of(self, raw: Dict[str, Any]) -> Optional[str]:
+        return meta_account(raw)
 
     def import_raw(self, ctx: GatherContext, raw: Dict[str, Any]) -> Dict[str, Any]:
         return meta_import.import_export(ctx, raw, social_source="instagram", message_source="instagram",

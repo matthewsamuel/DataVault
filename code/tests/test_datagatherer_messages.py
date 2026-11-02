@@ -361,6 +361,39 @@ def test_instagram_export_reads_media_metadata_and_direct_messages(client, app, 
     assert msgs == [("instagram", "Mooie foto!", 0)]
 
 
+def test_an_account_that_is_no_longer_active_makes_its_data_complete(client, app, tmp_path):
+    posts = [{"media": [{"uri": "media/posts/202406/1.jpg", "creation_timestamp": T0 + 50, "title": "Zee"}],
+              "title": "Zee", "creation_timestamp": T0 + 50}]
+    _upload(client, app, "instagram", instagram_export(tmp_path / "instagram-oud.account-2024-06-02-AbC123.zip", posts))
+    card = client.get("/api/datagatherer/sources/instagram").json()
+    assert card["status"] == "achter" and not card["complete"]
+    assert [(a["name"], a["records"], a["closed"]) for a in card["accounts"]] == [("oud.account", 1, False)]
+    # Marked as no longer active: nothing new can come, so the card is up to date
+    r = client.put("/api/datagatherer/sources/instagram/settings", json={"closed_accounts": ["oud.account"]})
+    assert r.status_code == 200
+    card = r.json()
+    assert (card["status"], card["status_label"], card["complete"]) == ("actueel", "Actueel", True)
+    assert card["accounts"][0]["closed"] and "oud.account is niet meer actief" in card["next_step"]
+    # Active again: behind again
+    card = client.put("/api/datagatherer/sources/instagram/settings", json={"closed_accounts": []}).json()
+    assert card["status"] == "achter" and not card["accounts"][0]["closed"]
+    assert client.put("/api/datagatherer/sources/instagram/settings",
+                      json={"closed_accounts": "oud.account"}).status_code == 400
+
+
+def test_an_export_of_an_unknown_account_keeps_the_card_honest(client, app, tmp_path):
+    """A renamed export says nothing about its account: closing the other one does not make the card complete."""
+    old = [{"media": [{"uri": "media/posts/202406/1.jpg", "creation_timestamp": T0 + 50, "title": "Zee"}],
+            "title": "Zee", "creation_timestamp": T0 + 50}]
+    _upload(client, app, "instagram", instagram_export(tmp_path / "instagram-oud-2024-06-02-AbC123.zip", old))
+    later = [{"media": [{"uri": "media/posts/202406/2.jpg", "creation_timestamp": T0 + 90, "title": "Bos"}],
+              "title": "Bos", "creation_timestamp": T0 + 90}]
+    _upload(client, app, "instagram", instagram_export(tmp_path / "mijn export.zip", later))
+    card = client.put("/api/datagatherer/sources/instagram/settings", json={"closed_accounts": ["oud"]}).json()
+    assert [a["name"] for a in card["accounts"]] == ["oud"]
+    assert card["status"] == "achter" and not card["complete"]
+
+
 # ---------- WhatsApp ----------
 
 def _mac_whatsapp(wal=False):

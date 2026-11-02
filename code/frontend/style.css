@@ -11956,6 +11956,46 @@ button.storage-file-thumb:hover .storage-file-play {
     color: var(--text-tertiary);
 }
 
+/* Per account (twee Instagram-accounts), onder het aantal in het datablok */
+.dg-accounts {
+    list-style: none;
+    margin: var(--space-xs) 0 0;
+    padding: var(--space-xs) 0 0;
+    border-top: 1px solid var(--border-hairline);
+    display: flex;
+    flex-direction: column;
+}
+
+.dg-account {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-xs) 0;
+    font-size: var(--fs-sm);
+}
+
+.dg-account-icon {
+    color: var(--text-tertiary);
+}
+
+.dg-account-name {
+    color: var(--text-primary);
+    font-weight: var(--fw-medium);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dg-account-meta {
+    font-size: var(--fs-xs);
+    color: var(--text-tertiary);
+    white-space: nowrap;
+}
+
+.dg-account-badge {
+    margin-left: auto;
+}
+
 /* De dekkingsbalk: vol waar een export het dekt, gestreept waar de luistertijd een schatting is */
 .dg-coverage-wrap {
     display: flex;
