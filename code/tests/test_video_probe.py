@@ -206,3 +206,38 @@ def test_a_move_in_the_app_never_starts_ffprobe(client, config, monkeypatch):
     db = Database(config.DB_PATH)
     media_index.record_move(db, config, config.VAULT_ROOT / "elders.mkv", config.VAULT_ROOT / rel)
     assert _row(config, rel)["meta_status"] == media_meta.META_PROBE
+
+
+def test_migration_181_only_adds_the_live_photo_index(tmp_path, monkeypatch):
+    from backend import migrations, near_dups
+    from test_duplicates_runs import _migrate_to
+    from test_foundation import _make_legacy_db
+    db_path = tmp_path / "datavault.db"
+    _make_legacy_db(db_path)
+    _migrate_to(db_path, 180, monkeypatch)
+    now = time.time()
+    with sqlite3.connect(str(db_path)) as conn:
+        for name, kind, ext in (("IMG_1.HEIC", "photo", ".heic"), ("IMG_1.MOV", "video", ".mov"),
+                                ("clip.mov", "video", ".mov")):
+            conn.execute("INSERT INTO media (path, folder, name, kind, ext, size, mtime_ns, added_at, indexed_at, "
+                         "seen_at) VALUES (?, '/v/RAW', ?, ?, ?, 10, 1, ?, ?, ?)", (f"/v/RAW/{name}", name, kind, ext,
+                                                                                    now, now, now))
+        conn.execute("INSERT INTO keurer_decisions (path, folder, decision, dest_path, dest_ino, dest_size) "
+                     "VALUES ('/v/RAW/weg.jpg', '/v/RAW', 'delete', '/v/TRASH/weg.jpg', 77, 1234)")
+        conn.execute("INSERT INTO app_settings VALUES ('elo_session_goal', '50', 5.0)")
+        conn.execute("INSERT INTO jobs (type, params, status, processed, created_at, updated_at, checkpoint) "
+                     "VALUES ('phash', '{}', 'paused', 3, ?, ?, '{}')", (now, now))
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' "
+                                             "AND name != 'schema_version'")]
+        before = {t: conn.execute(f"SELECT * FROM {t} ORDER BY 1").fetchall() for t in tables}
+    db = Database(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        assert migrations.get_schema_version(conn) == migrations.LATEST_VERSION >= 181
+        for table, rows in before.items():
+            assert conn.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall() == rows, table
+        plan = " ".join(r[3] for r in conn.execute(
+            f"EXPLAIN QUERY PLAN SELECT COUNT(*) FROM media m WHERE m.kind = 'video' AND {near_dups._LIVE_VIDEO}"))
+        assert "idx_media_photo_stem" in plan
+        live = conn.execute(f"SELECT name FROM media m WHERE m.kind = 'video' AND {near_dups._LIVE_VIDEO}").fetchall()
+        assert live == [("IMG_1.MOV",)]
+    db.close_all()

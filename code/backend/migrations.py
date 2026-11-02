@@ -1084,6 +1084,20 @@ def _m180_media_probe_videos(conn: sqlite3.Connection):
                  f"AND ext IN ({', '.join('?' * len(exts))})", exts)
 
 
+def _m181_media_photo_stem_index(conn: sqlite3.Connection):
+    """
+    'Beste uit reeks' leaves out the video of a Live Photo: a video with a photo of the same
+    name (without extension) in its folder (backend/near_dups._LIVE_VIDEO). This partial
+    expression index makes that check one lookup per video (100,000 files: 0.68 s -> 0.013 s
+    for the status). Only an index is added; no row changes.
+    """
+    has_media = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media'").fetchone()
+    if not has_media:
+        return
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_photo_stem ON media("
+                 "folder, lower(substr(name, 1, length(name) - length(ext)))) WHERE kind = 'photo' AND missing = 0")
+
+
 # The kinds google_formats.activity_item makes (My Activity and YouTube's own history)
 _ACTIVITY_ITEM_KINDS = ("youtube_watch", "youtube_search", "search", "maps", "web_visit", "activity")
 
@@ -1187,6 +1201,7 @@ MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (170, "spotify_covers", _m170_spotify_covers),
     # 180-189: search and series (video frames, ffprobe for other videos)
     (180, "media_probe_videos", _m180_media_probe_videos),
+    (181, "media_photo_stem_index", _m181_media_photo_stem_index),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
