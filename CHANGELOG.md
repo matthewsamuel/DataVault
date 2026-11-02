@@ -10,85 +10,163 @@ database-back-ups toe, in een nieuw uiterlijk met licht en donker thema. Wat bew
 staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 
 ### Afronding: wat nog bleef liggen
-- **Google Takeout als `.tgz`** wordt nu gelezen zoals een `.zip`, in het Nederlands en het Engels:
-  stukje voor stukje, zonder het archief uit te pakken. Het bestand zelf wordt gekopieerd en nooit
-  veranderd, en twee keer inlezen voegt niets toe. Een `.tgz` die DataVault eerder alleen kopieerde,
-  wordt bij de volgende keer inlezen alsnog gelezen. Ook `takeout-*.tgz`-delen in `RAW_google` tellen mee.
-  Is een `.tgz` beschadigd, afgebroken tijdens het downloaden of niet meer te vinden, dan zegt
-  DataGatherer dat duidelijk en probeert het later opnieuw, in plaats van hem als ingelezen te tellen.
-  Een verdacht sterk ingepakt archief stopt meteen, ook in een deel dat niet gelezen wordt.
-- **Hetzelfde websitebezoek uit twee bronnen** staat in Activiteit nog één keer. Een bezoek dat zowel
-  in de Chrome-geschiedenis van deze Mac als in Takeout staat (Chrome of Mijn activiteit), wordt
-  herkend aan het adres en het tijdstip (binnen 5 seconden). Onder het bezoek staan dan beide
-  bronnen met hun icoon. Beide rijen blijven bewaard; kies je alleen Google Takeout als bron, dan
-  zie je het bezoek gewoon daar, en ook dan staat Chrome-geschiedenis erbij. Een bezoek dat in Mijn
-  activiteit een fractie eerder staat dan in Chrome, wordt ook herkend.
-- **Bewerkte en ingetrokken iMessages** worden bijgewerkt in plaats van te blijven zoals ze eerst
-  waren. Een bewerkt bericht toont de nieuwe tekst met **Bewerkt**; een klik (of Enter) toont de
-  eerdere versies. Een ingetrokken bericht toont **Bericht ingetrokken**; had DataVault de tekst al,
-  dan staat die achter **Eerdere tekst**. Zoeken vindt alleen de tekst van nu. Ook een bericht dat
-  lang na het versturen bewerkt werd, wordt gevonden, en de eerste keer bijwerken bekijkt alles één keer opnieuw.
-  De eerdere versies schuiven zacht open en dicht, het gesprek eronder schuift mee, en wat je opent
-  blijft in beeld, ook bij het laatste bericht.
-- **Een tapback die iemand terugnam** verdwijnt van het bericht, en een gewijzigde tapback vervangt de
-  vorige van dezelfde persoon.
-- Terugzetten van een duplicatenrun controleert nu of het bestand in RAW_DUPLICATES nog precies het verplaatste bestand is (zelfde bestandsnummer en grootte). Is het intussen veranderd of vervangen, dan blijft het staan. Duplicaten toont dat bij de actie met een waarschuwing en in de melding na het terugzetten, en het Herstelcentrum noemt per bestand de reden. Acties van vóór deze versie werken zoals altijd.
-- Exporteren neemt de aanmaakdatum (de 'Aanmaakdatum' in Finder) nu exact over van het origineel, tot op de nanoseconde, ook als die later ligt dan de wijzigingsdatum. Een test bewijst het op APFS.
-- De twee oudere duplicaat-opdrachten (`delete_single`, `scan_folder`) nemen hun pad alleen nog in de JSON-body, nooit meer in de URL. Een pad in de URL wordt geweigerd met een duidelijke melding.
-- Een verzoek met een vreemde `Host` (DNS-rebinding) krijgt nu dezelfde JSON-foutmelding als de rest van de app (code `invalid_host`) in plaats van platte tekst.
-- `start.sh` opent Safari als er in config.json geen `browser` staat, of als die waarde geen tekst is (een getal, lijst of leeg). Voorheen werd de foutmelding van plutil als browsernaam gebruikt en lukte het openen niet.
-- Duplicaten: bij een opruimactie staat elke reden (veranderd, niet meer in RAW_DUPLICATES) op een eigen regel in een vaste kolom, zodat de mapnaam ook op een smal scherm leesbaar blijft. De vraag vóór het terugzetten zegt welke bestanden blijven staan, en na Terugzetten met het toetsenbord blijft de focus in de lijst.
-- Verplaatsen en terugzetten werkt nu ook op schijven die heel grote bestandsnummers geven (zoals FAT32 op macOS voor lege bestanden); voorheen weigerde de app dat met een fout.
-- **Landnamen op de offline kaart.** De kaart zonder internet toont nu de namen van de landen in het
-  Nederlands, midden op het grootste deel van het land (Frankrijk op het vasteland, niet tussen
-  Europa en Frans-Guyana). Namen schuiven nooit over elkaar: de belangrijkste landen eerst, dan de
-  hoofdsteden, de provincies en de andere steden; kleine landen pas als ze er ongeveer in passen en
-  dwergstaten als Monaco pas ver ingezoomd. Bij inzoomen vloeien nieuwe namen op volgorde in en
-  vervagen namen die moeten wijken, volgens je Beweging-instelling. Waar provincies staan, gaan die
-  voor de naam van hun land.
-- **Een plaatsnaam bij elke foto.** Elke foto met GPS krijgt een Nederlandse plaats, ook buiten de
-  grote steden: in een plaats ("Faro, Portugal"), in de buurt met afstand en richting
-  ("4 km ten oosten van Olhão, Portugal"), op het platteland de provincie ("Lapland, Finland"), aan
-  de kust ("Aan de kust van Friesland, Nederland"), op het water ("Voor de kust bij Zandvoort,
-  Nederland") of op zee. De viewer zet de provincie en "aan de kust" er stil onder, ook bij een plek
-  die uit je Tijdlijn geschat is. Alles offline, uit Natural Earth en GeoNames (plaatsen vanaf
-  15.000 inwoners).
-- **Pasha kent meer plaatsen.** Vraag naar foto's in een provincie of regio ("Toscane", "Gelderland",
-  "Limburg" telt beide Limburgen) of bij een kleinere plaats ("Olhão"); onder het antwoord staat
-  waar ze genomen zijn ("Amsterdam: 12 foto's"). Een bezochte plek zonder naam in je
-  locatiegeschiedenis krijgt dezelfde plaatsnaam.
-- **De juiste plaats bij een naam die vaker voorkomt.** Middelburg, Ede of Soest zoekt Pasha in
-  Nederland, niet in Zuid-Afrika, Nigeria of Duitsland; Bali is het Indonesische eiland. Bestaat een
-  naam op meer plekken (Lagos in Portugal en in Nigeria), dan kiest Pasha de plek waar jouw foto's zijn.
-  "Holland" is Nederland. Bij een stad telt Pasha eerst de stad zelf ("Amsterdam: 2 foto's") en
-  zegt "1 foto" in plaats van "1 foto's".
-- **Plaatsnamen kloppen beter.** De Burj Khalifa ligt in Dubai en Asakusa in Tokio, niet "14 km ten
-  noorden van Dubai"; een voorstad met een eigen centrum houdt zijn naam (Schiedam, Amstelveen).
-  Monaco en Singapore staan er één keer, het Sint-Pietersplein is Vaticaanstad, en het is Almere,
-  niet "Almere Stad". Noorse en Zweedse provincies heten provincie ("provincie Stockholm"), en
-  "Voor de kust van de Zuid-Egeïsche Eilanden".
-- **Namen op de kaart blijven leesbaar.** Een land- of plaatsnaam valt niet meer onder een groep foto's,
-  onder de zoomknoppen of half buiten de kaart; een landnaam schuift dan net boven of onder de groep.
-  Over de datumgrens (Japan, de Stille Oceaan) staan weer de steden in beeld. Een geschatte locatie in
-  de viewer toont de plaats als hoofdregel, met de provincie en de positie stil eronder.
-- **Welke is mooier? met een album als bereik.** Bovenin staat nu een collectiekiezer met de hele bibliotheek, je shows en je slimme albums. Druk op `c` (ook op de ranglijst), typ een paar letters en kies met Enter: het duel gaat meteen verder met foto's uit dat album, en de ranglijst, de voortgang en "Als album" gaan dan over dat album. `Esc` sluit alleen de kiezer.
-- De laatst gekozen collectie onthoudt de app voor de volgende keer. Bestaat een album niet meer, dan ga je vanzelf terug naar de hele bibliotheek, met een korte melding.
-- Een geopend album in Albums heeft een knop **Welke is mooier?** die het duel op dat album opent.
-- Een groot album is net zo vlot als een map: bij 10.000 foto's komt het volgende paar in 36 ms (was 86 ms) en is een keuze in 24 ms opgeslagen (was 76 ms).
-- **Pasha begrijpt je vaker.** Pasha gebruikt nu de eigen gereedschapsaanroep van Ollama in plaats van een tekstcode in het antwoord. Gemeten op 45 Nederlandse vragen, vijf keer elk: 97% gaat goed (was 89%), en bij anders geformuleerde vragen 92% (was 77%). In de meting leverde een groet of "verwijder al mijn foto's" geen voorstel meer op; mocht het toch gebeuren, dan gebeurt er niets tot je zelf op Uitvoeren klikt. Een antwoord is even snel (een halve seconde); alleen de eerste vraag na het opstarten duurt ongeveer een seconde langer. De meting staat in [docs/PASHA_TOOLS.md](docs/PASHA_TOOLS.md).
-- Een vervolgvraag ("en die van het strand?") gaat net zo goed, en een model dat de gereedschapsaanroep niet kent, gebruikt vanzelf weer de oude manier. Verplaatsen, de beste houden en exporteren blijven voorstellen die pas na jouw klik op Uitvoeren gebeuren.
-- Pasha laat nooit meer een lege ballon achter. Komt er van Ollama's gereedschapsaanroep niets terug (dat gebeurde soms na een eerdere actie), dan vraagt Pasha het meteen nog eens op de oude manier; lukt ook dat niet, dan zegt hij "Dat lukte me niet, wil je het anders vragen?". Een aanroep die het model als tekst schrijft, zie je tijdens het typen niet meer even voorbijkomen.
-- In **Instellingen > Taalmodel van Pasha** kies je bij **Acties** zelf tussen *Ollama-gereedschap* (standaard) en *Tekstcode*. Kan het gekozen model geen gereedschap gebruiken, dan staat dat erbij.
-- De collectiekiezer van Welke is mooier? toont bij elk album het aantal bestanden; albums met te weinig foto's staan gedimd onderaan. Staat er meer in de lijst dan je ziet, dan vervaagt de onderrand, en de regels schuiven bij het openen even achter elkaar in.
-- Klik je naast de open collectiekiezer, dan sluit alleen de kiezer: die klik telt niet meer als keuze voor de foto eronder. Een verdwenen album meldt de app nu in een melding met de hele uitleg; onderin blijft een korte regel staan.
-- Kies je een andere collectie, dan houdt het paar dat je net in de vorige koos daar niets meer tegen: een album van twee foto's toont meteen zijn paar, ook als je die twee net in de hele bibliotheek vergeleek.
-- Loskoppelen en terugplaatsen van de schijf wordt nu bij elke testronde gecontroleerd, niet meer eenmalig met de hand: terwijl de app draait en een taak miniaturen maakt, verdwijnt het archief. De taak wacht dan op het archief, de balk bovenin en het takenpaneel zeggen dat, en er wordt niets geschreven: geen map op de oude plek en geen enkel bestand in het losgekoppelde archief dat verandert. Komt de schijf terug, dan verdwijnt de balk, komt de map weer in beeld en maakt de taak zijn werk af. Het archief zelf is daarna precies hetzelfde, en een beoordeling en een instelling zijn er nog.
-- Een gepauzeerde taak hervatten zonder schijf geeft nu de duidelijke melding dat het archief niet bereikbaar is (de stand van de taak staat in de database op de schijf); met de schijf terug gaat het gewoon.
-- De rooktest in de browser draait nu ook via pytest, als je erom vraagt: `pytest -m smoke`. In een gewone testronde wordt hij overgeslagen.
-- De rooktest is beter bestand tegen een druk bezette computer: na elke stap wacht hij zolang er nog verzoeken onderweg zijn, de wachttijden rekken mee met de belasting van de machine, en een verzoek dat door het herladen van de pagina werd afgebroken wordt één keer opnieuw gevraagd (alleen lezen). Echte fouten blijven fouten. Elke stap toont hoe lang hij duurde, met de traagste stappen op het einde.
-- De rooktest is strenger over fouten tijdens het herladen: alleen een verzoek dat echt werd afgebroken wordt opnieuw gevraagd, op zijn eigen adres. Een foutmelding gaat alleen door als ze naar zo'n verzoek verwijst. Een fout die de app zelf meldt, of een fout zonder adres, blijft een fout, en de test controleert dat bij de start zelf.
-- `pytest -m smoke` houdt zich nu echt aan zijn tijdslimiet (30 minuten, of `DATAVAULT_SMOKE_TIMEOUT`). Een rooktest die blijft hangen wordt op tijd gestopt, samen met zijn testserver, en zijn tijdelijke map wordt opgeruimd.
-- Stopt de server terwijl een taak net klaar is en nog opruimt, dan wacht hij nu tot die taak echt gedaan heeft voor hij de database sluit. Zo kan het afsluiten niet meer af en toe crashen.
+
+In deze ronde is afgemaakt wat eerder bleef liggen. Wat nog steeds niet kan, staat met de reden in
+[docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
+
+**Menu en bediening**
+- **Reeksen, Berichten en DataGatherer hebben een eigen plek in het menu.** Reeksen ("Beste uit
+  reeks") is nu een eigen onderdeel (sneltoets **g n**) in plaats van een tabblad bij Duplicaten.
+  Het menu volgt de volgorde Home, Bestanden, Tijdlijn, Kaart, Albums, Reeksen, Duplicaten, Keurer,
+  Shows, Spotify, Berichten, DataGatherer en Herstelcentrum.
+- **Het menu Meer.** Past niet alles naast het zoekveld (bij 1024 px of op een smal venster), dan
+  schuiven de laatste onderdelen naar **Meer**. Dat veert open en de onderdelen komen er een voor een
+  in, met hun icoon en sneltoets. Met het toetsenbord opent **↓** het menu, kies je met de pijltjes,
+  Home, End of een beginletter, opent Enter het onderdeel en sluit **Esc** het weer. Staat het open
+  onderdeel in Meer, dan krijgt Meer het groene streepje. Het zoekveld is weer breder.
+- **Een breder venster toont nooit minder.** Is de ruimte krap, dan verdwijnt eerst het woordmerk
+  DATAVAULT en pas daarna schuiven onderdelen naar Meer. Wordt het venster breder terwijl je in Meer
+  zit, dan blijft de focus op dat onderdeel in de balk.
+- **"Ongedaan maken" in de melding.** Na verplaatsen, naar de prullenmand, een Keurer-beslissing
+  (prullenmand of verplaatsen), een reeks, een opruimactie bij Duplicaten en de selectiebalk staat er
+  een knop **Ongedaan maken** in de melding; **⌘Z** doet hetzelfde en staat in het
+  sneltoetsenoverzicht. De knop zet precies die actie terug, net als het Herstelcentrum. De melding
+  blijft 10 seconden staan, langer zolang de muis of de focus erop staat, en toont na de klik de
+  uitkomst. Wat al terug is, ook via het Herstelcentrum of ↓ in de Keurer, wordt nooit nog eens
+  aangeboden. In de Keurer en bij Welke is mooier? loopt één melding mee met de laatste keuze.
+- **Ongedaan maken lukt ook na een hapering.** Is de schijf even los of antwoordt de server niet, dan
+  blijft de knop staan en kun je het opnieuw proberen. Bij Reeksen blijven de link en de melding
+  staan tot het lukt.
+- **De Keurer-melding staat naast de foto**, zodat de map en **Andere map** vrij blijven tijdens een
+  snelle reeks beslissingen. Ook na meer dan twintig beslissingen zet de knop de oudere beslissing
+  nog terug; alleen als die echt al terug is, staat er "Al ongedaan".
+- Het Herstelcentrum noemt acties uit Reeksen nu ook "Reeksen".
+
+**Veiligheid van je bestanden**
+- **Terugzetten van een duplicatenrun kijkt of het bestand nog hetzelfde is** (zelfde bestandsnummer
+  en grootte). Is het bestand in RAW_DUPLICATES intussen veranderd of vervangen, dan blijft het
+  staan. Duplicaten waarschuwt daarvoor bij de actie en in de melding, en het Herstelcentrum noemt
+  per bestand de reden. Elke reden staat op een eigen regel, zodat de mapnaam ook op een smal scherm
+  leesbaar blijft. Na Terugzetten met het toetsenbord blijft de focus in de lijst. Acties van vóór
+  deze versie werken zoals altijd.
+- **Exporteren neemt de aanmaakdatum exact over**, de "Aanmaakdatum" in Finder, tot op de
+  nanoseconde, ook als die later ligt dan de wijzigingsdatum. Een test bewijst het op APFS.
+- **Verplaatsen en terugzetten werkt op meer schijven**, ook op schijven die heel grote
+  bestandsnummers geven (zoals FAT32 op macOS bij lege bestanden). Voorheen weigerde de app dat.
+- **De back-upmap kies je in Instellingen.** Onder Back-ups staat bij Locatie **Andere map…**: een
+  mappenkiezer waarin je ook een nieuwe map maakt. Bij elke map zie je meteen of hij kan: hij moet
+  bestaan en schrijfbaar zijn, en mag niet in het archief, de prullenmand, RAW_DUPLICATES of de
+  mappen van DataVault zelf liggen. Een map op dezelfde schijf als het archief mag, met de opmerking
+  dat een andere schijf veiliger is. **Gebruiken en testen** bewaart de keuze en maakt daar meteen
+  een back-up, ook voor een tweede of derde map in dezelfde sessie. Is de schijf met die map los, dan
+  maakt de app de map niet ergens anders aan, maar zegt dat. Het terugzetscript vindt de gekozen map
+  zelf (of met `--map`).
+- De twee oudere duplicaat-opdrachten nemen een pad niet meer uit het webadres aan, alleen nog uit
+  het verzoek zelf. Een verzoek met een vreemde `Host` krijgt dezelfde nette foutmelding als de rest
+  van de app.
+- `start.sh` opent Safari als er in config.json geen bruikbare `browser` staat. Voorheen lukte het
+  openen dan niet.
+
+**Zoeken, reeksen en video's**
+- **Slim zoeken opnieuw gemeten met het echte model.** Met 30 nieuwe zoekopdrachten in eigen woorden
+  (20 Nederlands, 10 Engels) vindt Slim zoeken 87 tot 93 procent van de goede foto's, en geen enkele
+  zoekopdracht blijft leeg terwijl er wel goede foto's zijn. De relevantiegrens stond al op het beste
+  punt en is niet veranderd.
+- **Sneller reeksen zoeken in een groot archief.** Bij 100.000 foto's met veel gelijkende scans of
+  screenshots duurt het zoeken naar paren nu ongeveer 6 seconden in plaats van 12 tot 24, met minder
+  geheugen. Bij gewone foto's is het bijna twee keer zo snel, en de app blijft ondertussen vlot.
+- **Datum, duur en afmetingen van avi-, mkv- en mts-video's.** Met ffprobe (onderdeel van ffmpeg)
+  leest de bibliotheek nu ook bij deze video's de opnamedatum, de duur en het formaat, zodat ze op de
+  juiste plek in de tijdlijn staan. Video's die al in de bibliotheek stonden, worden bij de volgende
+  ronde één keer opnieuw gelezen.
+- **Video's in Beste uit reeks.** Twee kopieën van dezelfde video (bijvoorbeeld het origineel en de
+  verkleinde versie uit WhatsApp) staan nu ook als reeks klaar, met een afspeelteken en de duur op
+  elke tegel. Video's komen alleen in een reeks met andere video's van bijna dezelfde lengte, en de
+  video van een Live Photo blijft bij zijn foto. Twee verschillende video's die allebei zwart of met
+  een fade-in beginnen, worden niet meer voor kopieën aangezien. Hiervoor is ffmpeg nodig.
+- **Video's groot bekijken.** Groot bekijken toont het echte beeld van elke video op zijn eigen
+  grootte, zodat je op 100% ziet welke kopie zachter is. Met k of spatie speel je af of pauzeer je,
+  met ← en → spring je 5 seconden, en Esc zet de video stil zonder het venster te sluiten. Een
+  formaat dat de browser niet afspeelt (zoals mkv) zegt "Afspelen kan niet in de browser". Teksten
+  bij video-reeksen zeggen "video" in plaats van "foto".
+
+**Kaart en plaatsen**
+- **Landnamen op de offline kaart**, in het Nederlands en midden op het grootste deel van het land
+  (Frankrijk op het vasteland, niet tussen Europa en Frans-Guyana). Namen schuiven nooit over
+  elkaar: eerst de belangrijkste landen, dan de hoofdsteden, de provincies en de andere steden;
+  dwergstaten als Monaco pas ver ingezoomd. Bij inzoomen vloeien nieuwe namen op volgorde in,
+  volgens je Beweging-instelling.
+- **Namen blijven leesbaar.** Een land- of plaatsnaam valt niet meer onder een groep foto's, onder
+  de zoomknoppen of half buiten de kaart. Over de datumgrens (Japan, de Stille Oceaan) staan de
+  steden weer in beeld.
+- **Een plaatsnaam bij elke foto met GPS**, ook buiten de grote steden: in een plaats ("Faro,
+  Portugal"), in de buurt ("4 km ten oosten van Olhão, Portugal"), op het platteland de provincie
+  ("Lapland, Finland"), aan de kust of op het water ("Voor de kust bij Zandvoort, Nederland"). De
+  viewer zet de provincie stil eronder, ook bij een plek die uit je Tijdlijn geschat is. Alles
+  offline, uit Natural Earth en GeoNames.
+- **Plaatsnamen kloppen beter.** De Burj Khalifa ligt in Dubai en Asakusa in Tokio; een voorstad met
+  een eigen centrum houdt zijn naam (Schiedam, Amstelveen), het Sint-Pietersplein is Vaticaanstad
+  en het is Almere, niet "Almere Stad".
+- **Pasha kent meer plaatsen.** Vraag naar foto's in een provincie of regio ("Toscane",
+  "Gelderland") of bij een kleinere plaats ("Olhão"); onder het antwoord staat waar ze genomen zijn.
+  Middelburg, Ede en Soest zoekt Pasha in Nederland, en bestaat een naam op meer plekken (Lagos),
+  dan kiest hij de plek waar jouw foto's zijn.
+
+**Welke is mooier?**
+- **Een album als bereik.** Bovenin staat een collectiekiezer met de hele bibliotheek, je shows en je
+  slimme albums. Druk op `c` (ook op de ranglijst), typ een paar letters en kies met Enter: het duel
+  gaat meteen verder met foto's uit dat album, en de ranglijst, de voortgang en "Als album" gaan dan
+  over dat album. `Esc` sluit alleen de kiezer. Een geopend album in Albums heeft een knop
+  **Welke is mooier?** die het duel op dat album opent.
+- De kiezer toont bij elk album het aantal bestanden; albums met te weinig foto's staan gedimd
+  onderaan. Een klik naast de open kiezer sluit alleen de kiezer en telt niet als keuze. De app
+  onthoudt de laatst gekozen collectie; bestaat die niet meer, dan ga je terug naar de hele
+  bibliotheek, met een melding.
+- **Een groot album is net zo vlot als een map:** bij 10.000 foto's komt het volgende paar in 36 ms
+  (was 86 ms) en is een keuze in 24 ms opgeslagen (was 76 ms).
+
+**Pasha**
+- **Pasha begrijpt je vaker.** Pasha gebruikt nu de eigen gereedschapsaanroep van Ollama. Op 45
+  Nederlandse vragen, vijf keer elk, gaat 97 procent goed (was 89), en bij anders geformuleerde
+  vragen 92 procent (was 77). Een antwoord is even snel; alleen de eerste vraag na het opstarten
+  duurt ongeveer een seconde langer. Verplaatsen, de beste houden en exporteren blijven voorstellen
+  die pas na jouw klik op **Uitvoeren** gebeuren. De meting staat in
+  [docs/PASHA_TOOLS.md](docs/PASHA_TOOLS.md).
+- **Nooit meer een lege ballon.** Komt er via de gereedschapsaanroep niets terug, dan vraagt Pasha
+  het meteen nog eens op de oude manier; lukt ook dat niet, dan zegt hij "Dat lukte me niet, wil je
+  het anders vragen?".
+- In **Instellingen > Taalmodel van Pasha** kies je bij **Acties** tussen *Ollama-gereedschap*
+  (standaard) en *Tekstcode*. Een model dat geen gereedschap kent, gebruikt vanzelf de tekstcode.
+
+**DataGatherer en berichten**
+- **Google Takeout als `.tgz`** wordt nu gelezen zoals een `.zip`, stukje voor stukje en zonder het
+  archief uit te pakken. Het bestand zelf blijft onveranderd, en twee keer inlezen voegt niets toe.
+  Een beschadigde of half gedownloade `.tgz` meldt DataGatherer duidelijk, en het probeert later
+  opnieuw.
+- **Hetzelfde websitebezoek uit twee bronnen** staat in Activiteit nog één keer. Een bezoek dat in
+  de Chrome-geschiedenis van deze Mac én in Takeout staat, wordt herkend aan het adres en het tijdstip
+  (binnen 5 seconden); onder het bezoek staan dan beide bronnen. Beide rijen blijven bewaard.
+- **Bewerkte en ingetrokken iMessages** worden bijgewerkt. Een bewerkt bericht toont de nieuwe tekst
+  met **Bewerkt**; een klik of Enter toont de eerdere versies. Een ingetrokken bericht toont
+  **Bericht ingetrokken**, met de **Eerdere tekst** als DataVault die al had. Zoeken vindt alleen de
+  tekst van nu.
+- **Een tapback die iemand terugnam** verdwijnt van het bericht, en een gewijzigde tapback vervangt
+  de vorige van dezelfde persoon.
+- **Spotify legt het helemaal in het Nederlands uit.** Elk inzicht (recorddag, langste reeks, vaste
+  favorieten of brede ontdekker, seizoensstemming) vertelt wat het meet en hoe DataVault het
+  uitrekent. In het luister-DNA zijn de typen te bedienen met Tab en Enter.
+
+**Betrouwbaarheid en tests**
+- **Loskoppelen en terugplaatsen van de schijf wordt bij elke testronde gecontroleerd.** Terwijl de
+  app draait en miniaturen maakt, verdwijnt het archief: de taak wacht, de balk bovenin zegt het, en
+  er wordt niets geschreven. Komt de schijf terug, dan maakt de taak zijn werk af en is het archief
+  precies hetzelfde.
+- Een gepauzeerde taak hervatten zonder schijf geeft nu de duidelijke melding dat het archief niet
+  bereikbaar is.
+- Stopt de server terwijl een taak nog opruimt, dan wacht hij tot die klaar is voor hij de database
+  sluit. Zo kan het afsluiten niet meer af en toe crashen.
+- De rooktest in de browser draait nu ook via `pytest -m smoke`, met een echte tijdslimiet, en is
+  beter bestand tegen een drukke computer. Echte fouten blijven fouten.
 
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
@@ -907,81 +985,6 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
   volgende paar 40 ms in plaats van 159 ms, en opslaan 31 in plaats van 88 ms.
 - Twee foto's die duizenden punten uit elkaar liggen (door veel duimpjes) gaven een fout bij
   vergelijken, en konden de app bij het bijwerken van de database laten vastlopen. Opgelost.
-
-### Afronding: wat nog bleef liggen
-
-- **Slim zoeken opnieuw gemeten met het echte model.** Met 30 nieuwe zoekopdrachten in eigen
-  woorden (20 Nederlands, 10 Engels) vindt Slim zoeken 87 tot 93 procent van de goede foto's,
-  en geen enkele zoekopdracht blijft leeg terwijl er wel goede foto's zijn. Ook als een
-  onderwerp een groot deel van een map is, blijft het gevonden. De relevantiegrens stond al
-  op het beste punt en is niet veranderd.
-- **Sneller reeksen zoeken in een groot archief.** Bij 100.000 foto's met veel gelijkende scans of
-  screenshots duurt het zoeken naar paren nu 6 s in plaats van 12 s, met minder geheugen. Bij
-  gewone foto's is het bijna twee keer zo snel, en de app blijft ondertussen even vlot.
-- **Datum, duur en afmetingen van avi-, mkv- en mts-video's.** Als ffprobe (onderdeel van ffmpeg)
-  geïnstalleerd is, leest de bibliotheek nu ook bij deze video's de opnamedatum, de duur en het
-  formaat. Ze staan daardoor op de juiste plek in de tijdlijn. Video's die al in de bibliotheek
-  stonden worden bij de volgende ronde één keer opnieuw gelezen.
-- **Video's in Beste uit reeks.** Twee kopieën van dezelfde video (bijvoorbeeld het origineel en
-  de verkleinde versie uit WhatsApp) staan nu ook als reeks klaar. Elke tegel toont een afspeelteken
-  met de duur, en in Groot bekijken speel je de video meteen af. Video's komen alleen in een reeks
-  met andere video's, en de video van een Live Photo blijft bij zijn foto. Hiervoor is ffmpeg nodig.
-  Twee verschillende video's die allebei met een zwart beeld of een fade-in beginnen, worden niet
-  meer voor kopieën aangezien: dan vergelijkt de app een later beeld, en video's van een duidelijk
-  andere lengte komen nooit samen in een reeks. Video's die helemaal zwart zijn, blijven erbuiten.
-  Valt de schijf weg terwijl een video wordt gelezen, dan probeert de volgende vergelijking hem
-  gewoon opnieuw.
-- **Video's groot bekijken.** Groot bekijken toont nu het echte beeld van elke video op zijn eigen
-  grootte, zodat je op 100% ziet welke kopie zachter is. Een spelende video blijft passend in beeld
-  met al zijn knoppen, zonder zwarte flits bij het starten. Met k of spatie speel je af of pauzeer
-  je, met ← en → spring je 5 seconden, en Esc zet de video stil zonder het venster te sluiten. Een
-  formaat dat de browser niet afspeelt (zoals mkv) krijgt een filmstrook in plaats van een
-  afspeelteken en de zichtbare regel 'Afspelen kan niet in de browser'. Teksten bij video-reeksen
-  zeggen nu 'video' in plaats van 'foto'.
-- **Reeksen, Berichten en DataGatherer hebben een eigen plek in het menu.** Reeksen ("Beste uit
-  reeks") is nu een eigen onderdeel (sneltoets **g n**) in plaats van een tabblad bij Duplicaten;
-  Berichten en DataGatherer staan als gewone menu-onderdelen naast de rest. Het menu volgt de
-  volgorde Home, Bestanden, Tijdlijn, Kaart, Albums, Reeksen, Duplicaten, Keurer, Shows, Spotify,
-  Berichten, DataGatherer en Herstelcentrum.
-- **Meer.** Past niet alles naast het zoekveld (bij 1024 px, of op een smal venster), dan schuiven
-  de laatste onderdelen naar het menu **Meer**. Dat veert open, de onderdelen komen er een voor een
-  in, met hun icoon en sneltoets. Met het toetsenbord: **↓** op Meer opent het, pijltjes, Home, End
-  of een beginletter kiezen, Enter opent het onderdeel en **Esc** sluit en zet de focus terug. Staat
-  het open onderdeel in Meer, dan krijgt Meer het groene streepje. Het zoekveld is weer breder.
-- **"Ongedaan maken" in de melding.** Na verplaatsen, naar de prullenmand, een Keurer-beslissing
-  (prullenmand of verplaatsen), een reeks of opruimactie bij Duplicaten en de selectiebalk staat er
-  een knop **Ongedaan maken** in de melding; **⌘Z** doet hetzelfde. Hij zet precies die actie terug,
-  zoals het Herstelcentrum. De melding blijft 10 seconden staan, en langer zolang de muis of de focus
-  erop staat, en wordt na de klik zelf de uitkomst ("Teruggezet"). Wat al terug is (ook via het
-  Herstelcentrum of ↓ in de Keurer), wordt nooit nog eens aangeboden. In de Keurer en bij Welke is
-  mooier? loopt één melding mee met de laatste keuze, in plaats van een stapel.
-- **De back-upmap kies je in Instellingen.** Onder Back-ups staat bij Locatie **Andere map…**: een
-  mappenkiezer die mappen pas laadt als je ze opent, met een nieuwe map maken erbij. Bij elke map zie
-  je meteen of hij kan: hij moet bestaan en schrijfbaar zijn, en mag niet in het archief, de
-  prullenmand, RAW_DUPLICATES of de mappen van DataVault zelf liggen. Een eigen map op de T7 kan, met
-  de opmerking dat een andere schijf veiliger is. **Gebruiken en testen** bewaart de keuze en maakt
-  meteen een back-up daar; het venster toont de stappen en de uitkomst. Is de schijf met die map
-  los, dan maakt de app hem niet ergens anders opnieuw aan, maar zegt dat. Het terugzetscript vindt
-  de gekozen map zelf (of met `--map`).
-- **Spotify: de uitleg klopt en is helemaal Nederlands.** Elk inzicht (recorddag, langste reeks,
-  vaste favorieten of brede ontdekker, seizoensstemming) vertelt nu wat het meet, wat het voor jou
-  is en hoe DataVault het uitrekent, met dezelfde grenzen als de berekening zelf. Het luister-DNA zegt
-  hoe je type bepaald wordt.
-- **Back-upmap: ook een tweede keer.** **Gebruiken en testen** bewaart en test ook een tweede of
-  derde map in dezelfde sessie, ook als je het venster na de eerste test met Esc sloot.
-- **Ongedaan maken lukt ook na een hapering.** Is de schijf even los of antwoordt de server niet, dan
-  blijft de knop **Ongedaan maken** staan en kun je het nog eens proberen; bij Reeksen blijven de
-  link en de melding staan tot het lukt. Staat de muis op de melding, dan blijft de uitkomst staan.
-- **Keurer: de melding staat naast de foto.** Zo blijven de map en **Andere map** vrij tijdens een
-  snelle reeks beslissingen. Na meer dan twintig beslissingen zet de knop in de melding de oudere
-  beslissing nog steeds terug; alleen als hij echt al terug is, staat er "Al ongedaan".
-- **Menu: een breder venster toont nooit minder.** Is de ruimte krap, dan gaat eerst het woordmerk
-  DATAVAULT weg en pas daarna schuiven onderdelen naar **Meer**; de ruimtes en het zoekveld groeien
-  vloeiend mee. Wordt het venster breder terwijl je in Meer zit, dan blijft de focus op dat
-  onderdeel in de balk.
-- **Kleine dingen.** Het Herstelcentrum noemt acties uit Reeksen nu ook "Reeksen". **⌘Z** staat in
-  het sneltoetsenoverzicht. In het luister-DNA zijn de typen knoppen (Tab en Enter werken) en de
-  uitleg zegt: "volgens de tijden in je Spotify-export".
 
 ## Fase 2 – Stabiliseren
 
