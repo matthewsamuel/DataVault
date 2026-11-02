@@ -2,8 +2,9 @@
 DataGatherer connector: Swarm by Foursquare (check-ins)
 
 Swarm has no export button in DataVault's sense: the user asks Foursquare for a copy of
-their data (Swarm or foursquare.com > Instellingen > Privacy-instellingen > 'Initiate Data
-Download Request'), and after a few days to two weeks a mail brings a zip with, among
+their data in the Swarm app (Instellingen > Privacy-instellingen > 'Initiate Data Download
+Request'; the web login on foursquare.com is now the one for developers and companies, not
+for Swarm accounts), and after a few days to two weeks a mail brings a zip with, among
 others:
 
     checkins1.json, checkins2.json, ...   {"count": n, "items": [check-in, ...]}, 1000 per file
@@ -30,8 +31,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from backend.datagatherer import activity_store as store, export_kit, geotag, location_store
 from backend.datagatherer.base import Connector, ConnectorError, Coverage, ExportKind, GatherContext, HelpOption
 
-HELP_URL = "https://foursquare.com/city-guide-sunset/"
-LOGIN_URL = "https://foursquare.com/login"
+# Foursquare's own instructions ('Request copies of your personal data'); the request itself is made in the app
+PRIVACY_URL = "https://foursquare.com/legal/privacy-center/"
 _CHECKINS = re.compile(r"^checkins\d*\.json$", re.IGNORECASE)
 _VISITS = re.compile(r"^(unconfirmed_)?visits\d*\.json$", re.IGNORECASE)
 _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?$")
@@ -134,12 +135,15 @@ class Swarm(Connector):
     settings = (export_kit.PASHA,)
     exports = (
         ExportKind(
-            id="gegevens", label="Foursquare-gegevens", request_url=LOGIN_URL,
+            id="gegevens", label="Foursquare-gegevens", request_url=PRIVACY_URL,
             patterns=("*.zip", "checkins*.json"), folder_label="Gegevens", expected_days=(3, 14),
+            intro="Je vraagt de export aan in de Swarm-app op je iPhone: inloggen op de website van Foursquare "
+                  "werkt niet meer voor Swarm-accounts. De knop opent de uitleg van Foursquare zelf.",
             steps=(
-                "Log in op de pagina die nu opent met je Swarm-account (wachtwoord vergeten? Zet het daar opnieuw).",
-                "Klik rechtsboven op je naam > Instellingen > Privacy-instellingen.",
-                "Klik onderaan op 'Initiate Data Download Request' en bevestig de mail van Foursquare.",
+                "Open Swarm op je iPhone, ga naar je profiel en tik rechtsboven op het tandwiel (geen app meer? "
+                "Installeer Swarm uit de App Store en log in met je oude account).",
+                "Kies Privacy-instellingen, scrol naar onder en tik op 'Initiate Data Download Request' (in een "
+                "Spaanse of andere app heet het net zo in die taal). Bevestig daarna de mail van Foursquare.",
                 "Binnen enkele dagen tot twee weken krijg je een mail met een downloadlink. DataVault vindt de zip "
                 "in Downloads en leest hem in. Het origineel blijft staan.",
             )),
@@ -147,15 +151,17 @@ class Swarm(Connector):
     help = (
         HelpOption(
             title="Export aanvragen in de Swarm-app", effort="makkelijk",
-            steps=("Open Swarm op je iPhone en tik linksboven op je profiel.",
-                   "Tik op het tandwiel > Privacy-instellingen > 'Initiate Data Download Request'.",
+            steps=("Open Swarm op je iPhone, ga naar je profiel en tik rechtsboven op het tandwiel.",
+                   "Kies Privacy-instellingen > 'Initiate Data Download Request'.",
                    "Download de zip uit de mail van Foursquare op deze Mac, of kies hem hier met Bestand kiezen."),
             note="De export bevat al je check-ins, ook die van jaren geleden, samen met je Foursquare-gegevens."),
         HelpOption(
-            title="Export aanvragen op de website", effort="makkelijk",
-            steps=("Klik op Export aanvragen en log in met je Swarm-account.",
-                   "Je naam rechtsboven > Instellingen > Privacy-instellingen > 'Initiate Data Download Request'."),
-            note="Geen toegang meer tot je account? Zet je wachtwoord opnieuw via het mailadres van toen."),
+            title="Swarm staat niet meer op je iPhone", effort="gemiddeld",
+            steps=("Installeer Swarm opnieuw uit de App Store en log in met het mailadres van je oude account.",
+                   "Wachtwoord vergeten? Tik bij het inloggen op 'Wachtwoord vergeten' en zet het opnieuw via je mail.",
+                   "Vraag daarna de export aan zoals hierboven; je kunt de app nadien weer verwijderen."),
+            note="Foursquare geeft je gegevens alleen als je kunt inloggen. Inloggen op foursquare.com zelf werkt "
+                 "niet meer voor Swarm-accounts."),
     )
 
     def detect(self, path: Path, names: Optional[List[str]]) -> Optional[str]:

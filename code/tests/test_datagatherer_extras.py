@@ -267,3 +267,9 @@ def test_swarm_times_from_the_export_and_from_the_api():
         "id": "v", "name": "Plek", "location": {"lat": 51.0, "lng": 3.7}}}]}}}
     events, points, visits = swarm.parse_checkins(api)
     assert len(events) == 1 and points == [(1563098400000, 51.0, 3.7, None)] and visits[0]["name"] == "Plek"
+
+
+def test_swarm_export_window_says_the_request_is_made_in_the_app(client):
+    kind = client.get("/api/datagatherer/sources/swarm").json()["export_kinds"][0]
+    assert "Swarm-app" in kind["intro"] and kind["url"] == "https://foursquare.com/legal/privacy-center/"
+    assert client.get("/api/datagatherer/sources/netflix").json()["export_kinds"][0]["intro"] == ""

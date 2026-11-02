@@ -511,7 +511,8 @@ def detail(config, db, connector: Connector, port: Optional[int]) -> Dict[str, A
             "links": [{"label": label, "url": url} for label, url in connector.setup.links],
         },
         "export_kinds": [{"id": k.id, "label": k.label, "url": k.request_url, "steps": list(k.steps),
-                          "expected_days": list(k.expected_days), "date_range": k.date_range} for k in connector.exports],
+                          "expected_days": list(k.expected_days), "date_range": k.date_range, "intro": k.intro}
+                         for k in connector.exports],
         "since": since_for(connector, gctx) if any(k.date_range for k in connector.exports) else None,
         "raw_imports": [{k: r[k] for k in ("id", "kind", "path", "is_folder", "origin", "received_at", "status",
                                             "imported_at", "records_added", "records_seen", "error")}

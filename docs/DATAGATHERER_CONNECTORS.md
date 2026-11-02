@@ -59,6 +59,7 @@ erbij: liever luid bij de start dan een halve kaart.
 | `holds_messages` | Het id van de bron is een berichtenbron in Berichten (tabellen `msg_*`, via `messages_store`) |
 | `watch_setting` | Een instelling met een gesynchroniseerde map (Dropbox, Drive, Koofr) waar de watcher altijd kijkt |
 | `ExportKind.date_range` | De exportpagina vraagt een periode: het venster toont de datum 'sinds' en kopieert hem |
+| `ExportKind.intro` | De eerste zin van het venster Export aanvragen, als de aanvraag niet op de geopende pagina gebeurt (Swarm: in de app) |
 | `record_label`, `stale_days`, `schedule_minutes`, `launchd` | Hoe een record heet, wanneer de gegevens "achter" lopen, het standaardinterval van het schema (staat standaard uit), en of de launchd-agent hem ook mag bijwerken |
 
 Het netwerklabel volgt vanzelf: "Verbindt met … wanneer jij klikt", of "Alleen lokaal".

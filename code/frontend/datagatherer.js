@@ -612,8 +612,8 @@ async function dgOpenExport(id) {
     const showSteps = () => stepsBox.replaceChildren(
         createEl('p', { class: 'dg-modal-text', text: `${dgExpected(kind.expected_days)} klaar. Zo gaat het:` }),
         dgSteps(kind.steps));
-    const body = [createEl('p', { class: 'dg-modal-text',
-        text: `De exportpagina van ${detail.name} opent in je eigen browser. Daar log je zelf in; DataVault ziet je wachtwoord nooit.` })];
+    const body = [createEl('p', { class: 'dg-modal-text', text: kind.intro ||
+        `De exportpagina van ${detail.name} opent in je eigen browser. Daar log je zelf in; DataVault ziet je wachtwoord nooit.` })];
     if (detail.export_kinds.length > 1) {
         body.push(createEl('div', { class: 'segmented dg-kind-choice', role: 'radiogroup', 'aria-label': 'Soort export' },
             ...detail.export_kinds.map((k, i) => createEl('label', { class: 'settings-choice' },

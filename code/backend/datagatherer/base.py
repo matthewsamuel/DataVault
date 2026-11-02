@@ -57,6 +57,7 @@ class ExportKind:
     expected_days: Tuple[int, int] = (1, 30)
     steps: Tuple[str, ...] = ()
     date_range: bool = False    # the page asks for a period: the window shows 'sinds' and copies it
+    intro: str = ""             # the window's first line, when not 'the page opens, you log in there'
 
 
 @dataclass(frozen=True)
