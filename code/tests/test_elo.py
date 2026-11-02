@@ -794,7 +794,9 @@ def test_a_pair_just_picked_does_not_come_back_while_its_save_is_on_the_way(clie
     larger = _play_like_the_screen(client, _photos(vault / "library/dertig", 30), 40, rng)
     for i, pair in enumerate(larger):
         assert pair not in larger[max(0, i - 8):i], i
-    assert len(set(larger)) >= 36
+    # The pairing is random on the server: 60 runs gave 33 to 41 distinct pairs of 41 shown,
+    # so 30 still tells a duel that goes round from one stuck on a few pairs
+    assert len(set(larger)) >= 30
 
 
 def test_a_skipped_pair_stays_away(client, app, vault):
