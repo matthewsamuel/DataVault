@@ -178,6 +178,44 @@ def test_describe_gives_every_geotagged_photo_a_place():
     assert places.describe_parts(52.4, 4.3)["sea"] is True and places.describe_parts(52.4, 4.3)["coast"] is True
 
 
+def test_describe_names_downtown_landmarks_by_their_city():
+    """A big city's point is one spot downtown: its landmarks 10-15 km away are still in it, while a suburb with
+    its own centre keeps its name."""
+    from backend import places
+    assert places.describe(25.1972, 55.2744) == "Dubai, Verenigde Arabische Emiraten"     # Burj Khalifa
+    assert places.describe(25.1412, 55.1853) == "Dubai, Verenigde Arabische Emiraten"     # Burj al Arab
+    assert places.describe(35.7148, 139.7967) == "Tokio, Japan"                            # Asakusa
+    assert places.describe(34.0928, -118.3287) == "Los Angeles, Verenigde Staten"         # Hollywood
+    assert places.describe(52.30, 4.86) == "Amstelveen, Nederland"
+    assert places.describe(48.80, 2.13) == "Versailles, Frankrijk"
+    assert places.town_radius_km(15) < 4 and places.town_radius_km(1e5) == 25
+
+
+def test_describe_city_states_and_region_names_read_as_dutch():
+    from backend import places
+    assert places.describe(43.7384, 7.4246) == "Monaco"
+    assert places.describe(1.2903, 103.8519) == "Singapore"
+    assert places.describe(43.9356, 12.4473) == "San Marino"
+    assert places.describe(41.9022, 12.4539) == "Vaticaanstad"                             # Sint-Pietersplein
+    assert places.describe(41.8986, 12.4769) == "Rome, Italië"                             # the Pantheon
+    assert places.describe(52.40, 5.15) == "Almere, Nederland"                             # not 'Almere Stad'
+    oslo, stockholm, cph = places.describe_parts(59.91, 10.75), places.describe_parts(59.33, 18.07), places.describe_parts(55.68, 12.57)
+    assert (oslo["region_kind"], stockholm["region_kind"], stockholm["region"]) == ("provincie", "provincie", "Stockholm")
+    assert cph["region"] == "Hovedstaden"
+    assert places.describe_parts(31.63, -7.99)["region"].startswith("Marrakesh-")         # one spelling with the city
+    assert places.describe(37.40, 25.20) == "Voor de kust van de Zuid-Egeïsche Eilanden, Griekenland"
+
+
+def test_describe_off_the_coast_is_quick_too():
+    import time
+    from backend import places
+    places.describe(52.0, 5.0)
+    start = time.perf_counter()
+    for i in range(100):
+        places.describe(52.4 + (i % 10) * 0.1, 4.3 + (i // 10) * 0.08)           # the coast and the Wadden
+    assert (time.perf_counter() - start) / 100 < 0.004
+
+
 def test_describe_is_fast_enough_for_a_page_of_photos():
     import time
     from backend import places

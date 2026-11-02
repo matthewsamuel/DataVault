@@ -24,7 +24,7 @@ DATA = Path(__file__).parent.parent / "frontend" / "vendor" / "naturalearth"
 CITY_RADIUS_KM = 25.0
 
 COUNTRY_ALIASES = {
-    "nederland": "Netherlands", "belgie": "Belgium", "duitsland": "Germany", "frankrijk": "France",
+    "nederland": "Netherlands", "holland": "Netherlands", "belgie": "Belgium", "duitsland": "Germany", "frankrijk": "France",
     "spanje": "Spain", "italie": "Italy", "portugal": "Portugal", "oostenrijk": "Austria",
     "zwitserland": "Switzerland", "luxemburg": "Luxembourg", "engeland": "United Kingdom",
     "verenigd koninkrijk": "United Kingdom", "groot-brittannie": "United Kingdom", "schotland": "United Kingdom",
@@ -112,15 +112,20 @@ def _in_ring(lat: float, lon: float, ring) -> bool:
 
 
 class Place:
-    """An area: kind 'city', 'region' (a province) or 'country', its name, and a bounding box [south, west, north, east]."""
+    """An area: kind 'city', 'region' (a province) or 'country', its name, and a bounding box [south, west, north, east].
+    A city is a circle (centre and radius_km) inside that box; a region or country its polygons."""
 
-    def __init__(self, kind: str, name: str, bbox: List[float], polygons=None):
+    def __init__(self, kind: str, name: str, bbox: List[float], polygons=None,
+                 centre: Optional[Tuple[float, float]] = None, radius_km: Optional[float] = None, code: Optional[str] = None):
         self.kind, self.name, self.bbox, self.polygons = kind, name, bbox, polygons
+        self.centre, self.radius_km, self.code = centre, radius_km, code
 
     def contains(self, lat: float, lon: float) -> bool:
         s, w, n, e = self.bbox
         if not (s <= lat <= n and w <= lon <= e):
             return False
+        if self.centre is not None:
+            return self.km_from_centre(lat, lon) <= self.radius_km
         if self.polygons is None:
             return True
         for poly, (ps, pw, pn, pe) in self.polygons:
@@ -129,67 +134,138 @@ class Place:
                 return True
         return False
 
+    def km_from_centre(self, lat: float, lon: float) -> float:
+        clat, clon = self.centre
+        return math.hypot(lat - clat, (lon - clon) * math.cos(math.radians(clat))) * 111.2
+
+
+HOME = ("NLD", "BEL")     # a name that is a place here and abroad (Middelburg, Ede): here first
+CANDIDATES_MAX = 8
+
 
 def find(name: str) -> Optional[Place]:
-    """The place for a name (Dutch or English, with or without accents), or None."""
+    """The most likely place for a name (Dutch or English, with or without accents), or None.
+    The assistant tries all of candidates() against the photos; this is the first of them."""
+    found = candidates(name)
+    return found[0] if found else None
+
+
+def candidates(name: str) -> List[Place]:
+    """
+    Every place a name can mean, the most likely first:
+      - a country wins outright ('Frankrijk', 'Holland');
+      - otherwise one place per country: a town ('Faro', the capitals and larger cities of the Kaart, and every
+        place of 15,000+ inhabitants) or a province or region ('Toscane', 'Gelderland'). Within one country a
+        big town wins over the province of the same name (Groningen, Utrecht); provinces of one name in
+        neighbouring countries count together (Limburg).
+    Order: the Netherlands and Belgium first (Middelburg, Ede), then provinces and regions before a town of the
+    same name abroad (Bali, not Bāli in India), then by size. Population alone never decides which one the
+    user means: the assistant keeps the candidate that holds their photos.
+    """
     _load()
     key = fold(name)
     if not key:
-        return None
+        return []
     english = COUNTRY_ALIASES.get(key)
     for country in _countries:
         if key in (fold(country["name"]), fold(country["dutch"])) or (english and country["name"] == english):
-            boxes = [b for _, b in country["polygons"]]
-            bbox = [min(b[0] for b in boxes), min(b[1] for b in boxes),
-                    max(b[2] for b in boxes), max(b[3] for b in boxes)]
-            return Place("country", country["name"], bbox, country["polygons"])
+            return [Place("country", country["name"], _union_bbox(country["polygons"]), country["polygons"], code=country["code"])]
+    d = _load_detail()
     city = CITY_ALIASES.get(key)
-    best = None
+    detail_key = REGION_ALIASES.get(key, key)
+    towns: Dict[Optional[str], Tuple[float, Place]] = {}          # code -> (population in thousands, place)
     for pname, lat, lon, capital in _places:
         if fold(pname) == key or (city and pname == city):
-            if best is None or capital:
-                best = (pname, lat, lon)
-    if best is None:
-        return _find_detail(key)
-    pname, lat, lon = best
-    return _city_place(pname, lat, lon, CITY_RADIUS_KM)
+            code = _code_at(d, lat, lon)
+            pop = _population_near(d, lat, lon, code) + (1e6 if capital else 0)  # a capital wins within its country
+            if code not in towns or pop > towns[code][0]:
+                towns[code] = (pop, _city_place(pname, lat, lon, CITY_RADIUS_KM, code))
+    seen_ne = set(towns)
+    for i, tname in enumerate(d["town_names"]):
+        if fold(tname) != detail_key:
+            continue
+        code, pop = d["town_code"][i], float(d["town_pop"][i])
+        if code in seen_ne or (code in towns and towns[code][0] >= pop):
+            continue          # the Kaart's own city (25 km) is the same place
+        lon, lat = (float(v) for v in d["town_xy"][i])
+        radius = CITY_RADIUS_KM if pop >= 300 else 15.0 if pop >= BIG_TOWN else 10.0
+        towns[code] = (pop, _city_place(tname, lat, lon, radius, code))
+    regions: Dict[str, List[Tuple[str, Any]]] = {}
+    for code, rname, shapes, _kind in d["provinces"]:
+        if fold(rname) == detail_key:
+            regions.setdefault(code, []).append((rname, shapes))
+    found: List[Tuple[Tuple, Place]] = []
+    region_places = []
+    for code, units in regions.items():
+        town = towns.get(code)
+        if town and (town[0] >= BIG_TOWN or code in seen_ne):
+            continue          # Groningen, Utrecht: the town of that name, not the province around it
+        towns.pop(code, None)
+        polygons = []
+        for _name, shapes in units:
+            for part in shapes:
+                rings = [ring.tolist() for ring in part]
+                polygons.append((rings, _ring_bbox(rings[0])))
+        region_places.append(Place("region", units[0][0], _union_bbox(polygons), polygons, code=code))
+    for place in _merge_neighbours(region_places):
+        s, w, n, e = place.bbox
+        found.append(((0 if place.codes & set(HOME) else 1, 0, -(n - s) * (e - w)), place))
+    for code, (pop, place) in towns.items():
+        found.append(((0 if code in HOME else 1, 1, -pop), place))
+    found.sort(key=lambda x: x[0])
+    return [place for _, place in found[:CANDIDATES_MAX]]
 
 
-def _city_place(name: str, lat: float, lon: float, radius_km: float) -> Place:
+def _union_bbox(polygons) -> List[float]:
+    boxes = [b for _, b in polygons]
+    return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+
+
+def _merge_neighbours(regions: List[Place], gap: float = 0.5) -> List[Place]:
+    """Provinces of one name whose boxes touch (within gap degrees) are one area: Limburg in the Netherlands and
+    in Belgium. Far apart they stay apart: Florida in Uruguay is not part of Florida in the United States."""
+    merged: List[Place] = []
+    for place in regions:
+        s, w, n, e = place.bbox
+        for other in merged:
+            os_, ow, on, oe = other.bbox
+            if s <= on + gap and os_ <= n + gap and w <= oe + gap and ow <= e + gap:
+                other.polygons = other.polygons + place.polygons
+                other.bbox = _union_bbox(other.polygons)
+                other.codes = other.codes | {place.code}
+                break
+        else:
+            place.codes = {place.code}
+            merged.append(place)
+    return merged
+
+
+def _code_at(d: Dict[str, Any], lat: float, lon: float) -> Optional[str]:
+    """The country (ADM0_A3) a position lies in, from the province shapes (a harbour just outside counts too)."""
+    found = _province_at(d, lat, lon) or _nearest_province(d, lat, lon, 10.0)
+    return found[0] if found else None
+
+
+def _population_near(d: Dict[str, Any], lat: float, lon: float, code: Optional[str]) -> float:
+    """Inhabitants (thousands) of the largest town within 10 km in the same country: the size of a Kaart city."""
+    import numpy as np
+    xy = d["town_xy"]
+    cos = max(0.05, math.cos(math.radians(lat)))
+    km = np.hypot((xy[:, 0] - lon) * cos, xy[:, 1] - lat) * KM_PER_DEG
+    near = [i for i in np.nonzero(km <= 10.0)[0] if d["town_code"][i] == code]
+    return max((float(d["town_pop"][i]) for i in near), default=300.0)
+
+
+def _city_place(name: str, lat: float, lon: float, radius_km: float, code: Optional[str] = None) -> Place:
     dlat = radius_km / 111.0
     dlon = radius_km / (111.0 * max(0.2, math.cos(math.radians(lat))))
-    return Place("city", name, [lat - dlat, lon - dlon, lat + dlat, lon + dlon])
+    return Place("city", name, [lat - dlat, lon - dlon, lat + dlat, lon + dlon], centre=(lat, lon),
+                 radius_km=radius_km, code=code)
 
 
 # Region names people use for a province with another name in the data
 REGION_ALIASES = {"algarve": "faro"}
 BIG_TOWN = 100.0        # thousands: a town this big wins over a province of the same name (Groningen, Utrecht)
-
-
-def _find_detail(key: str) -> Optional[Place]:
-    """A smaller town ('Faro', 15,000+ inhabitants) or a province or region as on the Kaart ('Toscane',
-    'Gelderland'). Provinces of the same name in several countries count together (Limburg)."""
-    d = _load_detail()
-    key = REGION_ALIASES.get(key, key)
-    town = None
-    for i, tname in enumerate(d["town_names"]):
-        if fold(tname) == key and (town is None or d["town_pop"][i] > d["town_pop"][town]):
-            town = i
-    regions = [(code, name, shapes) for code, name, shapes, _kind in d["provinces"] if fold(name) == key]
-    if town is not None and (d["town_pop"][town] >= BIG_TOWN or not regions):
-        pop = float(d["town_pop"][town])
-        lon, lat = (float(v) for v in d["town_xy"][town])
-        return _city_place(d["town_names"][town], lat, lon, CITY_RADIUS_KM if pop >= 300 else 15.0 if pop >= BIG_TOWN else 10.0)
-    if not regions:
-        return None
-    polygons = []
-    for _code, _name, shapes in regions:
-        for part in shapes:
-            rings = [ring.tolist() for ring in part]
-            polygons.append((rings, _ring_bbox(rings[0])))
-    boxes = [b for _, b in polygons]
-    bbox = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
-    return Place("region", regions[0][1], bbox, polygons)
 
 
 # Dutch display names for countries and cities that have a Dutch spelling (the aliases above
@@ -245,6 +321,9 @@ COAST_TOWN_KM = 15.0    # on the coast and further from a town than this: the co
 SHORE_KM = 1.0          # just outside the simplified coast (harbour, beach): still on land
 OFFSHORE_KM = 30.0      # 'voor de kust van ...' up to here; beyond: 'op zee'
 OPEN_SEA_KM = 150.0     # 'op zee, 80 km uit de kust van ...' up to here
+# Countries smaller than the data can draw (the 1:50m outline of the Vatican is a 1 km square in the wrong
+# spot, and it has no province shapes): a circle around the centre, in km
+ENCLAVES = {"VAT": (41.9038, 12.4521, 0.6)}
 DIRECTIONS = ("noorden", "noordoosten", "oosten", "zuidoosten", "zuiden", "zuidwesten", "westen", "noordwesten")
 
 _detail: Optional[Dict[str, Any]] = None
@@ -265,11 +344,13 @@ def _load_detail() -> Dict[str, Any]:
             a = (np.cumsum(np.asarray(flat, dtype=np.int64).reshape(-1, 2), axis=0) / scale).astype(np.float32)
             return a if len(a) > 2 and (a[0] == a[-1]).all() else np.vstack([a, a[:1]])
 
-        provinces, boxes = [], []
+        provinces, boxes, part_boxes = [], [], []
         for code, name, parts, kind in raw["provinces"]:
             shapes = [[ring(r) for r in part] for part in parts]
-            outer = np.vstack([part[0] for part in shapes])
-            boxes.append([outer[:, 0].min(), outer[:, 1].min(), outer[:, 0].max(), outer[:, 1].max()])
+            # per part (an island, a mainland) its own box: most of a coastal province's parts are far away
+            pb = np.asarray([[o[:, 0].min(), o[:, 1].min(), o[:, 0].max(), o[:, 1].max()] for o in (part[0] for part in shapes)])
+            boxes.append([pb[:, 0].min(), pb[:, 1].min(), pb[:, 2].max(), pb[:, 3].max()])
+            part_boxes.append(pb)
             provinces.append((raw["codes"][code], name, shapes, kind))
         a, b = [], []
         for flat in raw["coast"]:
@@ -284,7 +365,7 @@ def _load_detail() -> Dict[str, Any]:
         del raw["provinces"], raw["coast"]
         dutch_country = _dutch(COUNTRY_ALIASES)
         _detail = {
-            "provinces": provinces, "boxes": np.asarray(boxes),
+            "provinces": provinces, "boxes": np.asarray(boxes), "part_boxes": part_boxes,
             "coast_a": a, "coast_b": b, "coast_lo": np.minimum(a, b), "coast_hi": np.maximum(a, b),
             "town_names": [t[0] for t in towns],
             "town_xy": np.asarray([[t[1] / scale, t[2] / scale] for t in towns]),
@@ -325,7 +406,9 @@ def _province_at(d: Dict[str, Any], lat: float, lon: float) -> Optional[Tuple[st
     hits = np.nonzero((box[:, 0] <= lon) & (lon <= box[:, 2]) & (box[:, 1] <= lat) & (lat <= box[:, 3]))[0]
     for i in hits:
         code, name, shapes, kind = d["provinces"][i]
-        for part in shapes:
+        pb = d["part_boxes"][i]
+        for j in np.nonzero((pb[:, 0] <= lon) & (lon <= pb[:, 2]) & (pb[:, 1] <= lat) & (lat <= pb[:, 3]))[0]:
+            part = shapes[j]
             if _pip(lon, lat, part[0]) and not any(_pip(lon, lat, hole) for hole in part[1:]):
                 return code, name, kind
     return None
@@ -341,8 +424,10 @@ def _nearest_province(d: Dict[str, Any], lat: float, lon: float, max_km: float) 
     best = None
     for i in near:
         code, name, shapes, kind = d["provinces"][i]
-        for part in shapes:
-            outer = part[0]
+        pb = d["part_boxes"][i]
+        for j in np.nonzero((pb[:, 0] - pad_lon <= lon) & (lon <= pb[:, 2] + pad_lon)
+                            & (pb[:, 1] - pad_lat <= lat) & (lat <= pb[:, 3] + pad_lat))[0]:
+            outer = shapes[j][0]
             km = float(_segment_km(lat, lon, outer[:-1], outer[1:]).min())
             if km <= max_km and (best is None or km < best[3]):
                 best = (code, name, kind, km)
@@ -362,13 +447,16 @@ def _coast_km(d: Dict[str, Any], lat: float, lon: float, max_km: float) -> Optio
 
 
 def town_radius_km(pop_thousands: float) -> float:
-    """How far from its centre a town still counts as 'in' it: 2 km at 15,000, 6 km at 1.5 million."""
-    return 2.0 + 2.0 * math.log10(max(1.0, pop_thousands / 15.0))
+    """How far from its point a town still counts as 'in' it: about 3 km at 15,000, 10 km for Amsterdam,
+    17 km for Dubai and up to 25 km for Tokyo. A big city's point is one spot downtown, and its own people
+    still say they are in the city 15 km from it (the Burj Khalifa is in Dubai, Asakusa in Tokyo)."""
+    return min(25.0, 2.0 + 0.3 * math.sqrt(max(0.0, pop_thousands)))
 
 
 def _town_near(d: Dict[str, Any], lat: float, lon: float, code: Optional[str],
                weigh: float = 0.3) -> Optional[Dict[str, Any]]:
-    """The town that names a position: the largest one the position lies in, else the nearest within
+    """The town that names a position: the town the position lies in (of several, the one it is most central
+    in: a suburb with its own centre keeps its name inside a big city's circle), else the nearest within
     TOWN_KM, with larger towns weighing a bit heavier (a hamlet next to Faro is 'bij Faro'). At sea
     (weigh 0) simply the nearest: the harbour you see from the boat."""
     import numpy as np
@@ -378,15 +466,17 @@ def _town_near(d: Dict[str, Any], lat: float, lon: float, code: Optional[str],
     near = np.nonzero((np.abs(dy) <= TOWN_KM) & (np.abs(dx) <= TOWN_KM))[0]
     if code is not None:
         near = [i for i in near if d["town_code"][i] == code]   # a town across a border names nothing here
-    best, best_score, inside = None, None, None
+    best, best_score, inside, inside_share = None, None, None, None
     for i in near:
         km = math.hypot(dx[i], dy[i])
         if km > TOWN_KM:
             continue
         pop = float(d["town_pop"][i])
-        if km <= town_radius_km(pop):
-            if inside is None or pop > float(d["town_pop"][inside[0]]):
-                inside = (i, km)
+        radius = town_radius_km(pop)
+        if km <= radius:
+            share = km / radius
+            if inside is None or share < inside_share:
+                inside, inside_share = (i, km), share
             continue
         score = km / (pop / 15.0) ** weigh
         if best_score is None or score < best_score:
@@ -399,6 +489,23 @@ def _town_near(d: Dict[str, Any], lat: float, lon: float, code: Optional[str],
     bearing = (math.degrees(math.atan2(-dx[i], -dy[i])) + 360.0) % 360.0
     return {"name": d["town_names"][i], "km": km, "inside": inside is not None,
             "direction": DIRECTIONS[int((bearing + 22.5) // 45) % 8], "code": d["town_code"][i]}
+
+
+PLURAL_REGIONS = ("eilanden", "balearen", "azoren", "cycladen", "antillen", "canarische eilanden")
+
+
+def _with_article(region: str) -> str:
+    """'de Zuid-Egeïsche Eilanden' after 'van': a region named as a group of islands takes 'de'."""
+    return f"de {region}" if fold(region).endswith(PLURAL_REGIONS) else region
+
+
+def _enclave_at(lat: float, lon: float) -> Optional[Tuple[str, str, str]]:
+    """A country too small for the shapes in the data, inside another one's province: Sint-Pietersplein
+    lies in Lazio's simplified shape, but it is in Vaticaanstad."""
+    for code, (clat, clon, radius) in ENCLAVES.items():
+        if math.hypot(lat - clat, (lon - clon) * math.cos(math.radians(clat))) * KM_PER_DEG <= radius:
+            return code, "", ""
+    return None
 
 
 def _km_text(km: float) -> str:
@@ -421,7 +528,7 @@ def describe_parts(lat: float, lon: float) -> Optional[Dict[str, Any]]:
         return None
     d = _load_detail()
     names = d["country_nl"]
-    found = _province_at(d, lat, lon)
+    found = _enclave_at(lat, lon) or _province_at(d, lat, lon)
     code, region, kind, sea = (*found, False) if found else (None, None, "", True)
     if found is None:
         # The province shapes are simplified to about a kilometre: a harbour or beach can fall just outside
@@ -445,11 +552,14 @@ def describe_parts(lat: float, lon: float) -> Optional[Dict[str, Any]]:
                              "region": region, "region_kind": (region and kind) or None, "country": country, "coast": bool(coast or (sea and code)),
                              "sea": sea}
     tail = f", {country}" if country else ""
+    if town and country and fold(town["name"]) == fold(country):
+        tail = ""               # a city-state: 'Monaco', not 'Monaco, Monaco'
+    of_region = _with_article(region) if region else None
     if sea:
         if code and town:
             label = f"Voor de kust bij {town['name']}{tail}"
         elif code:
-            label = f"Voor de kust van {region}{tail}" if region else f"Voor de kust van {country}"
+            label = f"Voor de kust van {of_region}{tail}" if region else f"Voor de kust van {country}"
         else:
             far = _nearest_coast(lat, lon, OPEN_SEA_KM)
             far_nl = names.get(far) if far else None
@@ -461,7 +571,7 @@ def describe_parts(lat: float, lon: float) -> Optional[Dict[str, Any]]:
     elif town and not (coast and town["km"] > COAST_TOWN_KM):
         label = f"{_km_text(town['km'])} ten {town['direction']} van {town['name']}{tail}"
     elif coast:
-        label = f"Aan de kust van {region}{tail}" if region else f"Aan de kust van {country}"
+        label = f"Aan de kust van {of_region}{tail}" if region else f"Aan de kust van {country}"
     elif region:
         label = f"{region}{tail}"
     elif country:
