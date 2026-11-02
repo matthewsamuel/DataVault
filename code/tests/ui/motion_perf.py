@@ -239,6 +239,28 @@ DATA_TRANSITIONS = [
 ]
 TRANSITIONS += DATA_TRANSITIONS
 
+# ---------- Afronding: het Elo-duel, de ranglijst en de nieuwste schermen en knoppen ----------
+# Een land op de kaart: een klik op het eerste land dat goed in beeld staat (Leaflet hoort de
+# DOM-klik op het pad), zoals een gebruiker het aanklikt
+MAP_COUNTRY = ("(() => { const p = [...document.querySelectorAll('#section-map path.map-country')].find(el => {"
+               " const r = el.getBoundingClientRect(); return r.width > 40 && r.width < 500 && r.top > 260; });"
+               " if (!p) return; const r = p.getBoundingClientRect();"
+               " p.dispatchEvent(new MouseEvent('click', {bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2})); })()")
+FINAL_TRANSITIONS = [
+    ("elo: venster open", "if (window.closeElo) closeElo(); switchMainView('shows')", "openElo()", 1200),
+    ("elo: kiezen (winnaar vliegt, nieuw paar)", None, "eloPick(0, 'key')", 900),
+    ("elo: gelijk", None, "eloPick('draw', 'key')", 900),
+    ("elo: overslaan", None, "eloSkip()", 700),
+    ("elo: ranglijst rijst in", None, "eloShowTab('board')", 1000),
+    ("elo: dicht", None, "closeElo()", 600),
+    ("selectie: vinkje en balk", "switchMainView('albums'); DVExport.clear()",
+     "document.querySelectorAll('#albums-content .thumb-select')[1]?.click()", 900),
+    ("verplaatsen: venster met waaier", None, "DVExport.moveSelection()", 1000),
+    ("verplaatsen: dicht", None, "closeMoveFileModal(); DVExport.clear()", 600),
+    ("kaart: land, provincies en steden", "switchMainView('map')", MAP_COUNTRY, 1800),
+]
+TRANSITIONS += FINAL_TRANSITIONS
+
 
 def start_server(workdir: Path, showcase: bool, stress: int = 0):
     python = server_python()
@@ -315,15 +337,24 @@ def measure(page, setup, trigger, settle_ms):
 CALM_SWEEP = """(() => {
     window.__calm = new Map();
     const neutral = (t) => !t || t === 'none' || t.trim() === 'matrix(1, 0, 0, 1, 0, 0)'
-        || (!/scale\\((?!1\\)|1,\\s*1\\))|rotate\\((?!0)/.test(t) && !/translate3?d?\\((?!0(px)?,\\s*0(px)?(,\\s*0(px)?)?\\))/.test(t));
+        || (!/scale\\((?!1\\)|1,\\s*1\\))|rotate\\((?!0)/.test(t) && !/translate3?d?\\((?!0(px)?,\\s*0(px)?(,\\s*0(px)?)?\\))/.test(t)
+            && !/translate[XY]\\((?!0(px)?\\))/.test(t));
+    const same = (t) => t.replace(/\\s*scale\\(1\\)/g, '').replace(/translateX\\(([^)]+)\\)/g, 'translate($1)')
+        .replace(/translate3d\\(([^,]+),\\s*0(px)?,\\s*0(px)?\\)/g, 'translate($1)')
+        .replace(/translate\\(([^,]+),\\s*0(px)?\\)/g, 'translate($1)').trim();
     const name = (el) => el ? el.tagName + (el.id ? '#' + el.id : '') + '.' + String(el.className && el.className.baseVal !== undefined
         ? el.className.baseVal : el.className).split(' ').slice(0, 2).join('.') : '?';
     const tick = () => {
         for (const a of document.getAnimations()) {
             const effect = a.effect;
             if (!effect || !effect.getKeyframes || a.animationName === 'dv-toast-timer') continue;
-            const moving = effect.getKeyframes().map(k => k.transform).filter(t => t && !neutral(t));
+            const all = effect.getKeyframes().map(k => k.transform).filter(Boolean);
+            const moving = all.filter(t => !neutral(t));
             if (!moving.length) continue;
+            // The same transform in every keyframe is a placement (a centred bar, a turned check), not motion
+            if (all.length > 1 && new Set(all.map(same)).size === 1) continue;
+            // Centring by -50% (the selection bar, the country chip) is never a motion distance
+            if (all.every(t => /^translate\\(-50%(,\\s*-50%)?\\)$/.test(same(t)))) continue;
             const key = (a.animationName || a.transitionProperty || 'waapi') + ' @' + name(effect.target) + (effect.pseudoElement || '');
             if (!__calm.has(key)) __calm.set(key, moving.slice(0, 2).join(' -> '));
         }
@@ -356,6 +387,29 @@ def calm_sweep(browser, base) -> list:
     page.wait_for_timeout(400)
     page.evaluate("closeThemeDropdown()")
     page.wait_for_timeout(500)
+    # Het duel en de nieuwste knoppen: in Rustig alleen vervagen
+    page.evaluate("switchMainView('shows'); openElo()")
+    page.wait_for_timeout(1500)
+    page.evaluate("eloPick(0, 'key')")
+    page.wait_for_timeout(700)
+    page.evaluate("eloSkip()")
+    page.wait_for_timeout(700)
+    page.evaluate("eloShowTab('board')")
+    page.wait_for_timeout(700)
+    page.evaluate("closeElo()")
+    page.wait_for_timeout(500)
+    page.evaluate("switchMainView('albums')")
+    page.wait_for_timeout(1500)
+    page.evaluate("document.querySelectorAll('#albums-content .thumb-select')[1]?.click()")
+    page.wait_for_timeout(600)
+    page.evaluate("DVExport.moveSelection()")
+    page.wait_for_timeout(700)
+    page.evaluate("closeMoveFileModal(); DVExport.clear()")
+    page.wait_for_timeout(500)
+    page.evaluate("switchMainView('map')")
+    page.wait_for_timeout(1500)
+    page.evaluate(MAP_COUNTRY)
+    page.wait_for_timeout(1500)
     page.evaluate("switchMainView('viewer')")
     page.wait_for_timeout(800)
     for theme in ("light", "dark"):
