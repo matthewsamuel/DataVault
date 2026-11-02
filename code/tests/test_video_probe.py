@@ -195,3 +195,14 @@ def test_migration_180_marks_only_the_videos_ffprobe_reads_and_keeps_every_user_
         assert [r[:status_at] + r[status_at + 1:] for r in after] == \
                [r[:status_at] + r[status_at + 1:] for r in media_before]
     db.close_all()
+
+
+def test_a_move_in_the_app_never_starts_ffprobe(client, config, monkeypatch):
+    from backend import media_index
+    from test_media_index import _row
+    rel = "RAW/2019/zomer vakantie/verhuisd.mkv"
+    (config.VAULT_ROOT / rel).write_bytes(b"\x1aE\xdf\xa3" + b"\x00" * 500)
+    monkeypatch.setattr(media_meta, "ffprobe_info", lambda *a, **k: pytest.fail("ffprobe in a request"))
+    db = Database(config.DB_PATH)
+    media_index.record_move(db, config, config.VAULT_ROOT / "elders.mkv", config.VAULT_ROOT / rel)
+    assert _row(config, rel)["meta_status"] == media_meta.META_PROBE

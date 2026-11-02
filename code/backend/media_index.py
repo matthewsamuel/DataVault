@@ -224,13 +224,14 @@ def _fallback_meta(path: str, st: os.stat_result, status: str) -> Dict[str, Any]
     return meta
 
 
-def read_file(path: str, st: os.stat_result, probe: bool = False) -> Optional[Dict[str, Any]]:
+def read_file(path: str, st: os.stat_result, probe: bool = True) -> Optional[Dict[str, Any]]:
     """
     The metadata of one file for its row; None when the file is gone (it moved or was
     removed after the listing). A read error gives a row with the file's own dates and
     meta_status 'error', read again on the next pass. Raises OSError only when the
     error may be the vault going away (the caller checks). probe: ffprobe may run for
-    the videos only it reads (the index job; a request leaves them to the next pass).
+    the videos only it reads (the index job; a request passes False and leaves them to
+    the next pass).
     """
     try:
         return media_meta.read_metadata(Path(path), st, probe=probe)
@@ -425,8 +426,7 @@ class _Pass:
         from backend.jobs import bounded_map
         values = []
         stop = lambda: self.ctx.stopping  # noqa: E731
-        outcomes = bounded_map(lambda item: read_file(item[0], item[1], probe=True), items,
-                               workers=READ_WORKERS, stop=stop)
+        outcomes = bounded_map(lambda item: read_file(*item), items, workers=READ_WORKERS, stop=stop)
         for (path, st), meta, error in outcomes:
             if error is not None:
                 self.read_errors(path, error)
@@ -641,7 +641,7 @@ def record_move(db, config, src, dst) -> None:
     meta = None
     if shown and row is None:
         try:
-            meta = read_file(dst, os.lstat(dst))
+            meta = read_file(dst, os.lstat(dst), probe=False)     # a request: no ffprobe here
         except OSError:
             meta = None
     now = time.time()
