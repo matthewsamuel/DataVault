@@ -166,6 +166,10 @@
         map.getContainer().setAttribute('aria-label', "Kaart met foto's op locatie. Pijltjestoetsen verschuiven, plus en min zoomen, Enter opent een groep of foto.");
 
         map.on('zoomend moveend', () => { updateDetail(); updateHint(); });
+        // Tijdens het zoomen schaalt Leaflet de vectorlaag mee (ook de randen): style.css laat de
+        // groene rand dan even terugwijken, tot de kaart stilligt
+        map.on('zoomstart', () => map.getContainer().classList.add('is-zooming'));
+        map.on('zoomend', () => map.getContainer().classList.remove('is-zooming'));
         map.on('click', () => { if (state.selected) selectCountry(''); });
         map.getContainer().addEventListener('keydown', e => {
             if (e.key === 'Escape' && state.selected) { e.stopPropagation(); selectCountry(''); }
@@ -276,8 +280,8 @@
     }
 
     function reducedMotion() {
-        return document.documentElement.dataset.motion !== 'volledig'
-            || !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        if (window.Motion) return !Motion.full();   // Beweging in Instellingen (volgt ook macOS)
+        return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     }
 
     // Het label bovenaan de kaart met het aangeduide land en een knop om het los te laten

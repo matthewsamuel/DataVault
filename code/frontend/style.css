@@ -13942,7 +13942,7 @@ html[data-motion="rustig"] .elo-trash:hover i {
     stroke: var(--map-border);
     stroke-width: 0.7px;
     stroke-linejoin: round;
-    transition: fill var(--duration-fast) var(--ease-out);
+    transition: fill var(--duration-fast) var(--ease-out), stroke-opacity var(--dur-2) var(--ease-out);
 }
 
 .map-canvas .map-country:hover {
@@ -13991,6 +13991,13 @@ html[data-motion="rustig"] .elo-trash:hover i {
     fill: color-mix(in srgb, var(--accent) 6%, var(--map-land));
     stroke: var(--accent);
     stroke-width: 1.5px;
+}
+
+/* Tijdens het zoomen schaalt Leaflet de hele laag, dus ook de groene rand (tot vier keer zo dik):
+   die wijkt dan even terug en staat weer scherp zodra de kaart stilligt */
+.map-canvas.is-zooming .map-country.map-country-selected,
+.map-canvas.is-zooming .map-region-border {
+    stroke-opacity: 0.25;
 }
 
 .map-canvas .map-region-border {

@@ -724,17 +724,17 @@ function eloLeave(old, direction) {
             const far = eloPx('--motion-distance-lg', 24);
             a = eloAnimate(choice, [{ opacity: 1, transform: 'none' },
                 { opacity: 0, transform: `translateX(${i ? far : -far}px) rotate(${i ? 1.5 : -1.5}deg)` }],
-            { duration: '--dur-3', easing: '--ease-exit' });
+            { duration: '--dur-2', easing: '--ease-exit' });
         } else if (direction === 'back') {
             a = eloAnimate(choice, [{ opacity: 1, transform: 'none' },
                 { opacity: 0, transform: `translateX(${eloPx('--motion-distance-lg', 24)}px)` }],
-                { duration: '--dur-3', easing: '--ease-exit' });
+                { duration: '--dur-2', easing: '--ease-exit' });
         } else if (choice.classList.contains('is-chosen') || choice.classList.contains('is-draw')) {
             a = eloFlight(choice, document.querySelector(`#elo-result .elo-result-thumb[data-side="${i}"]`));
         } else {
             a = eloAnimate(choice, [{ opacity: 1, transform: 'none' },
                 { opacity: 0, transform: `translateY(${eloPx('--motion-distance-sm', 6)}px) scale(${eloCurve('--motion-scale-out', '0.98')})` }],
-                { duration: '--dur-3', easing: '--ease-exit' });
+                { duration: '--dur-2', easing: '--ease-exit' });
         }
         if (a) animations.push(a);
     });
