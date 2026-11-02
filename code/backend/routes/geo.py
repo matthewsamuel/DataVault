@@ -189,7 +189,7 @@ def locate(path: str = Query(..., min_length=1)) -> Dict[str, Any]:
         if estimate:
             from backend import places
             parts = places.describe_parts(estimate["lat"], estimate["lon"])
-            estimate = {**estimate, "place": parts and parts["label"]}
+            estimate = {**estimate, "place": parts and parts["label"], "place_parts": parts}
             return {"has_gps": False, "id": row[0], "inferred": estimate, "details": details}
         return {"has_gps": False, "id": row[0], "details": details}
     from backend import places
