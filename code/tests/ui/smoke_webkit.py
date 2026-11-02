@@ -1433,6 +1433,9 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                     `${API_BASE}/api/shows/compare/pair?scope=${encodeURIComponent(key)}`)).stats.comparisons""", album_key)
 
             in_album = album_comparisons()
+            # As if the album's only pair was the last one picked in the library: that pick belongs
+            # to the library and must not hold the album's pair back (prev= of another collection)
+            page.evaluate("(italy) => { elo.last = [{path: italy + '/rome.jpg'}, {path: italy + '/venetië.jpg'}]; }", italy)
             choose_scope("rooktest itali", "an album")
             pair = shown_pair()
             expect(page.evaluate("elo.scope") == album_key and len(pair) == 2 and all(p.startswith(italy + "/") for p in pair)

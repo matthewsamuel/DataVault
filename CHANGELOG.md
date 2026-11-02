@@ -81,6 +81,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - In **Instellingen > Taalmodel van Pasha** kies je bij **Acties** zelf tussen *Ollama-gereedschap* (standaard) en *Tekstcode*. Kan het gekozen model geen gereedschap gebruiken, dan staat dat erbij.
 - De collectiekiezer van Welke is mooier? toont bij elk album het aantal bestanden; albums met te weinig foto's staan gedimd onderaan. Staat er meer in de lijst dan je ziet, dan vervaagt de onderrand, en de regels schuiven bij het openen even achter elkaar in.
 - Klik je naast de open collectiekiezer, dan sluit alleen de kiezer: die klik telt niet meer als keuze voor de foto eronder. Een verdwenen album meldt de app nu in een melding met de hele uitleg; onderin blijft een korte regel staan.
+- Kies je een andere collectie, dan houdt het paar dat je net in de vorige koos daar niets meer tegen: een album van twee foto's toont meteen zijn paar, ook als je die twee net in de hele bibliotheek vergeleek.
 
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.

@@ -528,7 +528,6 @@ function openElo(scope = '', title = '') {
     elo.scopeTitle = title || (remembered ? remembered.title : '') || 'Hele bibliotheek';
     if (scope) eloRememberScope();
     eloResetRound();
-    elo.last = null;
     eloFillScopes();
     eloLoadAlbums();
     // Geopend met het toetsenbord: dan meteen een zichtbare focusring
@@ -552,10 +551,13 @@ function closeElo() {
 
 registerOverlayCloser('elo-overlay', closeElo);
 
+// Ook bij een andere collectie: het laatst gekozen paar (prev=) hoort bij de vorige collectie en
+// mag daar geen paar tegenhouden (een album van twee foto's zou anders 'Geen nieuw paar' tonen)
 function eloResetRound() {
     elo.undo = [];
     elo.round = 0;
     elo.pair = null;
+    elo.last = null;
     elo.shown = [];
     elo.notice = '';
     eloHideResult(true);
