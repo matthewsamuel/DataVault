@@ -29,6 +29,10 @@ DataVault is built for one person with one big archive on an external disk (the 
 - **Local LLM assistant ("Pasha")** through Ollama. It can search, filter and show photos. Anything that changes files is only a *proposal*: nothing happens until you click *Uitvoeren*.
 - **Schema migrations** (numbered, appended, tested against a legacy database) and automatic compact backups of the database.
 
+**Motion language.** All motion follows one language, "Lichtval" ([docs/MOTION.md](docs/MOTION.md)). Durations, curves, springs (sampled into CSS `linear()`), distances and the stagger rhythm are tokens in `style.css`, and `motion.js` provides interruptible helpers: shared elements, FLIP, staggers, view transitions and number tickers. Photos are never zoomed or tilted for effect. Fast keyboard flows (the Keurer, the Elo duel and the viewer's next and previous) answer in the next frame. Instellingen > Beweging has three modes: Volledig, Rustig (short fades only, also chosen automatically when macOS asks for less motion) and Uit. `code/tests/ui/motion_perf.py` measures frame timing in WebKit, and its `--calm-sweep` checks that nothing slides, scales or rotates in Rustig.
+
+**Ranking photos.** "Welke is mooier?" ranks photos from pairwise choices ([docs/ELO.md](docs/ELO.md)). Each photo has a Glicko-2 rating with an uncertainty, so new photos settle in a few comparisons and settled ones barely move. Each next pair is drawn by how much one choice would shrink both photos' uncertainty, without recent pairs, copies, bursts or near-duplicates. Every comparison can be undone exactly. In simulation the new method needs 15 to 45% fewer comparisons than the original fixed-K Elo to reach the same accuracy. The Ranglijst shows each photo's 95% band and how settled the ranking is.
+
 ## Features
 
 **Browse and find**
