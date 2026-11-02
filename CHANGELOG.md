@@ -16,7 +16,7 @@ staat in [docs/NIET_GEDAAN.md](docs/NIET_GEDAAN.md).
 - De rooktest is beter bestand tegen een druk bezette computer: na elke stap wacht hij zolang er nog verzoeken onderweg zijn, de wachttijden rekken mee met de belasting van de machine, en een verzoek dat door het herladen van de pagina werd afgebroken wordt één keer opnieuw gevraagd (alleen lezen). Echte fouten blijven fouten. Elke stap toont hoe lang hij duurde, met de traagste stappen op het einde.
 - De rooktest is strenger over fouten tijdens het herladen: alleen een verzoek dat echt werd afgebroken wordt opnieuw gevraagd, op zijn eigen adres. Een foutmelding gaat alleen door als ze naar zo'n verzoek verwijst. Een fout die de app zelf meldt, of een fout zonder adres, blijft een fout, en de test controleert dat bij de start zelf.
 - `pytest -m smoke` houdt zich nu echt aan zijn tijdslimiet (30 minuten, of `DATAVAULT_SMOKE_TIMEOUT`). Een rooktest die blijft hangen wordt op tijd gestopt, samen met zijn testserver, en zijn tijdelijke map wordt opgeruimd.
-- Stopt de server terwijl een taak net klaar is en nog opruimt, dan wacht hij nu tot die taak echt gedaan heeft voor hij de database sluit. Zo kan het afsluiten niet meer af en toe vastlopen.
+- Stopt de server terwijl een taak net klaar is en nog opruimt, dan wacht hij nu tot die taak echt gedaan heeft voor hij de database sluit. Zo kan het afsluiten niet meer af en toe crashen.
 
 ### Beweging: vloeiend en met aandacht
 - De app beweegt nu als één geheel ("Lichtval", zie [docs/MOTION.md](docs/MOTION.md)): een ander onderdeel komt binnen vanuit de richting van het menu, met de kop eerst en de inhoud vlak daarna, en het groene streepje in het menu glijdt mee naar het nieuwe onderdeel.
