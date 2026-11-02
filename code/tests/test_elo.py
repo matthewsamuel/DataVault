@@ -572,7 +572,8 @@ def test_a_registered_collection_is_a_scope_of_its_own(client, app, vault, monke
                                             "winner": "a"})   # in the library, newer
     undone = client.post("/api/shows/compare/undo", json={"scope": "album:7"}).json()
     assert undone["scope"] == "album:7" and undone["stats"] == {"photos": 2, "compared": 0, "comparisons": 0, "settled": 0}
-    for bad, status in (("album:8", 404), ("map:1", 404), ("album", 400)):
+    for bad, status in (("album:8", 404), ("map:1", 404), ("album", 400), ("album:¹", 404), ("album:٣", 404),
+                        ("album:007", 404), ("album:7 ", 404), ("album:+7", 404)):
         assert client.get("/api/shows/compare/pair", params={"scope": bad}).status_code == status, bad
 
 

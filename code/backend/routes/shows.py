@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import heapq
 import os
 import random
+import re
 import sqlite3
 import stat
 import threading
@@ -514,7 +515,8 @@ def _require_db():
 def _album_scope(value: str) -> Optional[Dict[str, Any]]:
     """'album:<id>': the photos of a smart album (a saved filter, asked of the index now)."""
     from backend import library_filters, smart_albums
-    if not value.isdigit() or len(value) > 18 or db is None:
+    # ASCII digits only, without leading zeros: one key per album ('¹' or '٣' is not a number here)
+    if not re.fullmatch(r"[1-9][0-9]{0,17}", value) or db is None:
         return None
     album = smart_albums.get_album(db, int(value))
     if album is None:
