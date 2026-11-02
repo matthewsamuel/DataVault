@@ -13,7 +13,8 @@
 // die ook in het overzicht staan.
 //
 // Geen sneltoets doet iets terwijl je typt (invoerveld, tekstvak, keuzelijst) of samen
-// met Cmd, Ctrl of Alt (dat zijn de toetsen van de browser en macOS). Zolang er een
+// met Cmd, Ctrl of Alt (dat zijn de toetsen van de browser en macOS), behalve ⌘Z / Ctrl+Z
+// voor 'Ongedaan maken' in een melding (undo-toast.js). Zolang er een
 // venster open is, wisselen 1-9, g, / en t niets op de achtergrond.
 //
 // Een nieuw onderdeel met eigen toetsen voegt een groep toe met addShortcutGroup(...),
@@ -38,6 +39,9 @@ const SHORTCUT_VIEWS = [
     { view: 'series', key: null, g: 'n', label: 'Reeksen' },
 ];
 
+// ⌘Z op een Mac, Ctrl+Z elders (zoals de hint in de melding, undo-toast.js)
+const SHORTCUT_UNDO_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '') ? '⌘' : 'Ctrl';
+
 const SHORTCUT_GROUPS = [
     {
         title: 'Overal',
@@ -48,6 +52,7 @@ const SHORTCUT_GROUPS = [
             [['/'], 'Naar het zoekveld; Enter zoekt in de hele bibliotheek (s opent het zoekvenster)'],
             [['↓'], 'Op Meer in de menubalk: de onderdelen die niet passen; pijltjes kiezen, Esc sluit'],
             [['t'], 'Thema wisselen: Auto, Licht, Donker'],
+            [[SHORTCUT_UNDO_KEY, 'Z'], 'Laatste actie uit een melding ongedaan maken (buiten een invoerveld)'],
             [['?'], 'Dit overzicht'],
             [['Esc'], 'Bovenste venster sluiten, of uit een invoerveld'],
             [['Tab'], 'Naar het volgende onderdeel; in een venster blijft Tab binnen het venster, langs elke knop'],
@@ -133,7 +138,8 @@ function buildShortcutHelp() {
             // Scrolt in een laag venster; met tabindex ook met de pijltjes te scrollen
             createEl('div', { class: 'shortcut-groups', tabindex: '0', role: 'region', 'aria-label': 'Alle sneltoetsen' }, ...groups),
             createEl('p', { class: 'shortcut-note',
-                text: 'Sneltoetsen doen niets terwijl je in een invoerveld typt, en nooit samen met Cmd, Ctrl of Alt. ' +
+                text: 'Sneltoetsen doen niets terwijl je in een invoerveld typt, en niet samen met Cmd, Ctrl of Alt; ' +
+                      `de enige uitzondering is ${SHORTCUT_UNDO_KEY === '⌘' ? '⌘Z' : 'Ctrl+Z'} voor 'Ongedaan maken'. ` +
                       'Wil je in Safari met Tab alleen ook langs knoppen: Safari > Instellingen > Geavanceerd, de Tab-optie aan.' })));
     document.body.appendChild(overlay);
     return overlay;
