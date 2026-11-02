@@ -1707,8 +1707,9 @@ def run(engine: str = "webkit", headed: bool = False) -> int:
                 scans.clear()
                 page.route("**/api/timeline/scan*", fake_first_page(change_total))
                 # (wait_for_timeout, not sleep: route handlers only run while Playwright waits)
+                # (the picker opens first: Kiezen takes what is ticked in it, as a click on it would)
                 step(f"timeline: walk then index, {label}", lambda: (
-                    page.evaluate("timelineConfirmFolders()"), page.wait_for_timeout(2500)), 0)
+                    page.evaluate("timelineOpenFolderPicker(), timelineConfirmFolders()"), page.wait_for_timeout(2500)), 0)
                 page.unroute("**/api/timeline/scan*")
                 expect(len(scans) == requests and page.query_selector(".tl-photo-card"),
                        f"timeline: {len(scans)} scan requests (expected {requests}) when the source switched")
