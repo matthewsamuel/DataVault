@@ -5,6 +5,10 @@
 // datums en bijlagen. De bronnen komen van de server (/api/messages/sources): deze pagina kent
 // geen bron bij naam. Alleen lezen; inlezen gebeurt in DataGatherer.
 //
+// Een foto opent groot (pijltjes bladeren door de foto's van het gesprek), een gedeelde link
+// staat als kaartje in de bubbel en de naam bovenaan opent het profiel online als DataVault
+// de gebruikersnaam kent (/api/messages/conversations/{id}/profile).
+//
 // Toetsenbord: pijltjes omhoog/omlaag (en Home/End) in de lijst, Enter opent een gesprek,
 // Escape in het zoekveld wist de zoekopdracht. Pasha leest berichten alleen per bron die je
 // zelf aanzet (venster 'Pasha en je berichten', standaard uit).
@@ -21,6 +25,8 @@ const msgState = {
     highlight: null,       // id van het bericht waar een zoektreffer naar wees
     searchTimer: null,
     loadToken: 0,
+    profiles: new Map(),   // gesprek-id -> profiel (of null) van de server
+    lightbox: null,        // {items, index}: de foto's van het gesprek en welke groot staat
 };
 
 const MSG_DAY = new Intl.DateTimeFormat('nl-BE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -312,16 +318,18 @@ function msgRenderThread() {
     const src = msgSourceInfo(conv.source);
     const period = conv.first && conv.last
         ? `${MSG_SHORT.format(new Date(conv.first * 1000))} – ${MSG_SHORT.format(new Date(conv.last * 1000))}` : '';
-    const header = createEl('div', { class: 'msg-thread-header' },
+    const header = createEl('div', { class: 'msg-thread-header' }, createEl('div', { class: 'msg-thread-person' },
         msgAvatar(conv.title, conv.source, conv.is_group),
         createEl('div', { class: 'msg-thread-heading' },
-            createEl('h2', { class: 'msg-thread-title', text: conv.title }),
+            createEl('div', { class: 'msg-thread-name' },
+                createEl('h2', { class: 'msg-thread-title', text: conv.title })),
             createEl('p', { class: 'msg-thread-meta' },
                 createEl('i', { class: src.icon, 'aria-hidden': 'true' }), ` ${src.name} · `,
                 createEl('span', { class: 'mono', text: conv.count.toLocaleString('nl-BE') }),
                 ` ${conv.count === 1 ? 'bericht' : 'berichten'}`,
                 conv.is_group && conv.participants.length ? ` · ${conv.participants.length} deelnemers` : '',
-                period ? ' · ' : '', period ? createEl('span', { class: 'mono', text: period }) : '')));
+                period ? ' · ' : '', period ? createEl('span', { class: 'mono', text: period }) : ''))),
+        createEl('div', { class: 'msg-thread-actions' }));
     const body = createEl('div', {
         class: 'msg-scroll', tabindex: '0', role: 'log', 'aria-label': `Berichten met ${conv.title}`,
     });
@@ -353,6 +361,50 @@ function msgRenderThread() {
     }
     if (!messages.length) body.append(emptyState({ icon: 'fa-comment-slash', title: 'Geen berichten', text: 'Dit gesprek is leeg.' }));
     pane.replaceChildren(header, body);
+    msgShowProfile(conv);
+}
+
+// Waar de ander online te vinden is (backend msg_profiles). Met een gebruikersnaam worden de
+// avatar en de naam een link naar het profiel, met de naam erbij en een knop rechts. Zonder
+// (Instagram bewaart in de export alleen de weergavenaam) staat er rechts 'Zoek op het web'.
+async function msgShowProfile(conv) {
+    let profile = msgState.profiles.get(conv.id);
+    if (profile === undefined) {
+        try {
+            profile = (await fetchJSON(`${API_BASE}/api/messages/conversations/${conv.id}/profile`)).profile;
+        } catch (_) {
+            return;     // zonder link is het gesprek gewoon te lezen
+        }
+        msgState.profiles.set(conv.id, profile);
+    }
+    const header = document.querySelector('#msg-thread .msg-thread-header');
+    if (!profile || !header || !msgState.thread || msgState.thread.conversation.id !== conv.id) return;
+    const actions = header.querySelector('.msg-thread-actions');
+    const external = { target: '_blank', rel: 'noopener noreferrer' };
+    if (profile.url) {
+        const what = profile.site === 'WhatsApp' ? `Chat met ${profile.handle} openen in WhatsApp`
+            : `Profiel van @${profile.handle} openen op ${profile.site}`;
+        const person = header.querySelector('.msg-thread-person');
+        const link = createEl('a', { class: 'msg-thread-person is-link', href: profile.url, title: what, ...external },
+            ...person.childNodes);
+        link.querySelector('.msg-thread-name').append(
+            createEl('i', { class: 'fas fa-arrow-up-right-from-square msg-thread-out', 'aria-hidden': 'true' }));
+        // Vlak na de bron, zodat hij ook in een smal venster in beeld blijft (de periode valt eerst weg)
+        const meta = link.querySelector('.msg-thread-meta');
+        meta.insertBefore(createEl('span', { class: 'mono msg-thread-handle',
+            text: profile.site === 'WhatsApp' ? profile.handle : `@${profile.handle}` }), meta.childNodes[2]);
+        meta.insertBefore(document.createTextNode(' · '), meta.childNodes[3]);
+        person.replaceWith(link);
+        actions.append(createEl('a', { class: 'btn btn-secondary btn-sm', href: profile.url, title: what, ...external },
+            createEl('i', { class: msgSourceInfo(conv.source).icon, 'aria-hidden': 'true' }),
+            profile.site === 'WhatsApp' ? 'Openen in WhatsApp' : 'Profiel openen'));
+    } else if (profile.search_url) {
+        actions.append(createEl('a', {
+            class: 'btn btn-secondary btn-sm', href: profile.search_url, ...external,
+            title: `${profile.site} bewaart in de export geen gebruikersnaam. Zoek '${conv.title}' op het web.`,
+        }, createEl('i', { class: 'fas fa-magnifying-glass', 'aria-hidden': 'true' }), 'Zoek op het web'));
+    }
+    if (window.Motion && actions.firstChild) Motion.enter(actions, 'fade', { key: 'profile' });
 }
 
 // Onderaan een bubbel: het uur, en 'Bewerkt' of 'Eerdere tekst' (ingetrokken) als dat zo is. De eerdere
@@ -444,6 +496,205 @@ function msgKeepInView(scroller, foot) {
     }
 }
 
+// ==================== LINKS ====================
+
+const MSG_URL = /https?:\/\/[^\s<>"]+/g;
+const MSG_URL_TAIL = /[.,;:!?)\]}'’]+$/;
+
+// Wat een link is: een gedeeld verhaal, post of profiel op Instagram, of anders gewoon de site.
+// Instagram zet de link van wat iemand deelde (of het verhaal waar iemand op reageerde) onder
+// de tekst van het bericht (formats/meta_dyi.parse_thread).
+function msgLinkInfo(url) {
+    let u;
+    try { u = new URL(url); } catch (_) { return null; }
+    const host = u.hostname.replace(/^www\./, '');
+    const [first, second] = u.pathname.split('/').filter(Boolean);
+    const short = (host + u.pathname).replace(/\/$/, '');
+    if (!/(^|\.)instagram\.com$/.test(host)) return { icon: 'fas fa-link', title: host, meta: short };
+    const ig = { icon: 'fab fa-instagram', meta: short };
+    if (first === 'stories' && second) {
+        return { ...ig, title: `Verhaal van @${second}`, meta: 'Instagram · een verhaal staat 24 uur online' };
+    }
+    if (first === 'p') return { ...ig, title: 'Post op Instagram' };
+    if (first === 'reel' || first === 'reels') return { ...ig, title: 'Reel op Instagram' };
+    if (first === 'tv') return { ...ig, title: 'Video op Instagram' };
+    const user = first === '_u' ? second : (second ? null : first);
+    if (user && /^[A-Za-z0-9._]{1,30}$/.test(user) && !['explore', 'accounts', 'direct'].includes(user)) {
+        return { ...ig, title: `Profiel van @${user}`, meta: `instagram.com/${user}` };
+    }
+    return { ...ig, title: 'Link naar Instagram' };
+}
+
+function msgShareCard(url) {
+    const info = msgLinkInfo(url);
+    if (!info) return null;
+    return createEl('a', { class: 'msg-share', href: url, target: '_blank', rel: 'noopener noreferrer', title: url },
+        createEl('span', { class: 'msg-share-icon', 'aria-hidden': 'true' }, createEl('i', { class: info.icon })),
+        createEl('span', { class: 'msg-share-main' },
+            createEl('span', { class: 'msg-share-title', text: info.title }),
+            createEl('span', { class: 'msg-share-meta', text: info.meta })),
+        createEl('i', { class: 'fas fa-arrow-up-right-from-square msg-share-out', 'aria-hidden': 'true' }));
+}
+
+// De tekst van een bericht: een link op een eigen regel wordt een kaartje onder de tekst, een
+// link midden in een zin wordt klikbaar. Alleen tekst en <a>, nooit HTML uit het bericht.
+function msgBody(body) {
+    const cards = [];
+    const lines = body.split('\n').filter(line => {
+        const bare = line.trim();
+        const whole = bare.match(MSG_URL);
+        if (!whole || whole.length !== 1 || whole[0] !== bare) return true;
+        const card = msgShareCard(bare);
+        if (card) cards.push(card);
+        return !card;
+    });
+    const text = lines.join('\n').trim();
+    if (!text) return cards;
+    const p = createEl('p', { class: 'msg-text' });
+    let at = 0;
+    for (const match of text.matchAll(MSG_URL)) {
+        const url = match[0].replace(MSG_URL_TAIL, '');
+        p.append(text.slice(at, match.index),
+            createEl('a', { class: 'msg-link', href: url, target: '_blank', rel: 'noopener noreferrer', text: url }));
+        at = match.index + url.length;
+    }
+    p.append(text.slice(at));
+    return [p, ...cards];
+}
+
+// ==================== FOTO'S ====================
+// Een foto uit een gesprek groot: hij groeit uit zijn miniatuur (Motion.sharedElement), eerst
+// met het voorbeeld dat er al is en scherp zodra de foto zelf geladen is (?size=full). Pijltjes
+// en de zones links en rechts bladeren door de foto's van het geladen gesprek; Escape, het
+// kruisje of een klik naast de foto sluit, en de foto krimpt dan terug naar zijn bubbel.
+
+function msgMediaItems() {
+    const items = [];
+    for (const m of msgState.thread ? msgState.thread.messages : []) {
+        m.attachments.filter(a => a.preview).forEach(a => items.push({ m, a, key: `${m.id}:${a.index}` }));
+    }
+    return items;
+}
+
+function msgMediaUrl(item, full) {
+    return `${API_BASE}/api/messages/attachments/${item.m.id}/${item.a.index}${full ? '?size=full' : ''}`;
+}
+
+function msgBuildLightbox() {
+    const nav = (side, dir, label) => createEl('button', {
+        type: 'button', class: `modal-nav-zone ${side}`, 'aria-label': label, title: `${label} (${dir < 0 ? '←' : '→'})`,
+        onClick: (e) => { e.stopPropagation(); msgLightboxStep(dir); },
+    }, createEl('span', { class: 'modal-nav-arrow', 'aria-hidden': 'true' },
+        createEl('i', { class: `fas fa-chevron-${side}` })));
+    const img = createEl('img', { class: 'msg-lightbox-img', alt: '' });
+    const stage = createEl('div', { class: 'msg-lightbox-stage', onClick: (e) => {
+        // Naast de foto (ook in de lege band rond een foto die niet het hele vak vult): sluiten
+        if (e.target === img) {
+            const r = msgContainRect(img);
+            if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return;
+        }
+        msgCloseLightbox();
+    } }, img, nav('left', -1, 'Vorige foto'), nav('right', 1, 'Volgende foto'));
+    const button = (icon, label, attrs) => createEl(attrs.href ? 'a' : 'button', {
+        class: 'msg-lightbox-btn', 'aria-label': label, title: label, ...attrs,
+    }, createEl('i', { class: `fas ${icon}`, 'aria-hidden': 'true' }));
+    const modal = createEl('div', {
+        class: 'modal msg-lightbox', id: 'msg-lightbox', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'msg-lightbox-who',
+        onKeydown: (e) => {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            e.preventDefault();
+            e.stopPropagation();
+            msgLightboxStep(e.key === 'ArrowLeft' ? -1 : 1);
+        },
+    }, createEl('div', { class: 'msg-lightbox-bar' },
+        createEl('div', { class: 'msg-lightbox-caption' },
+            createEl('span', { class: 'msg-lightbox-who', id: 'msg-lightbox-who' }),
+            createEl('time', { class: 'msg-lightbox-when mono' })),
+        createEl('span', { class: 'msg-lightbox-count mono' }),
+        button('fa-download', 'Foto bewaren', { href: '#', download: '', dataset: { role: 'download' } }),
+        button('fa-xmark', 'Sluiten (Esc)', { type: 'button', 'data-autofocus': '', onClick: msgCloseLightbox })),
+    stage);
+    document.body.append(modal);
+    registerOverlayCloser('msg-lightbox', msgCloseLightbox);
+    return modal;
+}
+
+// Het deel van een <img> met object-fit: contain waar de foto echt staat
+function msgContainRect(img) {
+    const box = img.getBoundingClientRect();
+    const aspect = img.naturalWidth && img.naturalHeight ? img.naturalWidth / img.naturalHeight : box.width / box.height;
+    let w = box.width, h = w / aspect;
+    if (h > box.height) { h = box.height; w = h * aspect; }
+    const left = box.left + (box.width - w) / 2, top = box.top + (box.height - h) / 2;
+    return { left, top, right: left + w, bottom: top + h };
+}
+
+function msgOpenLightbox(key, thumb) {
+    const items = msgMediaItems();
+    const index = items.findIndex(item => item.key === key);
+    if (index < 0) return;
+    msgState.lightbox = { items, index };
+    const modal = document.getElementById('msg-lightbox') || msgBuildLightbox();
+    msgShowLightboxItem(0);
+    modal.classList.add('active');
+    if (window.Motion && thumb && thumb.naturalWidth) {
+        Motion.sharedElement(thumb, modal.querySelector('.msg-lightbox-img'), { direction: 'open' });
+    }
+}
+
+// De foto op msgState.lightbox.index; dir (-1, 1) schuift hem van die kant binnen
+function msgShowLightboxItem(dir) {
+    const { items, index } = msgState.lightbox;
+    const item = items[index];
+    const modal = document.getElementById('msg-lightbox');
+    const img = modal.querySelector('.msg-lightbox-img');
+    const conv = msgState.thread.conversation;
+    const when = new Date(item.m.sent_at * 1000);
+    img.src = msgMediaUrl(item, false);
+    img.alt = item.a.name || 'Foto';
+    const full = new Image();
+    full.src = msgMediaUrl(item, true);
+    full.decode().then(() => {
+        if (msgState.lightbox && msgState.lightbox.items[msgState.lightbox.index] === item) img.src = full.src;
+    }, () => {});
+    modal.querySelector('.msg-lightbox-who').textContent = item.m.is_me ? 'Jij' : (item.m.sender || conv.title);
+    const time = modal.querySelector('.msg-lightbox-when');
+    time.dateTime = when.toISOString();
+    time.textContent = `${MSG_DAY.format(when)} · ${MSG_TIME.format(when)}`;
+    modal.querySelector('.msg-lightbox-count').textContent = items.length > 1 ? `${index + 1} / ${items.length}` : '';
+    const download = modal.querySelector('[data-role="download"]');
+    download.href = full.src;
+    download.download = item.a.name || `foto-${item.key.replace(':', '-')}.jpg`;
+    modal.querySelector('.modal-nav-zone.left').hidden = index === 0;
+    modal.querySelector('.modal-nav-zone.right').hidden = index === items.length - 1;
+    if (dir && window.Motion) {
+        const d = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--motion-distance-lg')) || 24;
+        Motion.animate(img, [{ opacity: 0, transform: `translate3d(${dir * d}px, 0, 0) scale(0.985)` }, { opacity: 1, transform: 'none' }],
+            { spring: 'snappy', key: 'msg-lightbox', fromCurrent: true });
+    }
+}
+
+function msgLightboxStep(dir) {
+    const box = msgState.lightbox;
+    if (!box) return;
+    const next = box.index + dir;
+    if (next < 0 || next >= box.items.length) return;
+    box.index = next;
+    msgShowLightboxItem(dir);
+}
+
+function msgCloseLightbox() {
+    const modal = document.getElementById('msg-lightbox');
+    if (!modal || !modal.classList.contains('active')) return;
+    const box = msgState.lightbox;
+    const thumb = box && document.querySelector(`#msg-thread img[data-media="${box.items[box.index].key}"]`);
+    if (window.Motion && thumb && thumb.naturalWidth) {
+        Motion.sharedElement(thumb, modal.querySelector('.msg-lightbox-img'), { direction: 'close' });
+    }
+    modal.classList.remove('active');
+    msgState.lightbox = null;
+}
+
 function msgBubble(m, conv, prev) {
     if (m.kind === 'system') {
         return createEl('div', { class: 'msg-system', dataset: { msg: String(m.id) } },
@@ -460,16 +711,21 @@ function msgBubble(m, conv, prev) {
     const previews = m.attachments.filter(a => a.preview);
     if (previews.length) {
         bubble.append(createEl('div', { class: `msg-media${previews.length > 1 ? ' is-grid' : ''}` },
-            ...previews.map(a => createEl('img', {
-                class: 'msg-media-img', loading: 'lazy', alt: a.name || 'Afbeelding',
-                src: `${API_BASE}/api/messages/attachments/${m.id}/${a.index}`,
-            }))));
+            ...previews.map(a => {
+                const key = `${m.id}:${a.index}`;
+                const img = createEl('img', {
+                    class: 'msg-media-img', loading: 'lazy', alt: a.name || 'Afbeelding', dataset: { media: key },
+                    src: `${API_BASE}/api/messages/attachments/${m.id}/${a.index}`,
+                });
+                return createEl('button', { type: 'button', class: 'msg-media-open', title: 'Foto groot bekijken',
+                    'aria-label': 'Foto groot bekijken', onClick: () => msgOpenLightbox(key, img) }, img);
+            })));
     }
     m.attachments.filter(a => !a.preview).forEach(a => bubble.append(createEl('span', { class: 'msg-file' },
         createEl('i', { class: 'fas fa-paperclip', 'aria-hidden': 'true' }),
         createEl('span', { class: 'msg-file-name', text: a.name || 'Bijlage' }),
         a.local ? createEl('span', { class: 'msg-file-note', text: 'op je Mac' }) : null)));
-    if (m.body) bubble.append(createEl('p', { class: 'msg-text', text: m.body }));
+    if (m.body) bubble.append(...msgBody(m.body));
     else if (m.kind === 'unsent') bubble.append(createEl('p', { class: 'msg-text msg-text-muted', text: 'Bericht ingetrokken' }));
     else if (!m.attachments.length) bubble.append(createEl('p', { class: 'msg-text msg-text-muted', text: 'Media (niet in de export)' }));
     const foot = msgFoot(m, when);

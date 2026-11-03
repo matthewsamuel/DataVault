@@ -15762,6 +15762,69 @@ html[data-motion="rustig"] .backup-folder-check.is-done .backup-folder-check-ico
     min-width: 0;
 }
 
+/* Avatar en naam; met een bekende gebruikersnaam een link naar het profiel online */
+.msg-thread-person {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: var(--space-md);
+    min-width: 0;
+    border-radius: var(--radius-md);
+    color: inherit;
+    text-decoration: none;
+}
+
+.msg-thread-person.is-link .msg-avatar {
+    transition: transform var(--spring-snappy-dur) var(--spring-snappy),
+                border-color var(--dur-2) var(--ease-out);
+}
+
+.msg-thread-person.is-link:hover .msg-avatar {
+    border-color: var(--accent-border);
+    transform: scale(1.06);
+}
+
+.msg-thread-person.is-link:hover .msg-thread-title {
+    color: var(--accent-text);
+}
+
+.msg-thread-person.is-link:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: var(--space-xs);
+}
+
+.msg-thread-name {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+}
+
+.msg-thread-out {
+    flex: none;
+    color: var(--accent-text);
+    font-size: var(--icon-xs);
+    opacity: 0;
+    transform: translate3d(calc(-1 * var(--space-xs)), var(--space-xs), 0);
+    transition: opacity var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.msg-thread-person.is-link:hover .msg-thread-out,
+.msg-thread-person.is-link:focus-visible .msg-thread-out {
+    opacity: 1;
+    transform: none;
+}
+
+.msg-thread-actions {
+    display: flex;
+    flex: none;
+    gap: var(--space-sm);
+}
+
+.msg-thread-actions:empty {
+    display: none;
+}
+
 .msg-thread-title {
     margin: 0;
     overflow: hidden;
@@ -15770,9 +15833,13 @@ html[data-motion="rustig"] .backup-folder-check.is-done .backup-folder-check-ico
     letter-spacing: var(--tracking-tight);
     text-overflow: ellipsis;
     white-space: nowrap;
+    transition: color var(--dur-2) var(--ease-out);
 }
 
 .msg-thread-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     margin: 2px 0 0;
     color: var(--text-secondary);
     font-size: var(--fs-xs);
@@ -15983,6 +16050,232 @@ button.msg-edited[aria-expanded="true"] .msg-edited-chevron {
     object-fit: cover;
     border-radius: var(--radius-thumb);
     background: var(--thumb-bg);
+}
+
+/* Een foto in een bubbel: klikken opent hem groot (msg-lightbox). Een vaste breedte, ook
+   voor de foto geladen is: anders wordt de bubbel daarna breder en hoger en staat het
+   gesprek niet meer onderaan. */
+.msg-media-open {
+    display: block;
+    width: 280px;
+    max-width: 100%;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: var(--radius-thumb);
+    background: none;
+    cursor: zoom-in;
+}
+
+.msg-media-open .msg-media-img {
+    transition: transform var(--dur-5) var(--ease-out), filter var(--dur-3) var(--ease-out);
+}
+
+.msg-media-open:hover .msg-media-img {
+    transform: scale(1.03);
+    filter: brightness(1.06);
+}
+
+.msg-media-open:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: var(--space-2xs);
+}
+
+.msg-media-open:active .msg-media-img {
+    transform: scale(0.99);
+}
+
+/* Een link in de tekst, en wat iemand deelde (een verhaal, post, reel of profiel) als kaartje */
+.msg-link {
+    color: var(--accent-text);
+    text-decoration: underline;
+    text-decoration-color: var(--accent-border);
+    text-underline-offset: var(--space-2xs);
+}
+
+.msg-link:hover {
+    text-decoration-color: currentColor;
+}
+
+.msg-share {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin: var(--space-xs) 0;
+    padding: var(--space-sm) var(--space-md) var(--space-sm) var(--space-sm);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: inherit;
+    text-decoration: none;
+    transition: border-color var(--dur-2) var(--ease-out), background-color var(--dur-2) var(--ease-out);
+}
+
+.msg-share + .msg-share {
+    margin-top: 0;
+}
+
+.msg-share:hover {
+    border-color: var(--accent-border);
+}
+
+.msg-share:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: var(--space-2xs);
+}
+
+.msg-share-icon {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: var(--space-2xl);
+    height: var(--space-2xl);
+    border-radius: var(--radius-sm);
+    background: var(--surface-card);
+    color: var(--text-secondary);
+    font-size: var(--icon-md);
+}
+
+.msg-share-main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+
+.msg-share-title,
+.msg-share-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.msg-share-title {
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    line-height: var(--lh-snug);
+}
+
+.msg-share-meta {
+    color: var(--text-tertiary);
+    font-size: var(--fs-xs);
+}
+
+.msg-share-out {
+    flex: none;
+    margin-left: var(--space-xs);
+    color: var(--text-tertiary);
+    font-size: var(--icon-xs);
+    transition: color var(--dur-2) var(--ease-out), transform var(--spring-snappy-dur) var(--spring-snappy);
+}
+
+.msg-share:hover .msg-share-out {
+    color: var(--accent-text);
+    transform: translate3d(var(--space-2xs), calc(-1 * var(--space-2xs)), 0);
+}
+
+/* Een foto uit een gesprek groot, op dezelfde donkere achtergrond als de viewer */
+.msg-lightbox {
+    z-index: 15000;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0;
+    background-color: var(--media-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+
+.msg-lightbox-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-lg) var(--space-md) var(--space-xl);
+    border-bottom: 1px solid var(--media-border);
+    color: var(--on-media);
+}
+
+.msg-lightbox-caption {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+
+.msg-lightbox-who {
+    overflow: hidden;
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.msg-lightbox-when,
+.msg-lightbox-count {
+    color: var(--on-media-muted);
+    font-size: var(--fs-xs);
+}
+
+.msg-lightbox-count {
+    margin-right: var(--space-sm);
+}
+
+.msg-lightbox-btn {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: var(--control-h);
+    height: var(--control-h);
+    border: 0;
+    border-radius: var(--radius-full);
+    background: var(--media-control);
+    color: var(--on-media-muted);
+    font-size: var(--icon-md);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+
+.msg-lightbox-btn:hover {
+    background: var(--media-control-hover);
+    color: var(--on-media);
+}
+
+.msg-lightbox-btn:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: var(--space-2xs);
+}
+
+.msg-lightbox-stage {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    padding: var(--space-xl) var(--space-4xl);
+}
+
+.msg-lightbox-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.msg-lightbox .modal-nav-zone {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+}
+
+.msg-lightbox .modal-nav-zone:focus-visible {
+    opacity: 1;
+    outline: none;
+}
+
+.msg-lightbox .modal-nav-zone:focus-visible .modal-nav-arrow {
+    box-shadow: var(--focus-shadow);
 }
 
 .msg-file {

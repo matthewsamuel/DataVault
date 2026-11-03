@@ -4,9 +4,12 @@ DataVault Dashboard - Berichten: the merged conversations of every chat source
 GET  /api/messages/sources                                  per message source: name, icon, counts, Pasha toggle
 GET  /api/messages/conversations?source=a,b&q=&limit&offset  conversations, newest first
 GET  /api/messages/conversations/{id}?before=&around=&limit= a thread (time order, superseded left out)
+GET  /api/messages/conversations/{id}/profile                where the other person can be found online
+                                                            (msg_profiles: Instagram, WhatsApp), or null
 GET  /api/messages/search?q=&source=a,b&limit=              full-text search (FTS5), newest first
-GET  /api/messages/attachments/{message_id}/{index}         a small JPEG preview of an image attachment
-                                                            that lives in an archived export
+GET  /api/messages/attachments/{message_id}/{index}?size=   an image attachment that lives in an archived
+                                                            export: a small JPEG preview, or with
+                                                            size=full the image itself for the viewer
 
 Read-only: imports happen in DataGatherer (backend/datagatherer/). An attachment preview is
 read from the archived export itself (a zip member or a file below a registered folder),
@@ -20,12 +23,14 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
-from backend.datagatherer import messages_store, raw_store, state
+from backend.datagatherer import messages_store, msg_profiles, raw_store, state
 
 router = APIRouter()
 config = None
 db = None
 PREVIEW_PX = 480
+FULL_PX = 2560
+WEB_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "GIF": "image/gif", "WEBP": "image/webp"}
 MAX_PREVIEW_SOURCE = 40 * 1024 * 1024
 
 
@@ -72,6 +77,14 @@ def get_thread(conv_id: int, before: Optional[int] = None, around: Optional[int]
     return data
 
 
+@router.get("/conversations/{conv_id}/profile")
+def get_profile(conv_id: int) -> Dict[str, Any]:
+    conv = messages_store.get_conversation(db, conv_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Dit gesprek bestaat niet")
+    return {"profile": msg_profiles.profile(db, conv)}
+
+
 @router.get("/search")
 def search(q: str = Query(..., max_length=200), source: Optional[str] = None,
            limit: int = Query(default=50, ge=1, le=200)) -> Dict[str, Any]:
@@ -107,7 +120,7 @@ def _read_member(raw: Dict[str, Any], member: str) -> Optional[bytes]:
 
 
 @router.get("/attachments/{message_id}/{index}")
-def attachment_preview(message_id: int, index: int) -> Response:
+def attachment_preview(message_id: int, index: int, size: str = Query(default="preview", pattern="^(preview|full)$")) -> Response:
     item = messages_store.get_attachment(db, message_id, index)
     if not item or not item.get("member") or not item.get("raw_import_id") or not messages_store._is_image(item):
         raise HTTPException(status_code=404, detail="Geen voorbeeld voor deze bijlage")
@@ -120,8 +133,12 @@ def attachment_preview(message_id: int, index: int) -> Response:
     try:
         from PIL import Image, ImageOps
         with Image.open(io.BytesIO(data)) as img:
+            # Full size in a format the browser shows: the file itself (the browser applies the
+            # EXIF orientation). Anything else (HEIC, TIFF, ...) becomes a large JPEG.
+            if size == "full" and img.format in WEB_FORMATS and max(img.size) <= FULL_PX * 2:
+                return Response(data, media_type=WEB_FORMATS[img.format], headers={"Cache-Control": "private, max-age=86400"})
             img = ImageOps.exif_transpose(img)
-            img.thumbnail((PREVIEW_PX, PREVIEW_PX))
+            img.thumbnail((FULL_PX, FULL_PX) if size == "full" else (PREVIEW_PX, PREVIEW_PX))
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
             out = io.BytesIO()
