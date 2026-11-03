@@ -18554,6 +18554,11 @@ html[data-motion="volledig"] .map-popup-body > :nth-child(3) { animation-delay: 
     will-change: transform;
 }
 
+/* De echte stand zet dgCard inline op de kaart (de klok van de pagina) */
+.dg-card.is-busy {
+    --dg-orbit-delay: 0s;
+}
+
 .dg-card.is-busy .dg-card-icon::after {
     content: '';
     position: absolute;
@@ -18565,7 +18570,7 @@ html[data-motion="volledig"] .map-popup-body > :nth-child(3) { animation-delay: 
 
 html[data-motion="volledig"] .dg-card.is-busy .dg-card-icon::before {
     animation: md-orbit calc(var(--dur-6) * 2.5) linear infinite;
-    animation-delay: var(--dg-orbit-delay, 0ms);
+    animation-delay: var(--dg-orbit-delay);
 }
 
 /* Zonder beweging: een rustige groene rand rondom, geen spoor dat stilstaat op één plek */
