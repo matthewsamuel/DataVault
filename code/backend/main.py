@@ -1,15 +1,21 @@
 """
 DataVault Dashboard - FastAPI Application
 """
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
+from typing import Optional
 import os
+import shutil
+import threading
+import uuid
 
-# Ensure ffmpeg is in PATH for video thumbnails
-if '/usr/local/bin' not in os.environ.get('PATH', ''):
-    os.environ['PATH'] = f"/usr/local/bin:{os.environ.get('PATH', '')}"
+# Ensure ffmpeg is in PATH for video thumbnails (Homebrew on Apple silicon and on Intel)
+for _bin in ('/usr/local/bin', '/opt/homebrew/bin'):
+    if _bin not in os.environ.get('PATH', '').split(':'):
+        os.environ['PATH'] = f"{os.environ.get('PATH', '')}:{_bin}".lstrip(':')
 
 import sys
 
@@ -18,137 +24,365 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import Config
 from backend.database import Database
-from backend.routes import folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline
-
-# Initialize FastAPI app
-app = FastAPI(title="DataVault Dashboard")
-
-# CORS for local development
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+from backend import backup, errors, file_ops, media_index, restart, security, semantic, thumbnail
+from backend.jobs import JobManager
+from backend.job_types import build_job_types
+from backend.routes import (
+    folders, media, duplicates, spotify, shows, chat, stats, keurer, timeline, jobs, library, recovery, albums,
+    series, datagatherer, search, geo, messages, history, ui,
 )
+from backend.datagatherer import (cards as gather_cards, daemon as gather_daemon, jobs as gather_jobs,
+                                  registry as gather_registry)
+from backend.routes import backup as backup_routes
+from backend.routes import export as export_routes
 
-# Initialize configuration and database (Sync to avoid race conditions with first requests)
-try:
-    # Load configuration
-    config_path = Path(__file__).parent.parent / "config.json"
-    config = Config(str(config_path))
-    
-    # Validate paths (but don't fail if T7 not mounted)
-    path_status = config.validate_paths()
-    
-    if not path_status["vault_root"]:
-        print("WARNING: Vault root not found. Is T7 mounted?")
-        print(f"Expected path: {config.VAULT_ROOT}")
-    else:
-        print(f"Vault root found: {config.VAULT_ROOT}")
-        
-        # Ensure cache directories exist
-        config.ensure_cache_dirs()
-        config.ensure_duplicates_folder()
-    
-    # Initialize database
-    db = Database(config.DB_PATH)
-    print(f"Database initialized: {config.DB_PATH}")
-    
-    # Initialize routes with config and database
-    folders.init_router(config)
-    media.init_router(config, db)
-    duplicates.init_router(config, db)
-    spotify.init_router(config)
-    shows.init_router(config, db)
-    stats.init_router(config)
-    chat.init_router(config)
-    keurer.init_router(config, db)
-    timeline.init_router(config)
-    
-    print("DataVault Dashboard initialized successfully")
 
-except Exception as e:
-    print(f"ERROR during initialization: {e}")
-    import traceback
-    traceback.print_exc()
+def _say(message: str) -> None:
+    """A startup message; a closed terminal (revoked tty) must never stop the server from starting."""
+    try:
+        print(message, flush=True)
+    except OSError:
+        pass
 
-@app.on_event("startup")
-async def startup_event():
-    """Startup tasks (async)"""
-    # Any future async startup tasks go here
-    pass
 
-# Register routes
-app.include_router(folders.router)
-app.include_router(media.router)
-app.include_router(duplicates.router)
-app.include_router(spotify.router, prefix="/api/spotify", tags=["spotify"])
-app.include_router(shows.router, prefix="/api/shows", tags=["shows"])
-app.include_router(chat.router, tags=["chat"])
-app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
-app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"])
-app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"])
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Automatic index passes (on start, when the vault returns) only while the server runs
+    auto_index = getattr(app.state, "auto_index", None)
+    if auto_index is not None:
+        auto_index.start()
+    # DataGatherer: the Downloads watcher (only while an export is requested) and the opt-in schedules
+    gather = getattr(app.state, "gather_daemon", None)
+    if gather is not None:
+        gather.start()
+    # A database backup on start when the newest is older than a day, then daily
+    auto_backup = getattr(app.state, "auto_backup", None)
+    if auto_backup is not None:
+        auto_backup.start()
+    auto_semantic = getattr(app.state, "auto_semantic", None)
+    if auto_semantic is not None:
+        auto_semantic.start()
+    yield
+    if gather is not None:
+        await run_in_threadpool(gather.stop)
+    if auto_semantic is not None:
+        await run_in_threadpool(auto_semantic.stop)
+    if auto_index is not None:
+        await run_in_threadpool(auto_index.stop)
+    if auto_backup is not None:
+        await run_in_threadpool(auto_backup.stop)
+    # Stop background jobs at their next check (they stay resumable as 'interrupted'),
+    # then close the database connections
+    job_manager = getattr(app.state, "jobs", None)
+    if job_manager is not None:
+        await run_in_threadpool(job_manager.shutdown)
+    database = getattr(app.state, "db", None)
+    if database is not None:
+        database.close_all()
+    config = getattr(app.state, "config", None)
+    if config is not None:
+        backup.release_app_lock(config)
 
-@app.post("/api/restart")
-async def restart_server():
+
+def create_app(config_path: Optional[str] = None) -> FastAPI:
     """
-    Sluit de huidige server af en start hem opnieuw op.
-    Spawnt een los achtergrondproces dat na 1s de server herstart.
+    Build the application. Config comes from config_path, $DATAVAULT_CONFIG
+    or code/config.json (see backend.config.resolve_config_path).
+    Run with: uvicorn --factory backend.main:create_app
     """
-    import subprocess, sys, os
-
-    # Pad naar de project-root (één niveau boven backend/)
-    project_root = str(Path(__file__).parent.parent)
-    python_exec  = sys.executable
-
-    # Shell-script dat wacht, alle processen op poort 8000 doodt, en opnieuw opstart
-    script = f"""#!/bin/bash
-sleep 1
-# Dood alle processen op poort 8000 (inclusief reloader parent/child)
-PIDS=$(lsof -ti :8000 2>/dev/null)
-if [ -n "$PIDS" ]; then
-    kill $PIDS 2>/dev/null
-    sleep 0.5
-    kill -9 $PIDS 2>/dev/null
-fi
-sleep 1
-cd "{project_root}"
-export PATH="/usr/local/bin:$PATH"
-nohup "{python_exec}" -m uvicorn backend.main:app \\
-    --host 127.0.0.1 --port 8000 --reload \\
-    >> /tmp/datavault_server.log 2>&1 &
-"""
-    subprocess.Popen(
-        ['bash', '-c', script],
-        start_new_session=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    # Telemetry is explicitly off: DataVault never sends data anywhere
+    app = FastAPI(
+        title="DataVault Dashboard",
+        lifespan=_lifespan,
+        # No Swagger UI or ReDoc: both load their scripts from a CDN, and DataVault must work
+        # fully offline. /openapi.json (plain JSON, nothing external) stays available.
+        docs_url=None,
+        redoc_url=None,
+        telemetry={
+            "tracing": False,
+            "metrics": False,
+            "logs": False,
+            "operation_spans": False,
+            "auto_configure": False,
+        },
     )
 
-    return {"status": "restarting"}
+    # No CORS: the frontend is served same-origin, so no other website may read the API.
+    # Every state-changing request needs this process's session token (see backend/security.py).
+    app.state.session_token = security.new_session_token()
+    app.state.instance_id = uuid.uuid4().hex
+    app.add_middleware(security.SessionTokenMiddleware, token=app.state.session_token)
+    app.add_middleware(security.ContentSecurityPolicyMiddleware)
+    security.strip_query_strings_from_access_log()
+    # Added last = outermost: a foreign Host header (DNS rebinding) is refused first
+    app.add_middleware(security.TrustedHostMiddleware, allowed_hosts=security.allowed_hosts())
+
+    config = None
+    app.state.jobs = None
+    app.state.db = None
+    app.state.auto_index = None
+    app.state.gather_daemon = None
+    app.state.auto_backup = None
+    app.state.auto_semantic = None
+    try:
+        # Load configuration
+        config = Config(config_path)
+
+        # No file move may ever take something out of (or into) the app's own cache/database
+        file_ops.protect_paths([config.CACHE_FOLDER, config.DB_PATH])
+        # A moved file keeps its cached thumbnail (renamed to the new path's key), and its
+        # index row, rating and Keurer decisions follow it (see media_index.record_move)
+        file_ops.on_moved(_after_move(config, lambda: app.state.db))
+
+        # Validate paths (but don't fail if T7 not mounted)
+        path_status = config.validate_paths()
+        if not path_status["vault_root"]:
+            _say("WARNING: Vault root not found. Is T7 mounted?")
+            _say(f"Expected path: {config.VAULT_ROOT}")
+            _say("The app starts anyway and opens the archive as soon as the disk is there.")
+        else:
+            _say(f"Vault root found: {config.VAULT_ROOT}")
+
+        # The database lives in the vault's cache folder: it opens now when the vault is
+        # there, otherwise on the first request after the disk comes back (no restart)
+        db = Database(config.DB_PATH, prepare=_vault_preparer(config))
+        app.state.db = db
+        if db.ready:
+            _say(f"Database initialized: {config.DB_PATH}")
+
+        # Background jobs (scans, hashing, thumbnails); what a previous run left
+        # running can only be resumed by hand
+        # DataGatherer: every connector is checked here (a broken one stops the start, loudly)
+        gather_registry.load()
+        job_manager = JobManager(db, config, build_job_types(config, db, on_dup_scan_done=duplicates.remember_scan)
+                                 + gather_jobs.build(config, db, lambda: app.state.jobs)
+                                 + semantic.build_job_types(config, db))
+        db.when_ready(lambda: _recover_jobs(job_manager))
+        # Old-style thumbnails (made before EXIF rotation, path-only key) and stored
+        # placeholders are made again on demand; clear them out in the background
+        db.when_ready(lambda: threading.Thread(
+            target=thumbnail.prune_thumbnail_cache, args=(config.THUMB_CACHE_PATH,),
+            name="thumb-prune", daemon=True).start())
+        app.state.jobs = job_manager
+        jobs.init_router(job_manager)
+
+        # The media index is brought up to date on start, when the vault returns and when
+        # the timeline finds it behind the disk (DATAVAULT_AUTO_INDEX=0 turns this off: tests)
+        if os.environ.get("DATAVAULT_AUTO_INDEX", "1") != "0":
+            app.state.auto_index = media_index.AutoIndexer(job_manager)
+            media_index.set_updater(app.state.auto_index.request)
+            # Slim zoeken: photos are recognised after the index, once the model is installed
+            app.state.auto_semantic = semantic.SemanticAuto(job_manager, config, db)
+            media_index.set_new_files_listener(app.state.auto_semantic.request)
+            # ... and the text model is read from disk now (10-20 s the first time after a boot),
+            # so the first query does not wait for it
+            def _warm():
+                try:
+                    semantic.warm_up(config)
+                except Exception:
+                    pass    # the first query reports a model that does not load
+            threading.Thread(target=_warm, daemon=True, name="semantic-warm").start()
+        else:
+            media_index.set_updater(None)
+            media_index.set_new_files_listener(None)
+        # DATAVAULT_GATHER_DAEMON=0 turns the DataGatherer thread off (tests tick it themselves)
+        if os.environ.get("DATAVAULT_GATHER_DAEMON", "1") != "0":
+            app.state.gather_daemon = gather_daemon.Daemon(config, db, lambda: app.state.jobs)
+            # The coverage of every card (counts over millions of rows) is cached in the background
+            db.when_ready(lambda: threading.Thread(target=gather_cards.warm, args=(config, db), daemon=True,
+                                                   name="dg-warm").start())
+
+        # The database is copied to the Mac's own disk (backend/backup.py): on start when the
+        # newest backup is older than a day, then daily (DATAVAULT_AUTO_BACKUP=0: tests). While
+        # the app has the database open it holds a lock, so restore_backup.py waits for a stop.
+        db.when_ready(lambda: backup.hold_app_lock(config))
+        # The backup folder chosen in Instellingen (app_settings) wins over config.json
+        backup.use_folder(config, None)
+        db.when_ready(lambda: backup.load_chosen_folder(config, db))
+        if os.environ.get("DATAVAULT_AUTO_BACKUP", "1") != "0":
+            app.state.auto_backup = backup.AutoBackup(config, db)
+
+        # Initialize routes with config and database: always, also without the vault
+        folders.init_router(config)
+        media.init_router(config, db)
+        duplicates.init_router(config, db)
+        spotify.init_router(config, db)
+        shows.init_router(config, db)
+        stats.init_router(config, db)
+        chat.init_router(config, db, job_manager)
+        keurer.init_router(config, db)
+        timeline.init_router(config, db)
+        library.init_router(config, db, job_manager)
+        albums.init_router(config, db)
+        recovery.init_router(config, db)
+        series.init_router(config, db, job_manager)
+        datagatherer.init_router(config, db, job_manager)
+        backup_routes.init_router(config, app.state.auto_backup, job_manager, db)
+        search.init_router(config, db, job_manager)
+        geo.init_router(config, db)
+        ui.init_router(config, db)
+        export_routes.init_router(config, db)
+        messages.init_router(config, db)
+        history.init_router(config, db, job_manager)
+
+        _say("DataVault Dashboard initialized successfully")
+
+    except (RuntimeError, gather_registry.InvalidConnector):
+        # Safety guards (e.g. test mode pointing at a real vault) must stop startup
+        raise
+    except Exception as e:
+        _say(f"ERROR during initialization: {e}")
+        import traceback
+        _say(traceback.format_exc())
+
+    app.state.config = config
+    errors.install(app)
+
+    # Register routes; every route that reads the archive answers 503 while it is unplugged
+    vault = [Depends(errors.require_vault)]
+    app.include_router(folders.router, dependencies=vault)
+    app.include_router(media.router, dependencies=vault)
+    app.include_router(duplicates.router, dependencies=vault)
+    app.include_router(jobs.router, tags=["jobs"])
+    app.include_router(spotify.router, prefix="/api/spotify", tags=["spotify"], dependencies=vault)
+    app.include_router(shows.router, prefix="/api/shows", tags=["shows"], dependencies=vault)
+    app.include_router(chat.router, tags=["chat"])
+    app.include_router(stats.router, prefix="/api/stats", tags=["stats"], dependencies=vault)
+    app.include_router(keurer.router, prefix="/api/keurer", tags=["keurer"], dependencies=vault)
+    app.include_router(timeline.router, prefix="/api/timeline", tags=["timeline"], dependencies=vault)
+    app.include_router(library.router, prefix="/api/library", tags=["library"], dependencies=vault)
+    app.include_router(albums.router, prefix="/api/library", tags=["library"], dependencies=vault)
+    app.include_router(recovery.router, prefix="/api/recovery", tags=["recovery"], dependencies=vault)
+    app.include_router(series.router, prefix="/api/series", tags=["series"], dependencies=vault)
+    app.include_router(datagatherer.router, prefix="/api/datagatherer", tags=["datagatherer"], dependencies=vault)
+    # Not behind require_vault: the backups are on the Mac's own disk (a backup itself needs the database)
+    app.include_router(backup_routes.router, prefix="/api/backup", tags=["backup"])
+    app.include_router(search.router, prefix="/api/search", tags=["search"], dependencies=vault)
+    app.include_router(geo.router, prefix="/api/map", tags=["map"], dependencies=vault)
+    app.include_router(ui.router, prefix="/api/ui", tags=["ui"], dependencies=vault)
+    app.include_router(export_routes.router, prefix="/api/export", tags=["export"], dependencies=vault)
+    app.include_router(messages.router, prefix="/api/messages", tags=["messages"], dependencies=vault)
+    app.include_router(history.router, tags=["history"], dependencies=vault)
+    app.include_router(security.router)
+    app.include_router(core_router)
+
+    # Serve frontend static files — MOET als allerlaatste staan, anders vangt het API-routes op
+    frontend_path = Path(__file__).parent.parent / "frontend"
+    if frontend_path.exists():
+        app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
+
+    return app
 
 
-@app.get("/api/health")
-async def health_check():
-    """Health check endpoint"""
+# Kept here as well: routes import it from backend.main
+VAULT_UNREACHABLE = errors.VAULT_UNREACHABLE
+
+
+def _vault_preparer(config):
+    """What must be true before the database may be opened: the vault is there and the cache folder exists."""
+    def prepare():
+        if not config.VAULT_ROOT.is_dir():
+            raise FileNotFoundError(f"vault not found: {config.VAULT_ROOT}")
+        # _make_dir never creates the vault root itself (nothing under /Volumes)
+        config._make_dir(config.CACHE_FOLDER)
+        config._make_dir(config.THUMB_CACHE_PATH)
+        config.ensure_duplicates_folder()
+    return prepare
+
+
+def _after_move(config, get_db):
+    """What follows a file the app moved: its thumbnail, then its index row, rating and Keurer decisions."""
+    def after(src, dst):
+        try:
+            thumbnail.carry_over(src, dst, config.THUMB_CACHE_PATH)
+        except Exception:
+            pass
+        try:
+            media_index.record_move(get_db(), config, src, dst)
+        except Exception as e:
+            _say(f"Index not updated after a move ({e}); the next pass picks it up")
+    return after
+
+
+def _recover_jobs(job_manager) -> None:
+    interrupted = job_manager.recover()
+    if interrupted:
+        _say(f"{interrupted} background job(s) were interrupted; resume them in the job dock")
+
+
+core_router = APIRouter()
+
+
+@core_router.post("/api/restart")
+def restart_server():
+    """
+    Herstart alleen dit serverproces (nooit iets anders op poort 8000 of elders).
+    Een hulpproces wacht tot dit proces gestopt is en start de server dan opnieuw
+    met dezelfde Python, argumenten, werkmap en omgeving (zie backend/restart.py).
+    Vereist het sessietoken, zoals elk POST-verzoek.
+    """
+    try:
+        return restart.schedule_restart()
+    except (restart.RestartNotPossible, restart.RestartInProgress) as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@core_router.get("/api/health")
+def health_check(request: Request):
+    """
+    Health check: is the vault there, and what can this Mac do (capabilities). 'notices'
+    lists in Dutch what does not work and how to fix it; the page shows them quietly.
+    """
+    config = request.app.state.config
     if not config:
         raise HTTPException(status_code=503, detail="Configuration not loaded")
 
     path_status = config.validate_paths()
+    db = request.app.state.db
+    caps = capabilities()
 
     return {
         "status": "running",
+        # Changes on every (re)start, so the page can tell the new process from the old one
+        "instance": request.app.state.instance_id,
+        "pid": os.getpid(),
         "vault_available": path_status["vault_root"],
         "vault_path": str(config.VAULT_ROOT),
-        "paths": path_status
+        "vault_message": None if path_status["vault_root"] else VAULT_UNREACHABLE,
+        "database_ready": bool(db is not None and db.ready),
+        "paths": path_status,
+        "capabilities": caps,
+        "notices": capability_notices(caps),
     }
 
-# Serve frontend static files — MOET als allerlaatste staan, anders vangt het API-routes op
-frontend_path = Path(__file__).parent.parent / "frontend"
-if frontend_path.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_path), html=True), name="frontend")
+
+def capabilities() -> dict:
+    """Optional tools the app uses (all local): checked on every call, the chat check is cached."""
+    return {
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "ffprobe": shutil.which("ffprobe") is not None,
+        "pillow_heif": thumbnail.HEIF_SUPPORT,
+        "sips": shutil.which("sips") is not None,
+        "chat": chat.chat_capability(),
+    }
+
+
+def capability_notices(caps: dict) -> list:
+    notices = []
+    if not caps["ffmpeg"]:
+        notices.append({"code": "ffmpeg", "title": "ffmpeg ontbreekt",
+                        "message": "Video's krijgen geen miniatuur. Installeer het met: brew install ffmpeg"})
+    if not caps["pillow_heif"]:
+        notices.append({"code": "pillow_heif", "title": "HEIC-ondersteuning ontbreekt",
+                        "message": "iPhone-foto's (HEIC) krijgen geen miniatuur. Installeer het met: "
+                                   "venv/bin/pip install -r requirements.txt"})
+    chat_caps = caps["chat"]
+    if chat_caps["message"]:
+        notices.append({"code": "chat_model" if chat_caps["reachable"] else "ollama",
+                        "title": "Chat werkt niet" if not chat_caps["reachable"] else "Chatmodel ontbreekt",
+                        "message": chat_caps["message"]})
+    return notices
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(create_app(), host="127.0.0.1", port=8000)

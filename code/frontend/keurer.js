@@ -13,85 +13,195 @@ let keurerMoveSelectedFolder = null;
 let keurerPreviewOpen = false;
 let keurerMoveHighlightIndex = -1;
 
-// Undo-geschiedenis: { file, decision, trash_path, moved_to }
+// Undo-stapel (nieuwste achteraan): { id, decision, folder, file }.
+// De server bewaart waar elk bestand heen ging; undo stuurt alleen het id.
 let keurerHistory = [];
+const KEURER_UNDO_MAX = 20;
+let keurerUndoBusy = false;
+let keurerMoveBusy = false;   // één verplaatsverzoek tegelijk (Enter in zoekveld én boom)
+let keurerLoadFailed = false; // laatste keer laden mislukt (bijv. schijf los): opnieuw zodra hij terug is
 
 // ==================== INITIALISATIE ====================
 
+// De meldingen staan in de Keurer naast de kaart, onder de map en de cijfers: zo blijven de map
+// en 'Andere map' vrij tijdens een snelle reeks beslissingen (CSS #toast-container[data-view="keurer"])
+function keurerDockToasts() {
+    const area = document.getElementById('keurer-card-area');
+    const container = document.getElementById('toast-container');
+    if (!area || !container || currentMainView() !== 'keurer') return;
+    const top = Math.round(area.getBoundingClientRect().top);
+    if (top > 0) container.style.setProperty('--toast-keurer-top', `${top}px`);
+}
+window.addEventListener('resize', () => { if (currentMainView() === 'keurer') requestAnimationFrame(keurerDockToasts); }, { passive: true });
+
 function keurerInit() {
     try {
+        requestAnimationFrame(keurerDockToasts);
         keurerLoadStats();
 
-        const display = document.getElementById('keurer-folder-display');
-        if (display) {
-            display.textContent = keurerFolder
-                ? keurerShortenPath(keurerFolder)
-                : 'Geen map geselecteerd';
-        }
+        keurerShowFolder();
 
-        if (keurerFolder) {
-            keurerLoadFiles();
-        } else {
-            keurerShowEmpty();
-        }
+        // Undo-stapel eerst van de server halen, zodat hij een herlaad overleeft
+        keurerLoadHistory().finally(() => {
+            if (keurerFolder) {
+                keurerLoadFiles();
+            } else {
+                keurerShowEmpty();
+            }
+        });
     } catch (e) {
         console.error('keurerInit fout:', e);
         const cardArea = document.getElementById('keurer-card-area');
         if (cardArea) {
-            cardArea.innerHTML = `<div class="keurer-state-card">
-                <span style="font-size:3rem">⚠️</span>
-                <h3>Initialisatie mislukt</h3>
-                <p style="color:var(--danger)">${keurerEsc(e.message)}</p>
+            cardArea.innerHTML = html`<div class="keurer-state-card">
+                <span class="keurer-state-icon is-error" aria-hidden="true"><i class="fas fa-triangle-exclamation"></i></span>
+                <h3>Starten mislukt</h3>
+                <p class="keurer-state-error">${e.message}</p>
             </div>`;
         }
     }
 }
 
+// De schijf is terug (app.js reloadAfterVaultReturn): statistieken en undo-stapel opnieuw,
+// en de foto's alleen als dat laden mislukt was (een lopende reeks blijft staan)
+function keurerVaultReturned() {
+    keurerLoadStats();
+    keurerLoadHistory().finally(() => {
+        if (keurerFolder && keurerLoadFailed) keurerLoadFiles();
+    });
+}
+
 // ==================== STATISTIEKEN ====================
 
+let keurerStatsLoaded = false;
+
 async function keurerLoadStats() {
+    // Nog nooit cijfers gehad: plaatshouders in de vorm van de drie cijfers, geen lege balk
+    if (!keurerStatsLoaded) keurerRenderStatsPlaceholder();
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/stats`);
-        if (res.ok) {
-            keurerStats = await res.json();
-            keurerRenderStats();
-        }
+        keurerStats = await fetchJSON(`${API_BASE}/api/keurer/stats`);
+        keurerStatsLoaded = true;
+        keurerRenderStats();
     } catch (e) {
         console.warn('Keurer stats ophalen mislukt:', e);
+        if (!keurerStatsLoaded) keurerRenderStatsPlaceholder(e);
+    }
+}
+
+// Laden (zonder fout) of mislukt (met fout): de balk is nooit een lege, omrande strook
+function keurerRenderStatsPlaceholder(error) {
+    const el = document.getElementById('keurer-stats-bar');
+    if (!el) return;
+    if (!error) {
+        el.replaceChildren(...[0, 1, 2].map(() => createEl('div', { class: 'keurer-stat keurer-stat-skeleton', 'aria-hidden': 'true' },
+            createEl('span', { class: 'skeleton keurer-stat-icon' }),
+            createEl('span', { class: 'skeleton skeleton-line' }),
+            createEl('span', { class: 'skeleton skeleton-line skeleton-line-short' }))));
+        el.setAttribute('aria-busy', 'true');
+        return;
+    }
+    el.removeAttribute('aria-busy');
+    el.replaceChildren(createEl('p', { class: 'keurer-stats-error', role: 'alert' },
+        createEl('i', { class: 'fas fa-triangle-exclamation', 'aria-hidden': 'true' }),
+        createEl('span', { text: `Je cijfers konden niet geladen worden: ${(error && error.message) || 'onbekende fout'}` }),
+        createEl('button', { type: 'button', class: 'btn btn-secondary btn-sm', text: 'Opnieuw proberen', onClick: () => keurerLoadStats() })));
+}
+
+// Statistieken altijd van de server overnemen (na beslissing of undo)
+function keurerApplyStats(stats) {
+    if (!stats) { keurerLoadStats(); return; }
+    const wasReached = keurerStats.goal_reached_today;
+    const before = keurerStats;
+    keurerStats = stats;
+    keurerRenderStats();
+    keurerStatsMotion(before, stats);
+    if (!wasReached && stats.goal_reached_today) {
+        showToast('🎉 Dagdoel bereikt!', `Je hebt vandaag ${stats.goal} fotos beoordeeld!`, 'success');
+    }
+}
+
+// Vandaag telt op: het getal tikt omhoog en de balk groeit vanaf waar hij was; het dagdoel
+// gehaald is een beloning (het icoon springt). Bij ongedaan maken tikt het terug.
+function keurerStatsMotion(before, after) {
+    if (!before || !after || before.today === after.today) return;
+    const bar = document.getElementById('keurer-stats-bar');
+    const blocks = bar ? bar.querySelectorAll('.keurer-stat') : [];
+    const today = blocks[1];
+    if (!today) return;
+    MediaMotion.nudge(today.querySelector('.keurer-stat-value'), after.today > before.today ? 1 : -1);
+    const fill = today.querySelector('.keurer-daily-fill');
+    const was = Math.min(100, (before.today / before.goal) * 100);
+    const now = Math.min(100, (after.today / after.goal) * 100);
+    if (fill && now > 0 && was !== now) {
+        Motion.animate(fill, [{ transform: `scaleX(${Math.max(0, was / now)})` }, { transform: 'none' }],
+            { spring: 'smooth', key: 'fill' });
+    }
+    if (!before.goal_reached_today && after.goal_reached_today) {
+        MediaMotion.pop(today.querySelector('.keurer-stat-icon'), { from: 0.5 });
+    }
+}
+
+// ==================== UNDO-STAPEL ====================
+
+async function keurerLoadHistory() {
+    try {
+        const data = await fetchJSON(`${API_BASE}/api/keurer/history`);
+        // Server geeft nieuwste eerst; de stapel heeft de nieuwste achteraan
+        keurerHistory = (data.entries || []).slice(0, KEURER_UNDO_MAX).reverse();
+    } catch (e) {
+        console.warn('Keurer undo-geschiedenis ophalen mislukt:', e);
+    }
+}
+
+function keurerDropHistory(id) {
+    keurerHistory = keurerHistory.filter(e => e.id !== id);
+}
+
+function keurerPushHistory(data) {
+    keurerHistory.push({ id: data.id, decision: data.decision, folder: data.folder, file: data.file });
+    if (keurerHistory.length > KEURER_UNDO_MAX) keurerHistory.shift();
+}
+
+function keurerUpdateRemaining() {
+    const remEl = document.getElementById('keurer-remaining');
+    if (remEl) {
+        const rem = keurerFileQueue.length - keurerIndex;
+        remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
     }
 }
 
 function keurerRenderStats() {
     const el = document.getElementById('keurer-stats-bar');
     if (!el) return;
+    el.removeAttribute('aria-busy');
 
-    const streakIcon = keurerStats.streak > 0 ? '🔥' : '❄️';
+    const streakIcon = keurerStats.streak > 0 ? 'fa-fire' : 'fa-snowflake';
     const todayPct = Math.min(100, (keurerStats.today / keurerStats.goal) * 100);
     const streakCls = keurerStats.streak > 0 ? 'streak-active' : '';
     const goalCls = keurerStats.goal_reached_today ? 'goal-reached' : '';
 
-    el.innerHTML = `
+    el.innerHTML = html`
         <div class="keurer-stat ${streakCls}" title="${keurerStats.streak} opeenvolgende dag(en) met ${keurerStats.goal}+ beoordelingen">
-            <span class="keurer-stat-icon">${streakIcon}</span>
+            <span class="keurer-stat-icon" aria-hidden="true"><i class="fas ${streakIcon}"></i></span>
             <span class="keurer-stat-value">${keurerStats.streak}</span>
-            <span class="keurer-stat-label">dag streak</span>
+            <span class="keurer-stat-label">Dagen op rij</span>
         </div>
         <div class="keurer-stat-divider"></div>
         <div class="keurer-stat ${goalCls}" title="Dagdoel: ${keurerStats.goal} beoordelingen">
-            <span class="keurer-stat-icon">📅</span>
+            <span class="keurer-stat-icon" aria-hidden="true"><i class="fas fa-calendar-day"></i></span>
             <div class="keurer-daily-block">
                 <div class="keurer-daily-bar">
                     <div class="keurer-daily-fill" style="width: ${todayPct}%"></div>
                 </div>
                 <span class="keurer-stat-value">${keurerStats.today}<span class="keurer-stat-dim">/${keurerStats.goal}</span></span>
             </div>
-            <span class="keurer-stat-label">vandaag</span>
+            <span class="keurer-stat-label">Vandaag</span>
         </div>
         <div class="keurer-stat-divider"></div>
         <div class="keurer-stat" title="Totaal aantal beoordeelde bestanden ooit">
-            <span class="keurer-stat-icon">🏷️</span>
+            <span class="keurer-stat-icon" aria-hidden="true"><i class="fas fa-tags"></i></span>
             <span class="keurer-stat-value">${keurerStats.total.toLocaleString('nl-NL')}</span>
-            <span class="keurer-stat-label">totaal beoordeeld</span>
+            <span class="keurer-stat-label">Totaal beoordeeld</span>
         </div>
     `;
 }
@@ -110,36 +220,44 @@ async function keurerLoadFiles() {
     cardArea.innerHTML = `
         <div class="keurer-state-card">
             <div class="loading-spinner"></div>
-            <p style="margin-top: 16px;">Fotos laden...</p>
+            <p>Foto's laden…</p>
         </div>`;
 
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/files?folder=${encodeURIComponent(keurerFolder)}`);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
+        // Eerst de beslissingen die nog onderweg zijn: anders komen die foto's terug in de rij
+        await keurerDecisionChain;
+        const data = await fetchJSON(`${API_BASE}/api/keurer/files?folder=${encodeURIComponent(keurerFolder)}`);
+        // De server geeft de map in één vaste schrijfwijze terug (symlinks en Unicode-vorm
+        // opgelost); die gebruiken we voortaan, zodat undo de beslissing aan deze map koppelt
+        if (data.folder && data.folder !== keurerFolder) {
+            keurerFolder = data.folder;
+            localStorage.setItem('keurer_folder', keurerFolder);
         }
-        const data = await res.json();
         keurerFileQueue = data.files;
         keurerIndex = 0;
+        keurerLoadFailed = false;
 
         if (remEl) {
             const rem  = data.remaining || 0;
             const done = data.decided  || 0;
-            remEl.textContent = `${rem} nog te beoordelen${done > 0 ? ` · ${done} al gedaan` : ''}`;
+            remEl.textContent = rem === 0 && done === 0 ? 'Geen foto\'s of video\'s'
+                : `${rem} nog te beoordelen${done > 0 ? ` · ${done} al gedaan` : ''}`;
         }
 
-        if (keurerFileQueue.length === 0) {
-            keurerShowDone(data.decided || 0);
+        if (keurerFileQueue.length === 0 && !data.decided) {
+            keurerShowNoMedia();
+        } else if (keurerFileQueue.length === 0) {
+            keurerShowDone(data.decided);
         } else {
             keurerShowCard();
         }
     } catch (e) {
-        cardArea.innerHTML = `
+        keurerLoadFailed = true;
+        cardArea.innerHTML = html`
             <div class="keurer-state-card">
-                <span style="font-size: 3rem;">⚠️</span>
+                <span class="keurer-state-icon is-error" aria-hidden="true"><i class="fas fa-triangle-exclamation"></i></span>
                 <h3>Laden mislukt</h3>
-                <p>${keurerEsc(e.message)}</p>
+                <p>${e.message}</p>
                 <button class="btn btn-secondary" onclick="keurerLoadFiles()">Opnieuw proberen</button>
             </div>`;
     }
@@ -155,7 +273,7 @@ function keurerShowEmpty() {
 
     cardArea.innerHTML = `
         <div class="keurer-state-card">
-            <span style="font-size: 4rem;">📁</span>
+            <span class="keurer-state-icon" aria-hidden="true"><i class="fas fa-folder-open"></i></span>
             <h3>Kies een map</h3>
             <p>Selecteer een map om foto's en video's te beoordelen.</p>
             <button class="btn btn-primary" onclick="keurerOpenFolderPicker()">
@@ -169,12 +287,12 @@ function keurerShowDone(decidedCount) {
     const btnArea  = document.getElementById('keurer-action-buttons');
     if (btnArea) btnArea.style.display = 'none';
 
-    cardArea.innerHTML = `
+    cardArea.innerHTML = html`
         <div class="keurer-state-card">
-            <span style="font-size: 4rem;">✅</span>
-            <h3>Map volledig beoordeeld!</h3>
+            <span class="keurer-state-icon is-done" aria-hidden="true"><i class="fas fa-check"></i></span>
+            <h3>Map volledig beoordeeld</h3>
             <p>Alle ${decidedCount} bestanden in deze map zijn al beoordeeld.</p>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
+            <div class="keurer-state-actions">
                 <button class="btn btn-secondary" onclick="keurerOpenFolderPicker()">
                     <i class="fas fa-folder"></i> Andere map
                 </button>
@@ -182,9 +300,31 @@ function keurerShowDone(decidedCount) {
         </div>`;
 }
 
+// Een map zonder foto's of video's (bijvoorbeeld alleen submappen): geen 'klaar', maar zeggen
+// dat er hier niets te beoordelen is
+function keurerShowNoMedia() {
+    const cardArea = document.getElementById('keurer-card-area');
+    const btnArea  = document.getElementById('keurer-action-buttons');
+    if (btnArea) btnArea.style.display = 'none';
+
+    cardArea.innerHTML = `
+        <div class="keurer-state-card">
+            <span class="keurer-state-icon" aria-hidden="true"><i class="fas fa-folder-open"></i></span>
+            <h3>Geen foto's of video's in deze map</h3>
+            <p>De Keurer kijkt alleen naar bestanden direct in deze map, niet in de submappen.</p>
+            <div class="keurer-state-actions">
+                <button class="btn btn-primary" onclick="keurerOpenFolderPicker()">
+                    <i class="fas fa-folder" aria-hidden="true"></i> Andere map
+                </button>
+            </div>
+        </div>`;
+}
+
 // ==================== KAART WEERGEVEN ====================
 
-function keurerShowCard() {
+// opts.arrive: de volgende kaart na een beslissing (kwam van onder de vorige vandaan);
+// opts.from: terug na ongedaan maken of een mislukte beslissing (uit die richting)
+function keurerShowCard(opts = {}) {
     const cardArea = document.getElementById('keurer-card-area');
     const btnArea  = document.getElementById('keurer-action-buttons');
 
@@ -200,7 +340,7 @@ function keurerShowCard() {
     const fileUrl  = `${API_BASE}/api/file?path=${encodeURIComponent(file.path)}`;
 
     const mediaHtml = file.is_video
-        ? `<video
+        ? html`<video
                 class="keurer-card-img"
                 id="kc-video"
                 src="${fileUrl}"
@@ -208,51 +348,73 @@ function keurerShowCard() {
                 draggable="false"
                 onerror="keurerHandleThumbError(this)"
            ></video>`
-        : `<img
+        : html`<img
                 class="keurer-card-img"
                 src="${thumbUrl}"
-                alt="${keurerEsc(file.name)}"
+                alt="${file.name}"
                 draggable="false"
                 onerror="keurerHandleThumbError(this)"
            >`;
 
     const undoAvail = keurerHistory.length > 0;
 
-    cardArea.innerHTML = `
+    cardArea.innerHTML = html`
         <div class="keurer-card-wrapper">
             <div class="keurer-card" id="keurer-card">
 
                 <!-- Overlays -->
                 <div class="keurer-card-overlay overlay-keep"   id="kc-overlay-keep">
-                    <div class="overlay-badge keep-badge"><i class="fas fa-heart"></i> HOUDEN</div>
+                    <div class="overlay-badge keep-badge"><i class="fas fa-heart"></i> Houden</div>
                 </div>
                 <div class="keurer-card-overlay overlay-delete" id="kc-overlay-delete">
-                    <div class="overlay-badge delete-badge"><i class="fas fa-trash"></i> WEGGOOIEN</div>
+                    <div class="overlay-badge delete-badge"><i class="fas fa-trash"></i> Prullenmand</div>
                 </div>
                 <div class="keurer-card-overlay overlay-move"   id="kc-overlay-move">
-                    <div class="overlay-badge move-badge"><i class="fas fa-folder-open"></i> VERPLAATSEN</div>
+                    <div class="overlay-badge move-badge"><i class="fas fa-folder-open"></i> Verplaatsen</div>
                 </div>
                 <div class="keurer-card-overlay overlay-undo"   id="kc-overlay-undo">
-                    <div class="overlay-badge undo-badge"><i class="fas fa-undo"></i> ONGEDAAN</div>
+                    <div class="overlay-badge undo-badge"><i class="fas fa-undo"></i> Ongedaan</div>
                 </div>
 
                 ${mediaHtml}
                 <div class="keurer-card-fallback" id="kc-fallback" style="display:none;">
-                    <i class="fas fa-${file.is_video ? 'video' : 'image'}" style="font-size:3rem;color:var(--text-secondary);"></i>
-                    <span style="color:var(--text-secondary);margin-top:12px;font-size:0.85rem;text-align:center;padding:0 16px;">${keurerEsc(file.name)}</span>
+                    <i class="fas fa-${file.is_video ? 'video' : 'image'}" aria-hidden="true"></i>
+                    <span>${file.name}</span>
                 </div>
 
                 <div class="keurer-card-footer">
-                    <span class="keurer-card-name" title="${keurerEsc(file.name)}">${keurerEsc(file.name)}</span>
-                    <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-                        ${undoAvail ? `<span class="keurer-undo-hint" title="Ongedaan maken (↓ pijl)"><i class="fas fa-undo"></i></span>` : ''}
+                    <span class="keurer-card-name" title="${file.name}">${file.name}</span>
+                    <div class="keurer-card-meta">
+                        ${undoAvail ? html`<span class="keurer-undo-hint" title="Ongedaan maken (↓ pijl)"><i class="fas fa-undo"></i></span>` : ''}
                         <span class="keurer-card-progress">${keurerIndex + 1} / ${keurerFileQueue.length}</span>
                     </div>
                 </div>
             </div>
         </div>`;
 
-    keurerSetupDrag(document.getElementById('keurer-card'));
+    const card = document.getElementById('keurer-card');
+    keurerSetupDrag(card);
+    if (opts.from || opts.arrive) MediaMotion.keurerArrive(card, opts.from || null);
+    keurerPreloadNext();
+}
+
+// De volgende twee foto's staan al gedecodeerd klaar, zodat de nieuwe kaart na een beslissing
+// in hetzelfde beeld zijn foto heeft (nooit een lege kaart)
+const keurerPreloaded = new Map();
+
+function keurerPreloadNext() {
+    const wanted = keurerFileQueue.slice(keurerIndex + 1, keurerIndex + 3)
+        .filter(f => !f.is_video)
+        .map(f => `${API_BASE}/api/thumb?path=${encodeURIComponent(f.path)}`);
+    for (const url of keurerPreloaded.keys()) if (!wanted.includes(url)) keurerPreloaded.delete(url);
+    for (const url of wanted) {
+        if (keurerPreloaded.has(url)) continue;
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = url;
+        if (img.decode) img.decode().catch(() => {});
+        keurerPreloaded.set(url, img);
+    }
 }
 
 function keurerHandleThumbError(el) {
@@ -263,98 +425,81 @@ function keurerHandleThumbError(el) {
 
 // ==================== BESLISSING & ANIMATIE ====================
 
+// De beslissing is meteen zichtbaar: de kaart vliegt weg (een spook, MediaMotion.keurerFly) en
+// de volgende foto staat er in hetzelfde beeld. Niets wacht op de animatie of op de server.
+// De beslissingen gaan wel op volgorde naar de server (keurerDecisionChain), zodat de
+// undo-stapel klopt. Mislukt er een, dan komt die foto terug als huidige kaart.
+let keurerDecisionChain = Promise.resolve();
+
 function keurerAnimateAndDecide(decision) {
-    if (keurerIsAnimating) return;
+    if (keurerUndoBusy || keurerMoveBusy) return;
     if (keurerIndex >= keurerFileQueue.length) return;
-
-    keurerIsAnimating = true;
+    const file = keurerFileQueue[keurerIndex];
     const card = document.getElementById('keurer-card');
-    if (!card) { keurerIsAnimating = false; return; }
+    if (card) MediaMotion.keurerFly(card, decision);
+    keurerIndex++;
+    keurerUpdateRemaining();
+    keurerShowCard({ arrive: true });
 
-    let flyX = 0, flyY = -60, rotate = 0;
-    if (decision === 'keep') {
-        flyX   = -Math.max(window.innerWidth * 1.1, 600);
-        rotate = -22;
-        const ol = document.getElementById('kc-overlay-keep');
-        if (ol) ol.style.opacity = '1';
-    } else {
-        flyX   = Math.max(window.innerWidth * 1.1, 600);
-        rotate = 22;
-        const ol = document.getElementById('kc-overlay-delete');
-        if (ol) ol.style.opacity = '1';
-    }
-
-    card.style.transition = 'transform 0.38s cubic-bezier(0.5,0,0.75,0), opacity 0.38s ease';
-    card.style.transform  = `translateX(${flyX}px) translateY(${flyY}px) rotate(${rotate}deg)`;
-    card.style.opacity    = '0';
-
-    keurerSendDecision(decision, keurerFileQueue[keurerIndex]);
-
-    setTimeout(() => {
-        keurerIndex++;
-        keurerIsAnimating = false;
-        const remEl = document.getElementById('keurer-remaining');
-        if (remEl) {
-            const rem = keurerFileQueue.length - keurerIndex;
-            remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
+    const result = keurerDecisionChain.then(() => keurerSendDecision(decision, file));
+    keurerDecisionChain = result.then(() => {}, () => {});
+    result.then((outcome) => {
+        if (outcome === 'ok') return;
+        const at = keurerFileQueue.indexOf(file);
+        if (at < 0) return;
+        keurerFileQueue.splice(at, 1);
+        if (at < keurerIndex) keurerIndex--;
+        if (outcome === 'failed') {
+            // Niet gelukt: dezelfde foto komt terug, uit de richting waar hij heen vloog
+            keurerFileQueue.splice(keurerIndex, 0, file);
+            keurerShowCard({ from: decision });
+        } else {
+            const progress = document.querySelector('#keurer-card .keurer-card-progress');
+            if (progress && keurerIndex < keurerFileQueue.length) progress.textContent = `${keurerIndex + 1} / ${keurerFileQueue.length}`;
         }
-        keurerShowCard();
-    }, 390);
+        keurerUpdateRemaining();
+    });
 }
 
-// Animeer kaart omhoog weg en open move-modal
+// Verplaatsen: de kaart komt omhoog en het mappenvenster opent meteen
 function keurerAnimateUp() {
-    if (keurerIsAnimating) return;
+    if (keurerUndoBusy || keurerMoveBusy) return;
     if (keurerIndex >= keurerFileQueue.length) return;
-
-    keurerIsAnimating = true;
     const card = document.getElementById('keurer-card');
-    if (!card) { keurerIsAnimating = false; return; }
-
-    const ol = document.getElementById('kc-overlay-move');
-    if (ol) ol.style.opacity = '1';
-
-    card.style.transition = 'transform 0.35s cubic-bezier(0.5,0,0.75,0), opacity 0.35s ease';
-    card.style.transform  = 'translateY(-120%) scale(0.85)';
-    card.style.opacity    = '0';
-
-    setTimeout(() => {
-        keurerIsAnimating = false;
-        keurerOpenMoveModal();
-    }, 350);
+    if (card) {
+        const ol = document.getElementById('kc-overlay-move');
+        if (ol) ol.style.opacity = '1';
+        const from = card.style.transform || 'none';
+        card.style.transition = '';
+        card.style.transform = '';
+        Motion.animate(card, [
+            { transform: from },
+            { transform: `translate3d(0, ${-Motion.px('--motion-distance-lg', 24)}px, 0) scale(0.96)` },
+        ], { spring: 'snappy', fill: 'forwards', key: 'lift' });
+    }
+    keurerOpenMoveModal();
 }
 
+// Geeft 'ok', 'gone' (bestand bestaat niet meer) of 'failed' terug
 async function keurerSendDecision(decision, file) {
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/decide`, {
+        const data = await fetchJSON(`${API_BASE}/api/keurer/decide`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: file.path, folder: keurerFolder, decision }),
         });
-        const data = res.ok ? await res.json() : {};
-
-        // Sla op in history voor undo (max 20)
-        keurerHistory.push({
-            file,
-            decision,
-            trash_path: data.trash_path || null,
-            moved_to:   null,
-        });
-        if (keurerHistory.length > 20) keurerHistory.shift();
-
-        keurerStats.today++;
-        keurerStats.total++;
-
-        if (!keurerStats.goal_reached_today && keurerStats.today >= keurerStats.goal) {
-            keurerStats.goal_reached_today = true;
-            if (keurerStats.streak === 0) keurerStats.streak = 1;
-            showToast('🎉 Dagdoel bereikt!', `Je hebt vandaag ${keurerStats.goal} fotos beoordeeld!`, 'success');
-        }
-
-        keurerRenderStats();
+        keurerPushHistory({ id: data.id, decision, folder: keurerFolder, file });
+        keurerApplyStats(data.stats);
+        // Naar de prullenmand: één melding met 'Ongedaan maken' die meeloopt (houden heeft ↓ al)
+        if (decision === 'delete') keurerUndoToast(data.id, 'Naar de prullenmand', `${file.name} staat in de prullenmand.`);
+        return 'ok';
     } catch (e) {
-        console.error('Beslissing opslaan mislukt:', e);
-        showToast('Fout', 'Beslissing kon niet worden opgeslagen', 'error');
+        if (e.status === 404) {
+            showToast('Overgeslagen', `${file.name}: ${e.message}`, 'warning');
+            return 'gone';
+        }
+        toastFetchError(`Beslissing mislukt voor ${file.name}`, e);
+        return 'failed';
     }
 }
 
@@ -362,66 +507,104 @@ function keurerDecideKeep()   { keurerAnimateAndDecide('keep'); }
 function keurerDecideDelete() { keurerAnimateAndDecide('delete'); }
 function keurerDecideMove()   { keurerAnimateUp(); }
 
-async function keurerUndo() {
-    if (keurerIsAnimating) return;
-    if (keurerHistory.length === 0) {
-        showToast('Undo', 'Geen actie om ongedaan te maken', 'info');
-        return;
+// De melding na een beslissing die een bestand verplaatst: in de snelle Keurer één melding die
+// steeds de nieuwste beslissing toont (group), nooit een stapel. ⌘Z of de knop zet precies die
+// beslissing terug; ↓ zet de laatste terug en haalt dan ook de knop weg (undoToastDone).
+function keurerUndoToast(id, title, message) {
+    keurerDockToasts();
+    showUndoToast({
+        title, message, group: 'keurer', key: `keurer:${id}`,
+        undo: () => keurerUndo(id, true), onUndone: (note) => note,
+    });
+}
+
+// targetId: precies die beslissing (vanuit de melding); anders de laatste. fromToast: de melding
+// toont de uitkomst zelf (de beschrijving komt terug), anders een eigen melding.
+async function keurerUndo(targetId = null, fromToast = false) {
+    if (keurerUndoBusy && fromToast) throw new Error('De Keurer is nog bezig met de vorige stap; gebruik ↓ of het Herstelcentrum.');
+    if (keurerUndoBusy || (keurerIsAnimating && !fromToast)) return null;
+    keurerUndoBusy = true;
+    // Een beslissing die nog onderweg is, hoort eerst op de stapel
+    await keurerDecisionChain;
+    // Uit de melding: precies die beslissing, ook als hij al van de korte stapel hier is gevallen
+    // (na twintig snelle beslissingen); de server weet of hij nog terug kan
+    const target = targetId === null ? keurerHistory[keurerHistory.length - 1]
+        : keurerHistory.find(e => e.id === targetId) || { id: targetId, decision: null, folder: null, file: null };
+    if (!target) {
+        keurerUndoBusy = false;
+        showToast('Ongedaan maken', 'Er is geen actie om ongedaan te maken.', 'info');
+        return null;
     }
 
+    // De huidige kaart zakt een stukje terug; de teruggezette foto komt er zo overheen
     const card = document.getElementById('keurer-card');
     if (card) {
         const ol = document.getElementById('kc-overlay-undo');
         if (ol) ol.style.opacity = '1';
-        card.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
-        card.style.transform  = 'translateY(80px) scale(0.92)';
-        card.style.opacity    = '0';
+        card.style.transition = '';
+        Motion.animate(card, [
+            { transform: card.style.transform || 'none', opacity: 1 },
+            { transform: `translate3d(0, ${Motion.px('--motion-distance-lg', 24)}px, 0) scale(0.94)`, opacity: 0.35 },
+        ], { duration: '--dur-3', easing: '--ease-exit', fill: 'forwards', key: 'undo' });
     }
 
-    const entry = keurerHistory.pop();
+    const entry = target;
+    let returned = false;
+    let note = null;
+    let failed = null;
+    let decision = entry.decision;
 
     try {
-        const res = await fetch(`${API_BASE}/api/keurer/undo`, {
+        const data = await fetchJSON(`${API_BASE}/api/keurer/undo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                path:       entry.file.path,
-                folder:     keurerFolder,
-                decision:   entry.decision,
-                trash_path: entry.trash_path,
-                moved_to:   entry.moved_to,
-            }),
+            body: JSON.stringify({ id: entry.id }),
         });
+        keurerDropHistory(entry.id);
+        undoToastDone(`keurer:${entry.id}`);
+        keurerApplyStats(data.stats);
 
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
+        // Alleen terug in de wachtrij als de beslissing bij de huidige map hoort, en dan als
+        // huidige kaart (ook als hij nog achter ons in de rij stond: beoordeelde foto's blijven
+        // daar staan tot de rij opnieuw laadt)
+        const file = data.file || entry.file;
+        if (data.folder === keurerFolder) {
+            const at = keurerFileQueue.findIndex(f => f.path === file.path);
+            if (at >= 0) {
+                keurerFileQueue.splice(at, 1);
+                if (at < keurerIndex) keurerIndex--;
+            }
+            keurerFileQueue.splice(keurerIndex, 0, file);
+            returned = true;
         }
+        keurerUpdateRemaining();
 
-        // Zet bestand terug in queue vóór huidige positie
-        keurerFileQueue.splice(keurerIndex, 0, entry.file);
-
-        // Stats bijwerken
-        keurerStats.today  = Math.max(0, keurerStats.today - 1);
-        keurerStats.total  = Math.max(0, keurerStats.total - 1);
-        keurerRenderStats();
-
-        const remEl = document.getElementById('keurer-remaining');
-        if (remEl) {
-            const rem = keurerFileQueue.length - keurerIndex;
-            remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
-        }
-
-        const label = entry.decision === 'delete' ? 'prullenmand' : entry.decision === 'move' ? 'verplaatsing' : 'bewaren';
-        showToast('Ongedaan gemaakt', `${label} teruggedraaid voor ${entry.file.name}`, 'success');
+        decision = data.decision || decision;
+        const label = decision === 'delete' ? 'Prullenmand' : decision === 'move' ? 'Verplaatsing' : 'Bewaren';
+        const where = data.folder === keurerFolder ? '' : ` (in ${keurerShortenPath(data.folder)})`;
+        note = { title: 'Ongedaan gemaakt', message: `${label} teruggedraaid voor ${file.name}${where}`, type: 'success' };
+        if (!fromToast) showToast(note.title, note.message, note.type);
 
     } catch (e) {
-        // Zet history terug als undo mislukt
-        keurerHistory.push(entry);
-        showToast('Fout', `Undo mislukt: ${e.message}`, 'error');
+        // 404/409/410: deze stap kan niet (meer) terug; haal hem van de stapel
+        if ([404, 409, 410].includes(e.status)) {
+            keurerDropHistory(entry.id);
+            undoToastDone(`keurer:${entry.id}`);
+        }
+        // 404: de beslissing bestaat niet meer, dus hij is al teruggedraaid (elders, of met ↓)
+        if (fromToast && e.status === 404) note = { title: 'Al ongedaan', message: 'Deze beslissing is al teruggedraaid.', type: 'info' };
+        // Anders zegt de melding zelf wat er mis ging (en mag het bij een losse schijf nog eens)
+        else if (fromToast) failed = e;
+        else toastFetchError('Ongedaan maken mislukt', e);
+    } finally {
+        keurerUndoBusy = false;
     }
 
-    setTimeout(() => { keurerShowCard(); }, 320);
+    // De foto komt terug uit de richting waar hij heen ging (houden links, prullenmand rechts),
+    // alleen als hij in deze Keurer staat (anders blijft de huidige kaart staan)
+    if (returned || !fromToast || currentMainView() === 'keurer') keurerShowCard(returned ? { from: decision } : {});
+    if (failed) throw failed;
+    return note;
 }
 
 // ==================== VERPLAATS MODAL ====================
@@ -445,26 +628,27 @@ async function keurerOpenMoveModal() {
     const modal = document.getElementById('modal-keurer-move');
     modal.classList.add('active');
     keurerMoveSelectedFolder = null;
+    keurerMoveHighlightIndex = -1;
     document.getElementById('btn-keurer-confirm-move').disabled = true;
 
-    // Zoekbalk resetten
+    // Zoekbalk resetten en direct focussen
     const searchEl = document.getElementById('keurer-move-search');
     const clearBtn = document.getElementById('keurer-move-search-clear');
     if (searchEl) { searchEl.value = ''; }
     if (clearBtn) clearBtn.style.display = 'none';
+    requestAnimationFrame(() => { if (searchEl) searchEl.focus(); });
 
     const nameEl = document.getElementById('keurer-move-filename');
     if (nameEl) nameEl.textContent = keurerFileQueue[keurerIndex].name;
 
     const treeContainer = document.getElementById('keurer-move-folder-tree');
-    treeContainer.innerHTML = '<div class="loading-spinner" style="margin:2rem auto;display:block;"></div>';
+    treeContainer.innerHTML = '<div class="loading-spinner"></div>';
 
     const tree = (typeof folderTree !== 'undefined' && folderTree.length > 0)
         ? folderTree
         : await (async () => {
             try {
-                const res  = await fetch(`${API_BASE}/api/folders`);
-                const data = await res.json();
+                const data = await fetchJSON(`${API_BASE}/api/folders`);
                 return data.folders || [];
             } catch (_) { return []; }
         })();
@@ -475,20 +659,21 @@ async function keurerOpenMoveModal() {
     treeContainer.innerHTML = '';
 
     if (tree.length === 0) {
-        treeContainer.innerHTML = '<p style="color:var(--danger);padding:1rem;">Mappen konden niet geladen worden.</p>';
+        treeContainer.innerHTML = '<p class="picker-message is-error">Mappen konden niet geladen worden.</p>';
         return;
     }
 
     tree.forEach(f => keurerRenderMoveFolderNode(treeContainer, f, 0));
 
-    // Zet focus op zoekbalk en voeg keyboard nav toe
-    keurerMoveHighlightIndex = -1;
-    setTimeout(() => {
-        if (searchEl) {
-            searchEl.focus();
-            searchEl.onkeydown = keurerHandleMoveSearchKeydown;
-        }
-    }, 80);
+    // Keyboard nav via centraal systeem
+    window._keurerMoveNav = activateFolderTreeModal({
+        modalId: 'modal-keurer-move',
+        containerId: 'keurer-move-folder-tree',
+        onSelect: (item) => { if (item.dataset.path) item.click(); },
+        onConfirm: () => { if (keurerMoveSelectedFolder) keurerConfirmMove(); },
+        onClose: keurerCloseMoveModal,
+        focusSelector: '#keurer-move-search',
+    });
 }
 
 function keurerFilterMoveTree(query) {
@@ -524,7 +709,7 @@ function keurerFilterMoveTree(query) {
     treeContainer.innerHTML = '';
 
     if (starts.length === 0 && contains.length === 0) {
-        treeContainer.innerHTML = '<p style="color:var(--text-secondary);padding:1rem 12px;font-size:0.85rem;">Geen mappen gevonden</p>';
+        treeContainer.innerHTML = '<p class="picker-message">Geen mappen gevonden</p>';
         return;
     }
 
@@ -542,12 +727,12 @@ function keurerFilterMoveTree(query) {
 
             const icon = document.createElement('span');
             icon.className = 'folder-icon';
-            icon.textContent = '📁';
+            setHTML(icon, html`<i class="fas fa-folder" aria-hidden="true"></i>`);
             item.appendChild(icon);
 
             const nameEl = document.createElement('span');
             nameEl.className = 'folder-name';
-            nameEl.innerHTML = keurerHighlight(f.name, q);
+            setHTML(nameEl, keurerHighlight(f.name, q));
             item.appendChild(nameEl);
 
             // Volledig pad als subtekst
@@ -580,12 +765,8 @@ function keurerClearMoveSearch() {
 function keurerHighlight(name, query) {
     // Markeer de eerste match (case-insensitief) vet
     const idx = name.toLowerCase().indexOf(query.toLowerCase());
-    if (idx === -1) return keurerEsc(name);
-    return (
-        keurerEsc(name.slice(0, idx)) +
-        '<mark class="keurer-hl">' + keurerEsc(name.slice(idx, idx + query.length)) + '</mark>' +
-        keurerEsc(name.slice(idx + query.length))
-    );
+    if (idx === -1) return html`${name}`;
+    return html`${name.slice(0, idx)}<mark class="keurer-hl">${name.slice(idx, idx + query.length)}</mark>${name.slice(idx + query.length)}`;
 }
 
 // ==================== KEYBOARD NAV IN MODAL ====================
@@ -672,7 +853,7 @@ function keurerRenderMoveFolderNode(container, folder, depth) {
     if (hasChildren) {
         const chevron = document.createElement('span');
         chevron.className = 'folder-chevron';
-        chevron.innerHTML = '▶';
+        chevron.innerHTML = '<i class="fas fa-chevron-right" aria-hidden="true"></i>';
         chevron.onclick = e => {
             e.stopPropagation();
             const childDiv = wrapper.querySelector(':scope > .folder-children');
@@ -689,13 +870,13 @@ function keurerRenderMoveFolderNode(container, folder, depth) {
         item.appendChild(chevron);
     } else {
         const spacer = document.createElement('span');
-        spacer.style.cssText = 'width:16px;display:inline-block;flex-shrink:0;';
+        spacer.className = 'folder-chevron no-children';
         item.appendChild(spacer);
     }
 
     const icon = document.createElement('span');
     icon.className = 'folder-icon';
-    icon.textContent = '📁';
+    setHTML(icon, html`<i class="fas fa-folder" aria-hidden="true"></i>`);
     item.appendChild(icon);
 
     const name = document.createElement('span');
@@ -723,6 +904,7 @@ function keurerRenderMoveFolderNode(container, folder, depth) {
 }
 
 function keurerCloseMoveModal() {
+    if (keurerMoveBusy) return; // het antwoord van de server sluit de modal
     document.getElementById('modal-keurer-move').classList.remove('active');
     keurerMoveSelectedFolder = null;
     // Zoekbalk wissen
@@ -730,13 +912,15 @@ function keurerCloseMoveModal() {
     if (searchEl) searchEl.value = '';
     const clearBtn = document.getElementById('keurer-move-search-clear');
     if (clearBtn) clearBtn.style.display = 'none';
-    // Kaart terugzetten als annuleren
-    keurerShowCard();
+    // Kaart terugzetten als annuleren: hij zakt terug op zijn plek
+    keurerShowCard({ arrive: true });
 }
 
 async function keurerConfirmMove() {
-    if (!keurerMoveSelectedFolder) return;
+    if (keurerMoveBusy || !keurerMoveSelectedFolder) return;
     if (keurerIndex >= keurerFileQueue.length) return;
+    keurerMoveBusy = true;
+    await keurerDecisionChain;
 
     const file = keurerFileQueue[keurerIndex];
     const btn  = document.getElementById('btn-keurer-confirm-move');
@@ -744,51 +928,41 @@ async function keurerConfirmMove() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Bezig...';
 
     try {
-        const res = await fetch(`${API_BASE}/api/move-file`, {
+        const movedData = await fetchJSON(`${API_BASE}/api/keurer/decide`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                source_path: file.path,
+                path: file.path,
+                folder: keurerFolder,
+                decision: 'move',
                 destination_folder: keurerMoveSelectedFolder,
             }),
         });
 
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
-        }
-
-        const movedData = await res.json();
-
         document.getElementById('modal-keurer-move').classList.remove('active');
         const destFolder = keurerMoveSelectedFolder;
         keurerMoveSelectedFolder = null;
+        btn.innerHTML = '<i class="fas fa-check"></i> Verplaatsen';
 
-        // Sla op in history voor undo
-        keurerHistory.push({
-            file,
-            decision:   'move',
-            trash_path: null,
-            moved_to:   movedData.new_path || null,
-        });
-        if (keurerHistory.length > 20) keurerHistory.shift();
+        // Server bewaart de verplaatsing; undo gaat via het id
+        keurerPushHistory({ id: movedData.id, decision: 'move', folder: keurerFolder, file });
+        keurerApplyStats(movedData.stats);
 
         // Verwijder bestand uit queue
         keurerFileQueue.splice(keurerIndex, 1);
+        keurerUpdateRemaining();
 
-        const remEl = document.getElementById('keurer-remaining');
-        if (remEl) {
-            const rem = keurerFileQueue.length - keurerIndex;
-            remEl.textContent = rem > 0 ? `${rem} nog te beoordelen` : '';
-        }
-
-        showToast('Verplaatst', `Bestand verplaatst naar ${destFolder.split('/').pop()}`, 'success');
-        keurerShowCard();
+        const newName = (movedData.dest_path || '').split('/').pop();
+        const renamed = newName && newName !== file.name ? ` als ${newName}` : '';
+        keurerUndoToast(movedData.id, 'Verplaatst', `${file.name} staat nu in ${destFolder.split('/').pop()}${renamed}.`);
+        keurerShowCard({ arrive: true });
 
     } catch (e) {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check"></i> Verplaatsen';
-        showToast('Fout', `Verplaatsen mislukt: ${e.message}`, 'error');
+        toastFetchError('Verplaatsen mislukt', e);
+    } finally {
+        keurerMoveBusy = false;
     }
 }
 
@@ -810,7 +984,7 @@ function keurerOpenPreview() {
 
     let mediaHtml;
     if (file.is_video) {
-        mediaHtml = `<video
+        mediaHtml = html`<video
             src="${fileUrl}"
             class="keurer-preview-media"
             controls
@@ -818,16 +992,16 @@ function keurerOpenPreview() {
             playsinline
         ></video>`;
     } else {
-        mediaHtml = `<img
+        mediaHtml = html`<img
             src="${fileUrl}"
             class="keurer-preview-media"
-            alt="${keurerEsc(file.name)}"
+            alt="${file.name}"
             draggable="false"
         >`;
     }
 
     const overlay = document.getElementById('keurer-preview-overlay');
-    document.getElementById('keurer-preview-content').innerHTML = mediaHtml;
+    setHTML(document.getElementById('keurer-preview-content'), mediaHtml);
     document.getElementById('keurer-preview-filename').textContent = file.name;
     overlay.classList.add('active');
     keurerPreviewOpen = true;
@@ -941,9 +1115,11 @@ function keurerSetupDrag(card) {
         } else if (currentX > 100) {
             keurerAnimateAndDecide('delete');
         } else {
-            // Terugveren
-            card.style.transition = 'transform 0.32s cubic-bezier(0.34,1.56,0.64,1)';
-            card.style.transform  = 'translateX(0) translateY(0) rotate(0) scale(1)';
+            // Terugveren vanaf waar de hand losliet (snappy-veer)
+            const from = card.style.transform || 'none';
+            card.style.transition = '';
+            card.style.transform = '';
+            Motion.animate(card, [{ transform: from }, { transform: 'none' }], { spring: 'snappy', key: 'drag' });
             ['kc-overlay-keep', 'kc-overlay-delete', 'kc-overlay-move', 'kc-overlay-undo'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.style.opacity = '0';
@@ -951,10 +1127,21 @@ function keurerSetupDrag(card) {
         }
     }
 
-    // Muis
-    card.addEventListener('mousedown', e => { e.preventDefault(); onStart(e.clientX, e.clientY); });
-    window.addEventListener('mousemove', e => { if (dragging) onMove(e.clientX, e.clientY); });
-    window.addEventListener('mouseup', onEnd);
+    // Muis: de window-luisteraars bestaan alleen tijdens het slepen. Zo blijft er per
+    // beoordeelde kaart niets achter (geen stapel luisteraars, geen vastgehouden kaarten).
+    function onMouseMove(e) { onMove(e.clientX, e.clientY); }
+    function onMouseUp() {
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        onEnd();
+    }
+    card.addEventListener('mousedown', e => {
+        e.preventDefault();
+        onStart(e.clientX, e.clientY);
+        if (!dragging) return;
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+    });
 
     // Touch
     card.addEventListener('touchstart', e => onStart(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
@@ -964,23 +1151,49 @@ function keurerSetupDrag(card) {
 
 // ==================== TOETSENBORD ====================
 
+// Mogen de Keurer-toetsen (pijltjes, spatie) nu iets doen? Alleen als de toets voor de Keurer
+// bedoeld is: niet tijdens typen, niet in het themamenu of een ander menu of venster, en niet als
+// een ander deel van het scherm de toets al afhandelde. Een pijltje beslist over een bestand en
+// verplaatst het, dus bij twijfel: niets doen.
+function keurerKeyIsForKeurer(e, key) {
+    if (e.defaultPrevented) return false;
+    const themeMenu = document.getElementById('theme-dropdown');
+    if (themeMenu && themeMenu.classList.contains('open')) return false;
+    const el = document.activeElement;
+    if (isTypingTarget(e.target) || isTypingTarget(el)) return false;
+    if (!el || el === document.body || el === document.documentElement) return true;
+    if (el.closest('#section-keurer, #keurer-preview-overlay')) {
+        // Spatie op een knop (Houden, Kies map, ...) drukt die knop in; geen voorbeeld openen
+        if (key === 'Space' && el !== document.getElementById('keurer-card')
+            && el.closest('button, a[href], summary, [role="button"]')) return false;
+        return true;
+    }
+    // Net op het Keurer-tabblad geklikt: de focus staat in het hoofdmenu. Alleen dat tabblad
+    // telt; een pijltje op een ander tabblad (Tijdlijn, ...) is geen beslissing over een foto.
+    const tab = el.closest('.nav-tabs [data-view]');
+    if (tab) return tab.dataset.view === 'keurer';
+    return false;
+}
+
 document.addEventListener('keydown', function (e) {
     const section = document.getElementById('section-keurer');
     if (!section || !section.classList.contains('active')) return;
+    // Het sneltoetsenoverzicht (?) ligt erboven: geen beslissing achter het venster
+    if (document.querySelector('.dv-overlay.active')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
 
     const moveModalActive = document.getElementById('modal-keurer-move').classList.contains('active');
 
-    // Enter in move-modal: bevestig verplaatsen
+    // Enter in move-modal: bevestig verplaatsen, maar alleen vanuit het zoekveld, de mappenboom
+    // of het venster zelf. Enter op een knop (Annuleren, ×) doet wat die knop doet.
     if (e.key === 'Enter' && moveModalActive) {
+        const modal = document.getElementById('modal-keurer-move');
+        const t = e.target instanceof Element ? e.target : null;
+        const fromTree = t && (t === modal || t.id === 'keurer-move-search'
+            || t.closest('#keurer-move-folder-tree'));
+        if (!fromTree) return;
         e.preventDefault();
         if (keurerMoveSelectedFolder) keurerConfirmMove();
-        return;
-    }
-
-    // Spatie: toggle preview (niet als move-modal open is)
-    if (e.code === 'Space' && !moveModalActive) {
-        e.preventDefault();
-        keurerTogglePreview();
         return;
     }
 
@@ -990,11 +1203,24 @@ document.addEventListener('keydown', function (e) {
         if (moveModalActive)   { keurerCloseMoveModal(); return; }
     }
 
-    // Andere toetsen: niet in modals of inputs
-    if (document.querySelector('.modal.active')) return;
-    const tag = document.activeElement && document.activeElement.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    // Andere toetsen: niet in vensters, niet tijdens typen, niet in menu's
+    if (moveModalActive || document.querySelector('.modal.active')) return;
+    const space = e.code === 'Space' || e.key === ' ';
+    const arrow = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key);
+    if (!space && !arrow) return;
+    if (!keurerKeyIsForKeurer(e, space ? 'Space' : e.key)) return;
 
+    // Spatie: preview open of dicht
+    if (space) {
+        e.preventDefault();
+        keurerTogglePreview();
+        return;
+    }
+
+    if (keurerPreviewOpen) return;
+    // De knop van de toets geeft even mee: je ziet welke beslissing je nam
+    const pressed = { ArrowLeft: '.keurer-btn-keep', ArrowRight: '.keurer-btn-delete', ArrowUp: '.keurer-btn-move' }[e.key];
+    if (pressed) MediaMotion.press(document.querySelector(`#keurer-action-buttons ${pressed}`));
     if (e.key === 'ArrowLeft')        { e.preventDefault(); keurerDecideKeep(); }
     else if (e.key === 'ArrowRight')  { e.preventDefault(); keurerDecideDelete(); }
     else if (e.key === 'ArrowUp')     { e.preventDefault(); keurerDecideMove(); }
@@ -1010,14 +1236,13 @@ async function keurerOpenFolderPicker() {
     document.getElementById('btn-keurer-confirm-folder').disabled = true;
 
     const treeContainer = document.getElementById('keurer-folder-tree');
-    treeContainer.innerHTML = '<div class="loading-spinner" style="margin:2rem auto;display:block;"></div>';
+    treeContainer.innerHTML = '<div class="loading-spinner"></div>';
 
     const tree = (typeof folderTree !== 'undefined' && folderTree.length > 0)
         ? folderTree
         : await (async () => {
             try {
-                const res  = await fetch(`${API_BASE}/api/folders`);
-                const data = await res.json();
+                const data = await fetchJSON(`${API_BASE}/api/folders`);
                 return data.folders || [];
             } catch (_) { return []; }
         })();
@@ -1025,73 +1250,30 @@ async function keurerOpenFolderPicker() {
     treeContainer.innerHTML = '';
 
     if (tree.length === 0) {
-        treeContainer.innerHTML = '<p style="color:var(--danger);padding:1rem;">Mappen konden niet geladen worden.</p>';
+        treeContainer.innerHTML = '<p class="picker-message is-error">Mappen konden niet geladen worden.</p>';
         return;
     }
 
-    tree.forEach(f => keurerRenderFolderNode(treeContainer, f, 0));
-}
+    renderFolderTree(treeContainer, tree, {
+        onSelect: (path) => {
+            keurerSelectedFolderForModal = path;
+            document.getElementById('btn-keurer-confirm-folder').disabled = false;
+        },
+    });
 
-function keurerRenderFolderNode(container, folder, depth) {
-    const wrapper = document.createElement('div');
-
-    const item = document.createElement('div');
-    item.className = 'folder-item';
-    item.style.paddingLeft = `${depth * 20 + 8}px`;
-
-    const hasChildren = folder.children && folder.children.length > 0;
-
-    if (hasChildren) {
-        const chevron = document.createElement('span');
-        chevron.className = 'folder-chevron';
-        chevron.innerHTML = '▶';
-        chevron.onclick = e => {
-            e.stopPropagation();
-            const childDiv = wrapper.querySelector(':scope > .folder-children');
-            if (childDiv) {
-                const isOpen = !childDiv.classList.contains('collapsed');
-                childDiv.classList.toggle('collapsed', isOpen);
-                chevron.classList.toggle('expanded', !isOpen);
-            }
-        };
-        item.appendChild(chevron);
-    } else {
-        const spacer = document.createElement('span');
-        spacer.style.cssText = 'width:16px;display:inline-block;flex-shrink:0;';
-        item.appendChild(spacer);
-    }
-
-    const icon = document.createElement('span');
-    icon.className = 'folder-icon';
-    icon.textContent = '📁';
-    item.appendChild(icon);
-
-    const name = document.createElement('span');
-    name.className = 'folder-name';
-    name.textContent = folder.name;
-    item.appendChild(name);
-
-    item.onclick = () => {
-        document.querySelectorAll('#keurer-folder-tree .folder-item').forEach(el => el.classList.remove('selected'));
-        item.classList.add('selected');
-        keurerSelectedFolderForModal = folder.path;
-        document.getElementById('btn-keurer-confirm-folder').disabled = false;
-    };
-
-    wrapper.appendChild(item);
-
-    if (hasChildren) {
-        const childDiv = document.createElement('div');
-        childDiv.className = 'folder-children collapsed';
-        folder.children.forEach(child => keurerRenderFolderNode(childDiv, child, depth + 1));
-        wrapper.appendChild(childDiv);
-    }
-
-    container.appendChild(wrapper);
+    // Keyboard nav
+    window._keurerFolderNav = activateFolderTreeModal({
+        modalId: 'modal-keurer-folder',
+        containerId: 'keurer-folder-tree',
+        onSelect: (item) => { if (item.dataset.path) item.click(); },
+        onConfirm: () => { if (keurerSelectedFolderForModal) keurerConfirmFolderSelection(); },
+        onClose: keurerCloseFolderPicker,
+    });
 }
 
 function keurerCloseFolderPicker() {
     document.getElementById('modal-keurer-folder').classList.remove('active');
+    if (window._keurerFolderNav) window._keurerFolderNav.nav.resetIndex();
     keurerSelectedFolderForModal = null;
 }
 
@@ -1100,8 +1282,7 @@ function keurerConfirmFolderSelection() {
     keurerFolder = keurerSelectedFolderForModal;
     localStorage.setItem('keurer_folder', keurerFolder);
 
-    const display = document.getElementById('keurer-folder-display');
-    if (display) display.textContent = keurerShortenPath(keurerFolder);
+    keurerShowFolder();
 
     keurerCloseFolderPicker();
     keurerLoadFiles();
@@ -1109,17 +1290,20 @@ function keurerConfirmFolderSelection() {
 
 // ==================== HELPERS ====================
 
-function keurerShortenPath(p) {
-    const parts = p.split('/').filter(Boolean);
-    if (parts.length <= 2) return '/' + parts.join('/');
-    return `.../${parts.slice(-2).join('/')}`;
+// De gekozen map in de kop, en de knop ernaast: 'Map kiezen' zolang er nog geen is
+function keurerShowFolder() {
+    const display = document.getElementById('keurer-folder-display');
+    if (display) {
+        display.textContent = keurerFolder ? keurerShortenPath(keurerFolder) : 'Geen map gekozen';
+        display.title = keurerFolder || '';
+        display.classList.toggle('path-label', !!keurerFolder);
+    }
+    const label = document.getElementById('keurer-folder-button-label');
+    if (label) label.textContent = keurerFolder ? 'Andere map' : 'Map kiezen';
 }
 
-function keurerEsc(str) {
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+// Paden zoals overal in de app: vanaf het archief, lang ingekort in het midden (displayPath)
+function keurerShortenPath(p) {
+    return displayPath(p, 40);
 }
+

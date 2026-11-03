@@ -1,19 +1,39 @@
 """
 DataVault Dashboard - Duplicates Routes
+
+A folder scan returns groups of byte-identical files with, per group, the copy
+that stays under the chosen rule (see scanner.choose_keeper). The client may
+pick another copy per group; the server never trusts that choice blindly: right
+before every move it checks, under ARCHIVE_LOCK, that the copy that stays still
+exists and is byte-for-byte identical. Moved files go to RAW_DUPLICATES (never
+deleted) and one user action is one undo run, however many requests it takes.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
+import os
+import sqlite3
+import stat
 
 from backend.config import Config
-from backend.file_ops import safe_move_with_structure, FileOperationError, CrossDeviceError
+from backend.scanner import is_hidden
+from backend.paths import resolve_in_vault, is_in_vault, vault_folder_or_none
+from backend.file_ops import (
+    safe_move_with_structure, move_no_overwrite, files_identical, is_inside, ARCHIVE_LOCK, sqlite_ino,
+    FileOperationError, CrossDeviceError, ProtectedPathError,
+)
 
 router = APIRouter()
 
 # Global state
 config: Config = None
 db = None
-last_scan_results: List[Dict[str, Any]] = []
+last_scan_results: List[Dict[str, Any]] = []  # flat {path, duplicate_of} pairs of the last scan
+
+# Most files one move request may carry; the UI sends bigger actions in chunks under one run_id
+MAX_BATCH_FILES = 200
+RUNS_TO_LIST = 20
+
 
 def init_router(cfg: Config, database):
     """Initialize router with config and database"""
@@ -21,316 +41,697 @@ def init_router(cfg: Config, database):
     config = cfg
     db = database
 
+
+def _protected_folders() -> List[Path]:
+    """
+    Folders the duplicates tool never takes files out of (nor accepts a kept original from).
+    Checked with is_inside, so other spellings (raw_duplicates, .DATAVAULT_CACHE) count too.
+    """
+    return [config.DUPLICATES_FOLDER, config.TRASH_FOLDER, config.CACHE_FOLDER, config.DB_PATH]
+
+
+def _in_protected_folder(path: Path) -> Optional[Path]:
+    for folder in _protected_folders():
+        if is_inside(path, folder):
+            return folder
+    return None
+
+
+def _require_config():
+    if not config:
+        raise HTTPException(status_code=500, detail="Configuration not initialized")
+
+
+# ==================== SCAN ====================
+#
+# The scan runs as a background job (type 'dup_scan', see backend/job_types.py and
+# /api/jobs): the duplicates screen starts it there and follows it in the job dock.
+# The endpoints below stay for scripts and older callers.
+
+def remember_scan(result: Dict[str, Any]) -> None:
+    """After every finished scan: the pairs delete_single falls back on."""
+    global last_scan_results
+    last_scan_results = [
+        {"path": copy["path"], "duplicate_of": group["copies"][group["keep"]]["path"]}
+        for group in result["groups"]
+        for i, copy in enumerate(group["copies"]) if i != group["keep"]
+    ]
+
+
+def _latest_scan_job() -> Optional[Dict[str, Any]]:
+    from backend.routes.jobs import get_manager
+    jobs = get_manager().list(limit=1, job_type="dup_scan")
+    return jobs[0] if jobs else None
+
+
+_OLD_STATUS = {"queued": "counting", "running": "scanning", "failed": "error", "interrupted": "error"}
+
+
 @router.get("/api/raw_duplicates/progress")
-async def get_scan_progress_endpoint():
-    """Get current scan progress"""
-    from backend.progress import get_scan_progress
-    
-    progress = get_scan_progress()
-    if progress:
-        return progress.to_dict()
+def get_scan_progress_endpoint():
+    """The newest duplicate scan job, in the shape of the old progress endpoint."""
+    job = _latest_scan_job()
+    if job is None:
+        return {
+            "status": "idle",
+            "phase": "Geen scan bezig",
+            "total_files": 0,
+            "processed_files": 0,
+            "duplicates_found": 0,
+            "progress_percent": 0,
+        }
+    summary = job["summary"] or {}
+    status = _OLD_STATUS.get(job["status"], job["status"])
+    error = job["error"]
+    if job["status"] == "done":
+        status = "complete" if summary.get("complete", True) else "incomplete"
+        if status == "incomplete":
+            error = f"{summary.get('errors', 0)} bestand(en) of map(pen) konden niet gelezen worden"
+    total = job["total"] or 0
     return {
-        "status": "idle",
-        "phase": "No scan in progress",
-        "total_files": 0,
-        "processed_files": 0,
-        "duplicates_found": 0,
-        "progress_percent": 0
+        "status": status,
+        "phase": job["message"],
+        "total_files": total,
+        "processed_files": job["processed"],
+        "duplicates_found": summary.get("duplicates_found", 0),
+        "progress_percent": int(job["processed"] / total * 100) if total else 0,
+        "error_message": error,
+        "job_id": job["id"],
     }
 
+
 @router.post("/api/raw_duplicates/cancel")
-async def cancel_scan_endpoint():
-    """Cancel the current scan"""
-    from backend.progress import cancel_scan
-    
-    cancel_scan()
+def cancel_scan_endpoint():
+    """Cancel every duplicate scan that is queued, running or waiting for the vault."""
+    from backend.jobs import ACTIVE
+    from backend.routes.jobs import get_manager
+    jobs = get_manager()
+    for job in jobs.list(limit=20, job_type="dup_scan"):
+        if job["status"] in ACTIVE:
+            jobs.cancel(job["id"])
     return {"status": "cancelled"}
 
 
-@router.post("/api/raw_duplicates/scan")
-async def scan_duplicates_endpoint() -> Dict[str, Any]:
-    """Scan RAW folder for duplicates"""
-    global last_scan_results
-    
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
-    
-    if not config.RAW_FOLDER.exists():
-        raise HTTPException(status_code=404, detail="RAW folder not found")
-    
-    try:
-        from backend.scanner import find_duplicates
-        
-        duplicates = find_duplicates(config, db)
-        last_scan_results = duplicates
-        
-        return {
-            "total_scanned": len(duplicates),
-            "duplicates_found": len(duplicates),
-            "duplicates": duplicates
-        }
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
-
 @router.get("/api/raw_duplicates")
-async def get_duplicates_endpoint() -> Dict[str, Any]:
+def get_duplicates_endpoint() -> Dict[str, Any]:
     """Get last scan results"""
     return {
         "duplicates_found": len(last_scan_results),
         "duplicates": last_scan_results
     }
 
-@router.post("/api/raw_duplicates/delete")
-async def delete_duplicates_endpoint() -> Dict[str, Any]:
+
+def _body_fields(request: Request, body: Any, required: str, optional: Tuple[str, ...]) -> Dict[str, Any]:
     """
-    Delete (move) duplicates from RAW to RAW_DUPLICATES.
-    Records operation in database for undo.
+    The fields of a JSON body for the two older single-call endpoints. Paths travel in the
+    body only, never in the URL (where they would end up in logs and history): a call that
+    still sends them as URL parameters gets a 400 that says so, not a silent default.
     """
-    global last_scan_results
-    
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
-    
-    if not last_scan_results:
-        raise HTTPException(status_code=400, detail="No duplicates to delete. Run scan first.")
-    
-    # Ensure duplicates folder exists
-    config.ensure_duplicates_folder()
-    
-    # Create delete run
-    run_id = db.create_delete_run()
-    
-    moved = 0
-    skipped = 0
-    errors = []
-    
-    for dup in last_scan_results:
-        src_path = Path(dup["raw_path"])
-        
-        # Skip if file no longer exists
-        if not src_path.exists():
-            skipped += 1
-            continue
-        
-        try:
-            # Move file preserving structure
-            dst_path, was_conflict = safe_move_with_structure(
-                src_path,
-                config.RAW_FOLDER,
-                config.DUPLICATES_FOLDER,
-                conflict_suffix="DUP"
-            )
-            
-            # Record operation for undo
-            db.record_delete_operation(run_id, src_path, dst_path)
-            
-            # Invalidate hash cache for both paths
-            db.invalidate_hash(src_path)
-            db.invalidate_hash(dst_path)
-            
-            moved += 1
-        
-        except CrossDeviceError as e:
-            errors.append(f"CRITICAL: Cross-device move blocked for {src_path}: {str(e)}")
-            skipped += 1
+    in_url = [name for name in (required, *optional) if name in request.query_params]
+    if in_url:
+        _bad_request(f"Stuur {', '.join(in_url)} in de JSON-body, niet in de URL")
+    if not isinstance(body, dict):
+        _bad_request(f'Body must be a JSON object with "{required}"')
+    unknown = set(body) - {required, *optional}
+    if unknown:
+        _bad_request(f"Unknown field(s): {', '.join(sorted(unknown))}")
+    value = body.get(required)
+    if not isinstance(value, str) or not value:
+        _bad_request(f"{required} must be a path")
+    fields = {required: value}
+    for name in optional:
+        value = body.get(name)
+        if value is not None and not isinstance(value, str):
+            _bad_request(f"{name} must be a string")
+        fields[name] = value
+    return fields
 
-        except FileOperationError as e:
-            errors.append(f"Failed to move {src_path}: {str(e)}")
-            skipped += 1
-
-        except Exception as e:
-            errors.append(f"Unexpected error moving {src_path}: {str(e)}")
-            skipped += 1
-    
-    # Clear scan results after delete
-    last_scan_results = []
-    
-    return {
-        "run_id": run_id,
-        "moved": moved,
-        "skipped": skipped,
-        "errors": errors
-    }
-
-@router.post("/api/raw_duplicates/undo_last")
-async def undo_last_delete_endpoint() -> Dict[str, Any]:
-    """
-    Undo the most recent delete operation.
-    Moves files back from RAW_DUPLICATES to RAW.
-    """
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
-    
-    # Get last delete run
-    last_run = db.get_last_delete_run()
-    
-    if not last_run:
-        raise HTTPException(status_code=404, detail="No delete operations to undo")
-    
-    run_id = last_run["run_id"]
-    operations = db.get_delete_operations(run_id)
-    
-    if not operations:
-        raise HTTPException(status_code=404, detail="No operations found for last run")
-    
-    restored = 0
-    skipped = 0
-    errors = []
-    
-    for op in operations:
-        # Note: src_path is the ORIGINAL location (in RAW)
-        # dst_path is where we moved it (in RAW_DUPLICATES)
-        # For undo, we move FROM dst_path BACK TO src_path
-        
-        dst_path = Path(op["dst_path"])  # Current location
-        src_path = Path(op["src_path"])  # Original location
-        
-        # Skip if file no longer exists at destination
-        if not dst_path.exists():
-            skipped += 1
-            continue
-        
-        try:
-            # Check if original location is now occupied
-            if src_path.exists():
-                # Add RESTORED suffix
-                from backend.file_ops import handle_conflict
-                src_path = handle_conflict(src_path, suffix_prefix="RESTORED")
-            
-            # Move back using safe rename
-            from backend.file_ops import safe_rename
-            safe_rename(dst_path, src_path, allow_cross_device=False)
-            
-            # Invalidate hash cache
-            db.invalidate_hash(dst_path)
-            db.invalidate_hash(src_path)
-            
-            restored += 1
-        
-        except CrossDeviceError as e:
-            errors.append(f"CRITICAL: Cross-device move blocked for {dst_path}: {str(e)}")
-            skipped += 1
-
-        except FileOperationError as e:
-            errors.append(f"Failed to restore {dst_path}: {str(e)}")
-            skipped += 1
-
-        except Exception as e:
-            errors.append(f"Unexpected error restoring {dst_path}: {str(e)}")
-            skipped += 1
-    
-    # Delete run record after successful undo
-    if restored > 0:
-        db.delete_run(run_id)
-    
-    return {
-        "run_id": run_id,
-        "restored": restored,
-        "skipped": skipped,
-        "errors": errors
-    }
 
 @router.post("/api/duplicates/scan_folder")
-async def scan_folder_for_duplicates(folder_path: str) -> Dict[str, Any]:
-    """
-    Scan a specific folder for duplicates within that folder only.
-    """
-    global last_scan_results
-    
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
-    
-    folder = Path(folder_path)
-    
-    if not folder.exists() or not folder.is_dir():
-        raise HTTPException(status_code=404, detail="Folder not found")
-    
-    # Validate folder is in vault
-    from backend.config import validate_path_in_vault
-    if not validate_path_in_vault(folder, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Folder must be within vault")
-    
-    try:
-        from backend.scanner import find_duplicates_in_folder
-        
-        result = find_duplicates_in_folder(folder, config, db)
-        duplicates = result["duplicates"]
-        total_files = result["total_files"]
-        
-        last_scan_results = duplicates
-        
-        return {
-            "folder": str(folder),
-            "total_scanned": total_files,  # Actual count of all files scanned
-            "duplicates_found": len(duplicates),
-            "duplicates": duplicates
-        }
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+def scan_folder_endpoint(request: Request, body: Any = Body(None)) -> Dict[str, Any]:
+    """Body: {"folder_path": path, "rule": optional, "prefer_folder": optional}. See scan_folder_for_duplicates."""
+    fields = _body_fields(request, body, "folder_path", ("rule", "prefer_folder"))
+    return scan_folder_for_duplicates(fields["folder_path"], fields["rule"] or "oldest", fields["prefer_folder"])
 
-@router.post("/api/duplicates/delete_single")
-async def delete_single_duplicate(file_path: str) -> Dict[str, Any]:
+
+def scan_folder_for_duplicates(
+    folder_path: str, rule: str = "oldest", prefer_folder: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Delete a single duplicate file (move to RAW_DUPLICATES).
+    Scan one folder (and its subfolders) for byte-identical media files, and wait
+    for the answer. Runs the same 'dup_scan' background job the duplicates screen
+    starts via /api/jobs (a plain def: it waits in the threadpool, never on the event loop).
+
+    rule picks the copy that stays in each group: oldest (default), newest,
+    shortest or folder (with prefer_folder). The client can re-apply any rule
+    itself from the returned copy data, and override per group.
+
+    One scan at a time (409 otherwise). A cancelled scan is a normal answer
+    (cancelled: true); read errors are counted and reported (complete: false);
+    a folder that disappears mid-scan gives 503, and so does an unplugged vault
+    (the job then waits for it and finishes later, see /api/jobs). A scan paused
+    from the job dock gives 409, one interrupted by a server stop 503; both name
+    the job, which can be resumed.
     """
-    if not config:
-        raise HTTPException(status_code=500, detail="Configuration not initialized")
-    
-    src_path = Path(file_path)
-    
-    if not src_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Validate file is in vault
-    from backend.config import validate_path_in_vault
-    if not validate_path_in_vault(src_path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="File must be within vault")
-    
-    # Ensure duplicates folder exists
-    config.ensure_duplicates_folder()
-    
-    # Create delete run
-    run_id = db.create_delete_run()
-    
+    from backend.jobs import QUEUED, RUNNING
+    from backend.routes.jobs import call, get_manager
+    from backend.job_types import ScanFolderGone
+
+    _require_config()
+    jobs = get_manager()
+    params: Dict[str, Any] = {"folder": folder_path, "rule": rule}
+    if prefer_folder is not None:
+        params["prefer_folder"] = prefer_folder
+    job, _ = call(jobs.start, "dup_scan", params, exclusive=True)
+    job = jobs.wait(job["id"], statuses=(QUEUED, RUNNING))
+
+    if job["status"] == "done":
+        return call(jobs.result, job["id"])
+    if job["status"] == "cancelled":
+        return {
+            "folder": job["params"]["folder"], "total_scanned": 0, "total_files": 0,
+            "empty_skipped": 0, "groups": [], "duplicates_found": 0, "cancelled": True,
+            "complete": False, "errors": 0, "error_samples": [], "rule": job["params"]["rule"],
+        }
+    if job["status"] == "waiting_for_vault":
+        from backend.main import VAULT_UNREACHABLE
+        raise HTTPException(status_code=503, detail=f"{VAULT_UNREACHABLE} De scan gaat verder zodra de schijf terug is (taak {job['id']}).")
+    if job["status"] == "paused":
+        # Paused from the job dock while this request waited: it can be resumed there
+        raise HTTPException(status_code=409, detail=f"De scan is gepauzeerd (taak {job['id']}). Hervat hem in het takenpaneel.")
+    if job["status"] == "interrupted":
+        raise HTTPException(status_code=503, detail=f"De scan is onderbroken omdat de server stopt (taak {job['id']}). Hervat hem in het takenpaneel.")
+    if job["error"] == str(ScanFolderGone()):
+        raise HTTPException(status_code=503, detail="De map is tijdens de scan onbereikbaar geworden (schijf losgekoppeld?)")
+    raise HTTPException(status_code=500, detail=job["error"] or f"Scan {job['status']}")
+
+
+# ==================== MOVE (verified, never overwrites) ====================
+
+def _find_keeper(file_path: Path) -> Optional[str]:
+    """The original the last folder scan paired with this duplicate."""
+    for dup in last_scan_results:
+        if dup.get("path") == str(file_path):
+            return dup.get("duplicate_of")
+    return None
+
+
+def _hidden(path: Path) -> bool:
+    """Hidden the way the scan sees it: a dot name below the vault root, or UF_HIDDEN."""
     try:
-        # Determine which folder to use as base
-        # If file is in RAW, use RAW as base, otherwise use vault root
-        if src_path.is_relative_to(config.RAW_FOLDER):
-            base_folder = config.RAW_FOLDER
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return is_hidden(path, config.VAULT_ROOT, st)
+
+
+def _os_error(e: OSError, doing: str) -> HTTPException:
+    """
+    A file that cannot be read (no permission, a read error on an aging disk, gone
+    between two checks) refuses only that file. An unplugged disk gives 503.
+    """
+    from backend.main import VAULT_UNREACHABLE
+    if not config.VAULT_ROOT.is_dir():
+        return HTTPException(status_code=503, detail=VAULT_UNREACHABLE)
+    reason = e.strerror or str(e)
+    return HTTPException(status_code=409, detail=f"Kon het bestand niet {doing}: {reason}. Er is niets verplaatst")
+
+
+def _move_verified(src_path: Path, keeper: Optional[Path]) -> Tuple[Path, bool]:
+    """
+    Move src_path to RAW_DUPLICATES, only if keeper still exists and is byte-for-byte
+    identical. The caller holds ARCHIVE_LOCK across this and recording the move, so
+    nothing (another tab, the Keurer) can move the keeper away in between.
+    Raises HTTPException, also for read errors; returns (dst_path, was_conflict).
+    """
+    try:
+        _verify(src_path, keeper)
+    except OSError as e:
+        raise _os_error(e, "lezen") from e
+    return _move_to_duplicates(src_path)
+
+
+def _verify(src_path: Path, keeper: Optional[Path]) -> None:
+    """Every check before a move; raises HTTPException (or OSError when a file cannot be read)."""
+    if not os.path.lexists(src_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if src_path.is_symlink() or not src_path.is_file():
+        raise HTTPException(status_code=400, detail="Only regular files can be moved")
+
+    protected = _in_protected_folder(src_path)
+    if protected is not None:
+        raise HTTPException(status_code=400, detail=f"Refusing files inside {protected.name}")
+
+    if keeper is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Unknown original for this file; scan the folder again"
+        )
+
+    if keeper.is_symlink() or not keeper.is_file() or _in_protected_folder(keeper) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Kept original no longer exists: {keeper}. Nothing was moved; scan again"
+        )
+
+    if os.path.samefile(src_path, keeper):
+        raise HTTPException(status_code=409, detail="File and original are the same file")
+
+    # A hidden copy (dot name or Finder flag) never stays in place of a visible one:
+    # the scan, the UI and Finder would no longer show the only copy left
+    if _hidden(keeper) and not _hidden(src_path):
+        raise HTTPException(
+            status_code=409,
+            detail="De kopie die blijft is verborgen; kies een zichtbare kopie. Er is niets verplaatst"
+        )
+
+    if not files_identical(src_path, keeper):
+        raise HTTPException(
+            status_code=409,
+            detail=f"File is no longer identical to {keeper.name}. Nothing was moved; scan again"
+        )
+
+
+def _move_to_duplicates(src_path: Path) -> Tuple[Path, bool]:
+    config.ensure_duplicates_folder()
+
+    try:
+        # Compare real locations (resolves /var -> /private/var style aliases);
+        # the file itself is not a symlink, so only its folders are resolved
+        real_src = src_path.parent.resolve() / src_path.name
+
+        # Keep the structure below RAW for files in RAW, below the vault root otherwise
+        if real_src.is_relative_to(config.RAW_FOLDER.resolve()):
+            base_folder = config.RAW_FOLDER.resolve()
         else:
-            base_folder = config.VAULT_ROOT
-        
-        # Move file preserving structure
-        dst_path, was_conflict = safe_move_with_structure(
-            src_path,
+            base_folder = config.VAULT_ROOT.resolve()
+
+        # Never overwrites (see file_ops)
+        return safe_move_with_structure(
+            real_src,
             base_folder,
-            config.DUPLICATES_FOLDER,
+            config.DUPLICATES_FOLDER.resolve(),
             conflict_suffix="DUP"
         )
-        
-        # Record operation for undo
-        db.record_delete_operation(run_id, src_path, dst_path)
-        
-        # Invalidate hash cache for both paths
-        db.invalidate_hash(src_path)
-        db.invalidate_hash(dst_path)
-        
-        return {
-            "run_id": run_id,
-            "moved": True,
-            "src_path": str(src_path),
-            "dst_path": str(dst_path),
-            "was_conflict": was_conflict
-        }
-    
+
+    except ProtectedPathError as e:
+        raise HTTPException(status_code=400, detail=f"Refused: {str(e)}")
+
     except CrossDeviceError as e:
-        raise HTTPException(status_code=500, detail=f"CRITICAL: Cross-device move blocked for {src_path}: {str(e)}")
+        raise HTTPException(status_code=409, detail=f"CRITICAL: Cross-device move blocked for {src_path}: {str(e)}")
 
     except FileOperationError as e:
         raise HTTPException(status_code=500, detail=f"Failed to move {src_path}: {str(e)}")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error moving {src_path}: {str(e)}")
+    except OSError as e:
+        # move_no_overwrite only lets a plain OSError through before the rename itself
+        raise _os_error(e, "verplaatsen") from e
 
+
+def _forget_hashes(*paths: Path) -> None:
+    """
+    Drop cached hashes of moved paths. Best effort: the move is already recorded, and a
+    stale cache row is never trusted anyway (validated on inode, size and times).
+    """
+    for path in paths:
+        try:
+            db.invalidate_hash(path)
+        except sqlite3.Error:
+            pass
+
+
+def _dst_fingerprint(dst_path: Path) -> Tuple[Optional[int], Optional[int]]:
+    """Inode and size of the file that was just moved (a rename keeps both)."""
+    try:
+        st = os.lstat(dst_path)
+    except OSError:
+        return None, None
+    return sqlite_ino(st.st_ino), st.st_size
+
+
+def _record_or_move_back(run_id: Optional[str], src_path: Path, dst_path: Path, folder: Optional[str]) -> str:
+    """Record the move for undo; if that fails, put the file back so nothing is untracked."""
+    ino, size = _dst_fingerprint(dst_path)
+    try:
+        return db.record_delete_operation(run_id, src_path, dst_path, folder, dst_ino=ino, dst_size=size)
+    except Exception as e:
+        try:
+            move_no_overwrite(dst_path, src_path, suffix_prefix="RESTORED")
+        except FileOperationError as back:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not record the move ({e}) nor move it back ({back}); the file is at {dst_path}"
+            )
+        raise HTTPException(status_code=500, detail=f"Could not record the move, file put back: {e}")
+
+
+@router.post("/api/duplicates/delete_single")
+def delete_single_endpoint(request: Request, body: Any = Body(None)) -> Dict[str, Any]:
+    """Body: {"file_path": path, "duplicate_of": optional path}. See delete_single_duplicate."""
+    fields = _body_fields(request, body, "file_path", ("duplicate_of",))
+    return delete_single_duplicate(fields["file_path"], fields["duplicate_of"])
+
+
+def delete_single_duplicate(file_path: str, duplicate_of: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Move a single duplicate file to RAW_DUPLICATES (one file, its own undo run).
+
+    Only after checking, right before the move, that the kept original
+    (duplicate_of, or the one from the last scan) still exists and is
+    byte-for-byte identical, so the last copy of a photo can never be moved away.
+    The UI uses /api/duplicates/move; this stays for single calls.
+    """
+    _require_config()
+
+    # Validate file is in vault (a plain file, no folders or symlinks: checked below).
+    # The cache and other protected folders get their own 400 further down.
+    src_path = resolve_in_vault(file_path, config, allow_internal=True)
+
+    keeper_str = duplicate_of or _find_keeper(src_path)
+    keeper = resolve_in_vault(keeper_str, config, allow_internal=True) if keeper_str else None
+
+    with ARCHIVE_LOCK:
+        dst_path, was_conflict = _move_verified(src_path, keeper)
+        run_id = _record_or_move_back(None, src_path, dst_path, None)
+
+    _forget_hashes(src_path, dst_path)
+
+    return {
+        "run_id": run_id,
+        "moved": True,
+        "src_path": str(src_path),
+        "dst_path": str(dst_path),
+        "duplicate_of": str(keeper),
+        "was_conflict": was_conflict
+    }
+
+
+def _bad_request(detail: str):
+    raise HTTPException(status_code=400, detail=detail)
+
+
+def _parse_move_body(body: Any) -> Tuple[List[Tuple[str, List[str]]], Optional[str], Optional[str]]:
+    if not isinstance(body, dict):
+        _bad_request("Body must be a JSON object")
+    groups = body.get("groups")
+    if not isinstance(groups, list) or not groups:
+        _bad_request("groups must be a non-empty list")
+    parsed = []
+    total = 0
+    for group in groups:
+        if not isinstance(group, dict):
+            _bad_request("Every group must be an object with keep and move")
+        keep, move = group.get("keep"), group.get("move")
+        if not isinstance(keep, str) or not keep:
+            _bad_request("keep must be a path")
+        if not isinstance(move, list) or not move or not all(isinstance(p, str) and p for p in move):
+            _bad_request("move must be a non-empty list of paths")
+        total += len(move)
+        parsed.append((keep, move))
+    if total > MAX_BATCH_FILES:
+        _bad_request(f"At most {MAX_BATCH_FILES} files per request; send the rest with the same run_id")
+    run_id = body.get("run_id")
+    if run_id is not None and (not isinstance(run_id, str) or len(run_id) > 64):
+        _bad_request("run_id must be a string")
+    folder = body.get("folder")
+    if folder is not None and not isinstance(folder, str):
+        _bad_request("folder must be a path")
+    return parsed, run_id, folder
+
+
+@router.post("/api/duplicates/move")
+def move_duplicates(body: Any = Body(...)) -> Dict[str, Any]:
+    """
+    Move duplicates to RAW_DUPLICATES as one undo run.
+
+    Body: {"groups": [{"keep": path, "move": [path, ...]}, ...],
+           "run_id": optional, "folder": optional scanned folder (label for the run)}
+    keep is the copy that stays: the scan's choice, another rule's, or the user's
+    own pick for that group. Each file is moved only if keep still exists and is
+    byte-for-byte identical to it at that moment; otherwise it stays and is listed
+    in failed with the reason. The run is created with the first file that is
+    actually moved; pass the returned run_id with the next chunk of the same action
+    so the whole action is undone at once.
+    """
+    _require_config()
+    groups, run_id, folder = _parse_move_body(body)
+    folder_label = None
+    if folder:
+        label = vault_folder_or_none(folder, config)
+        folder_label = str(label) if label else None
+
+    moved: List[Dict[str, Any]] = []
+    failed: List[Dict[str, Any]] = []
+    recorded = False
+
+    # Every refusal or error stays with its own file: the rest of the batch still runs,
+    # and what was moved is always answered with its run_id
+    for keep_str, move_paths in groups:
+        try:
+            keeper = resolve_in_vault(keep_str, config, allow_internal=True)
+        except OSError as e:
+            keeper_error = _os_error(e, "lezen")
+        except HTTPException as e:
+            keeper_error = e
+        else:
+            keeper_error = None
+        if keeper_error is not None:
+            failed.extend({"path": p, "keep": keep_str, "status": keeper_error.status_code,
+                           "detail": keeper_error.detail} for p in move_paths)
+            continue
+
+        for path_str in move_paths:
+            try:
+                src_path = resolve_in_vault(path_str, config, allow_internal=True)
+                with ARCHIVE_LOCK:
+                    dst_path, was_conflict = _move_verified(src_path, keeper)
+                    run_id = _record_or_move_back(run_id, src_path, dst_path, folder_label)
+                recorded = True
+            except OSError as e:
+                e = _os_error(e, "lezen")
+                failed.append({"path": path_str, "keep": keep_str, "status": e.status_code, "detail": e.detail})
+                continue
+            except HTTPException as e:
+                failed.append({"path": path_str, "keep": keep_str, "status": e.status_code, "detail": e.detail})
+                continue
+            _forget_hashes(src_path, dst_path)
+            moved.append({
+                "path": path_str,
+                "src_path": str(src_path),
+                "dst_path": str(dst_path),
+                "keep": str(keeper),
+                "was_conflict": was_conflict,
+            })
+
+    try:
+        run = db.get_delete_run(run_id) if run_id else None
+    except sqlite3.Error:
+        # The moves are recorded; only the summary is missing (disk gone just now?)
+        return {"run_id": run_id, "moved": moved, "failed": failed, "run": None}
+    if not recorded and run is None:
+        run_id = None  # nothing moved and no earlier chunk: there is no run to continue
+
+    return {"run_id": run_id, "moved": moved, "failed": failed, "run": run}
+
+
+# ==================== UNDO ====================
+
+def _paths_allowed(op: Dict[str, Any]) -> bool:
+    """Re-validate what the database says before moving anything."""
+    return (
+        is_inside(Path(op["dst_path"]), config.DUPLICATES_FOLDER)
+        and is_in_vault(op["src_path"], config, allow_internal=True)
+        and _in_protected_folder(Path(op["src_path"])) is None
+    )
+
+
+def moved_file_state(op: Dict[str, Any], st: Any = False) -> str:
+    """
+    Is the file this operation moved still in RAW_DUPLICATES, unchanged?
+    'ok', 'missing' (gone, or no longer a regular file), 'other' (another file has its
+    name: the inode differs) or 'changed' (the same file, but its size changed).
+    Operations recorded before migration 171 have no inode and size: for them only
+    'ok' or 'missing' (the checks those runs always had).
+    st: dst_path's lstat when the caller already has it (None: it does not exist).
+    """
+    if st is False:
+        try:
+            st = os.lstat(op["dst_path"])
+        except (OSError, ValueError):
+            st = None
+    if st is None or not stat.S_ISREG(st.st_mode):
+        return "missing"
+    ino, size = op.get("dst_ino"), op.get("dst_size")
+    if ino is None or size is None:
+        return "ok"
+    if sqlite_ino(st.st_ino) != ino:
+        return "other"
+    if st.st_size != size:
+        return "changed"
+    return "ok"
+
+
+def _still_there(op: Dict[str, Any]) -> bool:
+    """The moved file is still a regular file at its RAW_DUPLICATES location, and (when the
+    run recorded it) still the same file with the same size."""
+    return moved_file_state(op) == "ok"
+
+
+def _restorable(op: Dict[str, Any]) -> bool:
+    return _paths_allowed(op) and _still_there(op)
+
+
+# Why a file that is still in RAW_DUPLICATES does not go back (Dutch, for the screen)
+def changed_reason(state: str, name: str) -> str:
+    if state == "other":
+        return (f"In RAW_DUPLICATES staat nu een ander bestand met de naam {name}; "
+                "het wordt niet teruggezet")
+    return (f"{name} is in RAW_DUPLICATES veranderd sinds het daar kwam (andere grootte); "
+            "het wordt niet teruggezet")
+
+
+def _restore_ops(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Move the files of one run back where they came from. Caller holds ARCHIVE_LOCK.
+    Never overwrites: if the original place is taken, the file comes back as
+    name_RESTORED_001.ext next to it. Only restored files are forgotten; files that
+    could not be restored stay recorded, so they can be tried again later.
+    """
+    restored = 0
+    skipped = 0
+    errors = []
+    files = []
+    changed = []  # still in RAW_DUPLICATES, but changed or swapped since the move: left alone
+
+    for op in operations:
+        # src_path is the ORIGINAL location, dst_path is where it went (in RAW_DUPLICATES).
+        dst_path = Path(op["dst_path"])  # Current location
+        src_path = Path(op["src_path"])  # Original location
+
+        if not _paths_allowed(op):
+            errors.append(f"Refused to restore {dst_path}: path outside RAW_DUPLICATES or vault")
+            skipped += 1
+            continue
+
+        state = moved_file_state(op)
+        if state == "missing":
+            skipped += 1
+            continue
+        if state != "ok":
+            # Stays recorded (and listed with its reason in the Herstelcentrum)
+            changed.append({"src_path": str(src_path), "dst_path": str(dst_path), "state": state,
+                            "reason": changed_reason(state, dst_path.name)})
+            skipped += 1
+            continue
+
+        try:
+            restored_path = move_no_overwrite(dst_path, src_path, suffix_prefix="RESTORED")
+
+        except CrossDeviceError as e:
+            errors.append(f"CRITICAL: Cross-device move blocked for {dst_path}: {str(e)}")
+            skipped += 1
+            continue
+
+        except FileOperationError as e:
+            errors.append(f"Failed to restore {dst_path}: {str(e)}")
+            skipped += 1
+            continue
+
+        except Exception as e:
+            errors.append(f"Unexpected error restoring {dst_path}: {str(e)}")
+            skipped += 1
+            continue
+
+        db.delete_delete_operation(op["id"])
+        db.invalidate_hash(dst_path)
+        db.invalidate_hash(restored_path)
+        restored += 1
+        files.append({"src_path": str(src_path), "restored_path": str(restored_path)})
+
+    return {"restored": restored, "skipped": skipped, "errors": errors, "files": files, "changed": changed}
+
+
+def _nothing_to_restore(operations: List[Dict[str, Any]]) -> str:
+    if any(moved_file_state(op) in ("other", "changed") for op in operations):
+        return ("Niets terug te zetten: de bestanden in RAW_DUPLICATES zijn veranderd of vervangen "
+                "sinds het opruimen. Er is niets verplaatst")
+    return "Niets meer terug te zetten: de bestanden staan niet meer in RAW_DUPLICATES"
+
+
+@router.post("/api/raw_duplicates/undo_last")
+def undo_last_delete_endpoint() -> Dict[str, Any]:
+    """
+    Undo the most recent delete run (highest seq) that still has something to restore.
+
+    A run whose files are all gone from RAW_DUPLICATES (e.g. moved by hand) is
+    passed over instead of blocking every older run; its records are kept, so it
+    becomes restorable again if the files come back.
+    """
+    _require_config()
+
+    with ARCHIVE_LOCK:
+        runs = db.get_delete_runs()
+        if not runs:
+            raise HTTPException(status_code=404, detail="No delete operations to undo")
+
+        run_id = None
+        operations = []
+        passed_over = []
+        for run in runs:
+            ops = db.get_delete_operations(run["run_id"])
+            if any(_restorable(op) for op in ops):
+                run_id, operations = run["run_id"], ops
+                break
+            passed_over.extend(ops)
+
+        if run_id is None:
+            # Says whether the files are gone or changed/swapped (and so stay put)
+            raise HTTPException(status_code=404, detail=_nothing_to_restore(passed_over))
+
+        outcome = _restore_ops(operations)
+
+    return {"run_id": run_id, **outcome}
+
+
+@router.get("/api/duplicates/runs")
+def list_delete_runs(limit: int = RUNS_TO_LIST) -> Dict[str, Any]:
+    """
+    The most recent cleanup actions that can still be undone, newest first:
+    {runs: [{run_id, seq, created_at, timestamp, folder, total_files, remaining, restorable}]}.
+    restorable counts the files that are still in RAW_DUPLICATES, unchanged; changed counts
+    the files that are still there but were changed or swapped since (they stay where they are).
+    """
+    _require_config()
+    limit = max(1, min(int(limit), 100))
+    runs = db.get_delete_runs(limit=limit)
+    for run in runs:
+        states = [moved_file_state(op) for op in db.get_delete_operations(run["run_id"])]
+        run["restorable"] = states.count("ok")
+        run["changed"] = states.count("other") + states.count("changed")
+    return {"runs": runs}
+
+
+@router.post("/api/duplicates/undo")
+def undo_delete_run(body: Any = Body(...)) -> Dict[str, Any]:
+    """
+    Undo one cleanup action (a run) as a whole: {"run_id": "..."}.
+    404 for an unknown or already undone run, 410 if none of its files is still in
+    RAW_DUPLICATES (the records are kept in case they come back).
+    """
+    _require_config()
+    run_id = body.get("run_id") if isinstance(body, dict) else None
+    if not isinstance(run_id, str) or not run_id or len(run_id) > 64:
+        raise HTTPException(status_code=400, detail="run_id must be a string")
+
+    with ARCHIVE_LOCK:
+        run = db.get_delete_run(run_id)
+        if run is None or run["remaining"] == 0:
+            raise HTTPException(status_code=404, detail="Deze actie bestaat niet (meer) of is al teruggezet")
+        operations = db.get_delete_operations(run_id)
+        if not any(_restorable(op) for op in operations):
+            raise HTTPException(status_code=410, detail=_nothing_to_restore(operations))
+        outcome = _restore_ops(operations)
+        run = db.get_delete_run(run_id)
+
+    return {"run_id": run_id, **outcome, "run": run if run and run["remaining"] else None}

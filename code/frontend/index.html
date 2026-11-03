@@ -1,79 +1,139 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DataVault</title>
-    <link rel="stylesheet" href="style.css?v=29">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="favicon.png" type="image/png" sizes="64x64">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <!-- Lettertype en iconen staan lokaal in vendor/: de app werkt volledig offline -->
+    <link rel="stylesheet" href="vendor/jetbrains-mono/jetbrains-mono.css">
+    <link rel="stylesheet" href="vendor/fontawesome-6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="vendor/leaflet-1.9.4/leaflet.css">
+    <link rel="stylesheet" href="vendor/leaflet.markercluster-1.5.3/MarkerCluster.css">
+    <link rel="stylesheet" href="style.css?v=98">
+    <!-- Beweging: als eerste, zodat html[data-motion] klopt vóór de eerste weergave (docs/MOTION.md) -->
+    <script src="motion.js?v=2"></script>
 </head>
 
 <body>
     <div id="app">
-        <!-- Top Navigation -->
-        <nav class="top-nav">
-            <div class="nav-brand" onclick="restartServer()" title="Server herstarten" style="cursor:pointer;">DataVault</div>
+        <!-- Archief niet bereikbaar (de T7 is los): app.js toont dit en laadt alles opnieuw zodra de schijf terug is -->
+        <div class="vault-banner" id="vault-banner" role="alert" hidden>
+            <i class="fas fa-plug"></i>
+            <span class="vault-banner-text">Archief niet bereikbaar (schijf losgekoppeld?)</span>
+            <span class="vault-banner-hint">Sluit de schijf aan; de app gaat vanzelf verder.</span>
+        </div>
 
-            <div class="nav-tabs">
-                <button class="nav-tab active" data-view="home" onclick="switchMainView('home')">
+        <!-- Top Navigation (sneltoetsen: 1-9 of g + letter, ? voor het overzicht; shortcuts.js) -->
+        <nav class="top-nav" aria-label="Hoofdmenu">
+            <button type="button" class="nav-brand" onclick="restartServer()" title="Server herstarten" aria-label="DataVault (server herstarten)">
+                <span class="nav-brand-mark" aria-hidden="true"><i class="fas fa-vault"></i></span>
+                <span class="nav-brand-name">DataVault</span>
+            </button>
+
+            <!-- Onderdelen die niet passen, schuiven van achteren naar het menu Meer (nav-more.js) -->
+            <div class="nav-tabs" aria-label="Onderdelen">
+                <button type="button" class="nav-tab active" data-view="home" data-icon="fas fa-house" onclick="switchMainView('home')" title="Home (1)">
                     Home
                 </button>
-                <button class="nav-tab" data-view="viewer" onclick="switchMainView('viewer')">
-                    Files
+                <button type="button" class="nav-tab" data-view="viewer" data-icon="fas fa-folder-open" onclick="switchMainView('viewer')" title="Bestanden (2)">
+                    Bestanden
                 </button>
-                <button class="nav-tab" data-view="duplicates" onclick="switchMainView('duplicates')">
-                    Duplicates
+                <button type="button" class="nav-tab" data-view="timeline" data-icon="fas fa-stream" onclick="switchMainView('timeline')" title="Tijdlijn (7)">
+                    Tijdlijn
                 </button>
-                <button class="nav-tab" data-view="spotify" onclick="switchMainView('spotify')">
-                    Spotify Wrapped
+                <button type="button" class="nav-tab" data-view="map" data-icon="fas fa-map-location-dot" onclick="switchMainView('map')" title="Kaart: foto's op de plek waar ze genomen zijn (g m)">
+                    Kaart
                 </button>
-                <button class="nav-tab" data-view="shows" onclick="switchMainView('shows')">
-                    Shows
+                <button type="button" class="nav-tab" data-view="albums" data-icon="fas fa-photo-film" onclick="switchMainView('albums')" title="Albums: filters, slimme albums en op deze dag (g a)">
+                    Albums
                 </button>
-                <button class="nav-tab" data-view="keurer" onclick="switchMainView('keurer')">
+                <button type="button" class="nav-tab" data-view="series" data-icon="fas fa-images" onclick="switchMainView('series')" title="Reeksen: kies de beste uit foto's die op elkaar lijken (g n)">
+                    Reeksen
+                </button>
+                <button type="button" class="nav-tab" data-view="duplicates" data-icon="fas fa-clone" onclick="switchMainView('duplicates')" title="Duplicaten: byte voor byte gelijke kopieën (3)">
+                    Duplicaten
+                </button>
+                <button type="button" class="nav-tab" data-view="keurer" data-icon="fas fa-layer-group" onclick="switchMainView('keurer')" title="Keurer (6)">
                     Keurer
                 </button>
-                <button class="nav-tab" data-view="timeline" onclick="switchMainView('timeline')">
-                    Timeline
+                <button type="button" class="nav-tab" data-view="shows" data-icon="fas fa-film" onclick="switchMainView('shows')" title="Shows (5)">
+                    Shows
+                </button>
+                <button type="button" class="nav-tab" data-view="spotify" data-icon="fab fa-spotify" onclick="switchMainView('spotify')" title="Spotify (4)">
+                    Spotify
+                </button>
+                <button type="button" class="nav-tab" data-view="berichten" data-icon="fas fa-comments" onclick="switchMainView('berichten')" title="Berichten: je gesprekken doorzoeken (g e)">
+                    Berichten
+                </button>
+                <button type="button" class="nav-tab" data-view="datagatherer" data-also="activity backups" data-icon="fas fa-cloud-arrow-down" onclick="switchMainView('datagatherer')" title="DataGatherer: je gegevens bijwerken (g v)">
+                    DataGatherer
+                </button>
+                <button type="button" class="nav-tab" data-view="recovery" data-icon="fas fa-clock-rotate-left" onclick="switchMainView('recovery')" title="Herstelcentrum: alles terugzetten wat de app verplaatste (8)">
+                    Herstelcentrum
+                </button>
+                <button type="button" class="nav-tab nav-more-btn" id="nav-more-btn" aria-haspopup="menu" aria-expanded="false"
+                    aria-controls="nav-more-menu" title="Meer onderdelen" hidden>
+                    Meer <i class="fas fa-chevron-down nav-more-caret" aria-hidden="true"></i>
                 </button>
             </div>
+            <div class="menu nav-more-menu" id="nav-more-menu" role="menu" aria-label="Meer onderdelen" hidden></div>
 
             <div class="nav-actions">
-                <input type="text" class="search-input" id="global-search" placeholder="Search..."
-                    oninput="handleGlobalSearch(this.value)">
+                <div class="search-field nav-search search-elsewhere">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                    <input type="search" class="search-input" id="global-search" placeholder="Zoeken…"
+                        aria-label="Zoek in de hele bibliotheek: typ en druk op Enter (sneltoets /)"
+                        oninput="queueGlobalSearch(this.value)" onkeydown="globalSearchKeydown(event)">
+                    <kbd class="search-kbd" aria-hidden="true">/</kbd>
+                    <kbd class="search-kbd search-enter" aria-hidden="true">Enter</kbd>
+                </div>
 
                 <div class="theme-toggle">
-                    <button class="theme-button" onclick="toggleThemeDropdown()">
+                    <button type="button" class="theme-button" id="theme-button" onclick="toggleThemeDropdown()"
+                        aria-haspopup="true" aria-expanded="false" aria-controls="theme-dropdown" title="Thema (t wisselt)" aria-label="Thema kiezen">
+                        <i class="fas fa-circle-half-stroke" aria-hidden="true"></i>
                         <span id="theme-label">Auto</span>
-                        <span>▼</span>
+                        <i class="fas fa-chevron-down theme-caret" aria-hidden="true"></i>
                     </button>
-                    <div class="theme-dropdown" id="theme-dropdown">
-                        <button class="theme-option" data-theme="auto" onclick="setTheme('auto')">
-                            Auto (System)
+                    <div class="theme-dropdown" id="theme-dropdown" role="menu" aria-label="Thema">
+                        <button type="button" class="theme-option" role="menuitemradio" data-theme="auto" onclick="setTheme('auto')">
+                            Automatisch (systeem)
                         </button>
-                        <button class="theme-option" data-theme="light" onclick="setTheme('light')">
-                            Light
+                        <button type="button" class="theme-option" role="menuitemradio" data-theme="light" onclick="setTheme('light')">
+                            Licht
                         </button>
-                        <button class="theme-option" data-theme="dark" onclick="setTheme('dark')">
-                            Dark
+                        <button type="button" class="theme-option" role="menuitemradio" data-theme="dark" onclick="setTheme('dark')">
+                            Donker
                         </button>
                     </div>
                 </div>
+
+                <button type="button" class="nav-icon-btn" onclick="toggleShortcutHelp()" title="Sneltoetsen (?)"
+                    aria-label="Sneltoetsen tonen">
+                    <i class="fas fa-keyboard" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="nav-icon-btn nav-tab-settings" data-view="settings" onclick="switchMainView('settings')"
+                    title="Instellingen (9)" aria-label="Instellingen">
+                    <i class="fas fa-cog" aria-hidden="true"></i>
+                </button>
             </div>
         </nav>
 
         <div class="main-layout">
             <!-- Sidebar - only shown in viewer mode -->
-            <aside class="sidebar" id="sidebar">
+            <aside class="sidebar" id="sidebar" aria-label="Mappen">
                 <div class="sidebar-header">
-                    <div class="sidebar-title">Folders</div>
+                    <div class="sidebar-title">Mappen</div>
                     <div class="tree-controls">
-                        <button class="tree-control-btn" onclick="expandAllFolders()" title="Expand all">
-                            Expand
+                        <button class="tree-control-btn" onclick="expandAllFolders()" title="Alle mappen openklappen">
+                            Alles open
                         </button>
-                        <button class="tree-control-btn" onclick="collapseAllFolders()" title="Collapse all">
-                            Collapse
+                        <button class="tree-control-btn" onclick="collapseAllFolders()" title="Alle mappen dichtklappen">
+                            Alles dicht
                         </button>
                     </div>
                 </div>
@@ -84,142 +144,181 @@
 
             <!-- Main Content Area -->
             <main class="main-content">
-                <!-- VIEWER SECTION -->
                 <!-- HOME SECTION -->
                 <div id="section-home" class="section hidden">
                     <div class="home-container">
-                        <div class="home-header">
-                            <h1 class="home-title">DataVault</h1>
-                            <p class="home-subtitle">Access your digital archive</p>
-                        </div>
+                        <div class="home-inner">
+                            <header class="home-hero">
+                                <p class="home-date" id="home-date"></p>
+                                <h1 class="home-title" id="home-greeting">Welkom</h1>
+                                <p class="home-subtitle">Je digitale archief, volledig lokaal op deze Mac.</p>
+                            </header>
 
-                        <div class="home-stats-grid">
-                            <div class="stat-card">
-                                <i class="fas fa-hdd" style="color: var(--accent);"></i>
-                                <h3>DataVault Storage</h3>
-                                <p>Active & Accessibly Offline</p>
-                            </div>
-                            <div class="stat-card">
-                                <i class="fas fa-music" style="color: #1DB954;"></i>
-                                <h3>Listening DNA</h3>
-                                <p>Synced with Spotify</p>
-                            </div>
-                            <div class="stat-card">
-                                <i class="fas fa-shield-alt" style="color: #e74c3c;"></i>
-                                <h3>Privacy First</h3>
-                                <p>100% Local AI Model</p>
-                            </div>
-                        </div>
-
-                        <div class="app-grid" id="app-grid">
-                            <!-- App tiles will be populated by JavaScript -->
-                        </div>
-
-                        <!-- Chat Widget -->
-                        <div class="chat-widget">
-                            <div class="chat-header">
-                                <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
-                                <div class="chat-title">
-                                    <h3>Pasha (DataVault AI)</h3>
-                                    <span class="chat-status">Online (Qwen3:30b)</span>
-                                </div>
-                            </div>
-                            <div class="chat-messages" id="chat-messages">
-                                <div class="chat-message ai-message">
-                                    <div class="message-bubble">
-                                        Woof! I'm Pasha, your DataVault assistant. You can ask me questions about your
-                                        files or Spotify data!
+                            <!-- Op deze dag: foto's en muziek van deze datum in eerdere jaren -->
+                            <section class="home-dynamic-widgets" aria-label="Op deze dag">
+                                <div class="dynamic-widget" id="widget-photo-otd">
+                                    <div class="otd-header-flex">
+                                        <h4><i class="fas fa-camera-retro" aria-hidden="true"></i> Foto op deze dag</h4>
+                                        <div class="otd-header-actions">
+                                            <button type="button" class="btn btn-ghost btn-sm otd-see-all" onclick="albumsOpenOnThisDay()"
+                                                title="Alle foto's en video's van deze dag, per jaar (Albums)">
+                                                Alles bekijken <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                                            </button>
+                                            <button type="button" class="otd-settings-icon" onclick="toggleOtdSettings(event)"
+                                                title="Kies de mappen" aria-label="Mappen voor 'foto op deze dag' kiezen">
+                                                <i class="fas fa-sliders" aria-hidden="true"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="widget-content otd-widget-envelope">
+                                        <div class="loading-spinner" id="photo-otd-loading"></div>
+                                        <div id="photo-otd-content" class="otd-large-container" style="display: none;">
+                                            <!-- Will be populated by JS -->
+                                        </div>
+                                        <div id="otd-settings-panel" class="otd-settings-panel" style="display: none;">
+                                            <h5>Mappen</h5>
+                                            <div id="otd-settings-list" class="otd-settings-list"></div>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="chat-input-container">
-                                <input type="text" id="chat-input" class="chat-input" placeholder="Type a message..."
-                                    onkeypress="handleChatKeyPress(event)">
-                                <button class="chat-send-btn" onclick="sendChatMessage()">
-                                    <i class="fas fa-paper-plane"></i>
-                                </button>
-                            </div>
+
+                                <div class="dynamic-widget" id="widget-spotify-otd">
+                                    <div class="otd-header-flex">
+                                        <h4><i class="fab fa-spotify" aria-hidden="true"></i> Spotify op deze dag</h4>
+                                        <div class="otd-header-actions" id="spotify-otd-actions"></div>
+                                    </div>
+                                    <div class="widget-content">
+                                        <div class="loading-spinner" id="spotify-otd-loading"></div>
+                                        <div id="spotify-otd-content" style="display: none;">
+                                            <!-- Will be populated by JS -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Cijfers uit de bibliotheek (media-index) en de schijf -->
+                            <section class="home-stats-grid" aria-label="Je archief in cijfers">
+                                <div class="stat-tile">
+                                    <div class="stat-tile-label"><i class="fas fa-image" aria-hidden="true"></i> Foto's</div>
+                                    <div class="stat-tile-value is-empty" id="home-stat-photos">–</div>
+                                    <div class="stat-tile-meta" id="home-stat-folders">Bibliotheek wordt geladen</div>
+                                </div>
+                                <div class="stat-tile">
+                                    <div class="stat-tile-label"><i class="fas fa-film" aria-hidden="true"></i> Video's</div>
+                                    <div class="stat-tile-value is-empty" id="home-stat-videos">–</div>
+                                    <div class="stat-tile-meta" id="home-stat-videos-meta">Bibliotheek wordt geladen</div>
+                                </div>
+                                <div class="stat-tile">
+                                    <div class="stat-tile-label"><i class="fas fa-music" aria-hidden="true"></i> Audio</div>
+                                    <div class="stat-tile-value is-empty" id="home-stat-audio">–</div>
+                                    <div class="stat-tile-meta" id="home-stat-audio-meta">Bibliotheek wordt geladen</div>
+                                </div>
+                                <div class="stat-tile" id="widget-storage" role="button" tabindex="0"
+                                    aria-label="Opslag per map bekijken" onclick="openStorageModal()"
+                                    onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openStorageModal(); }">
+                                    <div class="stat-tile-label"><i class="fas fa-hard-drive" aria-hidden="true"></i> Opslag</div>
+                                    <div class="storage-loading"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
+                                    <div class="storage-stats" style="display: none;">
+                                        <div class="stat-tile-value" id="storage-used-text">0 GB</div>
+                                        <div class="storage-bar-container">
+                                            <div class="storage-bar" id="storage-bar-fill"></div>
+                                        </div>
+                                        <div class="storage-text stat-tile-meta" id="storage-meta"></div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Back-ups: per bron hoe lang geleden hij veiliggesteld is, het oudste eerst (backups.js) -->
+                            <section class="dynamic-widget home-backups" id="widget-backups" aria-labelledby="home-backups-title">
+                                <div class="otd-header-flex">
+                                    <h4 id="home-backups-title"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups
+                                        <span class="home-backups-meta" id="home-backups-meta"></span></h4>
+                                    <button type="button" class="btn btn-ghost btn-sm otd-see-all" onclick="switchMainView('backups')">
+                                        Alles bekijken <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                                <div class="home-backups-list" id="home-backups-list"></div>
+                            </section>
+
+                            <!-- Pasha, de assistent -->
+                            <section class="chat-widget" aria-label="Pasha, je assistent">
+                                <div class="chat-header">
+                                    <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
+                                    <div class="chat-title">
+                                        <h3>Pasha</h3>
+                                        <div class="chat-status-row">
+                                            <span class="chat-status" data-chat-status data-state="pending">Verbinden…</span>
+                                            <select class="select chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
+                                        </div>
+                                    </div>
+                                    <button class="chat-fullscreen-toggle" onclick="openChatFullscreen()" title="Volledig scherm"
+                                        aria-label="Chat op volledig scherm">
+                                        <i class="fas fa-expand" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                                <!-- Eén berichtenlijst: bij volledig scherm verhuist #chat-messages naar
+                                     #chat-fullscreen-slot en bij sluiten terug (app.js) -->
+                                <div class="chat-messages-slot" id="chat-home-slot">
+                                    <div class="chat-messages" id="chat-messages">
+                                        <div class="chat-message ai-message">
+                                            <div class="message-bubble">
+                                                Woef! Ik ben Pasha, je DataVault-assistent. Vraag me iets over je bestanden of je Spotify-geschiedenis.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- Voorbeeldvragen tot het eerste bericht; verhuizen mee met de berichten -->
+                                    <div class="chat-suggestions" id="chat-suggestions" role="group" aria-label="Voorbeeldvragen">
+                                        <button type="button" class="pill" onclick="askPasha(this.textContent)">Wat luisterde ik het meest?</button>
+                                        <button type="button" class="pill" onclick="askPasha(this.textContent)">Welke foto's zijn van deze dag?</button>
+                                        <button type="button" class="pill" onclick="askPasha(this.textContent)">Hoe groot is mijn archief?</button>
+                                    </div>
+                                </div>
+                                <div class="chat-input-container">
+                                    <input type="text" id="chat-input" class="chat-input" placeholder="Vraag Pasha iets…"
+                                        aria-label="Bericht aan Pasha" onkeypress="handleChatKeyPress(event)">
+                                    <button class="chat-send-btn" onclick="sendChatMessage()" title="Versturen" aria-label="Versturen">
+                                        <i class="fas fa-arrow-up" aria-hidden="true"></i>
+                                    </button>
+                                </div>
+                            </section>
                         </div>
                     </div>
-
-                    <!-- Dynamic Home Widgets -->
-                    <div class="home-dynamic-widgets">
-                        <div class="dynamic-widget" id="widget-storage" style="cursor: pointer;"
-                            onclick="openStorageModal()">
-                            <h4><i class="fas fa-server"></i> Vault Storage</h4>
-                            <div class="widget-content">
-                                <div class="storage-loading">Calculating space...</div>
-                                <div class="storage-stats" style="display: none;">
-                                    <div class="storage-bar-container">
-                                        <div class="storage-bar" id="storage-bar-fill"></div>
-                                    </div>
-                                    <div class="storage-text">
-                                        <span id="storage-used-text">0 GB</span> / <span id="storage-total-text">0
-                                            GB</span> used (<span id="storage-free-text">0 GB</span> free)
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="dynamic-widget" id="widget-photo-otd">
-                            <div class="otd-header-flex">
-                                <h4><i class="fas fa-camera-retro"></i> Photo On This Day</h4>
-                                <i class="fas fa-cog otd-settings-icon" onclick="toggleOtdSettings(event)" title="Settings"></i>
-                            </div>
-                            <div class="widget-content otd-widget-envelope">
-                                <div class="loading-spinner" id="photo-otd-loading"></div>
-                                <div id="photo-otd-content" class="otd-large-container" style="display: none;">
-                                    <!-- Will be populated by JS -->
-                                </div>
-                                <div id="otd-settings-panel" class="otd-settings-panel" style="display: none;">
-                                    <h5>Filter Sources</h5>
-                                    <div id="otd-settings-list" class="otd-settings-list"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="dynamic-widget" id="widget-spotify-otd">
-                            <h4><i class="fab fa-spotify" style="color: #1DB954;"></i> Spotify On This Day</h4>
-                            <div class="widget-content">
-                                <div class="loading-spinner" id="spotify-otd-loading"></div>
-                                <div id="spotify-otd-content" style="display: none;">
-                                    <!-- Will be populated by JS -->
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                 </div>
 
         <div id="section-viewer" class="section hidden">
             <div class="content-header">
                 <div class="breadcrumb" id="breadcrumb">
-                    <span class="breadcrumb-item active">Home</span>
+                    <span class="breadcrumb-item active">Archief</span>
                 </div>
 
                 <div class="content-toolbar">
                     <div class=" toolbar-actions">
-                        <label class="toolbar-label">Sort by:</label>
+                        <label class="toolbar-label" for="sort-select">Sorteren</label>
                         <select class="toolbar-select" id="sort-select" onchange="handleSort(this.value)">
-                            <option value="name">Name</option>
-                            <option value="date">Date Modified</option>
-                            <option value="size">Size</option>
+                            <option value="name">Naam</option>
+                            <option value="date">Gewijzigd</option>
+                            <option value="size">Grootte</option>
                         </select>
                     </div>
 
-                    <div class="view-toggle">
-                        <button class="view-toggle-btn active" data-view="grid" onclick="toggleView('grid')">
-                            Grid
+                    <button class="btn btn-secondary btn-small" id="btn-make-thumbs" onclick="startThumbnailJob()"
+                        title="Maakt op de achtergrond alle ontbrekende miniaturen van deze map (of van het hele archief)">
+                        Miniaturen maken
+                    </button>
+
+                    <div class="view-toggle" role="group" aria-label="Weergave">
+                        <button class="view-toggle-btn active" data-view="grid" onclick="toggleView('grid')" aria-pressed="true">
+                            Raster
                         </button>
-                        <button class="view-toggle-btn" data-view="list" onclick="toggleView('list')">
-                            List
+                        <button class="view-toggle-btn" data-view="list" onclick="toggleView('list')" aria-pressed="false">
+                            Lijst
                         </button>
                     </div>
                 </div>
             </div>
 
             <div class="content-scroll">
-                <div class="media-grid" id="media-grid">
+                <div class="media-grid grid-view" id="media-grid" aria-label="Bestanden in deze map (pijltjes om te kiezen, Enter om te openen)">
                     <!-- Media cards will be populated by JavaScript -->
                 </div>
             </div>
@@ -227,48 +326,80 @@
 
         <!-- DUPLICATES SECTION -->
         <div id="section-duplicates" class="section hidden">
-            <div class="duplicates-container">
-                <div class="duplicates-header">
-                    <h1 class="duplicates-title">Duplicate Finder</h1>
-                    <div class="duplicates-subtitle">Select a folder to scan for duplicate files</div>
+            <div class="duplicates-container" id="duplicates-container">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title"><i class="fas fa-clone" aria-hidden="true"></i> Duplicaten</h1>
+                        <p class="page-subtitle" id="dup-subtitle">Kies een map, zoek byte voor byte identieke bestanden en
+                            bepaal per groep welke kopie blijft. De andere kopieën gaan naar RAW_DUPLICATES: er wordt
+                            niets gewist en elke actie is terug te zetten. Foto's die alleen op elkaar lijken, vind je bij
+                            <button type="button" class="link-button" onclick="switchMainView('series')">Reeksen</button>.</p>
+                    </div>
                 </div>
 
+                <div class="dup-panel" id="dup-panel-exact">
                 <!-- Folder Selection -->
                 <div class="folder-selection-panel">
                     <div class="folder-selection-header">
-                        <span class="folder-selection-label">Selected Folder:</span>
-                        <span class="folder-selection-path" id="selected-folder-path">None</span>
+                        <span class="folder-selection-label">Gekozen map</span>
+                        <span class="folder-selection-path is-empty" id="selected-folder-path">Geen</span>
                     </div>
                     <div class="folder-selection-actions">
                         <button class="btn btn-secondary" id="btn-select-folder" onclick="openFolderSelector()">
-                            Select Folder
+                            Kies map
                         </button>
                         <button class="btn btn-primary" id="btn-scan-folder" onclick="scanSelectedFolder()" disabled>
-                            Scan for Duplicates
+                            Zoek duplicaten
                         </button>
                         <button class="btn btn-secondary" id="btn-cancel-scan" onclick="cancelScan()"
                             style="display: none;">
-                            Cancel Scan
+                            Scan stoppen
+                        </button>
+                        <button class="btn btn-secondary" id="btn-index-folder" onclick="indexSelectedFolder()" disabled
+                            title="Berekent de controlegetallen van deze map op de achtergrond, zodat een volgende scan alleen gewijzigde bestanden hoeft te lezen">
+                            Vooraf indexeren
                         </button>
                     </div>
+                </div>
+
+                <!-- Herstellen: recente opruimacties, elk in één keer terug te zetten -->
+                <div class="dup-restore-panel" id="dup-restore-panel">
+                    <div class="dup-restore-header">
+                        <span class="dup-restore-title">Herstellen</span>
+                        <span class="dup-restore-hint">Zet een opruimactie in één keer terug naar de oorspronkelijke
+                            plek. Er wordt nooit iets overschreven.</span>
+                        <button type="button" class="btn btn-secondary btn-small dup-restore-all" onclick="switchMainView('recovery')"
+                            title="Alles wat de app verplaatste, ook Keurer en de viewer (sneltoets 8)">Herstelcentrum</button>
+                    </div>
+                    <div class="dup-runs" id="dup-runs"></div>
                 </div>
 
                 <div class="status-panel" id="status-panel" style="display: none;">
                     <div class="status-grid">
                         <div class="status-item">
                             <div class="status-value" id="status-scanned">0</div>
-                            <div class="status-label">Files Scanned</div>
+                            <div class="status-label">Bestanden gescand</div>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-value" id="status-groups">0</div>
+                            <div class="status-label">Groepen</div>
                         </div>
                         <div class="status-item">
                             <div class="status-value" id="status-found">0</div>
-                            <div class="status-label">Duplicates Found</div>
+                            <div class="status-label">Te verplaatsen</div>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-value" id="status-bytes">0 B</div>
+                            <div class="status-label">Vrij te maken</div>
                         </div>
                         <div class="status-item">
                             <div class="status-value" id="status-timestamp">-</div>
-                            <div class="status-label">Last Scan</div>
+                            <div class="status-label">Laatste scan</div>
                         </div>
                     </div>
                 </div>
+
+                <div class="dup-warning" id="dup-scan-warning" hidden></div>
 
                 <div id="scan-progress-container" style="display: none;">
                     <div class="progress-container">
@@ -277,101 +408,166 @@
                     <div class="progress-text" id="progress-text"></div>
                 </div>
 
-                <div class="filter-bar" id="filter-bar" style="display: none;">
-                    <div style="display: flex; gap: var(--space-md);">
-                        <button class="filter-chip active" data-filter="all" onclick="filterDuplicates('all')">
-                            All
-                        </button>
-                        <button class="filter-chip" data-filter="photos" onclick="filterDuplicates('photos')">
-                            Photos Only
-                        </button>
-                        <button class="filter-chip" data-filter="videos" onclick="filterDuplicates('videos')">
-                            Videos Only
-                        </button>
+                <div class="dup-toolbar" id="filter-bar" style="display: none;">
+                    <div class="dup-filters" id="dup-filters">
+                        <button class="filter-chip active" data-filter="all" onclick="filterDuplicates('all')">Alles</button>
+                        <button class="filter-chip" data-filter="photo" onclick="filterDuplicates('photo')">Foto's</button>
+                        <button class="filter-chip" data-filter="video" onclick="filterDuplicates('video')">Video's</button>
+                        <button class="filter-chip" data-filter="audio" onclick="filterDuplicates('audio')">Audio</button>
                     </div>
-                    <button class="btn btn-danger" id="btn-remove-all" onclick="removeAllDuplicates()"
-                        style="margin-left: auto;">
-                        Remove All Duplicates
+                    <label class="dup-rule-label" for="dup-rule">Welke kopie blijft</label>
+                    <select class="toolbar-select" id="dup-rule" onchange="setKeepRule(this.value)">
+                        <option value="oldest">Oudste behouden</option>
+                        <option value="newest">Nieuwste behouden</option>
+                        <option value="shortest">Kortste pad</option>
+                        <option value="folder">Voorkeursmap…</option>
+                    </select>
+                    <select class="toolbar-select" id="dup-prefer-folder" onchange="setPreferFolder(this.value)"
+                        hidden></select>
+                    <span class="dup-override-info" id="dup-override-info" hidden></span>
+                    <button class="btn btn-danger" id="btn-remove-all" onclick="removeAllDuplicates()">
+                        Alles opruimen
                     </button>
                 </div>
+                <div class="dup-legend" id="dup-legend" style="display: none;"></div>
 
-                <div class="media-grid" id="duplicates-grid">
-                    <!-- Duplicates will be populated by JavaScript -->
+                <div class="dup-groups" id="duplicates-grid">
+                    <!-- Groepen worden door duplicates.js gevuld -->
+                </div>
+                <div class="dup-sentinel" id="dup-sentinel"></div>
+                </div>
+
+            </div>
+        </div>
+        <!-- REEKSEN: foto's die op elkaar lijken (bijna-duplicaten en bursts; series.js, /api/series) -->
+        <div id="section-series" class="section hidden">
+            <div class="series-container" id="series-container">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="series-page-title" tabindex="-1"><i class="fas fa-images" aria-hidden="true"></i> Reeksen</h1>
+                        <p class="page-subtitle">Foto's die op elkaar lijken: verkleinde of bewerkte kopieën en bursts. Kies per reeks wat
+                            blijft; de rest gaat naar RAW_DUPLICATES/near-duplicates en is in het Herstelcentrum terug te zetten.
+                            Byte voor byte gelijke kopieën vind je bij <button type="button" class="link-button" onclick="switchMainView('duplicates')">Duplicaten</button>.</p>
+                    </div>
+                </div>
+
+                <!-- Reeksen: bijna-duplicaten en bursts (series.js, /api/series) -->
+                <div class="series-panel" id="series-panel">
+                    <div class="series-toolbar">
+                        <div class="series-status">
+                            <div class="series-status-text" id="series-status-text">Even kijken…</div>
+                            <div class="progress series-progress" id="series-progress" hidden>
+                                <div class="progress-fill" id="series-progress-fill"></div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-secondary" id="btn-series-compare" onclick="seriesStartCompare()"
+                            title="Vergelijkt foto's die nieuw of veranderd zijn; wat al vergeleken is, wordt overgeslagen">
+                            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> <span id="series-compare-label">Foto's vergelijken</span>
+                        </button>
+                        <div class="series-controls">
+                            <div class="series-strictness">
+                                <label class="series-control-label" for="series-strictness">Strengheid</label>
+                                <input type="range" class="tl-slider series-slider" id="series-strictness" min="0" max="2" step="1"
+                                    value="1" aria-valuetext="Normaal" oninput="seriesStrictnessInput(this.value)"
+                                    onchange="seriesStrictnessChange(this.value)">
+                                <div class="series-strictness-labels" aria-hidden="true">
+                                    <button type="button" tabindex="-1" onclick="seriesSetStrictness('streng')">Streng</button>
+                                    <button type="button" tabindex="-1" onclick="seriesSetStrictness('normaal')">Normaal</button>
+                                    <button type="button" tabindex="-1" onclick="seriesSetStrictness('ruim')">Ruim</button>
+                                </div>
+                            </div>
+                            <div class="series-sort">
+                                <label class="series-control-label" for="series-sort">Volgorde</label>
+                                <select class="select select-sm" id="series-sort" onchange="seriesSetSort(this.value)">
+                                    <option value="size">Grootste reeksen eerst</option>
+                                    <option value="recent">Nieuwste eerst</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="series-summary" id="series-summary" hidden>
+                        <span class="series-summary-text" id="series-summary-text"></span>
+                        <span class="series-strictness-help" id="series-strictness-help"></span>
+                        <button type="button" class="link-button" id="btn-series-reset" onclick="seriesResetReviews()" hidden>Behouden reeksen weer tonen</button>
+                        <span class="series-last-kept" id="series-last-kept" role="status" hidden></span>
+                    </div>
+                    <div class="series-list" id="series-list" aria-label="Reeksen"></div>
                 </div>
             </div>
         </div>
         <!-- Spotify View -->
         <div id="section-spotify" class="section hidden">
             <div class="spotify-header">
-                <h2>Your Spotify Wrapped</h2>
+                <div>
+                    <h1 class="page-title"><i class="fab fa-spotify" aria-hidden="true"></i> Jouw jaar in muziek</h1>
+                    <p class="page-subtitle">Uit je eigen Spotify-export, alleen op deze Mac.</p>
+                    <p class="spotify-coverage chip" id="spotify-coverage" hidden></p>
+                </div>
                 <div class="year-selector">
-                    <select id="spotify-year-select" onchange="loadSpotifyStats()">
-                        <option value="all">All Time</option>
+                    <select class="select" id="spotify-year-select" onchange="loadSpotifyStats()" aria-label="Jaar">
+                        <option value="all">Alle jaren</option>
                     </select>
                 </div>
             </div>
 
             <div id="spotify-loading" class="spotify-loading" style="display: none;">
                 <div class="spinner"></div>
-                <p>Crunching the numbers...</p>
+                <p>Even rekenen…</p>
             </div>
 
             <div id="spotify-content" class="spotify-content" style="display: none;">
                 <!-- Summary Cards -->
                 <div class="spotify-stats-grid">
                     <div class="stat-card total-time">
-                        <div class="stat-icon">⏱️</div>
+                        <div class="stat-icon"><i class="fas fa-stopwatch" aria-hidden="true"></i></div>
                         <div class="stat-value" id="stat-minutes">0</div>
-                        <div class="stat-label">Minutes Listened</div>
+                        <div class="stat-label">Minuten geluisterd</div>
                     </div>
                     <div class="stat-card top-artist-card">
-                        <div class="stat-icon">🎤</div>
+                        <div class="stat-icon"><i class="fas fa-microphone" aria-hidden="true"></i></div>
                         <div class="stat-value" id="stat-top-artist">-</div>
-                        <div class="stat-label">Top Artist</div>
+                        <div class="stat-label">Topartiest</div>
                     </div>
                     <div class="stat-card total-plays">
-                        <div class="stat-icon">▶️</div>
+                        <div class="stat-icon"><i class="fas fa-play" aria-hidden="true"></i></div>
                         <div class="stat-value" id="stat-plays">0</div>
-                        <div class="stat-label">Total Plays</div>
+                        <div class="stat-label">Keer afgespeeld</div>
                     </div>
-                    <div class="stat-card listening-personality" onclick="showDnaExplanation()">
-                        <div class="stat-icon">🧬</div>
-                        <div class="stat-value" id="stat-dna" style="font-size: 1.5rem;">-</div>
-                        <div class="stat-label">Listening DNA</div>
+                    <div class="stat-card listening-personality" onclick="showDnaExplanation()" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                        <div class="stat-icon"><i class="fas fa-dna" aria-hidden="true"></i></div>
+                        <div class="stat-value stat-value-text" id="stat-dna">-</div>
+                        <div class="stat-label">Luister-DNA</div>
                     </div>
                 </div>
 
                 <!-- New Insights Grid -->
-                <div class="spotify-stats-grid" style="margin-top: 20px;">
-                    <div class="stat-card" onclick="showInsightExplanation('record_day')" style="cursor: pointer;">
-                        <div class="stat-icon">🏆</div>
-                        <div class="stat-value" id="stat-record-day-hours" style="font-size: 1.5rem;">-</div>
-                        <div class="stat-label" id="stat-record-day-date">Record Listening Day</div>
+                <div class="spotify-stats-grid">
+                    <div class="stat-card is-clickable" onclick="showInsightExplanation('record_day')" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                        <div class="stat-icon"><i class="fas fa-trophy" aria-hidden="true"></i></div>
+                        <div class="stat-value" id="stat-record-day-hours">-</div>
+                        <div class="stat-label" id="stat-record-day-date">Recorddag</div>
                     </div>
-                    <div class="stat-card" onclick="showInsightExplanation('top_binge')" style="cursor: pointer;">
-                        <div class="stat-icon">🔁</div>
-                        <div class="stat-value" id="stat-top-binge"
-                            style="font-size: 1.2rem; white-space: normal; word-wrap: break-word; line-height: 1.4;">
-                            None</div>
-                        <div class="stat-label" id="stat-top-binge-count">Top Consecutive Binge</div>
+                    <div class="stat-card is-clickable" onclick="showInsightExplanation('top_binge')" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                        <div class="stat-icon"><i class="fas fa-repeat" aria-hidden="true"></i></div>
+                        <div class="stat-value stat-value-text" id="stat-top-binge">-</div>
+                        <div class="stat-label" id="stat-top-binge-count">Langste reeks achter elkaar</div>
                     </div>
-                    <div class="stat-card" onclick="showInsightExplanation('mainstream_score')"
-                        style="cursor: pointer;">
-                        <div class="stat-icon">📈</div>
-                        <div class="stat-value" id="stat-mainstream-score" style="font-size: 1.2rem;">-</div>
-                        <div class="stat-label" id="stat-mainstream-percent">Mainstream Score</div>
+                    <div class="stat-card is-clickable" onclick="showInsightExplanation('mainstream_score')" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                        <div class="stat-icon"><i class="fas fa-chart-line" aria-hidden="true"></i></div>
+                        <div class="stat-value stat-value-text" id="stat-mainstream-score">-</div>
+                        <div class="stat-label" id="stat-mainstream-percent">Mainstreamscore</div>
                     </div>
-                    <div class="stat-card" onclick="showInsightExplanation('seasonal_mood')" style="cursor: pointer;">
-                        <div class="stat-icon">🌤️</div>
-                        <div class="stat-value" id="stat-seasonal-mood" style="font-size: 1.2rem;">-</div>
-                        <div class="stat-label">Seasonal Mood</div>
+                    <div class="stat-card is-clickable" onclick="showInsightExplanation('seasonal_mood')" role="button" tabindex="0" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                        <div class="stat-icon"><i class="fas fa-cloud-sun" aria-hidden="true"></i></div>
+                        <div class="stat-value stat-value-text" id="stat-seasonal-mood">-</div>
+                        <div class="stat-label">Seizoensstemming</div>
                     </div>
                 </div>
 
                 <!-- Top Discoveries Section -->
-                <div class="on-this-day-section" id="discoveries-container" style="display: none; margin-top: 30px;">
-                    <h3>🌟 Top Discoveries</h3>
-                    <p class="section-subtitle">Your favorite new artists found this year</p>
+                <div class="on-this-day-section" id="discoveries-container" style="display: none;">
+                    <h3 class="spotify-section-title"><i class="fas fa-star" aria-hidden="true"></i> Ontdekkingen</h3>
+                    <p class="section-subtitle">De nieuwe artiesten die je dit jaar het meest draaide</p>
                     <div class="on-this-day-list" id="discoveries-list">
                         <!-- Populated dynamically -->
                     </div>
@@ -380,14 +576,13 @@
                 <!-- On This Day Section -->
                 <div class="on-this-day-section" id="on-this-day-container" style="display: none;">
                     <div class="otd-header-row">
-                        <h3>📅 On This Day</h3>
-                        <span class="otd-vs">vs</span>
+                        <h3><i class="fas fa-calendar-day" aria-hidden="true"></i> Op deze dag</h3>
                         <div class="otd-date-block">
                             <span class="otd-today-date" id="otd-today-date"></span>
                             <span class="otd-live-clock" id="otd-live-clock"></span>
                         </div>
                     </div>
-                    <p class="section-subtitle">What you were jamming to on this date in previous years</p>
+                    <p class="section-subtitle">Wat je op deze datum in eerdere jaren luisterde</p>
                     <div id="on-this-day-list" class="spotify-list horizontal-scroll"></div>
                 </div>
 
@@ -395,14 +590,14 @@
                 <div class="spotify-lists-container">
                     <div class="spotify-list-section">
                         <h3 class="spotify-section-heading"
-                            title="Your most-listened artists ranked by total listening time. Click an artist to search on Spotify.">
-                            🏆 Top Artists</h3>
+                            title="Je meest beluisterde artiesten, op totale luistertijd. Klik om op Spotify te zoeken.">
+                            <i class="fas fa-microphone" aria-hidden="true"></i> Topartiesten</h3>
                         <div id="top-artists-list" class="spotify-list"></div>
                     </div>
                     <div class="spotify-list-section">
                         <h3 class="spotify-section-heading"
-                            title="Your most-played tracks ranked by play count. Click a track to search on Spotify.">
-                            🎵 Top Tracks</h3>
+                            title="Je vaakst gespeelde nummers. Klik om op Spotify te zoeken.">
+                            <i class="fas fa-music" aria-hidden="true"></i> Topnummers</h3>
                         <div id="top-tracks-list" class="spotify-list"></div>
                     </div>
                 </div>
@@ -411,14 +606,14 @@
                 <div class="spotify-charts-container">
                     <div class="chart-wrapper">
                         <h3 class="spotify-section-heading"
-                            title="Number of tracks played each month. Shows seasonal listening patterns across the year.">
-                            📅 Monthly Activity</h3>
+                            title="Aantal gespeelde nummers per maand.">
+                            <i class="fas fa-calendar-days" aria-hidden="true"></i> Per maand</h3>
                         <div id="monthly-chart" class="simple-bar-chart"></div>
                     </div>
                     <div class="chart-wrapper">
                         <h3 class="spotify-section-heading"
-                            title="Distribution of plays across every hour of the day. Shows when you listen most—morning, afternoon, evening, or night.">
-                            🕒 Hourly Activity</h3>
+                            title="Wanneer je luistert, per uur van de dag.">
+                            <i class="fas fa-clock" aria-hidden="true"></i> Per uur</h3>
                         <div id="hourly-chart" class="simple-bar-chart"></div>
                     </div>
                 </div>
@@ -434,29 +629,33 @@
         <!-- KEURER SECTION -->
         <div id="section-keurer" class="section hidden">
             <div class="keurer-layout">
+                <div class="page-header keurer-header">
+                    <div>
+                        <h1 class="page-title"><i class="fas fa-layer-group" aria-hidden="true"></i> Keurer</h1>
+                        <p class="page-subtitle">Eén foto per keer: houden, verplaatsen of naar de prullenmand.</p>
+                    </div>
+                    <!-- Map en teller -->
+                    <div class="keurer-folder-bar">
+                        <i class="fas fa-folder keurer-folder-icon" aria-hidden="true"></i>
+                        <div class="keurer-folder-text">
+                            <span class="keurer-folder-path" id="keurer-folder-display">Geen map gekozen</span>
+                            <span class="keurer-remaining" id="keurer-remaining"></span>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" onclick="keurerOpenFolderPicker()">
+                            <i class="fas fa-folder-open" aria-hidden="true"></i> <span id="keurer-folder-button-label">Map kiezen</span>
+                        </button>
+                    </div>
+                </div>
 
-                <!-- Stats bar -->
+                <!-- Reeks, vandaag, totaal -->
                 <div class="keurer-stats-bar">
                     <div id="keurer-stats-bar"><!-- gevuld door keurer.js --></div>
                 </div>
 
-                <!-- Map selector -->
-                <div class="keurer-folder-bar">
-                    <span class="keurer-folder-label">Map:</span>
-                    <span class="keurer-folder-path" id="keurer-folder-display">Geen map geselecteerd</span>
-                    <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.8rem; flex-shrink: 0;"
-                        onclick="keurerOpenFolderPicker()">
-                        <i class="fas fa-folder-open"></i> Wijzigen
-                    </button>
-                </div>
-
-                <!-- Teller -->
-                <div class="keurer-remaining" id="keurer-remaining"></div>
-
                 <!-- Kaart -->
                 <div class="keurer-card-area" id="keurer-card-area">
                     <div class="keurer-state-card">
-                        <span style="font-size: 4rem;">📁</span>
+                        <span class="keurer-state-icon" aria-hidden="true"><i class="fas fa-folder-open"></i></span>
                         <h3>Kies een map</h3>
                         <p>Selecteer een map om foto's en video's te beoordelen.</p>
                         <button class="btn btn-primary" onclick="keurerOpenFolderPicker()">
@@ -467,22 +666,27 @@
 
                 <!-- Actie-knoppen -->
                 <div class="keurer-action-buttons" id="keurer-action-buttons" style="display: none;">
-                    <button class="keurer-btn keurer-btn-keep" onclick="keurerDecideKeep()" title="Houden (← pijl)">
-                        <i class="fas fa-heart"></i>
+                    <button class="keurer-btn keurer-btn-keep" onclick="keurerDecideKeep()" title="Houden (← pijl)"
+                        aria-label="Houden">
+                        <i class="fas fa-heart" aria-hidden="true"></i>
                     </button>
-                    <button class="keurer-btn keurer-btn-move" onclick="keurerDecideMove()" title="Verplaatsen (↑ pijl)">
-                        <i class="fas fa-folder-open"></i>
+                    <button class="keurer-btn keurer-btn-move" onclick="keurerDecideMove()" title="Verplaatsen (↑ pijl)"
+                        aria-label="Verplaatsen">
+                        <i class="fas fa-folder-open" aria-hidden="true"></i>
                     </button>
                     <button class="keurer-btn keurer-btn-delete" onclick="keurerDecideDelete()"
-                        title="Verwijderen (→ pijl)">
-                        <i class="fas fa-trash"></i>
+                        title="Naar de prullenmand (→ pijl)" aria-label="Naar de prullenmand">
+                        <i class="fas fa-trash" aria-hidden="true"></i>
                     </button>
                 </div>
 
                 <!-- Hint -->
                 <p class="keurer-hint">
-                    ← houden &nbsp;|&nbsp; ↑ verplaatsen &nbsp;|&nbsp; → prullenmand &nbsp;|&nbsp; ↓ ongedaan
-                    &nbsp;·&nbsp; spatie = preview
+                    <span><kbd>←</kbd> houden</span>
+                    <span><kbd>↑</kbd> verplaatsen</span>
+                    <span><kbd>→</kbd> prullenmand</span>
+                    <span><kbd>↓</kbd> ongedaan</span>
+                    <span><kbd>spatie</kbd> voorbeeld</span>
                 </p>
 
             </div>
@@ -493,20 +697,23 @@
             <div class="timeline-page">
                 <!-- Timeline Header -->
                 <div class="tl-header">
-                    <div class="tl-header-left">
-                        <h2 class="tl-title"><i class="fas fa-stream"></i> Timeline</h2>
-                        <span class="tl-current-date" id="timeline-current-date"></span>
+                    <div>
+                        <div class="tl-header-left">
+                            <h1 class="page-title"><i class="fas fa-stream" aria-hidden="true"></i> Tijdlijn</h1>
+                            <span class="tl-current-date" id="timeline-current-date"></span>
+                        </div>
+                        <p class="page-subtitle">Je foto's en video's op de dag dat ze gemaakt zijn.</p>
                     </div>
                     <div class="tl-header-right">
                         <button class="btn btn-secondary tl-folder-btn" onclick="timelineOpenFolderPicker()">
-                            <i class="fas fa-folder-plus"></i> Folders
+                            <i class="fas fa-folder-plus" aria-hidden="true"></i> Mappen kiezen
                         </button>
                     </div>
                 </div>
 
                 <!-- Folder Chips -->
                 <div class="tl-folder-chips-bar" id="timeline-folder-chips">
-                    <span class="tl-no-folders">No folders selected</span>
+                    <span class="tl-no-folders">Geen mappen gekozen</span>
                 </div>
 
                 <!-- Info Bar -->
@@ -516,17 +723,348 @@
                 <div class="tl-slider-wrap" id="timeline-slider-wrap" style="display: none;">
                     <div class="tl-slider-container">
                         <div class="tl-slider-tooltip" id="timeline-slider-tooltip"></div>
-                        <input type="range" id="timeline-slider" class="tl-slider" min="0" max="1000" value="0">
+                        <input type="range" id="timeline-slider" class="tl-slider" min="0" max="1000" value="0" aria-label="Door de tijd schuiven">
                     </div>
                     <div class="tl-year-labels" id="timeline-year-labels"></div>
                 </div>
 
                 <!-- Photo Grid (virtualized) -->
-                <div class="tl-scroll-area" id="timeline-scroll">
+                <div class="tl-scroll-area" id="timeline-scroll" aria-label="Foto's op datum (pijltjes om te kiezen, Enter om te openen)">
                     <div class="tl-virtual-content" id="timeline-virtual-content">
                         <!-- Rendered by timeline.js -->
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ALBUMS: de bibliotheek met filters, slimme albums en 'op deze dag' (library.js) -->
+        <!-- KAART: foto's en video's met een GPS-positie (map.js, /api/map) -->
+        <div id="section-map" class="section hidden">
+            <div class="map-page">
+                <div class="page-header map-header">
+                    <div>
+                        <h1 class="page-title" id="map-title" tabindex="-1"><i class="fas fa-map-location-dot" aria-hidden="true"></i> Kaart</h1>
+                        <p class="page-subtitle" id="map-subtitle">Foto's en video's op de plek waar ze genomen zijn.</p>
+                    </div>
+                    <label class="map-osm-toggle" title="Haalt kaarttegels van OpenStreetMap via internet. Uit: de kaart werkt helemaal zonder internet.">
+                        <span class="switch">
+                            <input type="checkbox" id="map-osm-toggle" role="switch">
+                            <span class="slider"></span>
+                        </span>
+                        <span>Gedetailleerde kaart (OpenStreetMap, online)</span>
+                    </label>
+                </div>
+
+                <div class="map-filters" role="group" aria-label="Filters voor de kaart">
+                    <select class="select select-sm" id="map-year" aria-label="Jaar"></select>
+                    <label class="map-date-field"><span>Van</span>
+                        <input type="date" class="input input-sm" id="map-date-from" aria-label="Van datum" aria-describedby="map-range-error"></label>
+                    <label class="map-date-field"><span>Tot</span>
+                        <input type="date" class="input input-sm" id="map-date-to" aria-label="Tot en met datum" aria-describedby="map-range-error"></label>
+                    <p class="albums-range-error" id="map-range-error" role="alert" hidden></p>
+                    <select class="select select-sm" id="map-camera" aria-label="Camera"></select>
+                    <select class="select select-sm" id="map-album" aria-label="Album"></select>
+                    <button type="button" class="btn btn-ghost btn-sm" id="map-reset" hidden>Filters wissen</button>
+                    <span class="map-summary">
+                        <span class="map-count" id="map-count" role="status" aria-live="polite"></span>
+                        <button type="button" class="pill map-nogps" id="map-nogps" hidden aria-label="Bestanden zonder locatie"
+                            title="Toon deze bestanden in Albums"></button>
+                    </span>
+                </div>
+
+                <div class="map-layers" id="map-layers" role="group" aria-label="Locatiegeschiedenis" hidden>
+                    <span class="overline map-layers-title">Uit je Tijdlijn</span>
+                    <button type="button" class="pill" id="map-inferred" aria-pressed="false"
+                        title="Foto's zonder GPS op de plek waar je volgens je locatiegeschiedenis was (alleen in DataVault)">
+                        <span class="map-pin map-pin-estimated map-legend-pin" aria-hidden="true"></span>
+                        Locatie geschat uit Tijdlijn <span class="act-pill-count" id="map-inferred-count"></span></button>
+                    <button type="button" class="pill" id="map-track" aria-pressed="false">
+                        <i class="fas fa-route" aria-hidden="true"></i> Route per dag</button>
+                    <span class="map-track-controls" id="map-track-controls" hidden>
+                        <button type="button" class="btn btn-ghost btn-icon btn-sm" id="map-track-prev" aria-label="Vorige dag met locatie" title="Vorige dag met locatie">
+                            <i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+                        <input type="date" class="input input-sm" id="map-track-day" aria-label="Dag van de route">
+                        <button type="button" class="btn btn-ghost btn-icon btn-sm" id="map-track-next" aria-label="Volgende dag met locatie" title="Volgende dag met locatie">
+                            <i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                        <span class="map-track-info" id="map-track-info" role="status" aria-live="polite"></span>
+                    </span>
+                </div>
+
+                <div class="map-stage">
+                    <div id="map-canvas" class="map-canvas" aria-label="Kaart met foto's op locatie. Pijltjestoetsen verschuiven, plus en min zoomen, Enter opent een groep of foto."></div>
+                    <div class="map-overlay" id="map-overlay" hidden></div>
+                    <div class="map-progress" id="map-progress" hidden role="status"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="section-albums" class="section hidden">
+            <div class="albums-layout">
+                <nav class="albums-sidebar" aria-label="Albums">
+                    <div class="albums-side-group">
+                        <div class="overline albums-side-title">Bibliotheek</div>
+                        <div class="albums-side-list" id="albums-side-library"></div>
+                    </div>
+                    <div class="albums-side-group">
+                        <div class="albums-side-head">
+                            <span class="overline albums-side-title">Slimme albums</span>
+                            <button type="button" class="btn btn-ghost btn-icon btn-sm" onclick="albumsNew()"
+                                title="Nieuw slim album: kies filters en bewaar ze" aria-label="Nieuw slim album">
+                                <i class="fas fa-plus" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                        <div class="albums-side-list" id="albums-side-albums"></div>
+                    </div>
+                </nav>
+
+                <div class="albums-main">
+                    <!-- Bladeren: kop, filters en een gevirtualiseerd raster -->
+                    <div class="albums-pane" id="albums-browse">
+                        <div class="albums-top">
+                            <div class="page-header albums-header">
+                                <div>
+                                    <h1 class="page-title" id="albums-title" tabindex="-1"><i class="fas fa-photo-film" id="albums-title-icon" aria-hidden="true"></i> <span id="albums-title-text">Alles</span></h1>
+                                    <p class="page-subtitle" id="albums-subtitle"></p>
+                                </div>
+                                <div class="albums-header-actions" id="albums-header-actions"></div>
+                            </div>
+
+                            <div class="albums-filters" role="group" aria-label="Filters">
+                                <div class="albums-filter-row">
+                                    <div class="albums-kinds" id="albums-kinds" role="group" aria-label="Soort"></div>
+                                    <select class="select select-sm" id="albums-when" aria-label="Wanneer"></select>
+                                    <select class="select select-sm" id="albums-month" aria-label="Maand"></select>
+                                    <button type="button" class="pill albums-folder-btn" id="albums-folder-btn" aria-haspopup="dialog">
+                                        <i class="fas fa-folder" aria-hidden="true"></i> <span id="albums-folder-label">Hele archief</span>
+                                    </button>
+                                    <button type="button" class="pill" id="albums-more-btn" aria-expanded="false" aria-controls="albums-more">
+                                        <i class="fas fa-sliders" aria-hidden="true"></i> Meer filters
+                                        <span class="badge badge-accent albums-more-count" id="albums-more-count" hidden></span>
+                                    </button>
+                                    <span class="albums-filter-spacer"></span>
+                                    <span class="albums-sort">
+                                        <label class="albums-sort-label" for="albums-sort">Sorteren</label>
+                                        <select class="select select-sm" id="albums-sort"></select>
+                                    </span>
+                                </div>
+                                <!-- Van… tot…: op een eigen rij, zodat de rij erboven niet afbreekt -->
+                                <div class="albums-filter-row albums-range" id="albums-range" role="group" aria-label="Periode" hidden>
+                                    <label class="albums-range-label" for="albums-from">Van</label>
+                                    <input type="date" class="input input-sm" id="albums-from" aria-label="Van (datum)" aria-describedby="albums-range-error">
+                                    <label class="albums-range-label" for="albums-to">tot en met</label>
+                                    <input type="date" class="input input-sm" id="albums-to" aria-label="Tot en met (datum)" aria-describedby="albums-range-error">
+                                    <p class="albums-range-error" id="albums-range-error" role="alert" hidden></p>
+                                </div>
+                                <div class="albums-filter-row albums-more" id="albums-more" hidden>
+                                    <select class="select select-sm" id="albums-camera" aria-label="Camera"></select>
+                                    <select class="select select-sm" id="albums-ext" aria-label="Bestandstype"></select>
+                                    <select class="select select-sm" id="albums-has-gps" aria-label="Locatie"></select>
+                                    <select class="select select-sm" id="albums-rating" aria-label="Shows-score"></select>
+                                    <select class="select select-sm" id="albums-keurer" aria-label="Keurer"></select>
+                                    <select class="select select-sm" id="albums-orientation" aria-label="Oriëntatie"></select>
+                                    <select class="select select-sm" id="albums-capture-date" aria-label="Opnamedatum"></select>
+                                </div>
+                                <div class="albums-summary">
+                                    <div class="albums-chips" id="albums-chips" aria-label="Gekozen filters"></div>
+                                    <button type="button" class="link-button albums-clear" id="albums-clear" hidden>Alles wissen</button>
+                                    <span class="albums-count tabular" id="albums-count" aria-live="polite"></span>
+                                </div>
+                                <div class="albums-new-hint" id="albums-new-hint" role="status" hidden></div>
+                            </div>
+                        </div>
+
+                        <div class="albums-scroll" id="albums-scroll" aria-label="Bestanden (pijltjes om te kiezen, Enter om te openen)">
+                            <div class="albums-state" id="albums-state"></div>
+                            <div class="albums-loading" id="albums-loading" hidden></div>
+                            <div class="albums-content" id="albums-content"></div>
+                        </div>
+                    </div>
+
+                    <!-- Op deze dag: per jaar, van nieuw naar oud -->
+                    <div class="albums-pane" id="albums-otd" hidden>
+                        <div class="albums-otd-scroll">
+                            <div class="page-header albums-header">
+                                <div>
+                                    <h1 class="page-title" id="albums-otd-title" tabindex="-1"><i class="fas fa-calendar-day" aria-hidden="true"></i> <span id="albums-otd-title-text">Op deze dag</span></h1>
+                                    <p class="page-subtitle" id="albums-otd-subtitle"></p>
+                                </div>
+                                <div class="albums-otd-nav" role="group" aria-label="Dag kiezen">
+                                    <button type="button" class="btn btn-secondary btn-icon" onclick="albumsOtdShift(-1)" aria-label="Vorige dag" title="Vorige dag">
+                                        <i class="fas fa-chevron-left" aria-hidden="true"></i>
+                                    </button>
+                                    <select class="select" id="albums-otd-day" aria-label="Dag"></select>
+                                    <select class="select" id="albums-otd-month" aria-label="Maand"></select>
+                                    <button type="button" class="btn btn-secondary btn-icon" onclick="albumsOtdShift(1)" aria-label="Volgende dag" title="Volgende dag">
+                                        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-secondary" id="albums-otd-today" onclick="albumsOtdToday()">Vandaag</button>
+                                </div>
+                            </div>
+                            <p class="albums-otd-folders" id="albums-otd-folders" hidden></p>
+                            <div class="albums-otd-groups" id="albums-otd-groups" aria-label="Foto's per jaar (pijltjes om te kiezen, Enter om te openen)"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- HERSTELCENTRUM: alles wat de app verplaatste, met terugzetten per actie (recovery.js) -->
+        <div id="section-recovery" class="section hidden">
+            <div class="recovery-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="recovery-title" tabindex="-1"><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Herstelcentrum</h1>
+                        <p class="page-subtitle">Alles wat de app verplaatste (Keurer, duplicaten, de viewer), nieuwste
+                            eerst. De app wist nooit iets: elk bestand staat nog in het archief en kan terug naar
+                            zijn oude plek. Er wordt nooit iets overschreven.</p>
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="recoveryLoad()" title="Lijst opnieuw laden">
+                        <i class="fas fa-rotate" aria-hidden="true"></i> Vernieuwen
+                    </button>
+                </div>
+                <div class="recovery-summary" id="recovery-summary" aria-live="polite"></div>
+                <div class="recovery-list" id="recovery-list"></div>
+                <div class="recovery-more" id="recovery-more" hidden>
+                    <button type="button" class="btn btn-secondary btn-small" onclick="recoveryLoadMore()">Meer laden</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- BERICHTEN: alle gesprekken die DataGatherer inlas (messages.js) -->
+        <div id="section-berichten" class="section hidden">
+            <div class="page msg-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="msg-title" tabindex="-1"><i class="fas fa-comments" aria-hidden="true"></i> Berichten</h1>
+                        <p class="page-subtitle">Al je gesprekken uit DataGatherer op één plek. Ze blijven op deze Mac.</p>
+                    </div>
+                    <div class="dg-header-actions">
+                        <button type="button" class="btn btn-secondary" onclick="msgOpenPasha()">
+                            <i class="fas fa-shield-halved" aria-hidden="true"></i> Pasha en je berichten
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="switchMainView('datagatherer')">
+                            <i class="fas fa-cloud-arrow-down" aria-hidden="true"></i> Bijwerken
+                        </button>
+                    </div>
+                </div>
+                <div class="msg-layout">
+                    <section class="card msg-sidebar" aria-label="Gesprekken">
+                        <div class="msg-sidebar-top">
+                            <div class="search-field msg-search">
+                                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                                <input type="search" class="input" id="msg-search" placeholder="Zoek in gesprekken en berichten"
+                                    aria-label="Zoek in gesprekken en berichten" autocomplete="off" spellcheck="false">
+                            </div>
+                            <div class="msg-filters" id="msg-filters" role="group" aria-label="Bron"></div>
+                            <p class="msg-summary" id="msg-summary" aria-live="polite"></p>
+                        </div>
+                        <div class="msg-list" id="msg-list"></div>
+                    </section>
+                    <section class="card msg-thread" id="msg-thread" aria-label="Gesprek"></section>
+                </div>
+            </div>
+        </div>
+
+        <!-- DATAGATHERER: één kaart per gegevensbron, gebouwd uit wat elke bron van zichzelf zegt (datagatherer.js) -->
+        <div id="section-activity" class="section hidden">
+            <div class="page act-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="act-page-title" tabindex="-1"><i class="fas fa-wave-square" aria-hidden="true"></i> Activiteit</h1>
+                        <p class="page-subtitle">Wat je deed, per dag: uit Google, je browsers en de andere bronnen van DataGatherer.
+                            Alles staat alleen op deze Mac.</p>
+                    </div>
+                    <div class="dg-header-actions">
+                        <div class="segmented dg-switch" role="group" aria-label="DataGatherer-weergave">
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('datagatherer')"><i class="fas fa-plug" aria-hidden="true"></i> Bronnen</button>
+                            <button type="button" class="active" aria-pressed="true" data-view="activity" onclick="switchMainView('activity')"><i class="fas fa-wave-square" aria-hidden="true"></i> Activiteit</button>
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('backups')"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="act-toolbar">
+                    <div class="act-sources" id="act-sources" role="group" aria-label="Bronnen"></div>
+                    <div class="act-tools">
+                        <select class="select select-sm" id="act-kind" aria-label="Soort"></select>
+                        <label class="act-search-field"><i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                            <input type="search" class="input input-sm" id="act-search" placeholder="Zoeken in titels" aria-label="Zoeken in titels" autocomplete="off"></label>
+                        <button type="button" class="btn btn-ghost btn-sm" id="act-reset" hidden>Filters wissen</button>
+                        <span class="act-summary" id="act-summary" role="status" aria-live="polite"></span>
+                    </div>
+                </div>
+                <div class="act-layout" id="act-layout">
+                    <nav class="act-days-panel" aria-label="Dagen">
+                        <ul class="act-days" id="act-days"></ul>
+                    </nav>
+                    <section class="act-events-panel" id="act-events" aria-live="polite"></section>
+                </div>
+            </div>
+        </div>
+
+        <div id="section-datagatherer" class="section hidden">
+            <div class="page dg-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="dg-title" tabindex="-1"><i class="fas fa-cloud-arrow-down" aria-hidden="true"></i> DataGatherer</h1>
+                        <p class="page-subtitle">Haal je eigen gegevens binnen en vul je archief aan. DataVault gaat alleen
+                            online als jij op een knop drukt; exports vraag je zelf aan in je eigen browser.</p>
+                    </div>
+                    <div class="dg-header-actions">
+                        <div class="segmented dg-switch" role="group" aria-label="DataGatherer-weergave">
+                            <button type="button" class="active" aria-pressed="true" onclick="switchMainView('datagatherer')"><i class="fas fa-plug" aria-hidden="true"></i> Bronnen</button>
+                            <button type="button" class="" aria-pressed="false" data-view="activity" onclick="switchMainView('activity')"><i class="fas fa-wave-square" aria-hidden="true"></i> Activiteit</button>
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('backups')"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups</button>
+                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="switchMainView('berichten')" title="Berichten (g e)">
+                            <i class="fas fa-comments" aria-hidden="true"></i> Berichten
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="dgOpenNetworkLog()">
+                            <i class="fas fa-globe" aria-hidden="true"></i> Netwerklog
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-icon" onclick="dgLoad()" title="Vernieuwen" aria-label="Vernieuwen">
+                            <i class="fas fa-rotate" aria-hidden="true"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="dg-toolbar">
+                    <div class="dg-summary" id="dg-summary" aria-live="polite"></div>
+                    <div class="dg-filters" id="dg-filters" role="group" aria-label="Categorie"></div>
+                </div>
+                <div class="dg-groups" id="dg-groups"></div>
+            </div>
+        </div>
+
+        <!-- BACK-UPS: hoe lang geleden elke bron veiliggesteld is, en je eigen lijst (backups.js) -->
+        <div id="section-backups" class="section hidden">
+            <div class="page bk-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title" id="bk-title" tabindex="-1"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups</h1>
+                        <p class="page-subtitle">Wanneer je elke bron voor het laatst veiligstelde, en waar de back-ups
+                            van je oude toestellen staan.</p>
+                    </div>
+                    <div class="dg-header-actions">
+                        <div class="segmented dg-switch" role="group" aria-label="DataGatherer-weergave">
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('datagatherer')"><i class="fas fa-plug" aria-hidden="true"></i> Bronnen</button>
+                            <button type="button" class="" aria-pressed="false" onclick="switchMainView('activity')"><i class="fas fa-wave-square" aria-hidden="true"></i> Activiteit</button>
+                            <button type="button" class="active" aria-pressed="true" onclick="switchMainView('backups')"><i class="fas fa-shield-halved" aria-hidden="true"></i> Back-ups</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="bk-content" id="bk-content" aria-live="polite"></div>
+            </div>
+        </div>
+
+        <!-- INSTELLINGEN: één plek voor alle keuzes; onderdelen melden zich aan (settings.js) -->
+        <div id="section-settings" class="section hidden">
+            <div class="settings-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title"><i class="fas fa-cog" aria-hidden="true"></i> Instellingen</h1>
+                        <p class="page-subtitle">Alles blijft op deze Mac. Keuzes gelden meteen.</p>
+                    </div>
+                </div>
+                <div class="settings-sections" id="settings-sections"></div>
             </div>
         </div>
 
@@ -538,8 +1076,8 @@
     <div class="modal" id="modal-folder-selector">
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
-                <h2 class="modal-title">Select Folder to Scan</h2>
-                <button class="modal-close" onclick="closeFolderSelector()" aria-label="Close">×</button>
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Kies een map om te scannen</h2>
+                <button class="modal-close" onclick="closeFolderSelector()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
 
             <div class="modal-body folder-selector-body">
@@ -549,9 +1087,43 @@
             </div>
 
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeFolderSelector()">Cancel</button>
+                <button class="btn btn-secondary" onclick="closeFolderSelector()">Annuleren</button>
                 <button class="btn btn-primary" id="btn-confirm-folder" onclick="confirmFolderSelection()" disabled>
-                    Select Folder
+                    Kies deze map
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instellingen > Back-ups: een andere map voor de back-ups kiezen (backup-settings.js, /api/backup/folders) -->
+    <div class="modal" id="modal-backup-folder" role="dialog" aria-modal="true" aria-labelledby="backup-folder-title">
+        <div class="modal-container folder-selector-container backup-folder-container">
+            <div class="modal-header">
+                <h2 class="modal-title" id="backup-folder-title"><i class="fas fa-shield-halved" aria-hidden="true"></i> Map voor de back-ups</h2>
+                <button class="modal-close" onclick="backupFolderClose()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body backup-folder-body">
+                <p class="picker-intro backup-folder-intro">Een eigen map op deze Mac of op een andere schijf, zoals de T7 naast
+                    het archief. Niet in het archief zelf. De back-ups die er al zijn, blijven waar ze staan.</p>
+                <div class="folder-tree-container backup-folder-tree" id="backup-folder-tree" aria-label="Mappen"></div>
+                <div class="backup-folder-new">
+                    <label class="backup-folder-new-label" for="backup-folder-new-name">Nieuwe map in de gekozen map</label>
+                    <div class="backup-folder-new-row">
+                        <input type="text" class="input" id="backup-folder-new-name" value="DataVault-backups" spellcheck="false" autocomplete="off">
+                        <button type="button" class="btn btn-secondary" id="backup-folder-create" onclick="backupFolderCreate()" disabled>
+                            <i class="fas fa-folder-plus" aria-hidden="true"></i> Map maken
+                        </button>
+                    </div>
+                </div>
+                <div class="backup-folder-check" id="backup-folder-check" role="status" aria-live="polite"></div>
+            </div>
+            <div class="modal-footer backup-folder-footer">
+                <button type="button" class="btn btn-ghost backup-folder-default" id="backup-folder-default" onclick="backupFolderUseDefault()" hidden>
+                    Standaardmap gebruiken
+                </button>
+                <button type="button" class="btn btn-secondary" id="backup-folder-cancel" onclick="backupFolderClose()">Annuleren</button>
+                <button type="button" class="btn btn-primary" id="backup-folder-use" onclick="backupFolderUse()" disabled>
+                    Gebruiken en testen
                 </button>
             </div>
         </div>
@@ -563,14 +1135,14 @@
     <div class="modal" id="modal-comparison">
         <div class="modal-container comparison-container">
             <div class="modal-header">
-                <h2 class="modal-title">Delete Duplicate?</h2>
-                <button class="modal-close" onclick="closeComparisonModal()" aria-label="Close">×</button>
+                <h2 class="modal-title"><i class="fas fa-clone" aria-hidden="true"></i> Kopieën vergelijken</h2>
+                <button class="modal-close" onclick="closeComparisonModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
 
             <div class="modal-body comparison-body">
                 <div class="comparison-grid">
                     <div class="comparison-item">
-                        <div class="comparison-label">Original File</div>
+                        <div class="comparison-label keep-label">Blijft staan</div>
                         <div class="comparison-image-container">
                             <img id="comparison-original-img" class="comparison-image" />
                             <video id="comparison-original-video" class="comparison-image" controls
@@ -585,7 +1157,7 @@
                     <div class="comparison-divider"></div>
 
                     <div class="comparison-item">
-                        <div class="comparison-label duplicate-label">Duplicate File (Will be deleted)</div>
+                        <div class="comparison-label duplicate-label">Gaat naar RAW_DUPLICATES</div>
                         <div class="comparison-image-container">
                             <img id="comparison-duplicate-img" class="comparison-image" />
                             <video id="comparison-duplicate-video" class="comparison-image" controls
@@ -600,10 +1172,79 @@
             </div>
 
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeComparisonModal()">Cancel</button>
-                <button class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDelete()">
-                    Delete Duplicate
+                <button class="btn btn-secondary" onclick="closeComparisonModal()">Sluiten</button>
+                <button class="btn btn-secondary" id="btn-comparison-swap" onclick="keepComparedCopy()">
+                    Bewaar rechter kopie
                 </button>
+                <button class="btn btn-danger" id="btn-confirm-delete" onclick="confirmDelete()">
+                    Ruim deze groep op
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bevestiging voor opruimen (één groep of alles) -->
+    <div class="modal" id="modal-dup-confirm">
+        <div class="modal-container dup-confirm-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-broom" aria-hidden="true"></i> <span id="dup-confirm-title">Duplicaten opruimen?</span></h2>
+                <button class="modal-close" onclick="closeCleanupDialog()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body dup-confirm-body">
+                <ul class="dup-confirm-list" id="dup-confirm-list"></ul>
+                <div class="dup-confirm-progress" id="dup-confirm-progress" hidden>
+                    <div class="progress-container">
+                        <div class="progress-bar" id="dup-confirm-bar" style="width: 0%;">0%</div>
+                    </div>
+                    <div class="progress-text" id="dup-confirm-text"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-dup-cancel" onclick="closeCleanupDialog()">Annuleren</button>
+                <button class="btn btn-danger" id="btn-dup-go" onclick="runCleanup()">Verplaatsen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bevestiging voor 'Reeksen': aantal en bestemming vóór het verplaatsen -->
+    <div class="modal" id="modal-series-confirm">
+        <div class="modal-container series-confirm-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-layer-group" aria-hidden="true"></i> <span id="series-confirm-title">Reeks opruimen?</span></h2>
+                <button class="modal-close" onclick="seriesCloseConfirm()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body modal-body-list">
+                <ul class="dup-confirm-list" id="series-confirm-list"></ul>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-series-cancel" onclick="seriesCloseConfirm()" data-autofocus>Annuleren</button>
+                <button class="btn btn-primary" id="btn-series-go" onclick="seriesRunConfirm()">Verplaatsen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reeksen: de foto's van één reeks groot naast elkaar, passend of op 100% (series.js) -->
+    <div class="modal" id="modal-series-compare">
+        <div class="modal-container series-compare-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-magnifying-glass-plus" aria-hidden="true"></i> <span id="series-compare-title">Groot bekijken</span></h2>
+                <div class="segmented series-compare-zoom" role="group" aria-label="Weergave">
+                    <button type="button" id="btn-series-fit" aria-pressed="true" onclick="seriesCompareZoom(false)" title="Elke foto heel (d)">Passend</button>
+                    <button type="button" id="btn-series-detail" aria-pressed="false" onclick="seriesCompareZoom(true)" title="Dezelfde uitsnede op ware grootte; slepen verschuift (d)">100%</button>
+                </div>
+                <button class="modal-close" onclick="seriesCloseCompare()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body series-compare-body" id="series-compare-grid"></div>
+            <div class="modal-footer">
+                <div class="series-compare-hint" aria-hidden="true">
+                    <span><kbd>←</kbd> <kbd>→</kbd> <span id="series-compare-hint-noun">foto</span></span>
+                    <span><kbd>spatie</kbd> houden</span>
+                    <span id="series-compare-hint-video" hidden><kbd>k</kbd> afspelen of pauzeren</span>
+                    <span><kbd>d</kbd> passend of 100%</span>
+                    <span><kbd>Esc</kbd> sluiten</span>
+                </div>
+                <button class="btn btn-secondary" onclick="seriesCloseCompare()">Sluiten</button>
+                <button class="btn btn-primary" id="btn-series-compare-go" onclick="seriesCompareConfirm()">Verplaatsen</button>
             </div>
         </div>
     </div>
@@ -612,45 +1253,52 @@
     <div class="modal" id="modal-viewer" onclick="if(event.target === this) closeModal()">
         <div class="modal-container">
             <div class="modal-header">
-                <h2 class="modal-title" id="modal-title">Media Viewer</h2>
-                <button class="modal-close" onclick="closeModal()" aria-label="Close">×</button>
+                <h2 class="modal-title" id="modal-title">Viewer</h2>
+                <button class="modal-close" onclick="closeModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
 
             <div class="modal-body" id="modal-body">
                 <!-- Media content will be inserted here -->
                 <!-- Navigation zones -->
-                <div class="modal-nav-zone left" onclick="navigateModal(-1)">
-                    <span class="modal-nav-arrow">‹</span>
+                <div class="modal-nav-zone left" onclick="prevFile()" title="Vorige (←)" hidden>
+                    <span class="modal-nav-arrow" aria-hidden="true"><i class="fas fa-chevron-left"></i></span>
                 </div>
-                <div class="modal-nav-zone right" onclick="navigateModal(1)">
-                    <span class="modal-nav-arrow">›</span>
+                <div class="modal-nav-zone right" onclick="nextFile()" title="Volgende (→)" hidden>
+                    <span class="modal-nav-arrow" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
                 </div>
             </div>
 
             <div class="modal-controls" id="modal-controls" style="display: none;">
-                <button class="modal-control-btn" onclick="zoomIn()">Zoom In</button>
-                <button class="modal-control-btn" onclick="zoomOut()">Zoom Out</button>
-                <button class="modal-control-btn" onclick="fitToScreen()">Fit to Screen</button>
+                <button class="modal-control-btn" onclick="zoomOut()" title="Uitzoomen (−)" aria-label="Uitzoomen"><i class="fas fa-minus" aria-hidden="true"></i></button>
+                <button class="modal-control-btn" onclick="fitToScreen()" title="Passend maken (0)" aria-label="Passend maken"><i class="fas fa-expand" aria-hidden="true"></i></button>
+                <button class="modal-control-btn" onclick="zoomIn()" title="Inzoomen (+)" aria-label="Inzoomen"><i class="fas fa-plus" aria-hidden="true"></i></button>
             </div>
 
             <div class="modal-metadata" id="modal-metadata">
                 <!-- Metadata will be inserted here -->
             </div>
 
-            <div class="modal-footer"
-                style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-md); border-top: 1px solid var(--border);">
-                <div style="display: flex; gap: var(--space-sm);">
-                    <button class="btn btn-secondary" id="btn-open-finder" onclick="openInFinder()">
-                        Open in Finder
+            <div class="modal-footer">
+                <div class="viewer-actions">
+                    <button class="btn btn-secondary" id="btn-similar" onclick="similarFromViewer()" title="Foto's die hierop lijken (v)">
+                        <i class="fas fa-images" aria-hidden="true"></i> Vergelijkbaar
                     </button>
-                    <button class="btn btn-primary" id="btn-move-file" onclick="openMoveFileModal()">
-                        Move
+                    <button class="btn btn-secondary" id="btn-open-finder" onclick="openInFinder()" title="Toon in Finder (f)">
+                        <i class="fas fa-up-right-from-square" aria-hidden="true"></i> Toon in Finder
                     </button>
-                    <button class="btn btn-danger" id="btn-delete-file" onclick="confirmDeleteFile()">
-                        Delete
+                    <button class="btn btn-secondary" id="btn-show-in-files" onclick="showViewerFileInFiles()" title="Toon deze foto in Bestanden (b)">
+                        <i class="fas fa-folder-tree" aria-hidden="true"></i> In Bestanden
+                    </button>
+                    <button class="btn btn-secondary" id="btn-show-on-map" onclick="mapShowViewerFile()" hidden title="Toon deze foto op de kaart">
+                        <i class="fas fa-location-dot" aria-hidden="true"></i> Op kaart tonen
+                    </button>
+                    <button class="btn btn-danger" id="btn-trash-file" onclick="trashViewerFile()" title="Naar de prullenmand (⌫); terugzetten kan in het Herstelcentrum">
+                        <i class="fas fa-trash-can" aria-hidden="true"></i> Verwijderen
+                    </button>
+                    <button class="btn btn-primary" id="btn-move-file" onclick="openMoveFileModal()" title="Verplaatsen (m)">
+                        <i class="fas fa-folder-open" aria-hidden="true"></i> Verplaatsen
                     </button>
                 </div>
-                <div style="flex: 1;"></div>
             </div>
         </div>
     </div>
@@ -659,36 +1307,56 @@
     <div class="modal" id="modal-move-file">
         <div class="move-modal-container">
             <div class="move-modal-header">
-                <h2><i class="fas fa-exchange-alt"></i>Move File</h2>
-                <button class="modal-close" onclick="closeMoveFileModal()" aria-label="Close">&times;</button>
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> <span id="move-modal-title">Bestand verplaatsen</span></h2>
+                <button class="modal-close" onclick="closeMoveFileModal()" aria-label="Sluiten" title="Sluiten (Esc)">&times;</button>
             </div>
             <div class="move-modal-body">
                 <div class="move-panel-file">
                     <div class="move-file-thumb" id="move-file-preview"></div>
                     <div class="move-file-meta">
-                        <div class="move-meta-label">FILE</div>
+                        <div class="move-meta-label" id="move-file-label">Bestand</div>
                         <div class="move-meta-value" id="move-file-name"></div>
                     </div>
                     <div class="move-file-meta">
-                        <div class="move-meta-label">CURRENT LOCATION</div>
+                        <div class="move-meta-label">Huidige map</div>
                         <div class="move-meta-location" id="move-file-source"><i class="fas fa-folder"></i><span></span>
                         </div>
                     </div>
                     <div class="move-file-meta move-file-dest-meta" id="move-dest-display" style="display:none;">
-                        <div class="move-meta-label">MOVE TO</div>
+                        <div class="move-meta-label">Naar</div>
                         <div class="move-meta-dest" id="move-dest-path"><i class="fas fa-folder-open"></i><span></span>
                         </div>
                     </div>
                 </div>
                 <div class="move-panel-tree">
-                    <div class="move-tree-header">Select destination</div>
+                    <div class="move-tree-header">
+                        <span>Kies een doelmap</span>
+                        <span class="move-tree-query" id="move-tree-query" hidden aria-live="polite"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><span></span></span>
+                    </div>
                     <div class="move-tree-scroll" id="move-folder-tree"></div>
+                    <div class="move-tree-hints" aria-hidden="true">
+                        <span>Typ om te zoeken</span>
+                        <span><kbd>↑</kbd><kbd>↓</kbd> kiezen</span>
+                        <span><kbd>Enter</kbd> map in</span>
+                        <span><kbd>←</kbd> terug</span>
+                        <span><kbd>⌘</kbd><kbd>Enter</kbd> hierheen</span>
+                    </div>
                 </div>
             </div>
+            <!-- Dezelfde bytes staan al in de doelmap (app.js, showMoveTwin) -->
+            <div class="move-twin" id="move-twin" role="status" hidden>
+                <div class="move-twin-thumb" id="move-twin-thumb"></div>
+                <div class="move-twin-text">
+                    <div class="move-twin-title"><i class="fas fa-clone" aria-hidden="true"></i>Hier staat al een identieke kopie</div>
+                    <div class="move-twin-detail" id="move-twin-detail"></div>
+                </div>
+                <button type="button" class="btn btn-danger btn-sm" id="btn-move-twin-trash" onclick="trashMoveTwin()"><i
+                        class="fas fa-trash-can" aria-hidden="true"></i>Deze naar de prullenmand</button>
+            </div>
             <div class="move-modal-footer">
-                <button class="btn btn-secondary" onclick="closeMoveFileModal()">Cancel</button>
+                <button class="btn btn-secondary" onclick="closeMoveFileModal()">Annuleren</button>
                 <button class="btn btn-primary" id="btn-confirm-move" onclick="confirmMoveFile()" disabled><i
-                        class="fas fa-check"></i>Move Here</button>
+                        class="fas fa-check" aria-hidden="true"></i><span class="move-confirm-label">Hierheen verplaatsen</span></button>
             </div>
         </div>
     </div>
@@ -698,25 +1366,65 @@
     <div class="modal" id="modal-storage-details">
         <div class="modal-container storage-modal-container">
             <div class="modal-header">
-                <h2 class="modal-title"><i class="fas fa-server"></i> Storage Breakdown</h2>
-                <button class="modal-close" onclick="closeStorageModal()" aria-label="Close">×</button>
+                <h2 class="modal-title"><i class="fas fa-server" aria-hidden="true"></i> Opslag per map</h2>
+                <button class="modal-close" onclick="closeStorageModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
-            <div class="modal-body">
-                <div class="storage-breakdown-loading" id="storage-breakdown-loading">
-                    <div class="message-loading">
-                        <div class="dot"></div>
-                        <div class="dot"></div>
-                        <div class="dot"></div>
+            <div class="modal-body modal-body-list">
+                <div class="storage-breakdown-loading" id="storage-breakdown-loading" role="status" aria-label="Laden…">
+                    <div class="skeleton-list">
+                        <div class="skeleton-row"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
+                        <div class="skeleton-row"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
+                        <div class="skeleton-row"><div class="skeleton skeleton-line skeleton-line-wide"></div><div class="skeleton skeleton-line"></div></div>
                     </div>
                 </div>
                 <div class="storage-breakdown-content" id="storage-breakdown-content" style="display: none;">
-                    <ul class="storage-folder-list" id="storage-folder-list">
-                        <!-- Populated by JS -->
-                    </ul>
+                    <!-- Breadcrumb Navigation -->
+                    <div class="storage-breadcrumb" id="storage-breadcrumb" style="display: none;">
+                        <button class="storage-breadcrumb-btn" onclick="storageNavigateToRoot()">
+                            <i class="fas fa-house" aria-hidden="true"></i> Archief
+                        </button>
+                        <span class="storage-breadcrumb-path" id="storage-breadcrumb-path"></span>
+                    </div>
+
+                    <!-- Summary Card -->
+                    <div class="storage-summary-card" id="storage-summary" style="display: none;">
+                        <div class="storage-summary-item">
+                            <div class="stat-tile-label">Totaal</div>
+                            <div class="stat-tile-value" id="storage-total-display">0 GB</div>
+                        </div>
+                        <div class="storage-summary-item">
+                            <div class="stat-tile-label">Grootste map</div>
+                            <div class="storage-summary-largest" id="storage-largest-display">-</div>
+                        </div>
+                    </div>
+
+                    <!-- Tabs for switching between views -->
+                    <div class="storage-tabs" id="storage-tabs" style="display: none;">
+                        <button class="storage-tab-btn active" data-tab="subfolders" onclick="storageShowTab('subfolders')">
+                            <i class="fas fa-folder" aria-hidden="true"></i> Submappen
+                        </button>
+                        <button class="storage-tab-btn" data-tab="largest-files" onclick="storageShowTab('largest-files')">
+                            <i class="fas fa-file" aria-hidden="true"></i> Grootste bestanden
+                        </button>
+                    </div>
+
+                    <!-- Subfolders List -->
+                    <div id="storage-tab-subfolders" class="storage-tab-content active">
+                        <ul class="storage-folder-list" id="storage-folder-list">
+                            <!-- Populated by JS -->
+                        </ul>
+                    </div>
+
+                    <!-- Largest Files List -->
+                    <div id="storage-tab-largest-files" class="storage-tab-content">
+                        <ul class="storage-files-list" id="storage-files-list">
+                            <!-- Populated by JS -->
+                        </ul>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeStorageModal()">Close</button>
+                <button class="btn btn-secondary" onclick="closeStorageModal()">Sluiten</button>
             </div>
         </div>
     </div>
@@ -725,8 +1433,8 @@
     <div class="modal" id="modal-dna-explanation">
         <div class="modal-container dna-modal-container">
             <div class="modal-header">
-                <h2 class="modal-title">🧬 Your Listening DNA</h2>
-                <button class="modal-close" onclick="closeDnaModal()" aria-label="Close">×</button>
+                <h2 class="modal-title"><i class="fas fa-dna" aria-hidden="true"></i> Jouw luister-DNA</h2>
+                <button class="modal-close" onclick="closeDnaModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body dna-modal-body">
                 <!-- Left: Hero Section -->
@@ -735,68 +1443,74 @@
                         <!-- Dynamic art elements will be injected here -->
                     </div>
                     <div class="dna-hero-content">
-                        <div id="dna-modal-icon" class="dna-big-icon"></div>
+                        <div id="dna-modal-icon" class="dna-big-icon" aria-hidden="true"></div>
                         <h3 id="dna-modal-title" class="dna-hero-title"></h3>
                         <p id="dna-modal-description" class="dna-hero-desc"></p>
+                        <p class="dna-hero-how">Je type is het dagdeel waarin je de meeste nummers afspeelde (volgens de tijden in
+                            je Spotify-export). Kies rechts een type om te lezen wat het betekent.</p>
                     </div>
                 </div>
 
                 <!-- Right: All Types -->
                 <div class="dna-sidebar">
-                    <h4 class="dna-sidebar-title">Personalities</h4>
-                    <div class="dna-types-list">
-                        <div class="dna-type-item personality-early-bird" data-type="Early Bird">
-                            <span class="type-icon">🐦</span>
-                            <div class="type-info">
-                                <strong>Early Bird</strong>
-                                <span>5AM - 12PM</span>
-                            </div>
-                        </div>
-                        <div class="dna-type-item personality-daydreamer" data-type="Daydreamer">
-                            <span class="type-icon">☀️</span>
-                            <div class="type-info">
-                                <strong>Daydreamer</strong>
-                                <span>12PM - 6PM</span>
-                            </div>
-                        </div>
-                        <div class="dna-type-item personality-evening-chiller" data-type="Evening Chiller">
-                            <span class="type-icon">🌇</span>
-                            <div class="type-info">
-                                <strong>Evening Chiller</strong>
-                                <span>6PM - 11PM</span>
-                            </div>
-                        </div>
-                        <div class="dna-type-item personality-night-owl" data-type="Night Owl">
-                            <span class="type-icon">🦉</span>
-                            <div class="type-info">
-                                <strong>Night Owl</strong>
-                                <span>11PM - 5AM</span>
-                            </div>
-                        </div>
+                    <h4 class="dna-sidebar-title">Typen</h4>
+                    <div class="dna-types-list" role="group" aria-label="Typen">
+                        <button type="button" class="dna-type-item personality-early-bird" data-type="Early Bird" aria-pressed="false">
+                            <span class="type-icon" aria-hidden="true"><i class="fas fa-dove"></i></span>
+                            <span class="type-info">
+                                <strong>Vroege vogel</strong>
+                                <span>5:00 – 12:00</span>
+                            </span>
+                        </button>
+                        <button type="button" class="dna-type-item personality-daydreamer" data-type="Daydreamer" aria-pressed="false">
+                            <span class="type-icon" aria-hidden="true"><i class="fas fa-sun"></i></span>
+                            <span class="type-info">
+                                <strong>Dagdromer</strong>
+                                <span>12:00 – 18:00</span>
+                            </span>
+                        </button>
+                        <button type="button" class="dna-type-item personality-evening-chiller" data-type="Evening Chiller" aria-pressed="false">
+                            <span class="type-icon" aria-hidden="true"><i class="fas fa-cloud-moon"></i></span>
+                            <span class="type-info">
+                                <strong>Avondgenieter</strong>
+                                <span>18:00 – 23:00</span>
+                            </span>
+                        </button>
+                        <button type="button" class="dna-type-item personality-night-owl" data-type="Night Owl" aria-pressed="false">
+                            <span class="type-icon" aria-hidden="true"><i class="fas fa-moon"></i></span>
+                            <span class="type-info">
+                                <strong>Nachtuil</strong>
+                                <span>23:00 – 5:00</span>
+                            </span>
+                        </button>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-primary" style="width: 100%;" onclick="closeDnaModal()">Grootse DNA!</button>
+                <button class="btn btn-secondary" onclick="closeDnaModal()">Sluiten</button>
             </div>
         </div>
     </div>
 
     <!-- Generic Insight Modal -->
     <div class="modal" id="modal-insight-explanation">
-        <div class="modal-container dna-modal-container">
+        <div class="modal-container insight-modal-container">
             <div class="modal-header">
-                <h2 class="modal-title" id="insight-modal-header">Insight Details</h2>
-                <button class="modal-close" onclick="closeInsightModal()" aria-label="Close">×</button>
+                <h2 class="modal-title" id="insight-modal-header"><i class="fas fa-circle-info" aria-hidden="true"></i> Uitleg</h2>
+                <button class="modal-close" onclick="closeInsightModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
-            <div class="modal-body dna-modal-body" style="display: block; text-align: center; padding: 2rem;">
-                <div id="insight-modal-icon" style="font-size: 4rem; margin-bottom: 1rem;">ℹ️</div>
-                <h3 id="insight-modal-title"
-                    style="margin-bottom: 1rem; color: var(--text-primary); font-size: 1.5rem;">Title</h3>
-                <p id="insight-modal-description" style="color: var(--text-secondary); line-height: 1.6;"></p>
+            <div class="modal-body insight-modal-body">
+                <div id="insight-modal-icon" class="insight-modal-icon" aria-hidden="true"><i class="fas fa-circle-info"></i></div>
+                <h3 id="insight-modal-title" class="insight-modal-title">Uitleg</h3>
+                <p id="insight-modal-description" class="insight-modal-text"></p>
+                <p id="insight-modal-result" class="insight-modal-result" hidden></p>
+                <div class="insight-modal-how-box">
+                    <h4 class="insight-modal-how-title">Zo rekent DataVault</h4>
+                    <p id="insight-modal-how" class="insight-modal-how"></p>
+                </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-primary" style="width: 100%;" onclick="closeInsightModal()">Sluiten</button>
+                <button class="btn btn-secondary" onclick="closeInsightModal()">Sluiten</button>
             </div>
         </div>
     </div>
@@ -805,8 +1519,8 @@
     <div class="modal" id="modal-keurer-move">
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
-                <h2 class="modal-title"><i class="fas fa-folder-open"></i> Verplaatsen naar...</h2>
-                <button class="modal-close" onclick="keurerCloseMoveModal()" aria-label="Sluiten">×</button>
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Verplaatsen naar…</h2>
+                <button class="modal-close" onclick="keurerCloseMoveModal()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="keurer-move-topbar">
                 <div class="keurer-move-filename-row">
@@ -819,14 +1533,15 @@
                         type="text"
                         id="keurer-move-search"
                         class="keurer-move-search"
-                        placeholder="Zoek map..."
+                        placeholder="Zoek map…" aria-label="Zoek een doelmap"
                         oninput="keurerFilterMoveTree(this.value)"
+                        onkeydown="keurerHandleMoveSearchKeydown(event)"
                         autocomplete="off"
                         spellcheck="false"
                     >
                     <button class="keurer-move-search-clear" id="keurer-move-search-clear"
-                        onclick="keurerClearMoveSearch()" style="display:none;" title="Wissen">
-                        <i class="fas fa-times"></i>
+                        onclick="keurerClearMoveSearch()" style="display:none;" title="Zoektekst wissen" aria-label="Zoektekst wissen">
+                        <i class="fas fa-times" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
@@ -846,8 +1561,8 @@
 
     <!-- Keurer: Fullscreen preview overlay -->
     <div id="keurer-preview-overlay" onclick="if(event.target===this)keurerClosePreview()">
-        <button class="keurer-preview-close" onclick="keurerClosePreview()" title="Sluiten (spatie / Esc)">
-            <i class="fas fa-times"></i>
+        <button class="keurer-preview-close" onclick="keurerClosePreview()" title="Sluiten (spatie / Esc)" aria-label="Sluiten">
+            <i class="fas fa-times" aria-hidden="true"></i>
         </button>
         <div id="keurer-preview-content"></div>
         <div class="keurer-preview-bar">
@@ -860,8 +1575,8 @@
     <div class="modal" id="modal-keurer-folder">
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
-                <h2 class="modal-title">Kies een map om te keuren</h2>
-                <button class="modal-close" onclick="keurerCloseFolderPicker()" aria-label="Sluiten">×</button>
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Kies een map om te keuren</h2>
+                <button class="modal-close" onclick="keurerCloseFolderPicker()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body folder-selector-body">
                 <div class="folder-tree-container" id="keurer-folder-tree">
@@ -871,8 +1586,61 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="keurerCloseFolderPicker()">Annuleren</button>
                 <button class="btn btn-primary" id="btn-keurer-confirm-folder" onclick="keurerConfirmFolderSelection()" disabled>
-                    Map selecteren
+                    Kies deze map
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Albums: een slim album bewaren of bewerken (library.js) -->
+    <div class="modal" id="modal-album">
+        <div class="modal-container album-dialog">
+            <form onsubmit="albumsSaveDialog(event)">
+                <div class="modal-header">
+                    <h2 class="modal-title"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> <span id="album-dialog-title">Bewaar als slim album</span></h2>
+                    <button type="button" class="modal-close" onclick="albumsCloseDialog()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+                </div>
+                <div class="modal-body modal-body-list album-dialog-body">
+                    <label class="album-field-label" for="album-name">Naam</label>
+                    <input type="text" class="input" id="album-name" maxlength="80" autocomplete="off" required data-autofocus>
+                    <div class="album-field-label" id="album-icons-label">Icoon</div>
+                    <div class="album-icons" id="album-icons" role="radiogroup" aria-labelledby="album-icons-label"></div>
+                    <div class="album-field-label">Wat erin komt</div>
+                    <div class="album-filters" id="album-filters"></div>
+                    <p class="album-note">Een slim album is een bewaarde zoekopdracht: het blijft vanzelf bij en verplaatst of kopieert nooit een bestand.</p>
+                    <label class="album-hidden-row" id="album-hidden-row">
+                        <span class="switch"><input type="checkbox" id="album-hidden"><span class="slider"></span></span>
+                        <span>Verbergen in de lijst</span>
+                    </label>
+                    <p class="album-error" id="album-error" role="alert"></p>
+                </div>
+                <div class="modal-footer album-dialog-footer">
+                    <button type="button" class="btn btn-danger" id="album-delete" onclick="albumsDeleteFromDialog()">
+                        <i class="fas fa-trash-can" aria-hidden="true"></i> <span id="album-delete-label">Verwijderen</span>
+                    </button>
+                    <span class="albums-filter-spacer"></span>
+                    <button type="button" class="btn btn-secondary" onclick="albumsCloseDialog()">Annuleren</button>
+                    <button type="submit" class="btn btn-primary" id="album-save">Album bewaren</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Albums: een map kiezen voor het filter -->
+    <div class="modal" id="modal-albums-folder">
+        <div class="modal-container folder-selector-container">
+            <div class="modal-header">
+                <h2 class="modal-title"><i class="fas fa-folder-open" aria-hidden="true"></i> Alleen uit deze map</h2>
+                <button class="modal-close" onclick="albumsCloseFolderPicker()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
+            </div>
+            <div class="modal-body folder-selector-body">
+                <div class="folder-tree-container" id="albums-folder-tree"></div>
+            </div>
+            <div class="modal-footer albums-folder-footer">
+                <label class="albums-folder-sub"><input type="checkbox" class="checkbox" id="albums-folder-sub" checked> Met submappen</label>
+                <span class="albums-filter-spacer"></span>
+                <button class="btn btn-secondary" onclick="albumsWholeArchive()">Hele archief</button>
+                <button class="btn btn-primary" id="btn-albums-folder-confirm" onclick="albumsConfirmFolder()" disabled>Kies deze map</button>
             </div>
         </div>
     </div>
@@ -881,35 +1649,109 @@
     <div class="modal" id="modal-timeline-folders">
         <div class="modal-container folder-selector-container">
             <div class="modal-header">
-                <h2 class="modal-title"><i class="fas fa-folder-plus"></i> Select Timeline Folders</h2>
-                <button class="modal-close" onclick="timelineCloseFolderPicker()" aria-label="Close">×</button>
+                <h2 class="modal-title"><i class="fas fa-folder-plus" aria-hidden="true"></i> Mappen voor de tijdlijn</h2>
+                <button class="modal-close" onclick="timelineCloseFolderPicker()" aria-label="Sluiten" title="Sluiten (Esc)">×</button>
             </div>
             <div class="modal-body folder-selector-body">
-                <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 0.9rem;">Select one or more folders to include in your timeline. Photos from all selected folders will be displayed chronologically.</p>
+                <p class="picker-intro">Kies een of meer mappen. Een map neemt al zijn submappen mee; klik op een submap om die uit te zonderen. De foto's en video's komen op volgorde van datum in de tijdlijn.</p>
+                <div class="tl-picker-tools">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="timelinePickerFoldAll(true)">
+                        <i class="fas fa-down-left-and-up-right-to-center" aria-hidden="true"></i> Alles dichtklappen
+                    </button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="timelinePickerFoldAll(false)">
+                        <i class="fas fa-up-right-and-down-left-from-center" aria-hidden="true"></i> Alles openklappen
+                    </button>
+                </div>
                 <div class="folder-tree-container" id="timeline-folder-tree">
                     <!-- Populated by timeline.js -->
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="timelineCloseFolderPicker()">Cancel</button>
+                <span class="modal-footer-note tl-picker-summary" id="timeline-picker-summary" aria-live="polite"></span>
+                <button class="btn btn-secondary" onclick="timelineCloseFolderPicker()">Annuleren</button>
                 <button class="btn btn-primary" onclick="timelineConfirmFolders()">
-                    <i class="fas fa-check"></i> Apply Selection
+                    <i class="fas fa-check" aria-hidden="true"></i> Toepassen
                 </button>
             </div>
         </div>
     </div>
 
     <!-- Toast Container -->
-    <div class="toast-container" id="toast-container">
+    <!-- Achtergrondtaken: voortgang, pauzeren, hervatten, annuleren (jobs.js) -->
+    <!-- Wat op deze Mac ontbreekt (ffmpeg, HEIC, Ollama of het chatmodel); weg te klikken -->
+    <div class="capability-notice" id="capability-notice" role="status" hidden></div>
+
+    <div class="job-dock" id="job-dock" role="region" aria-label="Achtergrondtaken" hidden></div>
+
+    <div class="toast-container" id="toast-container" role="status" aria-live="polite">
         <!-- Toasts will be added here dynamically -->
     </div>
 
-    <script src="app.js?v=29"></script>
-    <script src="duplicates.js?v=10"></script>
-    <script src="keurer.js?v=5"></script>
-    <script src="timeline.js?v=1"></script>
-    <script src="wave-background.js?v=2"></script>
+    <!-- Chat Fullscreen Modal -->
+    <div class="chat-fullscreen-modal" id="chat-fullscreen-modal" onclick="if(event.target === this) closeChatFullscreen()">
+        <div class="chat-fullscreen-wrapper">
+            <div class="chat-widget">
+                <div class="chat-header">
+                    <img src="assets/audio_thumbs/pasha_mascot.png" alt="Pasha" class="chat-mascot">
+                    <div class="chat-title">
+                        <h3>Pasha</h3>
+                        <div class="chat-status-row">
+                            <span class="chat-status" data-chat-status data-state="pending">Verbinden…</span>
+                            <select class="select chat-model-select" data-chat-model aria-label="Taalmodel van Pasha" title="Taalmodel (Ollama)" onchange="chooseChatModel(this.value)"></select>
+                        </div>
+                    </div>
+                    <button class="chat-fullscreen-toggle" onclick="closeChatFullscreen()" title="Sluiten (Esc)" aria-label="Volledig scherm sluiten">
+                        <i class="fas fa-compress" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="chat-messages-slot" id="chat-fullscreen-slot"></div>
+                <div class="chat-input-container">
+                    <input type="text" id="chat-input-fullscreen" class="chat-input" placeholder="Vraag Pasha iets…"
+                        aria-label="Bericht aan Pasha" onkeypress="handleChatKeyPressFullscreen(event)">
+                    <button class="chat-send-btn" onclick="sendChatMessageFullscreen()" title="Versturen" aria-label="Versturen">
+                        <i class="fas fa-arrow-up" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- api.js eerst: zet het sessietoken op elk wijzigend verzoek -->
+    <script src="api.js?v=3"></script>
+    <script src="dom.js?v=1"></script>
+    <script src="ui.js?v=3"></script>
+    <script src="folder-tree.js?v=8"></script>
+    <script src="media-motion.js?v=3"></script>
+    <script src="vendor/leaflet-1.9.4/leaflet.js"></script>
+    <script src="vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js"></script>
+    <script src="app.js?v=91"></script>
+    <script src="nav-more.js?v=2"></script>
+    <script src="undo-toast.js?v=3"></script>
+    <script src="pasha-tools.js?v=3"></script>
+    <script src="jobs.js?v=18"></script>
+    <script src="duplicates.js?v=34"></script>
+    <script src="series.js?v=7"></script>
+    <script src="keurer.js?v=26"></script>
+    <script src="timeline.js?v=18"></script>
+    <script src="wave-background.js?v=5"></script>
     <script src="resizable-sidebar.js?v=1"></script>
+    <script src="recovery.js?v=12"></script>
+    <script src="settings.js?v=8"></script>
+    <script src="map.js?v=15"></script>
+    <script src="shortcuts.js?v=13"></script>
+    <script src="export.js?v=9"></script>
+    <script src="library.js?v=11"></script>
+    <script src="datagatherer.js?v=9"></script>
+    <script src="activity.js?v=7"></script>
+    <script src="backups.js?v=2"></script>
+    <script src="elo.js?v=14"></script>
+    <script src="backup-settings.js?v=10"></script>
+    <script src="search.js?v=6"></script>
+    <script src="messages.js?v=5"></script>
+    <!-- Beweging van de gegevensschermen: na de schermen die het aanroept (docs/MOTION.md) -->
+    <script src="motion-data.js?v=2"></script>
+    <!-- Beweging van de schil: laadt als laatste (docs/MOTION.md) -->
+    <script src="motion-shell.js?v=7"></script>
 </body>
 
 </html>

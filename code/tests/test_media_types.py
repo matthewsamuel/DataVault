@@ -1,0 +1,136 @@
+"""
+One shared list of media extensions (GAP-3), honest type labels (MEDIA-THUMBS-TIMELINE-18,
+LIVE-PROBE-24), content types for RAW photos (MEDIA-THUMBS-TIMELINE-22) and a name search
+that ignores the Unicode form (GAP-2).
+"""
+import shutil
+import unicodedata
+from pathlib import Path
+
+from backend import config as config_module
+from backend.config import content_type, media_type
+from fixtures.vault_builder import STRAND
+
+NEW_PHOTO_FORMATS = ["a.tif", "b.heif", "c.CR3", "d.raf", "e.ORF", "f.rw2", "g.hif"]
+
+
+def test_one_extension_list_knows_every_common_photo_format():
+    for name in NEW_PHOTO_FORMATS + ["h.tiff", "i.jpg", "j.dng", "k.HEIC"]:
+        assert media_type(Path(name)) == "photo", name
+        assert config_module.is_media_file(Path(name)), name
+    assert media_type(Path("clip.MTS")) == "video"
+    assert media_type(Path("song.flac")) == "audio"
+    for name in ["notes.txt", "report.pdf", "backup.zip", "noext"]:
+        assert media_type(Path(name)) == "other", name
+        assert not config_module.is_media_file(Path(name))
+
+
+def test_listing_labels_documents_as_other_never_as_photo(client, vault):
+    files = client.get("/api/media", params={"folder": str(vault / "RAW/misc")}).json()["files"]
+    types = {f["name"]: f["type"] for f in files}
+    assert types["notes.txt"] == "other"
+    assert types["UPPER.JPEG"] == "photo"
+    audio = client.get("/api/media", params={"folder": str(vault / "RAW/audio")}).json()["files"]
+    assert {f["type"] for f in audio} == {"audio"}
+
+
+def test_raw_photos_and_unknown_files_are_not_served_as_text(client, vault):
+    raw = vault / "RAW/misc/camera.CR2"
+    raw.write_bytes(b"II*\x00" + b"\x00" * 64)
+    unknown = vault / "RAW/misc/blob.qqzz"
+    unknown.write_bytes(b"\x00\x01")
+    r = client.get("/api/file", params={"path": str(raw)})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/x-canon-cr2"
+    r = client.get("/api/file", params={"path": str(unknown)})
+    assert r.headers["content-type"] == "application/octet-stream"
+    assert content_type(Path("x.heic")) == "image/heic"
+    assert content_type(Path("x.jpg")) == "image/jpeg"
+
+
+def test_new_formats_reach_the_keurer_and_the_duplicate_scan(client, vault):
+    folder = vault / "RAW/formats"
+    folder.mkdir()
+    for name in ("scan.tif", "fuji.RAF", "canon.cr3"):
+        shutil.copy2(vault / STRAND, folder / name)
+    names = {f["name"] for f in client.get("/api/keurer/files", params={"folder": str(folder)}).json()["files"]}
+    assert names == {"scan.tif", "fuji.RAF", "canon.cr3"}
+    r = client.post("/api/duplicates/scan_folder", json={"folder_path": str(folder)})
+    assert r.status_code == 200, r.text
+    groups = r.json()["groups"]
+    assert len(groups) == 1 and len(groups[0]["copies"]) == 3
+
+
+def test_name_search_ignores_case_and_unicode_form(client, vault):
+    folder = vault / "RAW/zoeken"
+    folder.mkdir()
+    nfd_name = unicodedata.normalize("NFD", "Café_Zürich.jpg")
+    shutil.copy2(vault / STRAND, folder / nfd_name)
+    for query in ("café", "CAFÉ", unicodedata.normalize("NFD", "café"), "zürich"):
+        photos = client.get("/api/stats/search-photos", params={"query": query}).json()["photos"]
+        assert [p["name"] for p in photos if "Zu" in unicodedata.normalize("NFD", p["name"])], query
+    # Documents are never a search hit, even when the name matches
+    (folder / "café notities.txt").write_text("x")
+    photos = client.get("/api/stats/search-photos", params={"query": "notities"}).json()["photos"]
+    assert photos == []
+
+
+def test_web_pages_and_svgs_from_the_archive_are_downloads_never_pages(client, vault):
+    """R25-8: a saved page in the archive must never run on the app's own origin."""
+    page = vault / "RAW/misc/saved page.html"
+    page.write_text("<script>fetch('/api/session')</script>")
+    svg = vault / "RAW/misc/pic.svg"
+    svg.write_text('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+    pdf = vault / "RAW/misc/brief.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    for f in (page, svg, pdf, vault / "RAW/misc/notes.txt"):
+        r = client.get("/api/file", params={"path": str(f)})
+        assert r.status_code == 200, f
+        assert r.headers["content-type"] == "application/octet-stream", f
+        assert r.headers["content-disposition"].startswith("attachment"), f
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["content-security-policy"] == "sandbox"
+    # Photos, videos and audio stay inline with their real type, and can still be streamed
+    r = client.get("/api/file", params={"path": str(vault / STRAND)})
+    assert r.headers["content-type"] == "image/jpeg" and "content-disposition" not in r.headers
+    assert r.headers["x-content-type-options"] == "nosniff"
+    song = next((vault / "RAW/audio").iterdir())
+    r = client.get("/api/file", params={"path": str(song)}, headers={"Range": "bytes=0-9"})
+    assert r.status_code == 206 and len(r.content) == 10
+    assert r.headers["content-type"].startswith("audio/") and "content-disposition" not in r.headers
+
+
+def test_a_name_search_that_finds_nothing_stops_at_its_budget(client, monkeypatch):
+    """A miss used to walk the whole archive; now it stops after SEARCH_MAX_FOLDERS folders
+    (or SEARCH_SECONDS) and says the answer is not complete."""
+    from backend.routes import stats
+    walked = []
+    real_walk = stats.walk_archive
+
+    def counting_walk(*args, **kwargs):
+        for step in real_walk(*args, **kwargs):
+            walked.append(step[0])
+            yield step
+    monkeypatch.setattr(stats, "walk_archive", counting_walk)
+
+    body = client.get("/api/stats/search-photos", params={"query": "bestaat-nergens"}).json()
+    assert body == {"photos": [], "complete": True}
+    everything = len(walked)
+    assert everything > 5
+
+    walked.clear()
+    monkeypatch.setattr(stats, "SEARCH_MAX_FOLDERS", 3)
+    body = client.get("/api/stats/search-photos", params={"query": "bestaat-nergens"}).json()
+    assert body == {"photos": [], "complete": False}
+    assert len(walked) <= 4                      # stopped instead of walking all folders
+
+    walked.clear()
+    monkeypatch.setattr(stats, "SEARCH_MAX_FOLDERS", 10_000)
+    monkeypatch.setattr(stats, "SEARCH_SECONDS", -1)
+    body = client.get("/api/stats/search-photos", params={"query": "bestaat-nergens"}).json()
+    assert body["complete"] is False and len(walked) == 1
+
+    # A hit within the budget is still found and complete
+    monkeypatch.setattr(stats, "SEARCH_SECONDS", 4.0)
+    body = client.get("/api/stats/search-photos", params={"query": "strand"}).json()
+    assert body["photos"] and body["complete"] is True

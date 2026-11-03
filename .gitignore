@@ -49,3 +49,10 @@ build/
 # Temporary
 *.tmp
 *.temp
+
+# Personal Claude Code settings
+.claude/settings.local.json
+
+# Downloaded ML models and the throwaway model build folder (eval photos, export venvs)
+code/models/
+.model-build/

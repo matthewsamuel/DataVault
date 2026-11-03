@@ -1,0 +1,1375 @@
+// DataVault Dashboard - Reeksen: de beste uit foto's die op elkaar lijken (een eigen onderdeel)
+// Note: API_BASE is defined in app.js
+//
+// Foto's die op elkaar lijken: een verkleinde of opnieuw opgeslagen kopie, een bewerking, of
+// een burst (een paar opnames binnen een paar seconden). De server vergelijkt de foto's in een
+// achtergrondtaak ('phash', jobsStart) en geeft per reeks alle foto's met een kwaliteitsscore;
+// de beste is voorgesteld om te houden. Per reeks kies je zelf wat blijft (ook meerdere), en
+// bij Bevestigen gaan de andere na een bevestiging naar RAW_DUPLICATES/near-duplicates: één
+// actie per reeks in het Herstelcentrum, er wordt nooit iets gewist (/api/series/keep).
+//
+// Toetsen (op een foto in de lijst): ← → naar de vorige of volgende foto, ↑ ↓ naar de vorige
+// of volgende reeks, spatie houden of laten gaan, Enter bevestigen, s overslaan, a alles
+// behouden, v groot vergelijken. Overslaan geldt voor deze sessie; 'Alles behouden' onthoudt
+// de server (en is meteen ongedaan te maken).
+//
+// Paging: een bevestigde of behouden reeks verdwijnt ook op de server, dus schuift de rest daar
+// een plaats op. nextOffset gaat dan één omlaag (seriesState.gone telt mee met een verzoek dat
+// al onderweg is); een overgeslagen reeks blijft op de server en telt gewoon mee.
+
+const SERIES_PAGE = 20;
+const SERIES_STRICTNESS = ['streng', 'normaal', 'ruim'];
+const SERIES_STRICTNESS_LABELS = { streng: 'Streng', normaal: 'Normaal', ruim: 'Ruim' };
+const SERIES_STRICTNESS_HELP = {
+    streng: 'Streng: alleen vrijwel dezelfde foto (een verkleinde of opnieuw opgeslagen kopie) en bursts met bijna geen beweging.',
+    normaal: 'Normaal: ook licht bewerkte foto\'s en bursts met weinig beweging.',
+    ruim: 'Ruim: ook iets bijgesneden of lichter gemaakte foto\'s en bursts met meer beweging.',
+};
+const SERIES_POINTS = [
+    ['sharpness', 'Scherpte', 40],
+    ['resolution', 'Resolutie', 25],
+    ['exposure', 'Belichting', 15],
+    ['choice', 'Jouw keuze', 20],
+];
+
+const seriesState = {
+    strictness: 'normaal',
+    sort: 'size',
+    items: [],             // reeksen in beeld, in volgorde
+    nextOffset: 0,         // null: alles geladen
+    total: 0,              // reeksen die de server nog heeft (ook de overgeslagen)
+    photos: 0,             // foto's en video's in de reeksen
+    videos: 0,             // waarvan video's
+    gone: 0,               // reeksen die in deze sessie op de server verdwenen (bevestigd of behouden)
+    handled: 0,            // daarvan sinds het openen van het tabblad: voor 'Alles bekeken'
+    moved: 0,              // en daarvan met verplaatste foto's
+    lastKept: null,        // {key, title}: de laatste 'Alles behouden', ongedaan te maken
+    undoingKeep: null,     // key van de 'Alles behouden' die nu wordt teruggedraaid
+    job: null,             // de vergelijking die nu loopt (voor het lege scherm)
+    keep: new Map(),       // reeks-sleutel -> Set van foto-id's die blijven
+    skipped: new Set(),    // reeks-sleutels die in deze sessie overgeslagen zijn
+    cursor: { key: null, id: null },
+    status: null,
+    jobId: null,
+    unwatch: null,
+    loading: false,
+    loaded: false,
+    seq: 0,
+    confirm: null,         // {series, keep[], move[]} terwijl het venster open is
+    busy: false,
+};
+
+try {
+    const saved = localStorage.getItem('seriesStrictness');
+    if (SERIES_STRICTNESS.includes(saved)) seriesState.strictness = saved;
+    const sort = localStorage.getItem('seriesSort');
+    if (sort === 'size' || sort === 'recent') seriesState.sort = sort;
+} catch (e) { /* geen opslag: standaard */ }
+
+// ==================== STAND EN VERGELIJKEN ====================
+
+// Bij elk bezoek opnieuw (iets kan in het Herstelcentrum teruggezet zijn); wat je per reeks
+// koos, blijft staan zolang de reeks dezelfde is
+function seriesInit() {
+    seriesSyncControls();
+    seriesState.handled = seriesState.moved = 0;
+    seriesLoadStatus();
+    seriesLoad(true);
+}
+
+function seriesSyncControls() {
+    const slider = document.getElementById('series-strictness');
+    slider.value = String(SERIES_STRICTNESS.indexOf(seriesState.strictness));
+    slider.setAttribute('aria-valuetext', SERIES_STRICTNESS_LABELS[seriesState.strictness]);
+    document.querySelectorAll('.series-strictness-labels button').forEach((b, i) => {
+        b.classList.toggle('active', SERIES_STRICTNESS[i] === seriesState.strictness);
+    });
+    document.getElementById('series-sort').value = seriesState.sort;
+    document.getElementById('series-strictness-help').textContent = SERIES_STRICTNESS_HELP[seriesState.strictness];
+}
+
+async function seriesLoadStatus() {
+    try {
+        const status = await fetchJSON(`${API_BASE}/api/series/status`);
+        seriesState.status = status;
+        seriesRenderStatus();
+        // Het lege scherm hangt af van de stand (nog niet vergeleken, of echt niets gevonden)
+        if (seriesState.loaded && !seriesState.items.length && !seriesState.loading) seriesRender();
+        if (status.job && status.job.id !== seriesState.jobId) seriesFollowJob(status.job.id);
+    } catch (err) {
+        document.getElementById('series-status-text').textContent = err.code === 'vault_unavailable'
+            ? 'Archief niet bereikbaar' : `Stand niet op te halen: ${err.message || err}`;
+    }
+}
+
+function seriesRenderStatus(job) {
+    const status = seriesState.status;
+    const text = document.getElementById('series-status-text');
+    const button = document.getElementById('btn-series-compare');
+    const progress = document.getElementById('series-progress');
+    const running = !!(job && JOB_ACTIVE.has(job.status));
+    const label = document.getElementById('series-compare-label');
+    const wasRunning = !!seriesState.job;
+    seriesState.job = running ? job : null;
+    if (running) {
+        const pct = job.total ? Math.round(job.processed / job.total * 100) : null;
+        text.textContent = seriesJobText(job);
+        progress.hidden = false;
+        progress.classList.toggle('is-indeterminate', pct === null);
+        document.getElementById('series-progress-fill').style.width = pct === null ? '' : `${pct}%`;
+        // Bezig: de knop zegt het (de balk ernaast laat de voortgang zien)
+        button.disabled = true;
+        label.textContent = 'Bezig met vergelijken…';
+        seriesUpdateEmptyProgress();
+        return;
+    }
+    progress.hidden = true;
+    button.disabled = false;
+    label.textContent = 'Foto\'s vergelijken';
+    if (wasRunning && seriesState.loaded && !seriesState.items.length) seriesRender();
+    if (!status) return;
+    if (!status.ready) {
+        text.textContent = 'De bibliotheek wordt nog opgebouwd; daarna kun je vergelijken.';
+        button.disabled = true;
+        return;
+    }
+    const parts = [`${formatNumberNl(status.analysed)} van ${formatNumberNl(status.photos)} `
+        + `${status.videos ? 'foto\'s en video\'s' : 'foto\'s'} vergeleken`];
+    // 'Nog te doen' telt alleen de foto's die nog bekeken moeten worden (zo klopt de som); het
+    // zoeken naar reeksen tussen al bekeken foto's is een aparte, korte stap
+    const toAnalyse = status.to_analyse ?? status.pending;
+    if (toAnalyse) parts.push(`${formatNumberNl(toAnalyse)} nog te doen`);
+    else if (status.pending) parts.push('reeksen zoeken volgt');
+    if (status.undecodable) parts.push(`${formatNumberNl(status.undecodable)} niet te openen`);
+    if (status.errors) parts.push(`${formatNumberNl(status.errors)} leesfout${status.errors === 1 ? '' : 'en'}`);
+    text.textContent = parts.join(' · ');
+    // Is er iets te doen, dan is vergelijken de hoofdactie van dit scherm
+    button.classList.toggle('btn-primary', status.pending > 0);
+    button.classList.toggle('btn-secondary', !status.pending);
+    const reset = document.getElementById('btn-series-reset');
+    reset.hidden = !status.reviewed;
+    reset.textContent = `Behouden reeksen weer tonen (${formatNumberNl(status.reviewed)})`;
+}
+
+// Eerst de bibliotheek bijwerken (een snelle ronde: alleen wat veranderde), zodat ook net
+// toegevoegde foto's meedoen; daarna vergelijken
+async function seriesStartCompare() {
+    const button = document.getElementById('btn-series-compare');
+    if (button.disabled && seriesState.job) return;
+    button.disabled = true;
+    try {
+        // (auto: een stille ronde, zonder eigen melding; dit scherm toont de voortgang)
+        const index = await jobsStart('index', { auto: true });
+        seriesRenderStatus({ id: index.id, status: 'running', message: 'Bibliotheek bijwerken…', total: null });
+        const done = await seriesWaitForJob(index.id);
+        if (done.status !== 'done') {
+            seriesRenderStatus();
+            showToast('Vergelijken niet gestart', 'De bibliotheek is niet bijgewerkt (gestopt of gepauzeerd).', 'warning');
+            return;
+        }
+        const job = await jobsStart('phash', {});
+        seriesFollowJob(job.id);
+    } catch (err) {
+        seriesRenderStatus();
+        toastFetchError('Vergelijken niet gestart', err);
+    }
+}
+
+function seriesJobText(job) {
+    return job.status === 'waiting_for_vault' ? 'Wacht tot het archief terug is…'
+        : (job.message || 'Foto\'s vergelijken…');
+}
+
+// Terwijl er vergeleken wordt en er nog niets te tonen is: het lege scherm zegt dat, zonder
+// tweede knop (de voortgang staat erboven)
+function seriesUpdateEmptyProgress() {
+    if (!seriesState.loaded || seriesState.items.length) return;
+    if (!document.getElementById('series-empty-progress')) seriesRender();
+}
+
+function seriesWaitForJob(id) {
+    return new Promise(resolve => {
+        const stop = jobsWatch(id, job => {
+            if (JOB_ACTIVE.has(job.status)) return;
+            setTimeout(() => stop(), 0);
+            resolve(job);
+        });
+    });
+}
+
+function seriesFollowJob(id) {
+    if (seriesState.unwatch) seriesState.unwatch();
+    seriesState.jobId = id;
+    let wasActive = null;
+    seriesState.unwatch = jobsWatch(id, job => {
+        const active = JOB_ACTIVE.has(job.status);
+        seriesRenderStatus(job);
+        if (wasActive && !active) {
+            seriesState.unwatch && seriesState.unwatch();
+            seriesState.unwatch = null;
+            seriesState.jobId = null;
+            seriesLoadStatus();
+            seriesLoad(true);
+        }
+        wasActive = active;
+    });
+}
+
+// ==================== STRENGHEID EN VOLGORDE ====================
+
+function seriesStrictnessInput(value) {
+    const name = SERIES_STRICTNESS[Number(value)] || 'normaal';
+    const slider = document.getElementById('series-strictness');
+    slider.setAttribute('aria-valuetext', SERIES_STRICTNESS_LABELS[name]);
+    document.getElementById('series-strictness-help').textContent = SERIES_STRICTNESS_HELP[name];
+}
+
+function seriesStrictnessChange(value) {
+    seriesSetStrictness(SERIES_STRICTNESS[Number(value)] || 'normaal');
+}
+
+function seriesSetStrictness(name) {
+    if (!SERIES_STRICTNESS.includes(name)) return;
+    const changed = name !== seriesState.strictness;
+    seriesState.strictness = name;
+    try { localStorage.setItem('seriesStrictness', name); } catch (e) { /* geen opslag */ }
+    seriesSyncControls();
+    if (changed) {
+        seriesState.handled = seriesState.moved = 0;
+        seriesLoad(true);
+    }
+}
+
+function seriesSetSort(sort) {
+    if (sort !== 'size' && sort !== 'recent') return;
+    seriesState.sort = sort;
+    seriesState.handled = seriesState.moved = 0;
+    try { localStorage.setItem('seriesSort', sort); } catch (e) { /* geen opslag */ }
+    seriesLoad(true);
+}
+
+// ==================== LADEN ====================
+
+// Geeft true terug als er reeksen bij kwamen (of de lijst opnieuw begon)
+async function seriesLoad(reset) {
+    const seq = ++seriesState.seq;
+    const list = document.getElementById('series-list');
+    if (reset) {
+        seriesState.items = [];
+        seriesState.nextOffset = 0;
+        if (!seriesState.loaded) list.replaceChildren(skeletonRows(3));
+    }
+    if (seriesState.nextOffset === null) return false;
+    seriesState.loading = true;
+    seriesMoreBusy(true);
+    const goneBefore = seriesState.gone;
+    const params = new URLSearchParams({
+        strictness: seriesState.strictness, sort: seriesState.sort,
+        offset: String(seriesState.nextOffset), limit: String(SERIES_PAGE),
+    });
+    try {
+        const data = await fetchJSON(`${API_BASE}/api/series?${params}`);
+        if (seq !== seriesState.seq) return false;
+        const before = seriesState.items.length;
+        const fresh = data.items.filter(s => !seriesState.skipped.has(s.key)
+            && !seriesState.items.some(t => t.key === s.key));
+        fresh.forEach(s => {
+            const chosen = seriesState.keep.get(s.key);
+            const still = chosen && [...chosen].every(id => s.members.some(m => m.id === id));
+            if (!still) seriesState.keep.set(s.key, new Set([s.best]));
+        });
+        seriesState.items.push(...fresh);
+        // Wat tijdens dit verzoek op de server verdween, schoof de rest daar al op
+        const goneSince = seriesState.gone - goneBefore;
+        seriesState.nextOffset = data.next_offset === null ? null : Math.max(0, data.next_offset - goneSince);
+        seriesState.total = Math.max(0, data.total - goneSince);
+        seriesState.photos = data.photos;
+        seriesState.videos = data.videos || 0;
+        seriesState.loaded = true;
+        seriesState.loading = false;
+        // (bijna) alles op deze pagina was overgeslagen: meteen de volgende
+        const more = seriesState.items.length < 5 && seriesState.nextOffset !== null;
+        if (!more || seriesState.items.length) seriesRender();
+        if (more) await seriesLoad(false);
+        return seriesState.items.length > before || reset;
+    } catch (err) {
+        if (seq !== seriesState.seq) return;
+        list.replaceChildren(errorState('Reeksen laden mislukt', err, () => seriesLoad(true)));
+        document.getElementById('series-summary').hidden = true;
+        return false;
+    } finally {
+        if (seq === seriesState.seq) {
+            seriesState.loading = false;
+            seriesMoreBusy(false);
+        }
+    }
+}
+
+function seriesMoreBusy(busy) {
+    const more = document.getElementById('btn-series-more');
+    if (!more) return;
+    more.disabled = busy;
+    more.classList.toggle('is-loading', busy);
+}
+
+// Komt het einde van de lijst in beeld, dan laadt de volgende pagina vanzelf
+let seriesMoreObserver = null;
+
+function seriesWatchMore(button) {
+    if (!('IntersectionObserver' in window)) return;
+    if (!seriesMoreObserver) {
+        seriesMoreObserver = new IntersectionObserver(entries => {
+            if (entries.some(e => e.isIntersecting) && !seriesState.loading && seriesState.nextOffset !== null
+                && currentMainView() === 'series') seriesLoad(false);
+        }, { rootMargin: '0px 0px 400px 0px' });
+    }
+    seriesMoreObserver.disconnect();
+    seriesMoreObserver.observe(button);
+}
+
+// ==================== TEKENEN ====================
+
+// 'foto' of 'video' (een reeks bestaat uit alleen foto's of alleen video's)
+function seriesNoun(series, n) {
+    if (series && series.media === 'video') return n === 1 ? 'video' : 'video\'s';
+    return n === 1 ? 'foto' : 'foto\'s';
+}
+
+function seriesDuration(seconds) {
+    if (!seconds) return null;
+    const total = Math.round(seconds);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = String(total % 60).padStart(2, '0');
+    return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
+function seriesTitle(series) {
+    const title = series.kind === 'burst'
+        ? `Burst van ${series.count} foto's`
+        : `${series.count} ${seriesNoun(series, series.count)} die op elkaar lijken`;
+    // Een heel grote groep komt in delen (de server knipt hem op tijdsvolgorde)
+    return series.part ? `${title} (deel ${series.part[0]} van ${series.part[1]})` : title;
+}
+
+function seriesDate(ts) {
+    if (!ts) return null;
+    return new Date(ts * 1000).toLocaleString('nl-NL', {
+        day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+}
+
+function seriesNotCompared(status) {
+    return !!(status && status.ready && !status.analysed && status.pending);
+}
+
+function seriesSummaryText(status) {
+    if (seriesNotCompared(status)) return '';
+    const { total, photos, videos } = seriesState;
+    const skipped = seriesState.skipped.size;
+    if (!total) return 'Geen reeksen';
+    const stills = Math.max(0, photos - videos);
+    const parts = [`${formatNumberNl(total)} ${total === 1 ? 'reeks' : 'reeksen'}`];
+    if (stills || !videos) parts.push(`${formatNumberNl(stills)} ${stills === 1 ? 'foto' : 'foto\'s'}`);
+    if (videos) parts.push(`${formatNumberNl(videos)} ${videos === 1 ? 'video' : 'video\'s'}`);
+    if (skipped) parts.push(`${formatNumberNl(skipped)} overgeslagen`);
+    return parts.join(' · ');
+}
+
+function seriesRender() {
+    const list = document.getElementById('series-list');
+    const summary = document.getElementById('series-summary');
+    const status = seriesState.status;
+    const shown = seriesState.items.length;
+    // Stond de focus in de lijst, dan komt hij na het opnieuw tekenen terug op de cursor
+    const hadFocus = list.contains(document.activeElement);
+    summary.hidden = false;
+    document.getElementById('series-summary-text').textContent = seriesSummaryText(status);
+    seriesRenderLastKept();
+    // Eén hoofdknop: vóór de eerste vergelijking staat hij in het lege scherm, niet ook bovenin
+    document.getElementById('btn-series-compare').hidden = !shown && seriesNotCompared(status) && !seriesState.job;
+    if (!shown) {
+        list.replaceChildren(seriesEmptyState(status));
+        if (hadFocus) seriesFocusCursor();
+        return;
+    }
+    const cards = seriesState.items.map(series => seriesCard(series));
+    list.replaceChildren(...cards);
+    // Elke reeks waaiert één keer uit en komt tot rust op de beste foto (zodra hij in beeld is)
+    MediaMotion.seriesWatch(cards);
+    if (seriesState.nextOffset !== null) {
+        const more = createEl('button', {
+            class: 'btn btn-secondary', id: 'btn-series-more', text: 'Meer reeksen laden',
+            onClick: () => seriesLoad(false),
+        });
+        list.appendChild(createEl('div', { class: 'series-more' }, more));
+        seriesWatchMore(more);
+    }
+    seriesEnsureCursor();
+    if (hadFocus) seriesFocusCursor(false);
+}
+
+function seriesEmptyState(status) {
+    if (status && !status.ready) {
+        return emptyState({
+            icon: 'fa-hourglass-half', title: 'De bibliotheek wordt nog opgebouwd',
+            text: 'Zodra alle foto\'s bekend zijn, kun je ze hier vergelijken.',
+        });
+    }
+    if (seriesState.job && (!status || !status.analysed || !seriesState.total)) {
+        // Er wordt vergeleken: geen knop; de voortgang staat erboven
+        const state = emptyState({
+            icon: 'fa-hourglass-half', title: 'Foto\'s worden vergeleken…',
+            text: 'Dat gebeurt op de achtergrond; je kunt intussen verder. De reeksen verschijnen hier zodra het klaar is.',
+        });
+        state.id = 'series-empty-progress';
+        return state;
+    }
+    if (seriesNotCompared(status)) {
+        return emptyState({
+            icon: 'fa-layer-group', title: 'Nog niet vergeleken',
+            text: 'Vergelijk je foto\'s één keer; daarna gaat het alleen nog om nieuwe of veranderde foto\'s.',
+            action: { label: 'Foto\'s vergelijken', onClick: seriesStartCompare, primary: true },
+        });
+    }
+    if (seriesState.skipped.size && seriesState.total) {
+        return emptyState({
+            icon: 'fa-forward', title: 'Alle reeksen overgeslagen',
+            text: seriesState.handled
+                ? `${formatNumberNl(seriesState.handled)} ${seriesState.handled === 1 ? 'reeks' : 'reeksen'} afgehandeld; de overgeslagen reeksen wachten nog.`
+                : 'Overgeslagen reeksen blijven voor later staan.',
+            action: { label: 'Overgeslagen tonen', primary: true, onClick: seriesShowSkipped },
+        });
+    }
+    if (seriesState.handled) {
+        const n = `${formatNumberNl(seriesState.handled)} ${seriesState.handled === 1 ? 'reeks' : 'reeksen'}`;
+        return emptyState({
+            icon: 'fa-circle-check', title: 'Alles bekeken',
+            text: seriesState.moved
+                ? `Je hebt ${n} afgehandeld. Wat je verplaatste, staat in het Herstelcentrum en kan daar terug.`
+                : `Je hebt ${n} afgehandeld en alles behouden. Met \u2018Behouden reeksen weer tonen\u2019 zie je ze opnieuw.`,
+            action: seriesState.moved ? { label: 'Naar het Herstelcentrum', onClick: () => goToView('recovery') } : null,
+        });
+    }
+    const looser = SERIES_STRICTNESS[SERIES_STRICTNESS.indexOf(seriesState.strictness) + 1];
+    return emptyState({
+        icon: 'fa-circle-check', title: 'Geen reeksen gevonden',
+        text: looser ? `Bij deze strengheid lijken geen foto's op elkaar. Bij ${SERIES_STRICTNESS_LABELS[looser].toLowerCase()} kijkt de app ruimer.`
+            : 'Er zijn geen foto\'s die op elkaar lijken.',
+        action: looser ? { label: `${SERIES_STRICTNESS_LABELS[looser]} proberen`, onClick: () => seriesSetStrictness(looser) } : null,
+    });
+}
+
+function seriesShowSkipped() {
+    seriesState.skipped.clear();
+    seriesLoad(true).then(() => seriesFocusCursor());
+}
+
+// 'Alles behouden' is meteen ongedaan te maken, tot de volgende keer
+function seriesRenderLastKept() {
+    const slot = document.getElementById('series-last-kept');
+    const last = seriesState.lastKept;
+    slot.hidden = !last;
+    if (!last) {
+        slot.replaceChildren();
+        return;
+    }
+    slot.replaceChildren(
+        createEl('i', { class: 'fas fa-check', 'aria-hidden': 'true' }),
+        createEl('span', { text: `Behouden: ${last.title}` }),
+        createEl('button', { type: 'button', class: 'link-button', id: 'btn-series-undo-keep', text: 'Ongedaan maken', onClick: () => seriesUndoKeepAll() }));
+}
+
+// Kleine reeksen krijgen grotere foto's: twee foto's van 156 px vergelijk je niet
+const SERIES_TILE = { 2: 340, 3: 300, 4: 260 };
+
+function seriesCard(series) {
+    const keep = seriesState.keep.get(series.key);
+    const moving = series.members.filter(m => !keep.has(m.id));
+    const meta = [];
+    // De datum van de voorgestelde foto (de nieuwste kan een kopie van vandaag zijn)
+    const best = series.members.find(m => m.best) || series.members[0];
+    const when = seriesDate(best.taken || series.taken);
+    if (when) meta.push(createEl('span', { text: when }));
+    if (series.folder) {
+        meta.push(createEl('span', { class: 'path-label', title: series.folder, text: displayPath(series.folder) }));
+    } else {
+        meta.push(createEl('span', { text: 'in meerdere mappen' }));
+    }
+    const card = createEl('section', {
+        class: 'series-card', dataset: { key: series.key }, 'aria-labelledby': `series-title-${series.key}`,
+    },
+        createEl('div', { class: 'series-card-header' },
+            createEl('div', { class: 'series-card-heading' },
+                createEl('span', { class: 'series-kind-icon', 'aria-hidden': 'true' },
+                    createEl('i', { class: `fas ${series.kind === 'burst' ? 'fa-bolt' : series.media === 'video' ? 'fa-film' : 'fa-clone'}` })),
+                createEl('div', { class: 'series-card-titles' },
+                    createEl('h2', { class: 'series-card-title', id: `series-title-${series.key}`, text: seriesTitle(series) }),
+                    createEl('div', { class: 'series-card-meta' }, ...seriesJoin(meta)))),
+            createEl('div', { class: 'series-card-actions' },
+                createEl('button', {
+                    class: 'btn btn-ghost', title: `De ${seriesNoun(series, 2)} groot naast elkaar (v)`, onClick: () => seriesOpenCompare(series),
+                }, createEl('i', { class: 'fas fa-magnifying-glass-plus', 'aria-hidden': 'true' }), 'Groot bekijken'),
+                createEl('button', {
+                    class: 'btn btn-ghost', title: 'Deze reeks nu overslaan (s)', onClick: () => seriesSkip(series),
+                }, 'Overslaan'),
+                createEl('button', {
+                    class: 'btn btn-secondary series-keepall-btn', title: `Alle ${seriesNoun(series, 2)} blijven; de reeks komt niet terug (a)`,
+                    onClick: () => seriesKeepAll(series),
+                }, 'Alles behouden'),
+                createEl('button', {
+                    class: 'btn btn-primary series-confirm-btn', title: 'Bevestigen (Enter)',
+                    onClick: () => seriesConfirm(series),
+                }, `Verplaats ${seriesMoveCount(series, keep).files}`))),
+        createEl('div', { class: 'series-photos', role: 'group', 'aria-label': `${series.media === 'video' ? 'Video\'s' : 'Foto\'s'}: ${seriesTitle(series)}` },
+            ...series.members.map(member => seriesPhoto(series, member, keep.has(member.id)))),
+        createEl('div', { class: 'series-detail', 'aria-live': 'polite' }));
+    const tile = SERIES_TILE[series.members.length];
+    if (tile) {
+        card.style.setProperty('--series-tile', `${tile}px`);
+        card.style.setProperty('--series-count', String(series.members.length));
+    }
+    card.classList.toggle('is-small', !!tile);
+    seriesSyncActions(card, series, keep);
+    return card;
+}
+
+// Niets te verplaatsen: dan is 'Alles behouden' de hoofdactie, en er staat geen tweede knop
+// met dezelfde naam naast
+// Wat er verhuist als je bevestigt: de foto's die weggaan plus hun exacte kopieën (zoals het venster telt)
+function seriesMoveCount(series, keep) {
+    const move = series.members.filter(m => !keep.has(m.id));
+    const copies = move.reduce((n, m) => n + (m.copies ? m.copies.length : 0), 0);
+    return { photos: move.length, copies, files: move.length + copies };
+}
+
+function seriesMoveTitle(count, series) {
+    return count.copies
+        ? `${count.photos} ${seriesNoun(series, count.photos)} en ${count.copies} exacte ${count.copies === 1 ? 'kopie' : 'kopieën'} verplaatsen (Enter)`
+        : 'Bevestigen (Enter)';
+}
+
+function seriesSyncActions(card, series, keep) {
+    const confirm = card.querySelector('.series-confirm-btn');
+    const keepAll = card.querySelector('.series-keepall-btn');
+    const count = seriesMoveCount(series, keep);
+    const moving = count.photos;
+    confirm.hidden = !moving;
+    confirm.textContent = `Verplaats ${count.files}`;
+    confirm.title = seriesMoveTitle(count, series);
+    keepAll.classList.toggle('btn-primary', !moving);
+    keepAll.classList.toggle('btn-secondary', !!moving);
+}
+
+function seriesJoin(nodes) {
+    const out = [];
+    nodes.forEach((node, i) => {
+        if (i) out.push(createEl('span', { class: 'series-dot', 'aria-hidden': 'true', text: '·' }));
+        out.push(node);
+    });
+    return out;
+}
+
+function seriesPhotoLabel(member, kept) {
+    const video = member.kind === 'video'
+        ? `, video${member.duration ? ` van ${seriesDuration(member.duration)}` : ''}${slidePlaysAsVideo(member) ? '' : ', speelt niet af in de browser'}`
+        : '';
+    return `${member.name}${video}: ${kept ? 'blijft' : 'gaat naar RAW_DUPLICATES'}${member.best ? ', voorgesteld als beste' : ''}, score ${member.score}`;
+}
+
+// Een video in de reeks: een afspeelteken met de duur, rechtsonder op het beeld. Een formaat dat
+// de browser niet afspeelt (mkv, avi) krijgt een filmstrook in plaats van het afspeelteken
+function seriesVideoBadge(member) {
+    if (member.kind !== 'video') return null;
+    return createEl('span', { class: 'series-video-badge', 'aria-hidden': 'true' },
+        createEl('i', { class: `fas ${slidePlaysAsVideo(member) ? 'fa-play' : 'fa-film'}` }),
+        seriesDuration(member.duration) || 'Video');
+}
+
+function seriesPhoto(series, member, kept) {
+    const img = createEl('img', { class: 'loading', alt: '', loading: 'lazy', decoding: 'async' });
+    img.addEventListener('load', () => img.classList.remove('loading'), { once: true });
+    img.addEventListener('error', () => { img.classList.remove('loading'); img.classList.add('is-missing'); }, { once: true });
+    img.src = vaultFileUrl('thumb', member.path);
+    const tile = createEl('button', {
+        type: 'button',
+        class: `series-photo thumb-tile${kept ? ' selected' : ' is-leaving'}${member.best ? ' is-best' : ''}`,
+        dataset: { id: String(member.id) },
+        tabindex: '-1',
+        'aria-pressed': kept ? 'true' : 'false',
+        'aria-label': seriesPhotoLabel(member, kept),
+        title: member.path,
+        onClick: () => { seriesMoveCursor(series.key, member.id, true); seriesToggleKeep(series, member.id); },
+        onFocus: () => seriesMoveCursor(series.key, member.id, false),
+    },
+        img,
+        member.best ? createEl('span', { class: 'series-best-badge' },
+            createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), 'Beste') : null,
+        seriesVideoBadge(member),
+        createEl('span', { class: 'series-photo-state', 'aria-hidden': 'true', text: kept ? '' : 'Gaat weg' }));
+    const size = member.width && member.height ? `${member.width} × ${member.height}` : formatBytes(member.size);
+    return createEl('div', { class: 'series-photo-cell' },
+        tile,
+        createEl('div', { class: 'series-photo-name', title: member.path, text: member.name }),
+        createEl('div', { class: 'series-photo-meta' },
+            createEl('span', { class: 'series-score', title: seriesBreakdownText(member) },
+                createEl('span', { class: 'series-score-value', text: String(member.score) }),
+                seriesScoreBar(member)),
+            createEl('span', { class: 'series-photo-facts', text: size })),
+        member.copies && member.copies.length ? createEl('span', {
+            class: 'chip series-copies',
+            title: `Byte voor byte gelijk; gaan mee als deze ${seriesNoun(series, 1)} weggaat:\n` + member.copies.map(c => c.path).join('\n'),
+        }, `+${member.copies.length} exacte ${member.copies.length === 1 ? 'kopie' : 'kopieën'}`) : null);
+}
+
+function seriesBreakdownText(member) {
+    return SERIES_POINTS.map(([key, label, max]) => `${label} ${member.breakdown[key]}/${max}`).join(' · ');
+}
+
+// Vier dunne stukjes in één balk: hoeveel elk onderdeel bijdraagt aan de score (van 100)
+function seriesScoreBar(member) {
+    return createEl('span', { class: 'series-score-bar', 'aria-hidden': 'true' },
+        ...SERIES_POINTS.map(([key], i) => {
+            const part = createEl('span', { class: `series-score-part series-score-part-${i + 1}` });
+            part.style.width = `${member.breakdown[key]}%`;
+            return part;
+        }));
+}
+
+function seriesUpdateCard(series) {
+    const card = seriesCardEl(series.key);
+    if (!card) return;
+    const keep = seriesState.keep.get(series.key);
+    card.querySelectorAll('.series-photo').forEach(tile => {
+        const member = series.members.find(m => m.id === Number(tile.dataset.id));
+        const kept = keep.has(member.id);
+        tile.classList.toggle('selected', kept);
+        tile.classList.toggle('is-leaving', !kept);
+        tile.setAttribute('aria-pressed', kept ? 'true' : 'false');
+        tile.setAttribute('aria-label', seriesPhotoLabel(member, kept));
+        tile.querySelector('.series-photo-state').textContent = kept ? '' : 'Gaat weg';
+    });
+    seriesSyncActions(card, series, keep);
+    seriesRenderDetail(series);
+    if (seriesCompareState.series === series) seriesRenderCompare();
+}
+
+function seriesCardEl(key) {
+    return [...document.querySelectorAll('#series-list .series-card')].find(c => c.dataset.key === key) || null;
+}
+
+function seriesRenderDetail(series) {
+    const card = seriesCardEl(series.key);
+    if (!card) return;
+    const detail = card.querySelector('.series-detail');
+    const id = seriesState.cursor.key === series.key ? seriesState.cursor.id : series.best;
+    const member = series.members.find(m => m.id === id) || series.members[0];
+    const keep = seriesState.keep.get(series.key);
+    const facts = [
+        member.width && member.height ? `${member.width} × ${member.height}` : null,
+        formatBytes(member.size),
+        member.camera,
+        seriesDate(member.taken),
+    ].filter(Boolean).join(' · ');
+    detail.replaceChildren(
+        createEl('span', { class: 'series-detail-name', title: member.path, text: member.name }),
+        createEl('span', { class: 'series-detail-facts', text: facts }),
+        createEl('span', { class: 'series-detail-score' },
+            createEl('span', { text: `Score ${member.score}` }),
+            ...SERIES_POINTS.map(([key, label, max], i) => createEl('span', { class: 'series-detail-part' },
+                createEl('span', { class: `series-score-dot series-score-part-${i + 1}`, 'aria-hidden': 'true' }),
+                `${label} ${member.breakdown[key]}/${max}`))),
+        createEl('span', { class: `badge ${keep.has(member.id) ? 'badge-accent' : 'badge-warning'}`,
+            text: keep.has(member.id) ? 'Blijft' : 'Gaat weg' }));
+}
+
+// ==================== CURSOR EN TOETSEN ====================
+
+function seriesEnsureCursor() {
+    const { key } = seriesState.cursor;
+    const series = seriesState.items.find(s => s.key === key) || seriesState.items[0];
+    if (!series) return;
+    const id = series.members.some(m => m.id === seriesState.cursor.id) ? seriesState.cursor.id : series.best;
+    seriesMoveCursor(series.key, id, false);
+    seriesState.items.forEach(s => seriesRenderDetail(s));
+}
+
+// Roving tabindex: alleen de foto onder de cursor is een tabstop
+function seriesMoveCursor(key, id, focus) {
+    seriesState.cursor = { key, id };
+    document.querySelectorAll('#series-list .series-photo').forEach(tile => {
+        const here = tile.dataset.id === String(id) && tile.closest('.series-card').dataset.key === key;
+        tile.tabIndex = here ? 0 : -1;
+        if (here && focus && document.activeElement !== tile) tile.focus();
+    });
+    const series = seriesState.items.find(s => s.key === key);
+    if (series) seriesRenderDetail(series);
+}
+
+function seriesFocusCursor(scroll = true) {
+    const card = seriesCardEl(seriesState.cursor.key);
+    const tile = card && [...card.querySelectorAll('.series-photo')].find(t => t.dataset.id === String(seriesState.cursor.id));
+    if (tile) {
+        tile.focus({ preventScroll: !scroll });
+        if (scroll) tile.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } else {
+        const list = document.getElementById('series-list');
+        const fallback = list.querySelector('.empty-state-action, #btn-series-more');
+        (fallback || document.getElementById('btn-series-compare')).focus();
+    }
+}
+
+function seriesKeydown(e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || anyOverlayOpen()) return;
+    // 'g' en dan een letter wisselt van pagina (shortcuts.js): die letter is niet voor de reeks
+    if (typeof shortcutGPending !== 'undefined' && shortcutGPending) return;
+    const tile = e.target.closest && e.target.closest('.series-photo');
+    if (!tile) return;
+    const key = tile.closest('.series-card').dataset.key;
+    const index = seriesState.items.findIndex(s => s.key === key);
+    const series = seriesState.items[index];
+    if (!series) return;
+    const pos = series.members.findIndex(m => m.id === Number(tile.dataset.id));
+    const go = (s, member) => { seriesMoveCursor(s.key, member.id, true); seriesFocusCursor(); };
+    switch (e.key) {
+    case 'ArrowRight':
+        if (pos < series.members.length - 1) go(series, series.members[pos + 1]);
+        break;
+    case 'ArrowLeft':
+        if (pos > 0) go(series, series.members[pos - 1]);
+        break;
+    case 'ArrowDown': {
+        const next = seriesState.items[index + 1];
+        if (next) go(next, next.members.find(m => m.best) || next.members[0]);
+        else if (seriesState.nextOffset !== null) seriesDownIntoNextPage(series.key);
+        break;
+    }
+    case 'ArrowUp': {
+        const prev = seriesState.items[index - 1];
+        if (prev) go(prev, prev.members.find(m => m.best) || prev.members[0]);
+        break;
+    }
+    case 'Home':
+        go(series, series.members[0]);
+        break;
+    case 'End':
+        go(series, series.members[series.members.length - 1]);
+        break;
+    case ' ':
+        seriesToggleKeep(series, series.members[pos].id);
+        break;
+    case 'Enter':
+        seriesConfirm(series);
+        break;
+    case 's':
+        seriesSkip(series);
+        break;
+    case 'a':
+        seriesKeepAll(series);
+        break;
+    case 'v':
+        seriesOpenCompare(series, series.members[pos].id);
+        break;
+    default:
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+// ↓ op de laatste geladen reeks: de volgende pagina laden en daar verder
+async function seriesDownIntoNextPage(key) {
+    if (!seriesState.loading) await seriesLoad(false);
+    const index = seriesState.items.findIndex(s => s.key === key);
+    const next = seriesState.items[index + 1];
+    if (!next) return;
+    seriesMoveCursor(next.key, (next.members.find(m => m.best) || next.members[0]).id, false);
+    seriesFocusCursor();
+}
+
+// ==================== BESLISSEN ====================
+
+function seriesToggleKeep(series, id) {
+    const keep = seriesState.keep.get(series.key);
+    if (keep.has(id)) {
+        if (keep.size === 1) {
+            const noun = seriesNoun(series, 1);
+            showToast(`Minstens één ${noun} blijft`, `Kies eerst een andere ${noun} om te houden, of sla de reeks over.`, 'info');
+            return;
+        }
+        keep.delete(id);
+    } else {
+        keep.add(id);
+    }
+    seriesUpdateCard(series);
+}
+
+// Een reeks is afgehandeld: weg uit de lijst, de cursor naar de volgende (of de vorige).
+// gone: de server heeft hem niet meer (verplaatst of behouden), dus schuift de rest daar op;
+// een overgeslagen reeks staat er nog wel.
+function seriesDone(series, gone) {
+    const index = seriesState.items.indexOf(series);
+    if (index < 0) return;
+    const hadFocus = !!(document.activeElement && document.activeElement.closest('#series-list'));
+    seriesState.items.splice(index, 1);
+    seriesState.keep.delete(series.key);
+    if (gone) {
+        seriesState.gone += 1;
+        seriesState.handled += 1;
+        if (seriesState.nextOffset !== null) seriesState.nextOffset = Math.max(0, seriesState.nextOffset - 1);
+        seriesState.total = Math.max(0, seriesState.total - 1);
+        seriesState.photos = Math.max(0, seriesState.photos - series.count);
+        if (series.media === 'video') seriesState.videos = Math.max(0, seriesState.videos - series.count);
+    }
+    const next = seriesState.items[index] || seriesState.items[index - 1];
+    if (next) seriesState.cursor = { key: next.key, id: next.best };
+    // De afgehandelde reeks gaat zichtbaar weg en de reeksen eronder schuiven op
+    const list = document.getElementById('series-list');
+    MediaMotion.flipByKey(list.querySelectorAll('.series-card'), el => el.dataset.key, seriesRender,
+        { after: () => list.querySelectorAll('.series-card'), enter: false });
+    if (seriesState.items.length < 5 && seriesState.nextOffset !== null && !seriesState.loading) seriesLoad(false);
+    if (hadFocus) seriesFocusCursor();
+}
+
+function seriesSkip(series) {
+    seriesState.skipped.add(series.key);
+    seriesDone(series, false);
+}
+
+async function seriesKeepAll(series) {
+    if (seriesState.busy) return;
+    seriesState.busy = true;
+    try {
+        const data = await fetchJSON(`${API_BASE}/api/series/keep-all`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ members: series.members.map(m => m.id) }),
+        });
+        seriesState.lastKept = { key: data.key, title: seriesTitle(series) };
+        seriesDone(series, true);
+        if (seriesState.status) seriesState.status.reviewed += 1;
+        seriesRenderStatus();
+        showUndoToast({
+            title: 'Alles behouden',
+            message: `${series.count} ${seriesNoun(series, series.count)} blijven staan. Deze reeks komt niet meer terug, tenzij hij verandert.`,
+            key: `series-keep:${data.key}`, undo: () => seriesUndoKeepAll(true, { key: data.key, title: seriesTitle(series) }),
+            onUndone: (note) => note,
+        });
+    } catch (err) {
+        toastFetchError('Behouden mislukt', err);
+    } finally {
+        seriesState.busy = false;
+    }
+}
+
+function seriesConfirm(series) {
+    if (seriesState.busy) return;
+    const keep = seriesState.keep.get(series.key);
+    const move = series.members.filter(m => !keep.has(m.id));
+    if (!move.length) {
+        seriesKeepAll(series);
+        return;
+    }
+    const kept = series.members.filter(m => keep.has(m.id));
+    const copies = move.reduce((n, m) => n + (m.copies ? m.copies.length : 0), 0);
+    const files = move.length + copies;
+    const bytes = move.reduce((n, m) => n + m.size * (1 + (m.copies ? m.copies.length : 0)), 0);
+    seriesState.confirm = { series, keep: kept.map(m => m.id) };
+    const destination = seriesState.status ? seriesState.status.holding_folder : null;
+    document.getElementById('series-confirm-title').textContent =
+        `${files} ${seriesNoun(series, files)} uit deze reeks verplaatsen?`;
+    const list = document.getElementById('series-confirm-list');
+    list.replaceChildren(...[
+        createEl('li', {},
+            `${files} ${files === 1 ? 'bestand gaat' : 'bestanden gaan'} (${formatBytes(bytes)}) naar `,
+            createEl('span', { class: 'path-label', title: destination || '', text: 'RAW_DUPLICATES/near-duplicates' }),
+            ', in dezelfde mappen als nu.'),
+        copies ? createEl('li', { text: `Daarvan ${copies} exacte ${copies === 1 ? 'kopie' : 'kopieën'} van een ${seriesNoun(series, 1)} die weggaat.` }) : null,
+        createEl('li', { class: 'dup-confirm-keep' },
+            `${kept.length === 1 ? 'Blijft' : 'Blijven'}: `,
+            ...kept.flatMap((m, i) => [i ? ', ' : null,
+                createEl('span', { class: 'path-label', title: m.path, text: m.name })])),
+        createEl('li', { text: 'Er wordt niets gewist. In het Herstelcentrum zet je deze reeks in één keer terug.' }),
+    ].filter(Boolean));
+    const go = document.getElementById('btn-series-go');
+    go.textContent = `Verplaats ${files} ${seriesNoun(series, files)}`;
+    go.disabled = false;
+    document.getElementById('modal-series-confirm').classList.add('active');
+}
+
+function seriesCloseConfirm() {
+    if (seriesState.busy) return;
+    document.getElementById('modal-series-confirm').classList.remove('active');
+    seriesState.confirm = null;
+}
+
+async function seriesRunConfirm() {
+    const pending = seriesState.confirm;
+    if (!pending || seriesState.busy) return;
+    const go = document.getElementById('btn-series-go');
+    seriesState.busy = true;
+    go.disabled = true;
+    go.classList.add('is-loading');
+    try {
+        const result = await fetchJSON(`${API_BASE}/api/series/keep`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ members: pending.series.members.map(m => m.id), keep: pending.keep }),
+        });
+        seriesState.busy = false;
+        seriesCloseConfirm();
+        const moved = result.moved.length;
+        if (result.failed.length) {
+            showToast(`${moved} verplaatst, ${result.failed.length} niet`,
+                result.failed.map(f => `${f.path ? f.path.split('/').pop() : 'foto'}: ${f.reason}`).join('\n'), 'warning');
+            seriesLoad(true);
+        } else {
+            showUndoToast({
+                title: `${moved} ${seriesNoun(pending.series, moved)} verplaatst`,
+                message: 'Ze staan in RAW_DUPLICATES/near-duplicates.',
+                key: result.action_id ? `action:${result.action_id}` : null,
+                undo: { url: '/api/recovery/undo', body: { action_id: result.action_id } },
+                onUndone: (data) => seriesMovedBack(data, pending.series),
+            });
+            seriesState.moved += 1;
+            seriesDone(pending.series, true);
+        }
+        seriesLoadStatus();
+    } catch (err) {
+        seriesState.busy = false;
+        go.disabled = false;
+        toastFetchError('Verplaatsen mislukt', err);
+        if (err && err.status === 409) {
+            seriesCloseConfirm();
+            seriesLoad(true);
+        }
+    } finally {
+        go.classList.remove('is-loading');
+    }
+}
+
+// ==================== GROOT VERGELIJKEN ====================
+//
+// De foto's van één reeks groot naast elkaar (v, of 'Groot bekijken'). 'Passend' toont elke foto
+// heel; '100%' toont dezelfde uitsnede van elke foto op de pixelgrootte van de grootste, zodat
+// een verkleinde of wazige kopie echt zachter oogt. Slepen verschuift de uitsnede van alle foto's
+// tegelijk. Houden of laten gaan kan hier ook; de kaart in de lijst loopt mee.
+
+const SERIES_VIDEO_FRAME_AT = 1;     // seconden: het moment van de miniatuur (thumbnail.py, near_dups.VIDEO_FRAME_AT)
+const SERIES_VIDEO_STEP = 5;         // seconden per ← of → op een spelende video
+
+const seriesCompareState = { series: null, current: null, detail: false, focus: { x: 50, y: 50 }, drag: null };
+
+function seriesOpenCompare(series, id) {
+    seriesCompareState.series = series;
+    seriesCompareState.current = id || (seriesState.cursor.key === series.key ? seriesState.cursor.id : series.best);
+    seriesCompareState.focus = { x: 50, y: 50 };
+    document.getElementById('series-compare-title').textContent = seriesTitle(series);
+    document.getElementById('series-compare-hint-noun').textContent = seriesNoun(series, 1);
+    document.getElementById('series-compare-hint-video').hidden = !series.members.some(m => m.kind === 'video' && slidePlaysAsVideo(m));
+    const grid = document.getElementById('series-compare-grid');
+    grid.style.setProperty('--compare-columns', String(Math.min(series.members.length, 3)));
+    grid.replaceChildren(...series.members.map(member => seriesComparePane(series, member)));
+    seriesCompareZoomAvailable();
+    seriesCompareZoom(seriesCompareState.detail);
+    seriesRenderCompare();
+    document.getElementById('modal-series-compare').classList.add('active');
+    // De focus op de knop van de foto onder de cursor (niet op de eerste knop van het venster)
+    setTimeout(() => seriesCompareFocus(seriesCompareState.current), 0);
+}
+
+function seriesCloseCompare() {
+    document.querySelectorAll('#series-compare-grid video').forEach(v => v.pause());
+    document.getElementById('modal-series-compare').classList.remove('active');
+    document.getElementById('series-compare-grid').replaceChildren();
+    seriesCompareState.series = null;
+}
+
+// De miniatuur als beeld in het venster (een video die de browser niet afspeelt, of een origineel
+// dat hij niet kan tonen). Een miniatuur is klein: op 100% blijft hij passend (is-still)
+function seriesCompareStill(member, frame) {
+    const img = createEl('img', { class: 'series-compare-img loading', alt: member.name, draggable: 'false' });
+    img.addEventListener('load', () => img.classList.remove('loading'), { once: true });
+    img.addEventListener('error', () => img.classList.remove('loading'), { once: true });
+    img.src = vaultFileUrl('thumb', member.path);
+    frame.classList.add('is-still');
+    return img;
+}
+
+// Het beeld zelf: een foto als origineel, een video die de browser afspeelt als stilstaande video op
+// zijn eigen grootte (hetzelfde moment als de miniatuur), zodat een verkleinde kopie op 100% echt zachter oogt
+function seriesCompareMedia(member, frame) {
+    if (member.kind === 'video') {
+        if (!slidePlaysAsVideo(member)) return seriesCompareStill(member, frame);
+        const video = createEl('video', {
+            class: 'series-compare-img series-compare-video loading', playsinline: true, preload: 'metadata',
+            'aria-label': member.name, src: `${vaultFileUrl('file', member.path)}#t=${SERIES_VIDEO_FRAME_AT}`,
+        });
+        video.muted = true;
+        video.addEventListener('loadeddata', () => video.classList.remove('loading'), { once: true });
+        // Toch niet af te spelen (een codec die de browser mist): de miniatuur, zonder afspeelknop
+        video.addEventListener('error', () => {
+            if (!video.isConnected) return;
+            frame.querySelector('.series-compare-play')?.remove();
+            frame.classList.remove('is-playing');
+            video.replaceWith(seriesCompareStill(member, frame));
+            seriesCompareZoomAvailable();
+        }, { once: true });
+        return video;
+    }
+    const img = createEl('img', { class: 'series-compare-img loading', alt: member.name, draggable: 'false' });
+    img.addEventListener('load', () => img.classList.remove('loading'), { once: true });
+    // Kan de browser het origineel niet tonen (HEIC buiten Safari), dan de miniatuur
+    img.addEventListener('error', () => {
+        if (img.dataset.fallback) { img.classList.remove('loading'); return; }
+        img.dataset.fallback = '1';
+        frame.classList.add('is-still');
+        img.src = vaultFileUrl('thumb', member.path);
+    });
+    img.src = vaultFileUrl('file', member.path);
+    return img;
+}
+
+function seriesComparePane(series, member) {
+    const isVideo = member.kind === 'video';
+    const playable = isVideo && slidePlaysAsVideo(member);
+    const frame = createEl('div', { class: 'series-compare-frame' });
+    frame.append(...[
+        seriesCompareMedia(member, frame),
+        member.best ? createEl('span', { class: 'series-best-badge' },
+            createEl('i', { class: 'fas fa-star', 'aria-hidden': 'true' }), 'Beste') : null,
+        playable ? createEl('button', {
+            type: 'button', class: 'btn btn-secondary btn-sm series-compare-play',
+            'aria-label': `${member.name} afspelen`,
+            onClick: e => { e.stopPropagation(); seriesComparePlay(frame); },
+        }, createEl('i', { class: 'fas fa-play', 'aria-hidden': 'true' }), 'Afspelen')
+            : isVideo ? seriesVideoBadge(member) : null,
+    ].filter(Boolean));
+    frame.addEventListener('pointerdown', e => seriesCompareDragStart(e, frame));
+    const facts = [
+        member.width && member.height ? `${member.width} × ${member.height}` : null,
+        isVideo ? seriesDuration(member.duration) : null,
+        formatBytes(member.size),
+        member.camera,
+    ].filter(Boolean).join(' · ');
+    return createEl('div', { class: 'series-compare-pane', dataset: { id: String(member.id) } },
+        frame,
+        createEl('div', { class: 'series-compare-info' },
+            createEl('div', { class: 'series-compare-head' },
+                createEl('span', { class: 'series-compare-name', title: member.path, text: member.name }),
+                createEl('span', { class: 'badge series-compare-state' })),
+            createEl('div', { class: 'series-compare-facts', text: facts }),
+            isVideo && !playable ? createEl('div', { class: 'series-compare-note' },
+                createEl('i', { class: 'fas fa-circle-info', 'aria-hidden': 'true' }),
+                'Afspelen kan niet in de browser') : null,
+            createEl('div', { class: 'series-compare-score' },
+                createEl('span', { class: 'series-compare-score-total', text: `Score ${member.score}` }),
+                ...SERIES_POINTS.map(([key, label, max], i) => createEl('span', { class: 'series-detail-part' },
+                    createEl('span', { class: `series-score-dot series-score-part-${i + 1}`, 'aria-hidden': 'true' }),
+                    `${label} ${member.breakdown[key]}/${max}`)))),
+        createEl('button', {
+            type: 'button', class: 'btn series-compare-keep',
+            onClick: () => { seriesCompareState.current = member.id; seriesToggleKeep(series, member.id); },
+            onFocus: () => seriesCompareSetCurrent(member.id),
+        }));
+}
+
+// Na elke wijziging: wat blijft, wat gaat, en de knop onderin
+function seriesRenderCompare() {
+    const series = seriesCompareState.series;
+    if (!series) return;
+    const keep = seriesState.keep.get(series.key);
+    if (!keep) return;
+    document.querySelectorAll('#series-compare-grid .series-compare-pane').forEach(pane => {
+        const member = series.members.find(m => m.id === Number(pane.dataset.id));
+        const kept = keep.has(member.id);
+        pane.classList.toggle('is-kept', kept);
+        pane.classList.toggle('is-current', member.id === seriesCompareState.current);
+        const state = pane.querySelector('.series-compare-state');
+        state.className = `badge series-compare-state ${kept ? 'badge-accent' : 'badge-warning'}`;
+        state.textContent = kept ? 'Blijft' : 'Gaat weg';
+        const button = pane.querySelector('.series-compare-keep');
+        button.classList.toggle('btn-primary', kept);
+        button.classList.toggle('btn-secondary', !kept);
+        button.setAttribute('aria-pressed', kept ? 'true' : 'false');
+        button.setAttribute('aria-label', `${member.name} houden`);
+        button.replaceChildren(createEl('i', { class: `fas ${kept ? 'fa-check' : 'fa-plus'}`, 'aria-hidden': 'true' }),
+            kept ? 'Blijft' : 'Houden');
+    });
+    const count = seriesMoveCount(series, keep);
+    const go = document.getElementById('btn-series-compare-go');
+    go.textContent = count.photos ? `Verplaats ${count.files}` : 'Alles behouden';
+}
+
+function seriesCompareSetCurrent(id) {
+    seriesCompareState.current = id;
+    document.querySelectorAll('#series-compare-grid .series-compare-pane').forEach(pane => {
+        pane.classList.toggle('is-current', pane.dataset.id === String(id));
+    });
+}
+
+function seriesCompareFocus(id) {
+    const pane = [...document.querySelectorAll('#series-compare-grid .series-compare-pane')].find(p => p.dataset.id === String(id));
+    if (!pane) return;
+    pane.querySelector('.series-compare-keep').focus({ preventScroll: true });
+    pane.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+// Passend of 100%: op 100% krijgt elke foto de breedte (in beeldpunten) van de grootste
+function seriesCompareZoom(detail) {
+    if (detail && !seriesCompareZoomAvailable()) detail = false;
+    seriesCompareState.detail = !!detail;
+    const series = seriesCompareState.series;
+    document.getElementById('btn-series-fit').setAttribute('aria-pressed', detail ? 'false' : 'true');
+    document.getElementById('btn-series-detail').setAttribute('aria-pressed', detail ? 'true' : 'false');
+    const grid = document.getElementById('series-compare-grid');
+    grid.classList.toggle('is-detail', !!detail);
+    if (!series) return;
+    const widest = Math.max(...series.members.map(m => m.width || 0)) || 1600;
+    grid.style.setProperty('--compare-detail-width', `${Math.round(widest / (window.devicePixelRatio || 1))}px`);
+    seriesComparePan();
+}
+
+// 100% heeft alleen zin als minstens één beeld op zijn eigen grootte te zien is (geen miniatuur)
+function seriesCompareZoomAvailable() {
+    const frames = [...document.querySelectorAll('#series-compare-grid .series-compare-frame')];
+    const available = !frames.length || frames.some(f => !f.classList.contains('is-still'));
+    const button = document.getElementById('btn-series-detail');
+    button.disabled = !available;
+    button.title = available ? 'Dezelfde uitsnede op ware grootte; slepen verschuift (d)'
+        : 'Geen van deze video\'s speelt af in de browser: er is alleen een miniatuur, dus geen 100%';
+    if (!available && seriesCompareState.detail) {
+        seriesCompareState.detail = false;
+        document.getElementById('series-compare-grid').classList.remove('is-detail');
+        document.getElementById('btn-series-fit').setAttribute('aria-pressed', 'true');
+        button.setAttribute('aria-pressed', 'false');
+    }
+    return available;
+}
+
+function seriesComparePan() {
+    const { x, y } = seriesCompareState.focus;
+    const grid = document.getElementById('series-compare-grid');
+    grid.style.setProperty('--compare-x', `${x}%`);
+    grid.style.setProperty('--compare-y', `${y}%`);
+}
+
+// Een video speelt op zijn plek in het venster, vanaf het begin en passend (ook op 100%: zo blijven
+// de knoppen van de video in beeld); het stilstaande beeld blijft staan tot het eerste beeld er is.
+// Een andere video die speelt, pauzeert
+function seriesComparePlay(frame) {
+    const video = frame.querySelector('video');
+    if (!video) return;
+    document.querySelectorAll('#series-compare-grid video').forEach(v => { if (v !== video) v.pause(); });
+    if (!frame.classList.contains('is-playing')) {
+        frame.classList.add('is-playing');
+        frame.querySelector('.series-compare-play')?.remove();
+        video.controls = true;
+        video.muted = false;
+        video.preload = 'auto';
+        video.addEventListener('play', () => {
+            document.querySelectorAll('#series-compare-grid video').forEach(v => { if (v !== video) v.pause(); });
+        });
+        try { video.currentTime = 0; } catch (err) { /* nog geen metadata: begint toch vooraan */ }
+    }
+    video.play().catch(() => {});
+    video.focus({ preventScroll: true });
+}
+
+// Toetsen op een spelende video (WebKit geeft een video zelf geen toetsen): k of spatie speelt of
+// pauzeert, ← → springen 5 s, Esc pauzeert en zet de focus terug op Houden (het venster blijft open)
+function seriesCompareVideoKey(e, video) {
+    if (e.key === ' ' || e.key === 'k') {
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        const step = e.key === 'ArrowRight' ? SERIES_VIDEO_STEP : -SERIES_VIDEO_STEP;
+        const end = Number.isFinite(video.duration) ? video.duration : Infinity;
+        video.currentTime = Math.max(0, Math.min(end, video.currentTime + step));
+    } else if (e.key === 'Escape') {
+        video.pause();
+        const pane = video.closest('.series-compare-pane');
+        pane?.querySelector('.series-compare-keep')?.focus({ preventScroll: true });
+    } else {
+        return false;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+}
+
+// Slepen op 100%: de uitsnede van alle foto's schuift mee (een spelende video en een miniatuur staan passend)
+function seriesCompareDragStart(e, frame) {
+    if (!seriesCompareState.detail || e.button !== 0 || e.target.closest('button')
+        || frame.classList.contains('is-playing') || frame.classList.contains('is-still')) return;
+    const img = frame.querySelector('.series-compare-img');
+    const rect = img.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    e.preventDefault();
+    const start = { px: e.clientX, py: e.clientY, ...seriesCompareState.focus };
+    frame.setPointerCapture(e.pointerId);
+    frame.classList.add('is-dragging');
+    const move = ev => {
+        const clamp = v => Math.max(0, Math.min(100, v));
+        seriesCompareState.focus = {
+            x: clamp(start.x - (ev.clientX - start.px) / rect.width * 100),
+            y: clamp(start.y - (ev.clientY - start.py) / rect.height * 100),
+        };
+        seriesComparePan();
+    };
+    const end = () => {
+        frame.classList.remove('is-dragging');
+        frame.removeEventListener('pointermove', move);
+        frame.removeEventListener('pointerup', end);
+        frame.removeEventListener('pointercancel', end);
+    };
+    frame.addEventListener('pointermove', move);
+    frame.addEventListener('pointerup', end);
+    frame.addEventListener('pointercancel', end);
+}
+
+function seriesCompareKeydown(e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || !seriesCompareState.series) return;
+    if (e.target instanceof HTMLVideoElement && seriesCompareVideoKey(e, e.target)) return;
+    const series = seriesCompareState.series;
+    const pos = series.members.findIndex(m => m.id === seriesCompareState.current);
+    if (e.key === 'k') {
+        // k speelt of pauzeert de video van het huidige beeld, ook met de focus op Houden
+        const pane = document.querySelector(`#series-compare-grid .series-compare-pane[data-id="${seriesCompareState.current}"]`);
+        const video = pane?.querySelector('video');
+        if (!video) return;
+        const frame = pane.querySelector('.series-compare-frame');
+        if (!frame.classList.contains('is-playing')) seriesComparePlay(frame);
+        else if (video.paused) video.play().catch(() => {});
+        else video.pause();
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        const next = series.members[pos + (e.key === 'ArrowRight' ? 1 : -1)];
+        if (next) seriesCompareFocus(next.id);
+    } else if (e.key === 'Home' || e.key === 'End') {
+        seriesCompareFocus(series.members[e.key === 'Home' ? 0 : series.members.length - 1].id);
+    } else if (e.key === 'd') {
+        seriesCompareZoom(!seriesCompareState.detail);
+    } else {
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+// Verplaatsen vanuit het venster: eerst dicht, dan dezelfde vraag als in de lijst
+function seriesCompareConfirm() {
+    const series = seriesCompareState.series;
+    if (!series) return;
+    seriesCloseCompare();
+    seriesConfirm(series);
+}
+
+// Na 'Ongedaan maken' van een verplaatste reeks (undo-toast.js): de reeks komt terug in de lijst
+function seriesMovedBack(data, series = null) {
+    seriesState.moved = Math.max(0, seriesState.moved - 1);
+    seriesState.handled = Math.max(0, seriesState.handled - 1);
+    seriesLoadStatus();
+    if (currentMainView() === 'series') seriesLoad(true);
+    const back = data.restored || 0;
+    const notBack = (data.skipped || []).length;
+    return { title: 'Teruggezet', type: notBack ? 'warning' : 'success',
+        message: `${back} ${seriesNoun(series, back)} ${back === 1 ? 'staat' : 'staan'} weer op de oude plek${notBack ? `, ${notBack} niet (zie het Herstelcentrum)` : ''}.` };
+}
+
+// 'Alles behouden' terugdraaien: met de link boven de lijst of vanuit de melding (fromToast: die
+// toont de uitkomst en meldt een fout); elk van beide haalt de ander weg
+async function seriesUndoKeepAll(fromToast = false, kept = null) {
+    const last = kept || seriesState.lastKept;
+    if (!last || seriesState.undoingKeep === last.key) return null;
+    // Bezig: de link staat even uit (geen dubbele klik); link en melding blijven tot het lukt
+    seriesState.undoingKeep = last.key;
+    const link = document.getElementById('btn-series-undo-keep');
+    if (link && seriesState.lastKept && seriesState.lastKept.key === last.key) link.disabled = true;
+    // Gelukt, of kan echt niet meer (404: al terug): beide wegen terug verdwijnen
+    const forget = () => {
+        if (seriesState.lastKept && seriesState.lastKept.key === last.key) seriesState.lastKept = null;
+        undoToastDone(`series-keep:${last.key}`);
+        seriesRenderLastKept();
+    };
+    let note = null;
+    try {
+        await fetchJSON(`${API_BASE}/api/series/reviews/undo`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: last.key }),
+        });
+    } catch (err) {
+        seriesState.undoingKeep = null;
+        if ([404, 409, 410].includes(err.status)) forget();
+        // De schijf even weg of geen verbinding: de link blijft, nog eens proberen mag
+        else seriesRenderLastKept();
+        if (fromToast) throw err;
+        toastFetchError('Ongedaan maken mislukt', err);
+        return null;
+    }
+    seriesState.undoingKeep = null;
+    forget();
+    seriesState.handled = Math.max(0, seriesState.handled - 1);
+    note = { title: 'Weer in de lijst', message: `${last.title} staat weer tussen de reeksen.`, type: 'success' };
+    if (!fromToast) showToast(note.title, note.message, note.type);
+    seriesLoadStatus();
+    try {
+        await seriesLoad(true);
+        const back = seriesState.items.find(s => s.key === last.key);
+        if (back && currentMainView() === 'series') {
+            seriesMoveCursor(back.key, back.best, false);
+            seriesFocusCursor();
+        }
+    } catch (err) {
+        toastFetchError('Reeksen laden mislukt', err);
+    }
+    return note;
+}
+
+async function seriesResetReviews() {
+    try {
+        const data = await fetchJSON(`${API_BASE}/api/series/reviews/reset`, { method: 'POST' });
+        showToast('Reeksen weer zichtbaar', `${data.shown_again} ${data.shown_again === 1 ? 'reeks staat' : 'reeksen staan'} weer in de lijst.`, 'success');
+        seriesState.lastKept = null;
+        seriesLoadStatus();
+        seriesLoad(true);
+    } catch (err) {
+        toastFetchError('Terugzetten mislukt', err);
+    }
+}
+
+function seriesInitPage() {
+    document.getElementById('series-list').addEventListener('keydown', seriesKeydown);
+    registerOverlayCloser('modal-series-confirm', seriesCloseConfirm);
+    registerOverlayCloser('modal-series-compare', seriesCloseCompare);
+    document.getElementById('modal-series-compare').addEventListener('keydown', seriesCompareKeydown);
+    addShortcutGroupLater();
+    // Na het terugzetten in het Herstelcentrum of een nieuwe vergelijking: opnieuw laden bij terugkomst
+    if (typeof jobsOnFinished === 'function') {
+        jobsOnFinished(job => {
+            if (job.type === 'index' && seriesState.loaded) seriesLoadStatus();
+        });
+    }
+}
+
+// shortcuts.js laadt na dit script: de groep pas toevoegen als de pagina klaar is
+function addShortcutGroupLater() {
+    const add = () => {
+        if (typeof addShortcutGroup !== 'function') return;
+        addShortcutGroup('Reeksen', [
+            [['←', '→'], 'Vorige of volgende foto in de reeks'],
+            [['↑', '↓'], 'Vorige of volgende reeks'],
+            [['Home', 'End'], 'Eerste of laatste foto in de reeks'],
+            [['spatie'], 'Foto houden of laten gaan'],
+            [['v'], 'Groot vergelijken (ook op 100%)'],
+            [['Enter'], 'Reeks bevestigen (met een vraag vooraf)'],
+            [['s'], 'Reeks overslaan'],
+            [['a'], 'Alles behouden'],
+        ]);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', add, { once: true });
+    else add();
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', seriesInitPage, { once: true });
+else seriesInitPage();

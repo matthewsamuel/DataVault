@@ -62,9 +62,10 @@ osacompile -o DataVault.app/Contents/Resources/Scripts/main.scpt code/main.apple
 - Of: Systeem Preferences > Security & Privacy > General > "Open Anyway"
 
 **Server start niet**
-- Controleer of poort 8000 vrij is: `lsof -i :8000`
-- Check of Python dependencies geïnstalleerd zijn: `cd code && source venv/bin/activate && pip install -r requirements.txt`
+- Controleer welk programma op poort 8000 luistert: `lsof -i :8000 -sTCP:LISTEN`
+- Check of Python dependencies geïnstalleerd zijn (Python 3.12): `cd code && venv/bin/pip install -r requirements.txt`
 
 **Meerdere servers draaien**
-- Run `cd code && ./stop_datavault.sh`
-- Of handmatig: `kill $(lsof -ti :8000)`
+- Run `cd code && ./stop_datavault.sh`. Dat stopt alleen de DataVault-server die op poort 8000
+  luistert, niet de browsertabbladen die ermee verbonden zijn (`kill $(lsof -ti :8000)` zou die
+  ook stoppen) en geen ander programma op die poort.

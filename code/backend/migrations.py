@@ -1,0 +1,1390 @@
+"""
+DataVault Dashboard - SQLite schema migrations
+
+Every schema change is a numbered migration that runs exactly once, inside a
+transaction. Before any pending migration runs on an existing database, a full
+copy is written to <cache>/db_backups/, so ratings, streaks and undo data can
+always be recovered. Migrations only add; they never drop user data.
+"""
+import logging
+import re
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+from typing import Callable, List, Set, Tuple
+
+log = logging.getLogger(__name__)
+
+BACKUP_DIR_NAME = "db_backups"
+BACKUPS_TO_KEEP = 10
+
+
+def _m001_baseline(conn: sqlite3.Connection):
+    """Schema as it existed before migrations were introduced (no-op on old DBs)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS file_hashes (
+            path TEXT PRIMARY KEY,
+            size INTEGER NOT NULL,
+            mtime REAL NOT NULL,
+            sha256 TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS delete_runs (
+            run_id TEXT PRIMARY KEY,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            total_files INTEGER DEFAULT 0
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS delete_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            src_path TEXT NOT NULL,
+            dst_path TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (run_id) REFERENCES delete_runs(run_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS file_ratings (
+            path TEXT PRIMARY KEY,
+            rating INTEGER DEFAULT 1000,
+            votes INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS show_settings (
+            path TEXT PRIMARY KEY,
+            enabled BOOLEAN DEFAULT 1,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS keurer_decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL,
+            folder TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(path, folder)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_keurer_folder ON keurer_decisions(folder)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_keurer_date ON keurer_decisions(decided_at)")
+
+
+def _m002_keurer_undo_paths(conn: sqlite3.Connection):
+    """
+    Keurer undo runs server-side: remember where a decision put the file.
+    path stays the original location; dest_path is the TRASH or move target
+    (NULL for 'keep' and for rows written before this migration).
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(keurer_decisions)")}
+    if "dest_path" not in columns:
+        conn.execute("ALTER TABLE keurer_decisions ADD COLUMN dest_path TEXT")
+
+
+def _m003_keurer_dest_fingerprint(conn: sqlite3.Connection):
+    """
+    Remember which file a Keurer decision moved: inode number and size of the
+    file at dest_path. A rename keeps the inode, so undo can tell the moved file
+    apart from a different, same-named file that later took its place in TRASH.
+    (st_dev is not stored: it changes when an external disk is mounted again.)
+    NULL for 'keep' and for rows written before this migration.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(keurer_decisions)")}
+    if "dest_ino" not in columns:
+        conn.execute("ALTER TABLE keurer_decisions ADD COLUMN dest_ino INTEGER")
+    if "dest_size" not in columns:
+        conn.execute("ALTER TABLE keurer_decisions ADD COLUMN dest_size INTEGER")
+
+
+def _m004_keurer_keep_move_history(conn: sqlite3.Connection):
+    """
+    UNIQUE(path, folder) let a new decision on a path silently replace an
+    earlier 'move' row (and with it the only record of where that file went).
+    Rebuild keurer_decisions so uniqueness only applies to keep/delete rows.
+    Every row is copied with its own id, and the AUTOINCREMENT counter is kept,
+    so an id that was already used (e.g. by an undone decision) is never reused.
+    """
+    row = conn.execute(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'keurer_decisions'"
+    ).fetchone()
+    old_seq = row[0] if row else 0
+    count_before = conn.execute("SELECT COUNT(*) FROM keurer_decisions").fetchone()[0]
+
+    conn.execute("""
+        CREATE TABLE keurer_decisions_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL,
+            folder TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            dest_path TEXT,
+            dest_ino INTEGER,
+            dest_size INTEGER
+        )
+    """)
+    columns = "id, path, folder, decision, decided_at, dest_path, dest_ino, dest_size"
+    conn.execute(f"INSERT INTO keurer_decisions_new ({columns}) SELECT {columns} FROM keurer_decisions")
+    count_after = conn.execute("SELECT COUNT(*) FROM keurer_decisions_new").fetchone()[0]
+    if count_after != count_before:
+        raise RuntimeError(f"keurer_decisions copy incomplete: {count_after} of {count_before} rows")
+
+    conn.execute("DROP TABLE keurer_decisions")
+    conn.execute("ALTER TABLE keurer_decisions_new RENAME TO keurer_decisions")
+    conn.execute(
+        "CREATE UNIQUE INDEX idx_keurer_path_folder ON keurer_decisions(path, folder) "
+        "WHERE decision != 'move'"
+    )
+    conn.execute("CREATE INDEX idx_keurer_folder ON keurer_decisions(folder)")
+    conn.execute("CREATE INDEX idx_keurer_date ON keurer_decisions(decided_at)")
+
+    new = conn.execute(
+        "SELECT seq FROM sqlite_sequence WHERE name = 'keurer_decisions'"
+    ).fetchone()
+    if new is None:
+        if old_seq:
+            conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('keurer_decisions', ?)", (old_seq,))
+    elif new[0] < old_seq:
+        conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'keurer_decisions'", (old_seq,))
+
+
+def _m005_keurer_keep_delete_history(conn: sqlite3.Connection):
+    """
+    Migration 4 still let a new 'delete' on a path replace an earlier 'delete'
+    row (e.g. a new file appeared at the same path and was trashed too), and with
+    it the only record of where the first file went in TRASH. From now on only
+    'keep' rows are unique per path; delete and move rows always stay.
+    Only the index changes: no row is touched.
+    """
+    conn.execute("DROP INDEX IF EXISTS idx_keurer_path_folder")
+    conn.execute(
+        "CREATE UNIQUE INDEX idx_keurer_keep_path_folder ON keurer_decisions(path, folder) "
+        "WHERE decision = 'keep'"
+    )
+
+
+def _m006_hash_cache_algo_and_fingerprint(conn: sqlite3.Connection):
+    """
+    The hash cache once held SHA-256 and xxHash3 values side by side in one
+    column called 'sha256', with nothing saying which was which, so a cached
+    SHA-256 made an identical file look different (REPO-HYGIENE-9). The column
+    becomes 'hash' and gets an 'algo' tag; existing rows keep algo NULL, which
+    never matches a lookup, so they are simply rehashed the next time.
+    A cached hash is now only trusted while the file's inode, size, mtime_ns and
+    ctime_ns are unchanged (ctime cannot be set back with utime, so an in-place
+    edit that restores the mtime is still noticed). The cache holds no user data.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(file_hashes)")}
+    if "sha256" in columns and "hash" not in columns:
+        conn.execute("ALTER TABLE file_hashes RENAME COLUMN sha256 TO hash")
+    for name, kind in (("algo", "TEXT"), ("ino", "INTEGER"), ("mtime_ns", "INTEGER"), ("ctime_ns", "INTEGER")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE file_hashes ADD COLUMN {name} {kind}")
+
+
+def _m007_delete_runs_sequence(conn: sqlite3.Connection):
+    """
+    Duplicate undo runs were ordered by a local-time text timestamp, so after
+    the switch to winter time (or a clock change) 'newest' could be the wrong
+    run (GAP-5). Rebuild delete_runs with an AUTOINCREMENT 'seq' that only ever
+    goes up. Existing runs get their rowid, which is their insertion order (a new
+    rowid is always above every existing one). Also new: created_at (UTC epoch
+    seconds, for display; existing rows converted from their local timestamp),
+    folder (which folder was being cleaned up) and an index on
+    delete_operations(run_id). Every run and operation is kept as it is.
+    """
+    count_before = conn.execute("SELECT COUNT(*) FROM delete_runs").fetchone()[0]
+    conn.execute("""
+        CREATE TABLE delete_runs_new (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL UNIQUE,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            total_files INTEGER DEFAULT 0,
+            created_at REAL,
+            folder TEXT
+        )
+    """)
+    conn.execute("""
+        INSERT INTO delete_runs_new (seq, run_id, timestamp, total_files, created_at)
+        SELECT rowid, run_id, timestamp, total_files,
+               CAST(strftime('%s', timestamp, 'utc') AS REAL)
+        FROM delete_runs ORDER BY rowid
+    """)
+    count_after = conn.execute("SELECT COUNT(*) FROM delete_runs_new").fetchone()[0]
+    if count_after != count_before:
+        raise RuntimeError(f"delete_runs copy incomplete: {count_after} of {count_before} rows")
+    conn.execute("DROP TABLE delete_runs")
+    conn.execute("ALTER TABLE delete_runs_new RENAME TO delete_runs")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_delops_run ON delete_operations(run_id)")
+
+
+def _m008_background_jobs(conn: sqlite3.Connection):
+    """
+    Background jobs (backend/jobs.py): duplicate scans, hashing and thumbnails run
+    in a worker thread and survive a reload or restart of the page. One row per
+    job with its progress and a checkpoint to resume from; the (possibly large)
+    result lives in job_results, zlib-compressed JSON, so listing jobs stays cheap.
+    Only new tables: no existing row is touched.
+    (delete_operations(run_id) already got its index, idx_delops_run, in migration 7.)
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            params TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL,
+            processed INTEGER NOT NULL DEFAULT 0,
+            total INTEGER,
+            message TEXT,
+            error TEXT,
+            checkpoint TEXT,
+            summary TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            started_at REAL,
+            finished_at REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type, id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS job_results (
+            job_id INTEGER PRIMARY KEY REFERENCES jobs(id),
+            encoding TEXT NOT NULL,
+            data BLOB NOT NULL
+        )
+    """)
+
+
+def _m009_media_dates(conn: sqlite3.Connection):
+    """
+    The capture date of photos and videos (backend/media_dates.py), so the timeline,
+    'on this day' and photos-by-date read EXIF or a video's own date once per file
+    instead of on every request. One row per path with the size and mtime_ns it was
+    read at: a changed file is read again. taken is the date used (EXIF or video date,
+    else the file's birthtime, else its mtime), source says which. Only a new table:
+    no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media_dates (
+            path TEXT PRIMARY KEY,
+            size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            taken REAL NOT NULL,
+            source TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_dates_taken ON media_dates(taken)")
+
+
+def _m010_app_settings(conn: sqlite3.Connection):
+    """
+    Small app-wide settings chosen in the UI (for now the chat model), as JSON values
+    by key. Only a new table: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+
+def _m011_media_index(conn: sqlite3.Connection):
+    """
+    The media index (backend/media_index.py): one row per photo, video and audio file
+    in the vault with what later features filter and sort on (capture date, size,
+    dimensions, camera, GPS, duration), so they query SQLite instead of walking the
+    disk. media_folders remembers the mtime of every folder at its last listing: an
+    incremental pass only lists folders whose mtime changed.
+
+    id is stable for as long as the file is known (a move, in the app or in Finder,
+    keeps the row and its id), so later features (perceptual hashes, CLIP embeddings)
+    can key their own tables on media.id. missing = 1 marks a file that was not there
+    at the last listing of its folder; such rows are hidden and removed at the end of
+    the pass, once a move elsewhere had its chance to claim them.
+
+    media_dates (migration 9) stays as it is: the walks that run while the index is
+    not there yet keep using it. Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL UNIQUE,
+            folder TEXT NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ext TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            inode INTEGER,
+            birthtime REAL,
+            taken REAL,
+            taken_source TEXT,
+            width INTEGER,
+            height INTEGER,
+            orientation INTEGER,
+            camera_make TEXT,
+            camera_model TEXT,
+            lens TEXT,
+            lat REAL,
+            lon REAL,
+            altitude REAL,
+            duration REAL,
+            meta_status TEXT,
+            added_at REAL NOT NULL,
+            indexed_at REAL NOT NULL,
+            seen_at REAL NOT NULL,
+            missing INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_taken ON media(taken)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_folder ON media(folder)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_latlon ON media(lat, lon) WHERE lat IS NOT NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_camera ON media(camera_make, camera_model)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_inode ON media(inode)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_missing ON media(missing) WHERE missing = 1")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media_folders (
+            path TEXT PRIMARY KEY,
+            parent TEXT,
+            mtime_ns INTEGER NOT NULL,
+            last_scanned REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_folders_parent ON media_folders(parent)")
+
+
+def _m012_recovery_actions(conn: sqlite3.Connection):
+    """
+    Undo records for every newer action that moves archive files (backend/recovery.py):
+    the move in the viewer now, later near-duplicate 'keep best' runs and assistant moves.
+    One action is one user action, however many files it moved; recovery_moves holds
+    where each file was (src_path) and where it went (dst_path), with the inode and size
+    of the moved file so an undo never takes back a different file with the same name.
+    The older Keurer decisions and duplicate runs keep their own tables; the recovery
+    center reads those as they are. Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recovery_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            folder TEXT,
+            details TEXT,
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recovery_moves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_id INTEGER NOT NULL REFERENCES recovery_actions(id),
+            src_path TEXT NOT NULL,
+            dst_path TEXT NOT NULL,
+            dst_ino INTEGER,
+            dst_size INTEGER,
+            moved_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_recovery_moves_action ON recovery_moves(action_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_recovery_actions_created ON recovery_actions(created_at)")
+
+
+def _m020_smart_albums(conn: sqlite3.Connection):
+    """
+    Smart albums (backend/smart_albums.py): a saved filter over the media index, shown
+    with its count in Albums. An album is a live query (filters is the JSON of
+    backend/library_filters.py): it never copies, moves or changes a file.
+    builtin names a default album (smart_albums.DEFAULTS, added once by the app, not
+    here; the user can hide or delete them, and 'Standaardalbums terugzetten' adds them
+    again). Only a new table: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS smart_albums (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            filters TEXT NOT NULL,
+            sort TEXT NOT NULL,
+            icon TEXT,
+            builtin TEXT UNIQUE,
+            hidden INTEGER NOT NULL DEFAULT 0,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+
+def _m030_near_duplicates(conn: sqlite3.Connection):
+    """
+    Near-duplicates and bursts (backend/near_dups.py), keyed on media.id, which stays the
+    same when a file is moved (in the app or in Finder).
+    media_phash: per photo its perceptual hashes (dhash, phash: 64 bits, stored signed),
+    the mean colours of its four quarters, its contrast, and the quality figures
+    (sharpness, clipped shadows and highlights, brightness), with the algorithm and version they were made
+    with and the size and mtime_ns of the file at that moment (a changed file is analysed
+    again). paired = 0 marks a photo whose pairs still have to be looked up.
+    near_dup_pairs: photos that look alike ('near') or were shot as a burst ('burst'),
+    with their distances (flat: one of the two is nearly flat, so its colours must match
+    closely), so a stricter or looser setting only filters these rows.
+    near_dup_reviews: series the user decided on ('alles behouden', or what was kept),
+    by the set of photos in it; a series that changes shows up again.
+    Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media_phash (
+            media_id INTEGER PRIMARY KEY,
+            algo TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            dhash INTEGER,
+            phash INTEGER,
+            colors BLOB,
+            sharpness REAL,
+            clip_low REAL,
+            clip_high REAL,
+            brightness REAL,
+            contrast REAL,
+            error TEXT,
+            paired INTEGER NOT NULL DEFAULT 0,
+            computed_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_phash_unpaired ON media_phash(paired) WHERE paired = 0")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS near_dup_pairs (
+            a INTEGER NOT NULL,
+            b INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            phash_d INTEGER NOT NULL,
+            dhash_d INTEGER NOT NULL,
+            color_d REAL NOT NULL,
+            gap REAL,
+            flat INTEGER NOT NULL DEFAULT 0,
+            same_bytes INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (a, b, kind)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_near_dup_pairs_b ON near_dup_pairs(b)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS near_dup_reviews (
+            key TEXT PRIMARY KEY,
+            media_ids TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            decided_at REAL NOT NULL
+        )
+    """)
+
+
+def _m021_keurer_path_index(conn: sqlite3.Connection):
+    """
+    An index on keurer_decisions(path): the library filter 'Keurer: nog niet beoordeeld'
+    asks per file whether any decision names its path. Only an index: no row is touched.
+    """
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_keurer_path ON keurer_decisions(path)")
+
+
+def _m031_near_duplicates_content(conn: sqlite3.Connection):
+    """
+    media_phash.content: the xxh3 hash of a photo that looks exactly like another photo of
+    the same size (backend/near_dups.py): the ones with the same hash are byte-for-byte
+    copies, shown as one photo. Photos that look exactly alike are now grouped when the
+    series are made instead of being paired one by one (a folder of 1,500 copies of one
+    shot gave a million pairs), so near_dup_pairs.same_bytes is no longer written.
+    Only a new column: no existing row is touched.
+    """
+    conn.execute("ALTER TABLE media_phash ADD COLUMN content TEXT")
+
+
+def _m060_datagatherer_core(conn: sqlite3.Connection):
+    """
+    DataGatherer (backend/datagatherer/): the state of every data source (connector), the
+    raw exports it archived or registered, its cursors, export requests and a log of
+    every network request it made.
+
+    dg_connectors       one row per connector the user touched: its (non-secret) settings,
+                        the opt-in schedule (off by default), when it was connected (OAuth,
+                        for the 6-month expiry) and the outcome of the last sync. Tokens and
+                        API keys are never here: they live in the macOS Keychain only.
+    dg_raw_imports      every raw export: a file copied into data/<owner>/<Bron>/<datum soort>/
+                        (sha256, never twice), or an existing folder registered in place
+                        (is_folder, fingerprint of its names, sizes and mtimes). status says
+                        whether its records are read (pending, importing, imported, failed).
+    dg_cursors          how far an api_sync got per stream (JSON).
+    dg_requests         an export the user asked for in their browser: while one is open, the
+                        Downloads watcher looks for the file.
+    dg_network_log      one row per HTTP request (or refused attempt), without query strings.
+
+    Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_connectors (
+            source_id TEXT PRIMARY KEY,
+            settings TEXT NOT NULL DEFAULT '{}',
+            schedule_enabled INTEGER NOT NULL DEFAULT 0,
+            schedule_minutes INTEGER,
+            connected_at REAL,
+            needs_reconnect INTEGER NOT NULL DEFAULT 0,
+            status_note TEXT,
+            retry_after REAL,
+            last_sync_at REAL,
+            last_success_at REAL,
+            last_error TEXT,
+            data_version INTEGER NOT NULL DEFAULT 0,
+            updated_at REAL NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_raw_imports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            path TEXT NOT NULL UNIQUE,
+            is_folder INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT UNIQUE,
+            fingerprint TEXT,
+            size INTEGER,
+            origin TEXT NOT NULL,
+            original_path TEXT,
+            received_at REAL NOT NULL,
+            status TEXT NOT NULL,
+            imported_at REAL,
+            parser_version INTEGER,
+            records_added INTEGER,
+            records_seen INTEGER,
+            covers_from REAL,
+            covers_until REAL,
+            stats TEXT,
+            error TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dg_raw_source ON dg_raw_imports(source_id, status)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_cursors (
+            source_id TEXT NOT NULL,
+            stream TEXT NOT NULL,
+            cursor TEXT,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (source_id, stream)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            requested_at REAL NOT NULL,
+            since TEXT,
+            status TEXT NOT NULL,
+            raw_import_id INTEGER,
+            note TEXT,
+            updated_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dg_requests_open ON dg_requests(status, source_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_network_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            at REAL NOT NULL,
+            source_id TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            method TEXT NOT NULL,
+            host TEXT NOT NULL,
+            path TEXT,
+            status INTEGER,
+            outcome TEXT NOT NULL,
+            bytes INTEGER,
+            ms INTEGER,
+            job_id INTEGER,
+            note TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dg_network_source ON dg_network_log(source_id, id)")
+
+
+def _m061_spotify_plays(conn: sqlite3.Connection):
+    """
+    Every Spotify play DataGatherer knows, merged from several sources
+    (backend/datagatherer/spotify_store.py), each with a stable key so importing the same
+    export twice adds nothing:
+
+    spotify_plays       plays from the privacy exports (source export_extended: Extended
+                        Streaming History, export_account: Account data) and from Last.fm
+                        scrobbles (source lastfm). ts_ms is when the play ended (UTC ms).
+    spotify_api_plays   plays from the Web API 'recently played' endpoint, in a table of their
+                        own: the developer terms treat API data as provisional; the exports
+                        are the lasting copy.
+
+    A play that a richer source also has is marked superseded (with what superseded it),
+    never deleted. The view spotify_plays_merged is what the Spotify dashboard reads: every
+    play that is not superseded, from both tables. Only new tables and a view.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS spotify_plays (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            play_key TEXT NOT NULL UNIQUE,
+            source TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            start_ms INTEGER,
+            ms_played INTEGER,
+            ms_estimated INTEGER NOT NULL DEFAULT 0,
+            content TEXT NOT NULL,
+            track TEXT,
+            artist TEXT,
+            album TEXT,
+            track_uri TEXT,
+            episode TEXT,
+            show TEXT,
+            episode_uri TEXT,
+            platform TEXT,
+            country TEXT,
+            reason_start TEXT,
+            reason_end TEXT,
+            shuffle INTEGER,
+            skipped INTEGER,
+            offline INTEGER,
+            incognito INTEGER,
+            raw_import_id INTEGER,
+            superseded INTEGER NOT NULL DEFAULT 0,
+            superseded_by TEXT,
+            first_seen_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spotify_plays_ts ON spotify_plays(ts_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spotify_plays_source ON spotify_plays(source, ts_ms)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS spotify_api_plays (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            play_key TEXT NOT NULL UNIQUE,
+            ts_ms INTEGER NOT NULL,
+            start_ms INTEGER,
+            duration_ms INTEGER,
+            track TEXT,
+            artist TEXT,
+            album TEXT,
+            track_uri TEXT,
+            context_uri TEXT,
+            superseded INTEGER NOT NULL DEFAULT 0,
+            superseded_by TEXT,
+            fetched_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_spotify_api_plays_ts ON spotify_api_plays(ts_ms)")
+    conn.execute("""
+        CREATE VIEW IF NOT EXISTS spotify_plays_merged AS
+            SELECT 'p' || id AS row_key, source, ts_ms, start_ms, ms_played, ms_estimated, content,
+                   track, artist, album, track_uri, platform
+              FROM spotify_plays WHERE superseded = 0
+            UNION ALL
+            SELECT 'a' || id, 'api', ts_ms, start_ms, duration_ms, 1, 'track',
+                   track, artist, album, track_uri, NULL
+              FROM spotify_api_plays WHERE superseded = 0
+    """)
+
+
+def _m050_elo_comparisons(conn: sqlite3.Connection):
+    """
+    'Welke is mooier?' in Shows (backend/elo.py): two photos side by side, the user picks
+    one, and both ratings (file_ratings, the same 1000-based scale as the up/down votes)
+    move by the standard Elo rule. elo_comparisons keeps every comparison with both paths,
+    the winner, both ratings and game counts before and after, so one can be undone
+    exactly. How many comparisons a photo took part in (its K-factor drops after 30) is
+    counted from these rows, so file_ratings itself does not change. existed_a/b say
+    whether the photo had a file_ratings row before (an undo then removes the row the
+    comparison made). Paths follow moves like ratings do (media_index._carry_user_data).
+    Version 50: numbers 50-59 belong to this feature. Only a new table: no existing row
+    is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elo_comparisons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_a TEXT NOT NULL,
+            path_b TEXT NOT NULL,
+            winner TEXT NOT NULL CHECK (winner IN ('a', 'b')),
+            rating_a_before INTEGER NOT NULL,
+            rating_a_after INTEGER NOT NULL,
+            rating_b_before INTEGER NOT NULL,
+            rating_b_after INTEGER NOT NULL,
+            games_a_before INTEGER NOT NULL,
+            games_b_before INTEGER NOT NULL,
+            existed_a INTEGER NOT NULL,
+            existed_b INTEGER NOT NULL,
+            k_a INTEGER NOT NULL,
+            k_b INTEGER NOT NULL,
+            scope TEXT,
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_a ON elo_comparisons(path_a)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_b ON elo_comparisons(path_b)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_scope ON elo_comparisons(scope, id)")
+
+
+def _m040_semantic_embeddings(conn: sqlite3.Connection):
+    """
+    'Slim zoeken' (backend/semantic.py): one image embedding per photo or video per search
+    model, keyed on media.id (stable across moves, so a moved photo keeps its embedding).
+    size and mtime_ns are the file's when it was embedded: a file that changed since is
+    embedded again. vector is the L2-normalised embedding as float16 (dim values), or
+    NULL with status 'undecodable' for a file that could not be read as an image, so it
+    is not tried again until it changes. Rows whose media row is gone are ignored by
+    every query and removed by the next embedding run. Only a new table: no existing
+    row is touched. (Version 40: the numbers below it are left to the steps built
+    alongside this one; migrations run in list order.)
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS semantic_embeddings (
+            media_id INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            dim INTEGER NOT NULL,
+            vector BLOB,
+            status TEXT NOT NULL DEFAULT 'ok',
+            size INTEGER NOT NULL,
+            mtime_ns INTEGER NOT NULL,
+            source TEXT,
+            created_at REAL NOT NULL,
+            PRIMARY KEY (media_id, model)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_semantic_model ON semantic_embeddings(model)")
+
+def _m090_messages(conn: sqlite3.Connection):
+    """
+    Conversations and messages from every chat source DataGatherer reads
+    (backend/datagatherer/messages_store.py): WhatsApp (the Mac database, an iPhone
+    backup's ChatStorage.sqlite and 'Export chat' files), iMessage/SMS, Messenger
+    (Facebook export and the end-to-end encrypted 'secure storage' download) and
+    Instagram direct messages.
+
+    msg_conversations   one row per (source, conv_key). merged_into points at the
+                        conversation a lower-precision copy was merged into (a WhatsApp
+                        'Export chat' of a chat the Mac database also has).
+    msg_messages        one row per (source, msg_key): the stable dedupe key, so importing
+                        the same export twice adds nothing. sent_at_ms is UTC; tz is the
+                        zone a local timestamp was read in (when known); ts_precision
+                        says how exact it is (ms, s or min). attachments and reactions are
+                        JSON. A message that a more exact copy also has is marked
+                        superseded_by (that row's id), never deleted.
+    msg_fts             FTS5 full-text index over body and sender (external content,
+                        kept in step by triggers).
+    Only new tables, indexes and triggers.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS msg_conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            conv_key TEXT NOT NULL,
+            title TEXT,
+            participants TEXT NOT NULL DEFAULT '[]',
+            is_group INTEGER NOT NULL DEFAULT 0,
+            merged_into INTEGER,
+            first_ms INTEGER,
+            last_ms INTEGER,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            updated_at REAL NOT NULL,
+            UNIQUE (source, conv_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_conversations_last ON msg_conversations(last_ms)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS msg_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            conv_id INTEGER NOT NULL,
+            msg_key TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            sent_at_ms INTEGER NOT NULL,
+            tz TEXT,
+            ts_precision TEXT NOT NULL,
+            sender TEXT,
+            is_me INTEGER,
+            body TEXT,
+            kind TEXT NOT NULL DEFAULT 'text',
+            attachments TEXT,
+            reactions TEXT,
+            raw_import_id INTEGER,
+            superseded_by INTEGER,
+            first_seen_at REAL NOT NULL,
+            UNIQUE (source, msg_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_messages_conv ON msg_messages(conv_id, sent_at_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_messages_origin ON msg_messages(origin, sent_at_ms)")
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS msg_fts USING fts5(
+            body, sender, content='msg_messages', content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        )
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS msg_fts_insert AFTER INSERT ON msg_messages BEGIN
+            INSERT INTO msg_fts (rowid, body, sender) VALUES (new.id, new.body, new.sender);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS msg_fts_delete AFTER DELETE ON msg_messages BEGIN
+            INSERT INTO msg_fts (msg_fts, rowid, body, sender) VALUES ('delete', old.id, old.body, old.sender);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS msg_fts_update AFTER UPDATE OF body, sender ON msg_messages BEGIN
+            INSERT INTO msg_fts (msg_fts, rowid, body, sender) VALUES ('delete', old.id, old.body, old.sender);
+            INSERT INTO msg_fts (rowid, body, sender) VALUES (new.id, new.body, new.sender);
+        END
+    """)
+
+
+def _m091_social_items(conn: sqlite3.Connection):
+    """
+    Posts, comments, reactions and media metadata from the Facebook and Instagram exports
+    (backend/datagatherer/formats/meta_dyi.py), one row per (source, item_key): the stable
+    key, so importing the same export twice adds nothing. ts_ms is UTC; media is JSON
+    (paths into the raw export, plus metadata such as EXIF). Only a new table and indexes.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS social_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            item_key TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            title TEXT,
+            body TEXT,
+            url TEXT,
+            media TEXT,
+            raw_import_id INTEGER,
+            first_seen_at REAL NOT NULL,
+            UNIQUE (source, item_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_social_items_ts ON social_items(source, ts_ms)")
+
+
+def _m110_activity_and_location(conn: sqlite3.Connection):
+    """
+    DataGatherer step 3.9c: activity, location history and estimated photo locations.
+
+    activity_events     one row per thing the user did that a source recorded: a YouTube
+                        video watched, a Google search, a page visited in Chrome or Safari,
+                        a calendar event, a Keep note, a Netflix title, a TikTok video, ...
+                        (backend/datagatherer/activity_store.py). source is the connector id,
+                        kind what it is, ts_ms when (UTC ms), details a small JSON object.
+                        event_key is stable per record, so importing the same export twice
+                        adds nothing (UNIQUE(source, event_key)).
+    location_points     where the user was, from Google's location history (the old Takeout
+                        Tijdlijn: Records.json and Semantic Location History, and the new
+                        Timeline export from the phone): time (UTC ms), lat, lon, accuracy (m).
+                        UNIQUE(ts_ms, lat, lon): the same point from two exports is one row.
+    location_visits     the places of the Timeline: a span of time at one place, with its
+                        name or address when the export has it.
+    media_location_inferred
+                        an ESTIMATED position for a photo or video without GPS, derived from the
+                        location history around its capture time (backend/datagatherer/geotag.py).
+                        Only here, in the database: the image files are never written. confidence
+                        0..1, how far the nearest location point was (gap_s), how the capture time
+                        was turned into UTC (tz, tz_source). Keyed on media.id.
+
+    Only new tables: no existing row is touched.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS activity_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            end_ms INTEGER,
+            title TEXT,
+            url TEXT,
+            details TEXT,
+            event_key TEXT NOT NULL,
+            raw_import_id INTEGER,
+            first_seen_at REAL NOT NULL,
+            UNIQUE (source, event_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_events(ts_ms)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_source_kind ON activity_events(source, kind, ts_ms)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS location_points (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts_ms INTEGER NOT NULL,
+            lat REAL NOT NULL,
+            lon REAL NOT NULL,
+            accuracy REAL,
+            source TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            raw_import_id INTEGER,
+            UNIQUE (ts_ms, lat, lon)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS location_visits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            start_ms INTEGER NOT NULL,
+            end_ms INTEGER NOT NULL,
+            lat REAL NOT NULL,
+            lon REAL NOT NULL,
+            place_key TEXT NOT NULL,
+            name TEXT,
+            address TEXT,
+            semantic_type TEXT,
+            probability REAL,
+            source TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            raw_import_id INTEGER,
+            UNIQUE (start_ms, place_key)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_location_visits_start ON location_visits(start_ms)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS media_location_inferred (
+            media_id INTEGER PRIMARY KEY,
+            lat REAL NOT NULL,
+            lon REAL NOT NULL,
+            confidence REAL NOT NULL,
+            accuracy_m REAL,
+            gap_s REAL,
+            method TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'tijdlijn',
+            taken_utc_ms INTEGER,
+            tz TEXT,
+            tz_source TEXT,
+            computed_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_location_inferred_latlon ON media_location_inferred(lat, lon)")
+
+
+def _m160_elo_glicko(conn: sqlite3.Connection):
+    """
+    'Welke is mooier?' gets an uncertainty-aware model (Glicko-2, backend/elo.py), draws
+    ('gelijk'), remembered skips ('overslaan') and protection against a double POST.
+
+    - elo_comparisons is rebuilt (SQLite cannot change a CHECK): winner may now be 'draw';
+      new columns keep both photos' model state before and after (mu, rd, vol), the model
+      name, and a client_token (unique when given). k_a/k_b are kept for the old rows and
+      are NULL from now on. Every row keeps its id, paths, winner, scope and time, and the
+      AUTOINCREMENT counter is carried over, so an id is never handed out twice.
+    - elo_ratings: the model state per photo (mu, rd, vol, the public rating it wrote last,
+      games). Paths follow moves like file_ratings (media_index._carry_user_data).
+    - elo_skips: skipped pairs (kept out of the pair choice for a while).
+    - The history is then played again with the new model (elo.replay_history): the
+      before/after values of every comparison and the rating of every compared photo are
+      recomputed from the same choices; votes cast between comparisons are carried over
+      exactly. Files that were never compared keep their rating untouched.
+    Version 160: numbers 160-169 belong to this feature.
+    """
+    from backend import elo
+
+    seq = conn.execute("SELECT seq FROM sqlite_sequence WHERE name = 'elo_comparisons'").fetchone()
+    conn.execute("""
+        CREATE TABLE elo_comparisons_v160 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_a TEXT NOT NULL,
+            path_b TEXT NOT NULL,
+            winner TEXT NOT NULL CHECK (winner IN ('a', 'b', 'draw')),
+            rating_a_before INTEGER NOT NULL,
+            rating_a_after INTEGER NOT NULL,
+            rating_b_before INTEGER NOT NULL,
+            rating_b_after INTEGER NOT NULL,
+            games_a_before INTEGER NOT NULL,
+            games_b_before INTEGER NOT NULL,
+            existed_a INTEGER NOT NULL,
+            existed_b INTEGER NOT NULL,
+            k_a INTEGER,
+            k_b INTEGER,
+            scope TEXT,
+            created_at REAL NOT NULL,
+            mu_a_before REAL, rd_a_before REAL, vol_a_before REAL,
+            mu_a_after REAL, rd_a_after REAL, vol_a_after REAL,
+            mu_b_before REAL, rd_b_before REAL, vol_b_before REAL,
+            mu_b_after REAL, rd_b_after REAL, vol_b_after REAL,
+            model TEXT,
+            client_token TEXT
+        )
+    """)
+    columns = ("id, path_a, path_b, winner, rating_a_before, rating_a_after, rating_b_before, rating_b_after, "
+               "games_a_before, games_b_before, existed_a, existed_b, k_a, k_b, scope, created_at")
+    conn.execute(f"INSERT INTO elo_comparisons_v160 ({columns}) SELECT {columns} FROM elo_comparisons ORDER BY id")
+    conn.execute("DROP TABLE elo_comparisons")
+    conn.execute("ALTER TABLE elo_comparisons_v160 RENAME TO elo_comparisons")
+    if seq:
+        conn.execute("INSERT INTO sqlite_sequence (name, seq) SELECT 'elo_comparisons', 0 WHERE NOT EXISTS "
+                     "(SELECT 1 FROM sqlite_sequence WHERE name = 'elo_comparisons')")
+        conn.execute("UPDATE sqlite_sequence SET seq = max(seq, ?) WHERE name = 'elo_comparisons'", (seq[0],))
+    else:
+        # The copy of an empty table leaves a counter at 0 that was not there before
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'elo_comparisons' AND seq = 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_a ON elo_comparisons(path_a)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_path_b ON elo_comparisons(path_b)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_scope ON elo_comparisons(scope, id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_created ON elo_comparisons(created_at)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_elo_token ON elo_comparisons(client_token) "
+                 "WHERE client_token IS NOT NULL")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elo_ratings (
+            path TEXT PRIMARY KEY,
+            mu REAL NOT NULL,
+            rd REAL NOT NULL,
+            vol REAL NOT NULL,
+            public INTEGER NOT NULL,
+            games INTEGER NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS elo_skips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path_a TEXT NOT NULL,
+            path_b TEXT NOT NULL,
+            scope TEXT,
+            created_at REAL NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_skips_time ON elo_skips(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_skips_a ON elo_skips(path_a)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_skips_b ON elo_skips(path_b)")
+    elo.replay_history(conn)
+
+
+
+def _m161_elo_state_indexes(conn: sqlite3.Connection):
+    """
+    Covering indexes for reading the ratings and model states of every photo below a folder
+    (elo.states_below, once per pair request): a range scan reads them from the index
+    instead of looking up each row (10,000 rated photos: about 14 to 9 ms). Only indexes
+    are added; no row changes.
+    """
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_file_ratings_state ON file_ratings(path, rating, votes)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_elo_ratings_state ON elo_ratings(path, mu, rd, vol, public, games)")
+
+
+def _m180_media_probe_videos(conn: sqlite3.Connection):
+    """
+    Videos the index now reads with ffprobe (avi, mkv, mts, m2ts, webm, wmv, flv, mpg,
+    mpeg: backend/media_meta.FFPROBE_EXTENSIONS) were indexed with their file date only
+    (meta_status 'none'). They get meta_status 'probe', so the next index pass that can
+    run ffprobe reads their date, duration and dimensions. Only that column of those rows
+    changes; nothing else is touched.
+    """
+    has_media = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media'").fetchone()
+    if not has_media:
+        return
+    exts = ('.avi', '.mkv', '.mts', '.m2ts', '.webm', '.wmv', '.flv', '.mpg', '.mpeg')
+    conn.execute(f"UPDATE media SET meta_status = 'probe' WHERE meta_status = 'none' AND kind = 'video' "
+                 f"AND ext IN ({', '.join('?' * len(exts))})", exts)
+
+
+def _m181_media_photo_stem_index(conn: sqlite3.Connection):
+    """
+    'Beste uit reeks' leaves out the video of a Live Photo: a video with a photo of the same
+    name (without extension) in its folder (backend/near_dups._LIVE_VIDEO). This partial
+    expression index makes that check one lookup per video (100,000 files: 0.68 s -> 0.013 s
+    for the status). Only an index is added; no row changes.
+    """
+    has_media = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media'").fetchone()
+    if not has_media:
+        return
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_media_photo_stem ON media("
+                 "folder, lower(substr(name, 1, length(name) - length(ext)))) WHERE kind = 'photo' AND missing = 0")
+
+
+# The kinds google_formats.activity_item makes (My Activity and YouTube's own history)
+_ACTIVITY_ITEM_KINDS = ("youtube_watch", "youtube_search", "search", "maps", "web_visit", "activity")
+
+
+def _m135_activity_keys_per_second(conn: sqlite3.Connection):
+    """
+    DataGatherer verification round: a My Activity entry is keyed on its time in whole
+    seconds. Takeout's HTML (the default) has seconds, its JSON has milliseconds, so the same
+    video read from both was stored twice. Every My Activity row of google_takeout gets the
+    new key (kind, second, url or title); where two rows now share it, the copy with the
+    less precise time is removed: it is the same entry, and the raw exports stay in the archive.
+    Chrome's own BrowserHistory rows ('bron': 'Takeout') keep their key.
+    """
+    import hashlib
+    import json
+
+    def key(*parts):
+        text = "\x1f".join("" if p is None else str(p) for p in parts)
+        return hashlib.sha1(text.encode("utf-8", "surrogatepass")).hexdigest()[:24]
+
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'activity_events'").fetchone():
+        return
+    rows = conn.execute(
+        f"SELECT id, kind, ts_ms, url, title, details, event_key FROM activity_events WHERE source = 'google_takeout' "
+        f"AND kind IN ({', '.join('?' * len(_ACTIVITY_ITEM_KINDS))}) ORDER BY id", _ACTIVITY_ITEM_KINDS).fetchall()
+    groups = {}
+    for row_id, kind, ts_ms, url, title, details, old_key in rows:
+        try:
+            info = json.loads(details) if details else {}
+        except ValueError:
+            info = {}
+        if kind == "web_visit" and isinstance(info, dict) and info.get("bron") == "Takeout":
+            continue
+        groups.setdefault(key(kind, ts_ms // 1000, url or title), []).append((row_id, ts_ms, old_key))
+    for new_key, members in groups.items():
+        # keep the millisecond time when there is one (JSON), else the oldest row
+        members.sort(key=lambda m: (m[1] % 1000 == 0, m[0]))
+        keep = members[0]
+        for row_id, _, _ in members[1:]:
+            conn.execute("DELETE FROM activity_events WHERE id = ?", (row_id,))
+        if keep[2] != new_key:
+            conn.execute("UPDATE activity_events SET event_key = ? WHERE id = ?", (new_key, keep[0]))
+
+def _m170_spotify_covers(conn: sqlite3.Connection):
+    """
+    Album covers for Home's 'Spotify op deze dag' (backend/datagatherer/spotify_covers.py):
+    one row per track (key: title and artist as spotify_store.norm compares them), with the
+    album, the cover URL and the file in <cache>/spotify_covers once it is fetched. status:
+    'url' (only the URL is known), 'ok' (the file is there) or 'none' (Spotify does not know
+    the track; asked again after a month). Only a new table.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS spotify_covers (
+            key TEXT PRIMARY KEY,
+            track_uri TEXT,
+            album_id TEXT,
+            image_url TEXT,
+            file TEXT,
+            status TEXT NOT NULL,
+            checked_at REAL NOT NULL
+        )
+    """)
+
+
+def _m171_delete_ops_fingerprint(conn: sqlite3.Connection):
+    """
+    Remember which file a duplicates run moved: inode number and size of the file at
+    dst_path (in RAW_DUPLICATES), right after the move. A rename keeps the inode, so the
+    undo can tell the moved file apart from one that was changed or swapped in its place
+    since; such a file is not moved back. (st_dev is not stored: it changes when an external
+    disk is mounted again.) NULL for rows written before this migration: those runs keep
+    the checks they always had. Only two new columns; every row stays as it is.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(delete_operations)")}
+    if "dst_ino" not in columns:
+        conn.execute("ALTER TABLE delete_operations ADD COLUMN dst_ino INTEGER")
+    if "dst_size" not in columns:
+        conn.execute("ALTER TABLE delete_operations ADD COLUMN dst_size INTEGER")
+
+
+def _m195_activity_duplicate_of(conn: sqlite3.Connection):
+    """
+    The same website visit from two sources (Chrome's history on this Mac and Google Takeout:
+    BrowserHistory.json or My Activity > Chrome) was two rows in Activiteit. Both rows stay;
+    activity_events.duplicate_of now points a copy at the row that is shown
+    (backend/datagatherer/activity_store.link_web_visits: same URL within a few seconds, one
+    row per origin). The visits already stored are linked here once. Only a new column, a
+    new index and that pointer: no row is removed and no other column changes.
+    """
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'activity_events'").fetchone():
+        return
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(activity_events)")}
+    if "duplicate_of" not in columns:
+        conn.execute("ALTER TABLE activity_events ADD COLUMN duplicate_of INTEGER")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_duplicate ON activity_events(duplicate_of) "
+                 "WHERE duplicate_of IS NOT NULL")
+    from backend.datagatherer import activity_store
+    activity_store.link_web_visits_conn(conn)
+
+
+def _m196_message_edits(conn: sqlite3.Connection):
+    """
+    Edited and unsent messages (iMessage, macOS 13+): msg_messages gets edited_at_ms and
+    retracted_at_ms (UTC ms, NULL when not) and edits, a JSON list of the earlier versions
+    [{at, body}] (backend/datagatherer/messages_store.revise_messages). A later read updates
+    the stored row instead of leaving the first text or adding a second row; the earlier
+    text is kept in edits. Only new columns: no existing value changes.
+    """
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'msg_messages'").fetchone():
+        return
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(msg_messages)")}
+    for name, kind in (("edited_at_ms", "INTEGER"), ("retracted_at_ms", "INTEGER"), ("edits", "TEXT")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE msg_messages ADD COLUMN {name} {kind}")
+
+
+def _m197_own_sources(conn: sqlite3.Connection):
+    """
+    The user's own list of sources DataGatherer cannot reach (an old iPad, a phone in a
+    drawer, a USB stick, an account without an export page): where their back-up is, when it
+    was made and how far it is (backend/datagatherer/backups.py). status: 'te_doen' (no
+    back-up yet), 'bezig' (partly) or 'veilig' (everything is in a back-up). in_use: 1 when
+    the source still gets new data, so an old back-up gets old. Only a new table.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS dg_own_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            location TEXT,
+            note TEXT,
+            status TEXT NOT NULL,
+            in_use INTEGER NOT NULL DEFAULT 0,
+            backup_at REAL,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+
+# (version, name, function) - append only, never renumber or edit an applied migration
+MIGRATIONS: List[Tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
+    (1, "baseline", _m001_baseline),
+    (2, "keurer_undo_paths", _m002_keurer_undo_paths),
+    (3, "keurer_dest_fingerprint", _m003_keurer_dest_fingerprint),
+    (4, "keurer_keep_move_history", _m004_keurer_keep_move_history),
+    (5, "keurer_keep_delete_history", _m005_keurer_keep_delete_history),
+    (6, "hash_cache_algo_and_fingerprint", _m006_hash_cache_algo_and_fingerprint),
+    (7, "delete_runs_sequence", _m007_delete_runs_sequence),
+    (8, "background_jobs", _m008_background_jobs),
+    (9, "media_dates", _m009_media_dates),
+    (10, "app_settings", _m010_app_settings),
+    (11, "media_index", _m011_media_index),
+    (12, "recovery_actions", _m012_recovery_actions),
+    (20, "smart_albums", _m020_smart_albums),
+    (21, "keurer_path_index", _m021_keurer_path_index),
+    (30, "near_duplicates", _m030_near_duplicates),
+    (31, "near_duplicates_content", _m031_near_duplicates_content),
+    # 40-49: Slim zoeken (step 3.5)
+    (40, "semantic_embeddings", _m040_semantic_embeddings),
+    # 50-59: Elo comparisons (step 3.9b)
+    (50, "elo_comparisons", _m050_elo_comparisons),
+    # 60-69: DataGatherer (step 3.9a); gaps in the numbering are fine, the list stays sorted
+    (60, "datagatherer_core", _m060_datagatherer_core),
+    (61, "spotify_plays", _m061_spotify_plays),
+    # 90-99: DataGatherer messages and social (step 3.9b)
+    (90, "messages", _m090_messages),
+    (91, "social_items", _m091_social_items),
+    # 110-119: DataGatherer Google, location, browser and extras (step 3.9c)
+    (110, "activity_and_location", _m110_activity_and_location),
+    # 135-139: DataGatherer verification round
+    (135, "activity_keys_per_second", _m135_activity_keys_per_second),
+    # 160-169: Elo with uncertainty (Glicko-2), draws, skips (step p3x-elo)
+    (160, "elo_glicko", _m160_elo_glicko),
+    (161, "elo_state_indexes", _m161_elo_state_indexes),
+    # 170-179: Spotify covers on Home
+    (170, "spotify_covers", _m170_spotify_covers),
+    # 171: inode and size of files a duplicates run moved (stream p4-safety)
+    (171, "delete_ops_fingerprint", _m171_delete_ops_fingerprint),
+    # 180-189: search and series (video frames, ffprobe for other videos)
+    (180, "media_probe_videos", _m180_media_probe_videos),
+    (181, "media_photo_stem_index", _m181_media_photo_stem_index),
+    # 195-199: DataGatherer, what was left (web visits from two sources, edited iMessages)
+    (195, "activity_duplicate_of", _m195_activity_duplicate_of),
+    (196, "message_edits", _m196_message_edits),
+    # 197: the user's own sources and their back-ups (Home and DataGatherer > Back-ups)
+    (197, "own_sources", _m197_own_sources),
+]
+
+LATEST_VERSION = MIGRATIONS[-1][0]
+
+
+def get_schema_version(conn: sqlite3.Connection) -> int:
+    """Highest applied migration, 0 for a database that predates migrations."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+    return row[0] or 0
+
+
+def get_applied_versions(conn: sqlite3.Connection) -> Set[int]:
+    """Every version recorded in schema_version. migrate() runs what is missing from this
+    set, not only what lies above the highest number: phase 3 merged migrations out of
+    order (40 and 50 landed after 60 and 61), so a database migrated in between has a
+    gap below its highest version that must still be filled."""
+    get_schema_version(conn)  # creates the table when it is missing
+    return {r[0] for r in conn.execute("SELECT version FROM schema_version")}
+
+
+def _has_user_tables(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+        "AND name NOT IN ('schema_version', 'sqlite_sequence')"
+    ).fetchone()
+    return row[0] > 0
+
+
+def _backup_sort_key(path: Path):
+    """(stamp, mtime) for '<stem>-v<version>-<YYYYmmdd-HHMMSS-ffffff>.db'; a name that does
+    not match that pattern falls back to its mtime with an empty stamp, so it counts as
+    oldest."""
+    m = re.match(r".*-v\d+-(\d{8}-\d{6}-\d{6})\.db$", path.name)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (m.group(1) if m else "", mtime)
+
+
+def backup_database(conn: sqlite3.Connection, db_path: Path, from_version: int) -> Path:
+    """Consistent copy via the SQLite backup API; keeps the newest BACKUPS_TO_KEEP."""
+    backup_dir = db_path.parent / BACKUP_DIR_NAME
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup_path = backup_dir / f"{db_path.stem}-v{from_version}-{stamp}.db"
+    target = sqlite3.connect(str(backup_path))
+    try:
+        conn.backup(target)
+    finally:
+        target.close()
+
+    # Oldest first by the fixed-width stamp, not by the whole name: by name 'v110-' sorts
+    # before 'v12-' and 'v10-' before 'v9-', which would delete the copy just made.
+    backups = sorted(backup_dir.glob(f"{db_path.stem}-v*.db"), key=_backup_sort_key)
+    for old in backups[:-BACKUPS_TO_KEEP]:
+        old.unlink()  # only our own backup copies, never archive files
+    return backup_path
+
+
+def migrate(db_path: Path) -> List[int]:
+    """Bring the database at db_path up to LATEST_VERSION: run, in list order, every
+    migration whose version is not yet in schema_version. Returns applied versions."""
+    conn = sqlite3.connect(str(db_path), isolation_level=None)
+    applied: List[int] = []
+    try:
+        current = get_schema_version(conn)
+        done = get_applied_versions(conn)
+        pending = [m for m in MIGRATIONS if m[0] not in done]
+        if not pending:
+            return applied
+        gaps = [m[0] for m in pending if m[0] < current]
+        if gaps:
+            log.warning("Schema version %s is missing migrations %s (merged out of order); "
+                        "applying them now", current, gaps)
+
+        if _has_user_tables(conn):
+            backup_database(conn, db_path, current)
+
+        for version, name, fn in pending:
+            conn.execute("BEGIN")
+            try:
+                fn(conn)
+                conn.execute(
+                    "INSERT INTO schema_version (version, name) VALUES (?, ?)",
+                    (version, name),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            applied.append(version)
+        return applied
+    finally:
+        conn.close()

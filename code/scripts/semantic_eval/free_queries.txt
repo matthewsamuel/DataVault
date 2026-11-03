@@ -1,0 +1,31 @@
+# Free-form queries written after the cut was set (2026-11), not used to tune it: tags | language | query
+dog | nl | honden
+dog beach | nl | mijn hond aan zee
+dog beach | nl | spelende hond op het zand
+cat | nl | katten
+cake | nl | taart
+cake birthday | nl | feestje met taart
+sunset | nl | ondergaande zon
+snow mountains | nl | besneeuwde bergtoppen
+city night | nl | skyline in het donker
+canal | nl | Amsterdamse grachten
+food | nl | avondeten
+pasta | nl | spaghetti
+pizza | nl | pizza margherita
+forest | nl | bomen in het bos
+tulips | nl | tulpen in Nederland
+sailboat | nl | boot met zeilen
+horse | nl | paarden
+christmas_tree | nl | kerst
+beach sea | nl | zandstrand met zee
+bicycle | nl | fietsen
+dog | en | puppy
+cat | en | cats
+snow mountains | en | snowy peaks
+canal | en | Amsterdam
+food | en | dinner
+pasta | en | spaghetti
+forest | en | woods
+sailboat | en | boats with sails
+city night | en | night skyline
+dog beach | en | dog at the seaside

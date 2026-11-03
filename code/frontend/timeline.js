@@ -10,15 +10,31 @@
     let tlDateIndex = {};               // year → { month → count }
     let tlYearBoundaries = {};          // year → first index in tlFiles
     let tlSelectedFolders = new Set();  // selected folder paths
+    let tlExcludedFolders = new Set();  // folders left out of a selected one, with everything below
+    let tlMissingFolders = new Set();   // chosen folders the last scan could not find (moved or gone)
+    let tlMissingToast = null;          // the toast that names them, while it is up
     let tlFolderTree = [];              // full folder tree from API
     let tlLoading = false;
     let tlScanning = false;
     let tlInitialized = false;
+    let tlFoldersFailed = false;        // last folder list or scan failed (e.g. the disk was gone):
+    let tlScanFailed = false;           // done again on return to the tab or when the disk is back
+
+    // Paging: the first page shows at once, the rest loads behind it (oldest first, so it
+    // only ever grows at the bottom). tlTotal is the whole selection, also before it is loaded.
+    const TL_FIRST_PAGE = 3000;
+    const TL_PAGE = 20000;
+    let tlTotal = 0;
+    let tlScanSeq = 0;                  // a newer scan stops the pages of an older one
+    let tlPagesLoading = false;
+    let tlPendingYear = null;           // a year asked for before its photos were loaded
 
     // Virtualization
-    const ITEM_HEIGHT = 220;            // photo card height (px)
+    const ITEM_HEIGHT = 220;            // photo card height (px) until the first layout
     const COLS = 5;                     // cards per row
-    const ROW_HEIGHT = ITEM_HEIGHT + 12; // row height + gap
+    const GAP = 12;                     // between the cards, in a row and between rows
+    let tlTile = ITEM_HEIGHT;           // square tiles: as high as a column is wide
+    let tlRowHeight = ITEM_HEIGHT + GAP; // row height + gap
     const HEADER_HEIGHT = 48;           // date group header height
     const PRELOAD_ROWS = 4;            // extra rows to render above/below
 
@@ -28,23 +44,25 @@
     let tlRenderedRange = { start: -1, end: -1 };
     let tlScrollContainer = null;
     let tlContentEl = null;
+    let tlLayoutCols = 0;               // columns the current layout was built with
 
-    // Slider
     let tlSliderDragging = false;
+    let tlScrollTicking = false;
+    let tlFocusIndex = 0;               // the card the keyboard is on (Tab lands here)
 
     // ── Persistence ───────────────────────────────────────
     function loadSavedFolders() {
         try {
             const saved = localStorage.getItem('timeline_folders');
-            if (saved) {
-                const arr = JSON.parse(saved);
-                tlSelectedFolders = new Set(arr);
-            }
+            const excluded = localStorage.getItem('timeline_excluded');
+            ({ chosen: tlSelectedFolders, excluded: tlExcludedFolders } = normalizedMarks(
+                saved ? JSON.parse(saved) : [], excluded ? JSON.parse(excluded) : []));
         } catch (e) { /* ignore */ }
     }
 
     function saveFolders() {
         localStorage.setItem('timeline_folders', JSON.stringify([...tlSelectedFolders]));
+        localStorage.setItem('timeline_excluded', JSON.stringify([...tlExcludedFolders]));
     }
 
     // ── Init ──────────────────────────────────────────────
@@ -56,6 +74,13 @@
 
         // Prevent re-initialization when switching back to timeline tab
         if (tlInitialized) {
+            // What failed last time (the disk was gone) is tried again
+            if (tlFoldersFailed || tlScanFailed) {
+                await timelineVaultReturned();
+                return;
+            }
+            // Window resized while the tab was hidden: rebuild with the real width
+            if (tlFiles.length > 0 && layoutStale()) recomputeLayout();
             // Just re-render in case of resize
             if (tlFiles.length > 0) {
                 tlRenderedRange = { start: -1, end: -1 };
@@ -70,9 +95,13 @@
 
         // Attach scroll listener
         container.addEventListener('scroll', onTimelineScroll, { passive: true });
+        container.addEventListener('keydown', onTimelineKeydown);
 
         // Recompute cols on resize
-        window.addEventListener('resize', debounce(recomputeLayout, 200));
+        // (not while the tab is hidden: its width is 0 then, which would mean 2 columns)
+        window.addEventListener('resize', debounce(() => {
+            if (tlScrollContainer && tlScrollContainer.clientWidth > 0 && tlFiles.length > 0) recomputeLayout();
+        }, 200));
 
         // Load folder tree for picker
         await loadTimelineFolders();
@@ -89,25 +118,94 @@
     // ── Folder Loading ────────────────────────────────────
     async function loadTimelineFolders() {
         try {
-            const res = await fetch(`${API_BASE}/api/timeline/folders`);
-            if (!res.ok) throw new Error('Failed to load folders');
-            const data = await res.json();
+            const data = await fetchJSON(`${API_BASE}/api/timeline/folders`);
             tlFolderTree = data.folders || [];
+            tlFoldersFailed = false;
         } catch (e) {
-            console.error('Timeline: error loading folders', e);
+            toastFetchError('Tijdlijn: mappen laden mislukt', e);
             tlFolderTree = [];
+            tlFoldersFailed = true;
         }
     }
 
+    // The disk is back (app.js reloadAfterVaultReturn) or the tab is opened again:
+    // load again what failed, without the user picking the folders again
+    window.timelineVaultReturned = async function () {
+        if (!tlInitialized) return;
+        if (tlFoldersFailed) await loadTimelineFolders();
+        if (tlScanFailed && tlSelectedFolders.size > 0) {
+            updateFolderChips();
+            await scanTimeline();
+        }
+    };
+
     // ── Folder Picker Modal ───────────────────────────────
+    // A chosen folder brings all its subfolders, and a subfolder of it can be left out
+    // again (with everything below it): the nearest marked folder above a folder decides,
+    // as selected_marks in routes/timeline.py. Below a chosen folder everything is ticked
+    // along (a click leaves it out); a folder with an exception inside gets a dash.
+    // The picker works on a draft: Annuleren leaves the selection as it was.
+    // Folders can be folded away; that only hides rows, the draft stays as it is.
+    let tlPickerDraft = new Set();
+    let tlPickerExcluded = new Set();
+    let tlPickerCollapsed = new Set();   // folded folders, kept between visits
+
+    try {
+        tlPickerCollapsed = new Set(JSON.parse(localStorage.getItem('timeline_picker_collapsed') || '[]'));
+    } catch (e) { /* ignore */ }
+
+    function saveCollapsed() {
+        try {
+            localStorage.setItem('timeline_picker_collapsed', JSON.stringify([...tlPickerCollapsed]));
+        } catch (e) { /* ignore */ }
+    }
+
+    function isInside(path, folder) {
+        return path.startsWith(folder.endsWith('/') ? folder : folder + '/');
+    }
+
+    // The nearest marked folder above path (not path itself): { folder, chosen } or null
+    function markAbove(path, chosen, excluded) {
+        let nearest = null;
+        for (const [marks, isChosen] of [[chosen, true], [excluded, false]]) {
+            for (const folder of marks) {
+                if (isInside(path, folder) && (!nearest || folder.length > nearest.folder.length)) {
+                    nearest = { folder, chosen: isChosen };
+                }
+            }
+        }
+        return nearest;
+    }
+
+    // Without the marks that change nothing: a chosen folder inside a chosen one, a
+    // left-out folder that is not inside a chosen one (also done by the server)
+    function normalizedMarks(chosen, excluded) {
+        const c = new Set(chosen);
+        const x = new Set([...excluded].filter(p => !c.has(p)));
+        return {
+            chosen: new Set([...c].filter(p => markAbove(p, c, x)?.chosen !== true)),
+            excluded: new Set([...x].filter(p => markAbove(p, c, x)?.chosen === true)),
+        };
+    }
+
     window.timelineOpenFolderPicker = function () {
         const modal = document.getElementById('modal-timeline-folders');
         const tree = document.getElementById('timeline-folder-tree');
         if (!modal || !tree) return;
 
+        ({ chosen: tlPickerDraft, excluded: tlPickerExcluded } = normalizedMarks(tlSelectedFolders, tlExcludedFolders));
         tree.innerHTML = '';
-        renderPickerTree(tree, tlFolderTree, 0);
+        if (tlFolderTree.length === 0) {
+            tree.appendChild(emptyState({ icon: 'fa-folder-open', title: 'Geen mappen gevonden',
+                text: tlFoldersFailed ? 'De mappen konden niet geladen worden. Is de schijf aangesloten?' : 'Het archief heeft nog geen mappen met foto\'s.' }));
+        } else {
+            renderPickerTree(tree, tlFolderTree, 0, tree);
+        }
+        refreshPicker();
         modal.classList.add('active');
+        // De eerste map krijgt de focus: pijltjes en spatie werken meteen
+        const first = tree.querySelector('.tl-picker-row');
+        if (first) setTimeout(() => first.focus(), 0);
     };
 
     window.timelineCloseFolderPicker = function () {
@@ -117,63 +215,187 @@
 
     window.timelineConfirmFolders = async function () {
         timelineCloseFolderPicker();
-        saveFolders();
-        updateFolderChips();
-
-        if (tlSelectedFolders.size > 0) {
-            await scanTimeline();
-        } else {
-            tlFiles = [];
-            renderEmptyState();
-        }
+        ({ chosen: tlSelectedFolders, excluded: tlExcludedFolders } = normalizedMarks(tlPickerDraft, tlPickerExcluded));
+        await applyFolderSelection();
     };
 
-    function renderPickerTree(container, folders, depth) {
+    // Chosen: off. Ticked along: left out, with what was marked below it. Left out: along again.
+    // Not in: chosen.
+    function togglePickerFolder(path, state) {
+        if (state === 'checked') {
+            tlPickerDraft.delete(path);
+        } else if (state === 'included') {
+            [...tlPickerDraft, ...tlPickerExcluded].forEach(p => {
+                if (isInside(p, path)) { tlPickerDraft.delete(p); tlPickerExcluded.delete(p); }
+            });
+            tlPickerExcluded.add(path);
+        } else if (state === 'excluded') {
+            tlPickerExcluded.delete(path);
+        } else {
+            tlPickerDraft.add(path);
+        }
+        ({ chosen: tlPickerDraft, excluded: tlPickerExcluded } = normalizedMarks(tlPickerDraft, tlPickerExcluded));
+        refreshPicker();
+    }
+
+    const PICKER_TITLES = {
+        checked: 'Gekozen, met alle submappen. Klik om niet meer te kiezen.',
+        included: 'Komt mee met de map erboven. Klik om uit te zonderen.',
+        excluded: 'Uitgezonderd, met alle submappen. Klik om weer mee te nemen.',
+        none: '',
+    };
+
+    // Draws every row's state from the draft: chosen, along with a chosen folder, left out,
+    // or nothing; mixed when something inside it is the other way round
+    function refreshPicker() {
+        const tree = document.getElementById('timeline-folder-tree');
+        if (!tree) return;
+        tree.querySelectorAll('.tl-picker-node').forEach(node => {
+            const path = node.dataset.path;
+            const row = node.firstElementChild;
+            const box = row.querySelector('.tl-picker-checkbox');
+            const via = row.querySelector('.tl-picker-via');
+            const above = markAbove(path, tlPickerDraft, tlPickerExcluded);
+            const state = tlPickerDraft.has(path) ? 'checked'
+                : tlPickerExcluded.has(path) ? 'excluded'
+                : above?.chosen ? 'included' : 'none';
+            const isIn = state === 'checked' || state === 'included';
+            // The other way round inside: left out (in a folder that is in) or chosen (in one that is not)
+            const inside = [...(isIn ? tlPickerExcluded : tlPickerDraft)].filter(p => isInside(p, path)).length;
+
+            node.classList.toggle('is-chosen', state === 'checked');
+            node.classList.toggle('is-excluded', state === 'excluded');
+            row.dataset.state = state;
+            row.classList.toggle('is-mixed', inside > 0);
+            setHTML(box, inside > 0 ? html`<i class="fas fa-minus" aria-hidden="true"></i>`
+                : isIn ? html`<i class="fas fa-check" aria-hidden="true"></i>` : html``);
+            row.setAttribute('aria-checked', inside > 0 ? 'mixed' : String(isIn));
+            row.title = PICKER_TITLES[state];
+
+            // Folded with an exception inside: say how many, the rows themselves are hidden
+            const folded = inside > 0 && node.classList.contains('is-collapsed');
+            via.textContent = folded ? (isIn ? `${inside} uitgezonderd` : `${inside} gekozen`)
+                : state === 'excluded' ? 'uitgezonderd'
+                : state === 'included' ? `via ${above.folder.split('/').pop()}` : '';
+            via.hidden = !via.textContent;
+            via.classList.toggle('is-hint', folded && !isIn);
+            via.classList.toggle('is-note', state === 'excluded' || (folded && isIn));
+        });
+        updatePickerSummary(tree);
+    }
+
+    function updatePickerSummary(tree) {
+        const summary = document.getElementById('timeline-picker-summary');
+        if (!summary) return;
+        const chosen = tlPickerDraft.size;
+        const along = tree.querySelectorAll('.tl-picker-row[data-state="included"]').length;
+        const left = tlPickerExcluded.size;
+        if (chosen === 0) {
+            summary.textContent = 'Nog geen map gekozen';
+            return;
+        }
+        const parts = [chosen === 1 ? [...tlPickerDraft][0].split('/').pop() : `${chosen} mappen`];
+        if (along > 0) parts.push(`met ${along} ${along === 1 ? 'submap' : 'submappen'}`);
+        if (left > 0) parts.push(`${left} uitgezonderd`);
+        summary.textContent = parts.join(', ');
+    }
+
+    function setCollapsed(node, collapsed) {
+        const children = node.querySelector(':scope > .tl-picker-children');
+        if (!children) return;
+        const row = node.firstElementChild;
+        node.classList.toggle('is-collapsed', collapsed);
+        children.hidden = collapsed;
+        row.querySelector('.folder-chevron').classList.toggle('expanded', !collapsed);
+        row.setAttribute('aria-expanded', String(!collapsed));
+        if (collapsed) tlPickerCollapsed.add(node.dataset.path);
+        else tlPickerCollapsed.delete(node.dataset.path);
+    }
+
+    function toggleCollapsed(node) {
+        setCollapsed(node, !node.classList.contains('is-collapsed'));
+        saveCollapsed();
+        refreshPicker();
+    }
+
+    window.timelinePickerFoldAll = function (collapsed) {
+        const tree = document.getElementById('timeline-folder-tree');
+        if (!tree) return;
+        tree.querySelectorAll('.tl-picker-node').forEach(node => setCollapsed(node, collapsed));
+        saveCollapsed();
+        refreshPicker();
+    };
+
+    function renderPickerTree(container, folders, depth, tree) {
         folders.forEach(folder => {
+            const node = createEl('div', { class: 'tl-picker-node' });
+            node.dataset.path = folder.path;
+            const hasChildren = folder.children && folder.children.length > 0;
+
             const row = document.createElement('div');
             row.className = 'tl-picker-row';
-            row.style.paddingLeft = `${depth * 20 + 12}px`;
+            row.style.paddingLeft = `${depth * 20 + 8}px`;
 
-            const isSelected = tlSelectedFolders.has(folder.path);
+            // Dichtklappen: alleen de rijen gaan weg, wat erin gekozen is blijft gekozen
+            const chevron = createEl('span', { class: 'folder-chevron' + (hasChildren ? '' : ' no-children') });
+            if (hasChildren) {
+                setHTML(chevron, html`<i class="fas fa-chevron-right" aria-hidden="true"></i>`);
+                chevron.title = 'In- of uitklappen';
+                chevron.onclick = (e) => { e.stopPropagation(); toggleCollapsed(node); };
+            }
 
-            const checkbox = document.createElement('div');
-            checkbox.className = 'tl-picker-checkbox' + (isSelected ? ' checked' : '');
-            checkbox.innerHTML = isSelected ? '<i class="fas fa-check"></i>' : '';
+            const checkbox = createEl('span', { class: 'tl-picker-checkbox' });
 
             const icon = document.createElement('span');
             icon.className = 'tl-picker-icon';
-            icon.textContent = '📁';
+            setHTML(icon, html`<i class="fas fa-folder" aria-hidden="true"></i>`);
 
             const name = document.createElement('span');
             name.className = 'tl-picker-name';
             name.textContent = folder.name;
 
+            const via = createEl('span', { class: 'tl-picker-via' });
+
             const count = document.createElement('span');
             count.className = 'tl-picker-count';
             count.textContent = folder.media_count > 0 ? `${folder.media_count}` : '';
 
-            row.appendChild(checkbox);
-            row.appendChild(icon);
-            row.appendChild(name);
-            row.appendChild(count);
+            row.append(chevron, checkbox, icon, name, via, count);
 
-            row.onclick = () => {
-                if (tlSelectedFolders.has(folder.path)) {
-                    tlSelectedFolders.delete(folder.path);
-                    checkbox.classList.remove('checked');
-                    checkbox.innerHTML = '';
-                } else {
-                    tlSelectedFolders.add(folder.path);
-                    checkbox.classList.add('checked');
-                    checkbox.innerHTML = '<i class="fas fa-check"></i>';
+            // Een aanvinkvakje voor het toetsenbord en schermlezers: Tab erheen, spatie of Enter
+            row.tabIndex = 0;
+            row.setAttribute('role', 'checkbox');
+            row.setAttribute('aria-label', folder.name);
+            row.onclick = () => togglePickerFolder(folder.path, row.dataset.state);
+            row.onkeydown = (e) => {
+                if (e.key === ' ' || e.key === 'Enter') {
+                    e.preventDefault();
+                    row.click();
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    // Only the rows that can be seen: not those in a folded folder
+                    const rows = [...tree.querySelectorAll('.tl-picker-row')].filter(r => !r.closest('[hidden]'));
+                    const next = rows[rows.indexOf(row) + (e.key === 'ArrowDown' ? 1 : -1)];
+                    if (next) next.focus();
+                } else if (e.key === 'ArrowRight' && hasChildren && node.classList.contains('is-collapsed')) {
+                    e.preventDefault();
+                    toggleCollapsed(node);
+                } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (hasChildren && !node.classList.contains('is-collapsed')) toggleCollapsed(node);
+                    else node.parentElement.closest('.tl-picker-node')?.firstElementChild.focus();
                 }
             };
 
-            container.appendChild(row);
+            node.appendChild(row);
+            container.appendChild(node);
 
-            // Render children recursively
-            if (folder.children && folder.children.length > 0) {
-                renderPickerTree(container, folder.children, depth + 1);
+            // Render children recursively, inside the node: a chosen folder is one block with its subfolders
+            if (hasChildren) {
+                const children = createEl('div', { class: 'tl-picker-children', role: 'group' });
+                node.appendChild(children);
+                renderPickerTree(children, folder.children, depth + 1, tree);
+                setCollapsed(node, tlPickerCollapsed.has(folder.path));
             }
         });
     }
@@ -186,68 +408,142 @@
         container.innerHTML = '';
 
         if (tlSelectedFolders.size === 0) {
-            container.innerHTML = '<span class="tl-no-folders">No folders selected</span>';
+            container.innerHTML = '<span class="tl-no-folders">Geen mappen gekozen</span>';
             return;
         }
 
         tlSelectedFolders.forEach(path => {
             const name = path.split('/').pop();
-            const chip = document.createElement('div');
-            chip.className = 'tl-folder-chip';
-            chip.innerHTML = `
-                <span class="tl-chip-name">${name}</span>
-                <button class="tl-chip-remove" onclick="event.stopPropagation(); timelineRemoveFolder('${path.replace(/'/g, "\\'")}')">×</button>
-            `;
+            // Niet gevonden (verplaatst of weg): een waarschuwingsicoon, het pad in de tooltip
+            const missing = tlMissingFolders.has(path);
+            const chip = createEl('div', {
+                class: `tl-folder-chip${missing ? ' is-missing' : ''}`,
+                title: missing ? `Niet gevonden, overgeslagen: ${displayPath(path)}` : null,
+            },
+                missing ? createEl('i', { class: 'fas fa-triangle-exclamation tl-chip-icon', 'aria-hidden': 'true' }) : null,
+                createEl('span', { class: 'tl-chip-name', text: name }),
+                createEl('button', {
+                    class: 'tl-chip-remove',
+                    'aria-label': `${name} uit de tijdlijn halen`,
+                    title: 'Uit de tijdlijn halen',
+                    onClick: (e) => { e.stopPropagation(); timelineRemoveFolder(path); },
+                }, '×'));
+            container.appendChild(chip);
+        });
+        // Uitgezonderde mappen: het kruisje neemt ze weer mee
+        tlExcludedFolders.forEach(path => {
+            const name = path.split('/').pop();
+            const chip = createEl('div', { class: 'tl-folder-chip is-excluded', title: `Uitgezonderd: ${path.split('/').slice(-2).join('/')}` },
+                createEl('span', { class: 'tl-chip-name', text: `zonder ${name}` }),
+                createEl('button', {
+                    class: 'tl-chip-remove',
+                    'aria-label': `${name} weer in de tijdlijn nemen`,
+                    title: 'Weer meenemen',
+                    onClick: (e) => { e.stopPropagation(); timelineRemoveFolder(path); },
+                }, '×'));
             container.appendChild(chip);
         });
     }
 
+    // A chip's cross: a chosen folder goes out, a left-out folder comes back
     window.timelineRemoveFolder = async function (path) {
         tlSelectedFolders.delete(path);
+        tlExcludedFolders.delete(path);
+        ({ chosen: tlSelectedFolders, excluded: tlExcludedFolders } = normalizedMarks(tlSelectedFolders, tlExcludedFolders));
+        await applyFolderSelection();
+    };
+
+    // Welke gekozen mappen er niet meer zijn: 'Welke?' klapt de lijst open in de melding, daarna
+    // haalt dezelfde knop ze uit de selectie
+    function showMissingFoldersToast(paths) {
+        const same = tlMissingToast && tlMissingToast.isConnected && !tlMissingToast._leaving;
+        if (same && tlMissingToast._paths === paths.join('\n')) return;
+        if (same) hideToast(tlMissingToast);
+        const n = paths.length;
+        const message = n === 1 ? '1 gekozen map is niet gevonden en overgeslagen'
+            : `${n} gekozen mappen zijn niet gevonden en overgeslagen`;
+        tlMissingToast = showToast('Tijdlijn', message, 'warning', {
+            label: 'Welke?', icon: 'fa-list-ul', keepOpen: true,
+            onClick: (button, toast) => {
+                if (!toast._expanded) {
+                    toast._expanded = true;
+                    toast.querySelector('.toast-body').after(createEl('ul', { class: 'toast-list' },
+                        ...paths.map(p => createEl('li', { title: p },
+                            createEl('i', { class: 'fas fa-folder', 'aria-hidden': 'true' }),
+                            createEl('span', { class: 'path-label', text: displayPath(p) })))));
+                    button.querySelector('i').className = 'fas fa-xmark';
+                    button.querySelector('.toast-action-label').textContent = 'Uit de selectie halen';
+                    // Open blijft hij langer staan, zodat de lijst uit te lezen is
+                    toastSchedule(toast, 20000);
+                    restartToastTimer(toast);
+                    return;
+                }
+                hideToast(toast);
+                paths.forEach(p => { tlSelectedFolders.delete(p); tlMissingFolders.delete(p); });
+                applyFolderSelection();
+            },
+        });
+        tlMissingToast._paths = paths.join('\n');
+    }
+
+    async function applyFolderSelection() {
         saveFolders();
         updateFolderChips();
 
         if (tlSelectedFolders.size > 0) {
             await scanTimeline();
         } else {
+            tlScanSeq++;   // pages still on their way are for the old selection
             tlFiles = [];
+            tlTotal = 0;
             renderEmptyState();
         }
-    };
+    }
 
     // ── Scanning ──────────────────────────────────────────
+    function timelineScanUrl(offset, limit) {
+        // Eén parameter per map: een mapnaam mag een komma bevatten
+        const params = new URLSearchParams();
+        [...tlSelectedFolders].forEach(folder => params.append('folders', folder));
+        [...tlExcludedFolders].forEach(folder => params.append('exclude', folder));
+        params.set('offset', String(offset));
+        params.set('limit', String(limit));
+        return `${API_BASE}/api/timeline/scan?${params}`;
+    }
+
     async function scanTimeline() {
         if (tlScanning) return;
         tlScanning = true;
+        const seq = ++tlScanSeq;
+        tlPendingYear = null;
+        tlFocusIndex = 0;
 
         const scrollEl = tlScrollContainer;
         const contentEl = tlContentEl;
-        const infoBar = document.getElementById('timeline-info-bar');
         const sliderWrap = document.getElementById('timeline-slider-wrap');
 
         // Show loading
         if (contentEl) {
             contentEl.style.height = 'auto';
-            contentEl.innerHTML = `
-                <div class="tl-loading-state">
-                    <div class="tl-loading-spinner"></div>
-                    <p>Scanning folders…</p>
-                </div>
-            `;
+            contentEl.replaceChildren(skeletonCards(15, 'tl-skeleton'));
         }
 
         try {
-            const foldersParam = [...tlSelectedFolders].join(',');
-            const res = await fetch(`${API_BASE}/api/timeline/scan?folders=${encodeURIComponent(foldersParam)}`);
-            if (!res.ok) throw new Error('Scan failed');
-
-            const data = await res.json();
-            tlFiles = data.files || [];
+            const data = await fetchJSON(timelineScanUrl(0, TL_FIRST_PAGE));
+            tlFiles = timelineFilesFrom(data);
+            tlTotal = data.total || tlFiles.length;
+            tlScanFailed = false;
+            tlMissingFolders = new Set(data.skipped || []);
+            updateFolderChips();
+            if (tlMissingFolders.size) showMissingFoldersToast([...tlMissingFolders]);
+            if (data.complete === false) {
+                showToast('Tijdlijn', `${data.errors || 'Sommige'} map(pen) of bestand(en) konden niet gelezen worden; de tijdlijn is mogelijk onvolledig`, 'warning');
+            }
             tlDateIndex = data.date_index || {};
             tlYearBoundaries = data.year_boundaries || {};
 
             if (tlFiles.length === 0) {
-                renderEmptyState('No photos found in selected folders');
+                renderEmptyState('Geen foto\'s of video\'s in de gekozen mappen');
                 tlScanning = false;
                 return;
             }
@@ -262,17 +558,7 @@
             setupSlider();
 
             // Show info bar
-            if (infoBar) {
-                const years = Object.keys(tlDateIndex).sort();
-                const range = years.length > 1
-                    ? `${years[0]} – ${years[years.length - 1]}`
-                    : years[0] || '';
-                infoBar.innerHTML = `
-                    <span class="tl-info-count"><i class="fas fa-images"></i> ${tlFiles.length.toLocaleString()} photos</span>
-                    <span class="tl-info-range"><i class="fas fa-calendar-alt"></i> ${range}</span>
-                `;
-                infoBar.style.display = 'flex';
-            }
+            renderInfoBar();
 
             // Show slider
             if (sliderWrap) sliderWrap.style.display = 'flex';
@@ -281,13 +567,115 @@
             if (scrollEl) scrollEl.scrollTop = 0;
             tlRenderedRange = { start: -1, end: -1 };
             renderVisibleRows();
+            // De eerste foto's komen als een golf binnen (alleen wat in beeld staat)
+            if (tlContentEl) MediaMotion.cascade(tlContentEl.querySelectorAll('.tl-photo-card'), { root: scrollEl });
 
+            if (data.next_offset !== null && data.next_offset !== undefined) {
+                // Not awaited: the timeline can be used while the rest arrives
+                loadRemainingPages(seq, data.next_offset, {
+                    version: data.version, source: data.source, total: data.total, date_index: data.date_index,
+                });
+            }
         } catch (e) {
             console.error('Timeline scan error:', e);
-            renderEmptyState('Failed to scan folders. Check console for details.');
+            tlScanFailed = true;
+            renderEmptyState(`Tijdlijn laden mislukt: ${e.message}`);
         }
 
         tlScanning = false;
+    }
+
+    // Zelfde selectie, alleen uit een andere bron (de schijf of de bibliotheek): zelfde
+    // aantal en zelfde verdeling over de maanden, dan zijn het dezelfde rijen
+    function sameSelection(page, first) {
+        return page.source !== first.source && page.total === first.total &&
+            JSON.stringify(page.date_index || {}) === JSON.stringify(first.date_index || {});
+    }
+
+    // De rest van de tijdlijn, een pagina tegelijk, achter de eerste pagina aan
+    async function loadRemainingPages(seq, offset, first) {
+        let version = first.version;
+        let source = first.source;
+        tlPagesLoading = true;
+        renderInfoBar();
+        try {
+            while (offset !== null && offset !== undefined && seq === tlScanSeq) {
+                const page = await fetchJSON(timelineScanUrl(offset, TL_PAGE));
+                if (seq !== tlScanSeq) return;
+                if (page.version !== version && sameSelection(page, { ...first, source })) {
+                    // Bijv. de bibliotheek is net bijgewerkt: verder met de nieuwe bron
+                    version = page.version;
+                    source = page.source;
+                } else if (page.version !== version) {
+                    // De selectie is intussen veranderd (bijv. bijgewerkt): opnieuw vanaf het begin
+                    tlPagesLoading = false;
+                    scanTimeline();
+                    return;
+                }
+                tlFiles = tlFiles.concat(timelineFilesFrom(page));
+                offset = page.next_offset;
+                buildGroups();
+                recomputeLayout();   // groeit alleen onderaan: de scrollpositie blijft staan
+                updateSliderFromScroll();
+                if (tlPendingYear !== null && tlYearBoundaries[tlPendingYear] < tlFiles.length) {
+                    const year = tlPendingYear;
+                    tlPendingYear = null;
+                    jumpToYear(year);
+                }
+                renderInfoBar();
+            }
+        } catch (e) {
+            if (seq === tlScanSeq) {
+                toastFetchError('Tijdlijn: verder laden mislukt', e);
+                tlScanFailed = true;   // bij terugkomen of als de schijf terug is: opnieuw
+            }
+        } finally {
+            if (seq === tlScanSeq) {
+                tlPagesLoading = false;
+                renderInfoBar();
+            }
+        }
+    }
+
+    // De server stuurt per bestand een korte rij [tijd, pad t.o.v. het archief, grootte,
+    // 'p'|'v', datumbron]; hier worden het weer bestandsobjecten voor de viewer
+    const TL_DATE_SOURCES = { e: 'exif', q: 'video', b: 'birthtime', m: 'mtime' };
+
+    function timelineFilesFrom(data) {
+        const root = String(data.root || '').replace(/\/+$/, '');
+        const columns = data.columns || [];
+        const at = name => columns.indexOf(name);
+        const [iTs, iPath, iSize, iType, iSource] = ['timestamp', 'path', 'size', 'type', 'date_source'].map(at);
+        return (data.rows || []).map(row => {
+            const rel = row[iPath];
+            return {
+                path: `${root}/${rel}`,
+                name: rel.slice(rel.lastIndexOf('/') + 1),
+                timestamp: row[iTs],
+                size: row[iSize],
+                type: row[iType] === 'v' ? 'video' : 'photo',
+                date_source: TL_DATE_SOURCES[row[iSource]] || null,
+            };
+        });
+    }
+
+    // Aantal foto's en jaarbereik; ook na een verplaatsing opnieuw getekend
+    function renderInfoBar() {
+        const infoBar = document.getElementById('timeline-info-bar');
+        if (!infoBar) return;
+        const years = Object.keys(tlDateIndex).sort();
+        const range = years.length > 1
+            ? `${years[0]} – ${years[years.length - 1]}`
+            : years[0] || '';
+        const loading = tlPagesLoading && tlFiles.length < tlTotal
+            ? html`<span class="tl-info-loading" role="status">${tlFiles.length.toLocaleString('nl-NL')} van ${tlTotal.toLocaleString('nl-NL')} geladen…</span>`
+            : html``;
+        infoBar.innerHTML = html`
+            <span class="tl-info-count"><i class="fas fa-images" aria-hidden="true"></i> ${tlTotal.toLocaleString('nl-NL')} foto's en video's</span>
+            <span class="tl-info-range"><i class="fas fa-calendar-alt"></i> ${range}</span>
+            ${loading}
+        `;
+        infoBar.style.display = 'flex';
     }
 
     // ── Grouping ──────────────────────────────────────────
@@ -304,8 +692,8 @@
             const month = dt.getMonth();
             const day = dt.getDate();
 
-            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                'July', 'August', 'September', 'October', 'November', 'December'];
+            const monthNames = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
+                'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
             const label = `${monthNames[month]} ${year}`;
 
             if (label !== currentLabel) {
@@ -330,9 +718,20 @@
     }
 
     // ── Layout Computation ────────────────────────────────
+    // Page margin left and right of the rows (--page-gutter, 20 px on narrow windows)
+    function gutter() {
+        const value = tlContentEl && parseFloat(getComputedStyle(tlContentEl).getPropertyValue('--page-gutter'));
+        return value > 0 ? value : 32;
+    }
+
+    // The content is at most --page-max wide (centred, like every page); the rows sit inside it
+    function rowWidth() {
+        return (tlContentEl || tlScrollContainer).clientWidth - 2 * gutter();
+    }
+
     function getColumns() {
         if (!tlScrollContainer) return COLS;
-        const w = tlScrollContainer.clientWidth - 48; // padding
+        const w = rowWidth();
         if (w < 500) return 2;
         if (w < 750) return 3;
         if (w < 1050) return 4;
@@ -340,8 +739,19 @@
         return 6;
     }
 
+    // Built for another width (columns or tile size)?
+    function layoutStale() {
+        const cols = getColumns();
+        return cols !== tlLayoutCols
+            || Math.max(80, Math.floor((rowWidth() - GAP * (cols - 1)) / cols)) !== tlTile;
+    }
+
     function recomputeLayout() {
         const cols = getColumns();
+        tlLayoutCols = cols;
+        // Square tiles, the same shape as in Bestanden, at every window width
+        tlTile = Math.max(80, Math.floor((rowWidth() - GAP * (cols - 1)) / cols));
+        tlRowHeight = tlTile + GAP;
         tlLayoutRows = [];
         let top = 0;
 
@@ -373,18 +783,19 @@
                 tlLayoutRows.push({
                     type: 'row',
                     top: top,
-                    height: ROW_HEIGHT,
+                    height: tlRowHeight,
                     groupIdx: gi,
                     rowFiles: rowFiles
                 });
-                top += ROW_HEIGHT;
+                top += tlRowHeight;
             }
 
             // Group spacing
             top += 16;
         }
 
-        tlTotalHeight = top;
+        // Ruimte onderaan, zoals elke pagina (--space-4xl): het takenpaneel bedekt de laatste rij niet
+        tlTotalHeight = top + 64;
 
         if (tlContentEl) {
             tlContentEl.style.height = `${tlTotalHeight}px`;
@@ -401,21 +812,27 @@
 
         const scrollTop = tlScrollContainer.scrollTop;
         const viewHeight = tlScrollContainer.clientHeight;
-        const preloadPx = PRELOAD_ROWS * ROW_HEIGHT;
+        const preloadPx = PRELOAD_ROWS * tlRowHeight;
 
         const viewStart = scrollTop - preloadPx;
         const viewEnd = scrollTop + viewHeight + preloadPx;
 
-        // Binary search for first visible row
+        // Binary search for first row traversing into view
+        let left = 0;
+        let right = tlLayoutRows.length - 1;
         let startIdx = 0;
-        let endIdx = tlLayoutRows.length - 1;
 
-        // Find first row that is in view
-        while (startIdx < tlLayoutRows.length && tlLayoutRows[startIdx].top + tlLayoutRows[startIdx].height < viewStart) {
-            startIdx++;
+        while (left <= right) {
+            const mid = Math.floor((left + right) / 2);
+            if (tlLayoutRows[mid].top + tlLayoutRows[mid].height < viewStart) {
+                left = mid + 1;
+            } else {
+                startIdx = mid;
+                right = mid - 1;
+            }
         }
-        // Find last row that is in view
-        endIdx = startIdx;
+
+        let endIdx = startIdx;
         while (endIdx < tlLayoutRows.length && tlLayoutRows[endIdx].top < viewEnd) {
             endIdx++;
         }
@@ -423,55 +840,84 @@
 
         // Skip if range hasn't changed
         if (startIdx === tlRenderedRange.start && endIdx === tlRenderedRange.end) return;
-
         tlRenderedRange = { start: startIdx, end: endIdx };
 
-        // Build fragment
-        const fragment = document.createDocumentFragment();
-
-        for (let i = startIdx; i <= endIdx; i++) {
-            const layoutRow = tlLayoutRows[i];
-
-            if (layoutRow.type === 'header') {
-                const header = document.createElement('div');
-                header.className = 'tl-group-header';
-                header.style.position = 'absolute';
-                header.style.top = `${layoutRow.top}px`;
-                header.style.left = '0';
-                header.style.right = '0';
-                header.style.height = `${layoutRow.height}px`;
-                header.textContent = layoutRow.label;
-                fragment.appendChild(header);
+        // Smart DOM Update (Dom Recycling)
+        const existingNodes = Array.from(tlContentEl.children);
+        const existingIndices = new Set();
+        
+        // Remove nodes that are out of bounds
+        existingNodes.forEach(node => {
+            const idx = parseInt(node.getAttribute('data-row-idx'), 10);
+            if (isNaN(idx) || idx < startIdx || idx > endIdx) {
+                tlContentEl.removeChild(node);
             } else {
-                const row = document.createElement('div');
-                row.className = 'tl-photo-row';
-                row.style.position = 'absolute';
-                row.style.top = `${layoutRow.top}px`;
-                row.style.left = '24px';
-                row.style.right = '24px';
-                row.style.height = `${ROW_HEIGHT}px`;
-                row.style.display = 'grid';
-                row.style.gridTemplateColumns = `repeat(${getColumns()}, 1fr)`;
-                row.style.gap = '10px';
+                existingIndices.add(idx);
+            }
+        });
 
-                layoutRow.rowFiles.forEach(fileIdx => {
-                    const file = tlFiles[fileIdx];
-                    const card = createPhotoCard(file, fileIdx);
-                    row.appendChild(card);
-                });
-
-                fragment.appendChild(row);
+        // Add nodes that are missing
+        const fragment = document.createDocumentFragment();
+        for (let i = startIdx; i <= endIdx; i++) {
+            if (!existingIndices.has(i)) {
+                fragment.appendChild(renderRowNode(i));
             }
         }
+        
+        if (fragment.childElementCount > 0) {
+            tlContentEl.appendChild(fragment);
+        }
+        // Eén kaart in beeld is met Tab bereikbaar: die van het toetsenbord, anders de eerste
+        if (!tlContentEl.querySelector('.tl-photo-card[tabindex="0"]')) {
+            const first = tlContentEl.querySelector('.tl-photo-card');
+            if (first) first.tabIndex = 0;
+        }
+    }
 
-        tlContentEl.innerHTML = '';
-        tlContentEl.appendChild(fragment);
+    function renderRowNode(rowIndex) {
+        const layoutRow = tlLayoutRows[rowIndex];
+
+        if (layoutRow.type === 'header') {
+            const header = document.createElement('div');
+            header.className = 'tl-group-header';
+            header.setAttribute('data-row-idx', rowIndex);
+            header.style.position = 'absolute';
+            header.style.top = `${layoutRow.top}px`;
+            header.style.left = '0';
+            header.style.right = '0';
+            header.style.height = `${layoutRow.height}px`;
+            header.textContent = layoutRow.label;
+            return header;
+        } else {
+            const row = document.createElement('div');
+            row.className = 'tl-photo-row';
+            row.setAttribute('data-row-idx', rowIndex);
+            row.style.position = 'absolute';
+            row.style.top = `${layoutRow.top}px`;
+            row.style.left = `${gutter()}px`;
+            row.style.right = `${gutter()}px`;
+            row.style.height = `${tlTile}px`;
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = `repeat(${tlLayoutCols}, 1fr)`;
+            row.style.gap = `${GAP}px`;
+
+            layoutRow.rowFiles.forEach(fileIdx => {
+                const file = tlFiles[fileIdx];
+                const card = createPhotoCard(file, fileIdx);
+                row.appendChild(card);
+            });
+
+            return row;
+        }
     }
 
     function createPhotoCard(file, index) {
         const card = document.createElement('div');
-        card.className = 'tl-photo-card';
+        card.className = 'tl-photo-card thumb-tile';
         card.setAttribute('data-index', index);
+        card.dataset.motionKey = file.path;   // de viewer groeit hieruit en krimpt hierheen terug
+        card.setAttribute('role', 'button');
+        card.tabIndex = index === tlFocusIndex ? 0 : -1;
 
         // Lazy image
         const img = document.createElement('img');
@@ -492,7 +938,7 @@
         img.addEventListener('load', () => img.classList.remove('loading'));
         img.addEventListener('error', () => {
             img.classList.remove('loading');
-            img.style.backgroundColor = 'var(--bg-tertiary)';
+            img.style.backgroundColor = 'var(--surface-raised)';
         });
 
         img.src = thumbUrl;
@@ -500,104 +946,238 @@
 
         // Date label
         const dt = new Date(file.timestamp * 1000);
-        const dateStr = `${dt.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][dt.getMonth()]} ${dt.getFullYear()}`;
+        const dateStr = `${dt.getDate()} ${['jan', 'feb', 'mrt', 'apr', 'mei', 'jun',
+            'jul', 'aug', 'sep', 'okt', 'nov', 'dec'][dt.getMonth()]} ${dt.getFullYear()}`;
         const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
 
         const dateLabel = document.createElement('div');
         dateLabel.className = 'tl-photo-date';
         dateLabel.textContent = dateStr;
         card.appendChild(dateLabel);
+        card.setAttribute('aria-label', `${file.name}, ${dateStr} ${timeStr}${file.type === 'video' ? ', video' : ''}`);
 
-        // Click handler - open in viewer modal
-        card.onclick = () => {
+        // Click handler - open in viewer modal; het rondje rechtsboven selecteert altijd
+        if (window.DVExport) {
+            if (DVExport.has(file.path)) card.classList.add('selected');
+            card.appendChild(DVExport.selectButton((e) => selectTimelineFile(file, index, e.shiftKey)));
+        }
+        card.onclick = (e) => {
+            if (window.DVExport && DVExport.wantsSelect(e)) return selectTimelineFile(file, index, e.shiftKey);
             openTimelinePhoto(file, index);
         };
 
         return card;
     }
 
-    function openTimelinePhoto(file, index) {
-        // Reuse the existing media modal from app.js
-        // We need to set up the modal data for timeline context
-        const modal = document.getElementById('modal-viewer');
-        if (!modal) return;
-
-        const title = document.getElementById('modal-title');
-        const body = document.getElementById('modal-body');
-        const metadata = document.getElementById('modal-metadata');
-
-        if (title) title.textContent = file.name;
-
-        // Create appropriate media element
-        let mediaHTML = '';
-        if (file.type === 'video') {
-            mediaHTML = `<video src="${API_BASE}/api/file?path=${encodeURIComponent(file.path)}" controls autoplay class="modal-media" style="max-width:100%;max-height:70vh;"></video>`;
+    // Selecteren voor export: klik met shift of cmd, of spatie
+    let tlAnchor = null;
+    function selectTimelineFile(file, index, range) {
+        if (range && tlAnchor !== null) {
+            DVExport.selectRange(tlFiles.slice(Math.min(tlAnchor, index), Math.max(tlAnchor, index) + 1));
         } else {
-            mediaHTML = `<img src="${API_BASE}/api/file?path=${encodeURIComponent(file.path)}" class="modal-media" style="max-width:100%;max-height:70vh;object-fit:contain;">`;
+            DVExport.toggle(file);
         }
+        tlAnchor = index;
+    }
+    // export.js laadt na dit bestand: pas dan bestaat DVExport
+    document.addEventListener('DOMContentLoaded', () => {
+        if (!window.DVExport) return;
+        DVExport.onChange(() => {
+            if (!tlContentEl) return;
+            tlContentEl.querySelectorAll('.tl-photo-card').forEach(card => {
+                const f = tlFiles[Number(card.getAttribute('data-index'))];
+                if (f) card.classList.toggle('selected', DVExport.has(f.path));
+            });
+            tlContentEl.classList.toggle('is-selecting', DVExport.count > 0);
+        });
 
-        // Keep nav zones
-        const navZones = body.querySelectorAll('.modal-nav-zone');
-        body.innerHTML = mediaHTML;
-        navZones.forEach(z => body.appendChild(z));
+        // Verplaatst met de selectiebalk: wat nog in een gekozen map staat, blijft met zijn
+        // nieuwe pad; de rest (en alles uit de prullenmand) gaat eruit
+        DVExport.onMoved((moved, { trashed }) => {
+            if (!tlInitialized || !tlFiles.length) return;
+            if (tlPagesLoading) { scanTimeline(); return; }   // de volgende pagina's schuiven anders op
+            let removed = false;
+            moved.forEach(({ path, new_path: newPath }) => {
+                const file = tlFiles.find(f => f.path === path);
+                if (!file) return;
+                if (!trashed && markAbove(newPath, tlSelectedFolders, tlExcludedFolders)?.chosen === true) {
+                    file.path = newPath;
+                    file.name = newPath.split('/').pop();
+                } else if (dropTimelineFile(path)) removed = true;
+            });
+            if (removed) relayoutAfterRemoval();
+            else { tlRenderedRange = { start: -1, end: -1 }; renderVisibleRows(); }
+        });
+        // Ongedaan gemaakt: de bestanden staan weer op hun plek, dus opnieuw inlezen
+        DVExport.onRestored(() => { if (tlInitialized && tlSelectedFolders.size > 0) scanTimeline(); });
+    });
 
-        // Setup timeline-specific navigation
-        const leftZone = body.querySelector('.modal-nav-zone.left');
-        const rightZone = body.querySelector('.modal-nav-zone.right');
-
-        if (leftZone) {
-            leftZone.onclick = () => {
-                if (index > 0) openTimelinePhoto(tlFiles[index - 1], index - 1);
-            };
-        }
-        if (rightZone) {
-            rightZone.onclick = () => {
-                if (index < tlFiles.length - 1) openTimelinePhoto(tlFiles[index + 1], index + 1);
-            };
-        }
-
-        // Metadata
-        if (metadata) {
-            const dt = new Date(file.timestamp * 1000);
-            const sizeStr = formatSize(file.size);
-            metadata.innerHTML = `
-                <div class="modal-metadata-grid">
-                    <div class="metadata-item"><strong>Date</strong><span>${dt.toLocaleString()}</span></div>
-                    <div class="metadata-item"><strong>Size</strong><span>${sizeStr}</span></div>
-                    <div class="metadata-item"><strong>Type</strong><span>${file.type}</span></div>
-                    <div class="metadata-item"><strong>Path</strong><span style="font-size:0.8em;word-break:break-all;">${file.path}</span></div>
-                </div>
-            `;
-        }
-
-        // Wire up Finder / Delete buttons
-        const finderBtn = document.getElementById('btn-open-finder');
-        if (finderBtn) {
-            finderBtn.onclick = () => {
-                fetch(`${API_BASE}/api/open-in-finder`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path: file.path })
-                });
-            };
-        }
-
-        modal.classList.add('active');
+    // De gedeelde viewer van app.js, met de tijdlijn als eigen lijst: bladeren gaat door de
+    // tijdlijn, en Open in Finder en Verplaatsen werken op de foto die te zien is
+    function openTimelinePhoto(file, index) {
+        openViewer(tlFiles, index, { onRemoved: removeTimelineFile });
     }
 
-    function formatSize(bytes) {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-        if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-        return (bytes / 1073741824).toFixed(2) + ' GB';
+    // Een verplaatst bestand uit de tijdlijn halen en de indeling opnieuw opbouwen
+    function removeTimelineFile(file) {
+        if (dropTimelineFile(file.path)) relayoutAfterRemoval();
     }
 
-    // ── Scroll Handler ────────────────────────────────────
-    function onTimelineScroll() {
+    // Eén bestand uit de lijst en de tellingen halen, zonder opnieuw te tekenen
+    function dropTimelineFile(path) {
+        const at = tlFiles.findIndex(f => f.path === path);
+        if (at < 0) return false;
+        const [file] = tlFiles.splice(at, 1);
+        const dt = new Date(file.timestamp * 1000);
+        const year = String(dt.getFullYear());
+        const month = String(dt.getMonth() + 1);
+        if (tlDateIndex[year] && tlDateIndex[year][month]) {
+            tlDateIndex[year][month]--;
+            // Een lege maand of een leeg jaar telt niet meer mee in het bereik
+            if (tlDateIndex[year][month] <= 0) delete tlDateIndex[year][month];
+            if (Object.keys(tlDateIndex[year]).length === 0) delete tlDateIndex[year];
+        }
+        // Jaren na dit bestand beginnen één plek eerder; een leeg jaar verdwijnt (ook als nog
+        // niet alles geladen is, dus niet opnieuw tellen uit tlFiles)
+        tlTotal = Math.max(0, tlTotal - 1);
+        Object.keys(tlYearBoundaries).forEach(y => {
+            if (!tlDateIndex[y]) delete tlYearBoundaries[y];
+            else if (tlYearBoundaries[y] > at) tlYearBoundaries[y]--;
+        });
+        return true;
+    }
+
+    function relayoutAfterRemoval() {
+        if (tlFiles.length === 0 && !tlPagesLoading) {
+            renderEmptyState('Geen foto\'s of video\'s in de gekozen mappen');
+            return;
+        }
+        buildGroups();
+        recomputeLayout();
+        renderInfoBar();
+        // Jaarlabels opnieuw opbouwen (een jaar zonder foto's verdwijnt) en de schuif bij de scrollpositie houden
+        setupSlider();
+        updateSliderFromScroll();
+    }
+
+    // ── Keyboard ──────────────────────────────────────────
+    // Arrows move between cards (up and down keep the column, across month headers),
+    // Home/End and PageUp/PageDown jump, Enter or space opens the viewer. The list is
+    // virtualized, so the target row is scrolled into view and drawn before it gets focus.
+
+    function layoutRowOf(index) {
+        let lo = 0, hi = tlLayoutRows.length - 1, found = -1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const row = tlLayoutRows[mid];
+            const first = row.type === 'row' ? row.rowFiles[0] : (tlGroups[row.groupIdx] || {}).startIdx;
+            if (first <= index) { found = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        // A header shares its first index with the row below it
+        while (found >= 0 && found < tlLayoutRows.length && tlLayoutRows[found].type !== 'row') found++;
+        return found;
+    }
+
+    function photoRowFrom(ri, step) {
+        for (let i = ri + step; i >= 0 && i < tlLayoutRows.length; i += step) {
+            if (tlLayoutRows[i].type === 'row') return i;
+        }
+        return -1;
+    }
+
+    function focusTimelineCard(index) {
+        if (!tlFiles.length || !tlScrollContainer) return;
+        index = Math.max(0, Math.min(tlFiles.length - 1, index));
+        const ri = layoutRowOf(index);
+        if (ri < 0) return;
+        const row = tlLayoutRows[ri];
+        const before = tlLayoutRows[ri - 1];
+        const top = before && before.type === 'header' ? before.top : row.top;
+        const view = tlScrollContainer.clientHeight;
+        const scroll = tlScrollContainer.scrollTop;
+        if (top < scroll) tlScrollContainer.scrollTop = top;
+        else if (row.top + row.height > scroll + view) tlScrollContainer.scrollTop = row.top + row.height - view;
         renderVisibleRows();
         updateSliderFromScroll();
         updateCurrentDateLabel();
+        const old = tlContentEl.querySelector('.tl-photo-card[tabindex="0"]');
+        if (old) old.tabIndex = -1;
+        tlFocusIndex = index;
+        const card = tlContentEl.querySelector(`.tl-photo-card[data-index="${index}"]`);
+        if (card) {
+            card.tabIndex = 0;
+            card.focus({ preventScroll: true });
+        }
+    }
+
+    function onTimelineKeydown(e) {
+        const card = e.target.closest && e.target.closest('.tl-photo-card');
+        if (!card || e.altKey || e.ctrlKey || e.metaKey) return;
+        const index = Number(card.getAttribute('data-index'));
+        const ri = layoutRowOf(index);
+        const row = tlLayoutRows[ri];
+        const col = row ? index - row.rowFiles[0] : 0;
+        const rowsPerPage = Math.max(1, Math.floor(tlScrollContainer.clientHeight / tlRowHeight) - 1);
+        const inRow = (target) => {
+            if (target < 0) return index;
+            const r = tlLayoutRows[target];
+            return Math.min(r.rowFiles[0] + col, r.rowFiles[r.rowFiles.length - 1]);
+        };
+        const rowsAway = (n) => {
+            let target = ri;
+            for (let i = 0; i < Math.abs(n); i++) {
+                const next = photoRowFrom(target, Math.sign(n));
+                if (next < 0) break;
+                target = next;
+            }
+            return inRow(target);
+        };
+        let next = null;
+        switch (e.key) {
+            case 'ArrowRight': next = index + 1; break;
+            case 'ArrowLeft': next = index - 1; break;
+            case 'ArrowDown': next = inRow(photoRowFrom(ri, 1)); break;
+            case 'ArrowUp': next = inRow(photoRowFrom(ri, -1)); break;
+            case 'PageDown': next = rowsAway(rowsPerPage); break;
+            case 'PageUp': next = rowsAway(-rowsPerPage); break;
+            case 'Home': next = 0; break;
+            case 'End': next = tlFiles.length - 1; break;
+            case ' ':
+                e.preventDefault();
+                if (window.DVExport && tlFiles[index]) selectTimelineFile(tlFiles[index], index, e.shiftKey);
+                return;
+            case 'Enter':
+                e.preventDefault();
+                card.click();
+                return;
+            default:
+                return;
+        }
+        e.preventDefault();
+        focusTimelineCard(next);
+    }
+
+    // Clicking a card (or Tab onto it) makes it the card the arrows go on from
+    document.addEventListener('focusin', (e) => {
+        const card = e.target.closest && e.target.closest('.tl-photo-card');
+        if (!card || !tlContentEl || !tlContentEl.contains(card)) return;
+        const old = tlContentEl.querySelector('.tl-photo-card[tabindex="0"]');
+        if (old && old !== card) old.tabIndex = -1;
+        card.tabIndex = 0;
+        tlFocusIndex = Number(card.getAttribute('data-index'));
+    });
+
+    // ── Scroll Handler ────────────────────────────────────
+    function onTimelineScroll() {
+        if (!tlScrollTicking) {
+            window.requestAnimationFrame(() => {
+                renderVisibleRows();
+                updateSliderFromScroll();
+                updateCurrentDateLabel();
+                tlScrollTicking = false;
+            });
+            tlScrollTicking = true;
+        }
     }
 
     function updateCurrentDateLabel() {
@@ -607,10 +1187,14 @@
         const label = document.getElementById('timeline-current-date');
         if (!label) return;
 
-        // Find the header row closest to current scroll position
-        for (let i = tlLayoutRows.length - 1; i >= 0; i--) {
-            if (tlLayoutRows[i].type === 'header' && tlLayoutRows[i].top <= scrollTop + 60) {
-                label.textContent = tlLayoutRows[i].label;
+        // Find the header row closest to current scroll position using the rendered range
+        let searchStart = Math.min(tlRenderedRange.end >= 0 ? tlRenderedRange.end : tlLayoutRows.length - 1, tlLayoutRows.length - 1);
+        for (let i = searchStart; i >= 0; i--) {
+            if (tlLayoutRows[i] && tlLayoutRows[i].type === 'header' && tlLayoutRows[i].top <= scrollTop + 60) {
+                if (label.textContent !== tlLayoutRows[i].label) {
+                    // De maand rolt: omhoog als je verder scrolt, omlaag als je teruggaat
+                    MediaMotion.timelineLabel(label, tlLayoutRows[i].label, scrollTop);
+                }
                 return;
             }
         }
@@ -721,6 +1305,12 @@
     window.jumpToYear = function (year) {
         const idx = tlYearBoundaries[year];
         if (idx === undefined) return;
+        if (idx >= tlFiles.length) {
+            // Nog niet geladen: springen zodra die pagina er is
+            tlPendingYear = year;
+            showToast('Tijdlijn', `${year} wordt nog geladen…`, 'info');
+            return;
+        }
 
         // Find the layout row that contains this file index
         for (let i = 0; i < tlLayoutRows.length; i++) {
@@ -730,7 +1320,7 @@
                 const group = tlGroups[lr.groupIdx];
                 if (group && group.startIdx <= idx && group.endIdx >= idx) {
                     if (tlScrollContainer) {
-                        tlScrollContainer.scrollTo({ top: lr.top, behavior: 'smooth' });
+                        tlScrollContainer.scrollTo({ top: lr.top, behavior: Motion.full() ? 'smooth' : 'auto' });
                     }
                     return;
                 }
@@ -742,7 +1332,7 @@
             if (tlGroups[i].startIdx <= idx && tlGroups[i].endIdx >= idx) {
                 const headerRow = tlLayoutRows.find(r => r.type === 'header' && r.groupIdx === i);
                 if (headerRow && tlScrollContainer) {
-                    tlScrollContainer.scrollTo({ top: headerRow.top, behavior: 'smooth' });
+                    tlScrollContainer.scrollTo({ top: headerRow.top, behavior: Motion.full() ? 'smooth' : 'auto' });
                 }
                 return;
             }
@@ -760,16 +1350,15 @@
 
         if (contentEl) {
             contentEl.style.height = 'auto';
-            contentEl.innerHTML = `
-                <div class="tl-empty-state">
-                    <div class="tl-empty-icon">📷</div>
-                    <h3>${message || 'Select folders to explore your photo timeline'}</h3>
-                    <p>Choose one or more folders from your vault to see all photos organized chronologically.</p>
-                    <button class="btn btn-primary" onclick="timelineOpenFolderPicker()">
-                        <i class="fas fa-folder-plus"></i> Select Folders
-                    </button>
-                </div>
-            `;
+            const failed = message && tlScanFailed;
+            contentEl.replaceChildren(emptyState({
+                icon: failed ? 'fa-exclamation-triangle' : 'fa-images',
+                tone: failed ? 'error' : null,
+                title: message || 'Kies mappen voor je tijdlijn',
+                text: failed ? 'Probeer het opnieuw, of kies andere mappen.'
+                    : 'Kies een of meer mappen uit het archief; alle foto\'s en video\'s komen dan op datum onder elkaar.',
+                action: { label: 'Mappen kiezen', onClick: timelineOpenFolderPicker, primary: true },
+            }));
         }
     }
 

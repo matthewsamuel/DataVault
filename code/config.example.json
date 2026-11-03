@@ -1,0 +1,8 @@
+{
+  "vault_root": "/Volumes/T7/vault",
+  "raw_folder": "/Volumes/T7/vault/RAW",
+  "duplicates_folder": "/Volumes/T7/vault/RAW_DUPLICATES",
+  "trash_folder": "/Volumes/T7/vault/TRASH",
+  "cache_folder": "/Volumes/T7/vault/.datavault_cache",
+  "browser": "Safari"
+}

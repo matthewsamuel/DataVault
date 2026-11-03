@@ -1,3 +1,5 @@
+> Let op: dit is een oudere uitgebreide beschrijving uit fase 1 (Engelstalig) en loopt achter op de huidige app. Begin bij de [README](README.md) en de [CHANGELOG](CHANGELOG.md).
+
 # DataVault Dashboard: A Comprehensive Personal Media Management System
 
 ## PART 1: EXECUTIVE SUMMARY
@@ -18,7 +20,7 @@
 
 ### Technology Stack
 
-- **Backend:** FastAPI, Python 3.8+, SQLite3
+- **Backend:** FastAPI, Python 3.12, SQLite3
 - **Frontend:** Vanilla JavaScript (ES6), CSS3 (Flexbox/Grid), no external frameworks
 - **Media Processing:** Pillow (PIL), ffmpeg, xxHash3
 - **AI Integration:** Ollama (local LLM)
@@ -41,8 +43,9 @@ backend/
 ├── database.py          # SQLite database abstraction layer
 ├── scanner.py           # File discovery, hashing, duplicate detection algorithms
 ├── file_ops.py          # Safe atomic file operations with metadata preservation
-├── thumbnail.py         # Thumbnail generation and caching
-├── progress.py          # Long-running operation progress tracking
+├── thumbnail.py         # Thumbnail generation and caching (atomic writes)
+├── jobs.py              # Background jobs: JobManager, progress, cancel/pause/resume, vault wait
+├── job_types.py         # dup_scan, hashing, thumbnails
 └── routes/
     ├── folders.py       # Folder tree enumeration
     ├── media.py         # Individual file operations and serving
@@ -85,89 +88,73 @@ frontend/
 **Solution Architecture:**
 
 1. **Hash-Based Content Addressing**
-   - Uses SHA-256 hashing with caching to identify duplicate files by content, not name
-   - Cache validity verified by file size and modification time (mtime)
-   - Two hash algorithms available:
-     - SHA-256: Cryptographic standard, used for main duplicate detection
-     - xxHash3-128: 5-10x faster than SHA-256, suitable for speed-critical operations
+   - Uses xxHash3-128 hashing with caching to find candidate duplicates by content, not name
+   - A cached hash is tagged with its algorithm and only trusted while inode, size, mtime_ns and
+     ctime_ns are unchanged (ctime cannot be set back, so an edit that restores the mtime is caught)
+   - A hash only *proposes* a duplicate: before anything moves, a full byte-for-byte compare decides
    
    ```python
-   def compute_hash(file_path: Path, db: Database) -> str:
-       """Compute SHA-256 with cache validation"""
-       stat = file_path.stat()
-       cached = db.get_cached_hash(file_path, stat.st_size, stat.st_mtime)
-       if cached:
-           return cached  # Cache hit
-       
-       # Full file scan with 8KB chunking for memory efficiency
-       sha256 = hashlib.sha256()
-       with open(file_path, 'rb') as f:
-           while chunk := f.read(8192):
-               sha256.update(chunk)
-       
-       hash_hex = sha256.hexdigest()
-       db.store_hash(file_path, size, mtime, hash_hex)  # Cache for future
-       return hash_hex
+   cache = db.get_cached_hashes(folder_path, HASH_ALGO)       # one query per scan
+   for path in paths:
+       cached = cache.get(path)
+       if cached and cached[0] == fingerprints[path]:            # (ino, size, mtime_ns, ctime_ns)
+           hashes[path] = cached[1]
+       else:
+           to_hash.append(path)
+   # 4 threads, at most 16 submitted at once; on a stop nothing new starts
+   for path, digest, error in bounded_map(hash_file_xxh3, to_hash, workers=4, stop=lambda: reporter.stopping):
+       ...
+       if len(batch) >= HASH_FLUSH_FILES or (batch and now - last_flush >= HASH_FLUSH_SECONDS):
+           flush()                                               # executemany, one transaction per batch
    ```
 
-2. **Vault-Wide Scanning with Progress Tracking**
-   - Builds hash index of entire vault (all files → hashes mapping)
-   - Identifies RAW folder files that have exact matches elsewhere
-   - Tracks progress with phase indicators and cancellation support
-   - Graceful error handling (continues on corrupt files)
+2. **Per-Folder Scanning with Progress Tracking**
+   - Scans one chosen folder (and its subfolders), not the whole vault
+   - Groups files by size first: files of different sizes can never be duplicates, so most files are never hashed
+   - Hashes the remaining candidates in parallel, then picks the copy that stays per group by an
+     explicit, deterministic rule (never by which thread finished first)
+   - Runs as a background job with progress, ETA, cancel, pause and resume; read errors are counted
+     and reported instead of silently skipped
    
    ```python
-   def find_duplicates(config: Config, db: Database) -> List[Dict]:
-       # Initialize progress tracking
-       progress = ScanProgress(status='scanning', phase='Scanning for duplicates...')
-       set_scan_progress(progress)
-       
-       # Build hash index: hash -> [file_paths]
-       vault_hashes: Dict[str, List[str]] = {}
-       
-       for file_path in all_vault_files:
-           if is_scan_cancelled():  # Support cancellation
-               return []
-           
-           file_hash = compute_hash(file_path, db)  # Uses cache
-           vault_hashes[file_hash].append(str(file_path))
-           update_scan_progress(...)
-       
-       # Find RAW files with duplicates elsewhere
-       duplicates = []
-       for raw_file in raw_folder_files:
-           file_hash = compute_hash(raw_file, db)
-           if len(vault_hashes[file_hash]) > 1:
-               duplicates.append(...)  # Has duplicates
-       
-       return duplicates
+   def keeper_sort_key(copy, rule="oldest", prefer_folder=None):
+       hidden = 1 if copy["hidden"] else 0          # a visible copy always wins
+       oldest = (copy["capture_ts"], copy["file_ts"])  # EXIF, then birthtime/mtime
+       if rule == "newest":
+           return (hidden, -copy["capture_ts"], -copy["file_ts"], copy["path_len"], copy["name_rank"])
+       if rule == "shortest":
+           return (hidden, copy["path_len"], *oldest, copy["name_rank"])
+       if rule == "folder":
+           return (hidden, 0 if _inside(copy["path"], prefer_folder) else 1, *oldest,
+                   copy["path_len"], copy["name_rank"])
+       return (hidden, *oldest, copy["path_len"], copy["name_rank"])  # alphabetical last
    ```
+   The frontend uses the same keys, so switching the rule re-evaluates every group instantly, and
+   the user can still pick another copy per group.
 
-3. **Safe Removal with Undo Support**
-   - Moves duplicates to separate folder preserving directory structure
-   - Records all operations in database for transactional rollback
-   - Invalidates hash cache for affected files
+3. **Verified Removal with Undo Support**
+   - Right before moving, the server re-checks that the file is a regular file outside
+     RAW_DUPLICATES/TRASH/cache and that the kept original still exists and is byte-for-byte identical
+   - Checks and move run under one app-wide lock, so a second request can never move "the other copy" away
+   - Moves the duplicate to RAW_DUPLICATES preserving its folder structure, never overwriting
+   - Records every move in the database for undo: one run per user action (sent in chunks under one
+     run_id), created together with its first moved file, ordered by an AUTOINCREMENT seq
    
    ```python
-   def safe_move_with_structure(src_path, src_root, dst_root) -> Tuple[Path, bool]:
-       """Move file preserving folder structure"""
-       rel_path = src_path.relative_to(src_root)
-       dst_path = dst_root / rel_path
-       
-       # Handle filename conflicts
-       if dst_path.exists():
-           dst_path = handle_conflict(dst_path, suffix_prefix="DUP")
-       
-       # Atomic move using os.replace() - preserves all metadata
-       os.replace(str(src_path), str(dst_path))
-       
-       return dst_path, was_conflict
+   with ARCHIVE_LOCK:  # shared by every move in the app
+       if not files_identical(src_path, keeper):  # full byte compare, no cached hash
+           raise HTTPException(409, "File is no longer identical to the kept copy; scan again")
+       dst_path, was_conflict = safe_move_with_structure(
+           real_src, base_folder, config.DUPLICATES_FOLDER.resolve(), conflict_suffix="DUP"
+       )  # -> move_no_overwrite(): a clash becomes name_DUP_001.ext
+       run_id = db.record_delete_operation(run_id, src_path, dst_path, folder)  # starts a run if needed
    ```
 
 **Technical Achievements:**
 - Concurrent file processing with ThreadPoolExecutor for multi-core efficiency
-- Deterministic hash index ordering for reproducible results
-- Cross-device move detection (prevents metadata loss on different volumes)
+- Size pre-filter: only files that share a size are hashed
+- The last copy of a photo can never be moved away, even if the folder changed since the scan
+- Cross-device move detection (refused instead of copy + delete)
 - Progress streaming to UI with 1-second update intervals
 
 ---
@@ -178,71 +165,33 @@ frontend/
 
 **Solution Architecture:**
 
-1. **Date-Based Metadata Extraction**
-   - Extracts creation/taken date from file metadata using platform-specific methods
-   - On macOS: Uses `st_birthtime` (file creation date, typically preserved from original)
-   - Fallback: Uses `st_mtime` (modification time) if creation date unavailable
-   - Handles gracefully for photos without EXIF data
-   
+1. **Capture Dates, One Rule Everywhere** (`backend/media_dates.py`)
+   - EXIF DateTimeOriginal (then DateTimeDigitized, DateTime) for photos, the QuickTime `mvhd`
+     creation time for mp4/mov/m4v/3gp (read from the box headers, no ffprobe call)
+   - Fallback: `st_birthtime`, then `st_mtime`
+   - The timeline, "on this day" and photos-by-date all use it, so one photo has one date everywhere
+   - Cached in SQLite (`media_dates`, migration 9) per path with the size and mtime_ns it was read
+     at; missing dates are read with 4 threads
+   - Since migration 11 the media index (`backend/media_index.py`) holds the date with the rest of a
+     file's metadata. The timeline answers from it (paged, `offset`/`limit`) whenever every folder of
+     the selection still has the mtime it was indexed with; otherwise it walks as above and asks for
+     an incremental index pass. On a 100k-file vault: 0.17 s for the first page from the index, versus
+     11.7 s (cold) / 0.8 s (warm date cache) for the walk.
+
    ```python
-   def _get_creation_date(file_path: Path) -> float:
-       """Get best available creation/taken date for media file"""
-       try:
-           s = file_path.stat()
-           # macOS: st_birthtime is the real creation date
-           birthtime = getattr(s, 'st_birthtime', None)
-           if birthtime and birthtime > 0:
-               return birthtime  # Preferred: file creation date
-           return s.st_mtime  # Fallback: modification time
-       except (OSError, PermissionError):
-           return 0.0
+   def capture_date(path: Path, st: os.stat_result) -> Tuple[float, str]:
+       ts, source = embedded_date(path)          # ('exif' | 'video') or (None, None)
+       if ts is not None:
+           return ts, source
+       return file_date(st)                      # ('birthtime' | 'mtime')
    ```
 
-2. **Efficient Recursive Scanning**
-   - Recursively scans selected folders for all photos and videos
-   - Excludes system folders (cache, duplicates, trash, dotfiles)
-   - Returns flat list sorted chronologically (oldest first)
-   - Lightweight metadata only (path, timestamp, size, type)
-   
-   ```python
-   def _scan_folder_recursive(folder_path: Path, photo_only: bool = False) -> List[Dict]:
-       """Recursively scan folder for media files with timestamps"""
-       results = []
-       extensions = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
-       
-       for root, dirs, files in os.walk(str(folder_path)):
-           # Skip excluded and hidden folders in-place (prevents recursion)
-           dirs[:] = [
-               d for d in dirs
-               if not d.startswith('.') and d not in EXCLUDED_FOLDER_NAMES
-           ]
-           dirs.sort()  # Deterministic order
-           
-           for filename in sorted(files):
-               if filename.startswith('.'):
-                   continue
-               
-               file_path = Path(root) / filename
-               if file_path.suffix.lower() not in extensions:
-                   continue
-               
-               try:
-                   s = file_path.stat()
-                   birthtime = getattr(s, 'st_birthtime', None)
-                   ts = birthtime if birthtime > 0 else s.st_mtime
-                   
-                   results.append({
-                       "path": str(file_path),
-                       "name": filename,
-                       "timestamp": ts,
-                       "size": s.st_size,
-                       "type": "video" if file_path.suffix.lower() in VIDEO_EXTENSIONS else "photo"
-                   })
-               except (OSError, PermissionError):
-                   continue
-       
-       return results
-   ```
+2. **Efficient Recursive Scanning, Compact and Cached**
+   - `walk_archive` over the selected folders (no cache, duplicates, trash, dotfiles or symlinks)
+   - One `folders` query parameter per folder (names may contain commas); a folder inside another
+     selected folder is dropped, so no photo appears twice; unknown folders come back in `skipped`
+   - The answer is one short row per file, `[timestamp, path relative to the vault, size, 'p'|'v',
+     date source]`, cached per selection until the mtime of any folder below it changes
 
 3. **Multi-Folder Selection**
    - Users select one or more folders via tree picker
@@ -308,7 +257,7 @@ frontend/
 - Date index enables O(1) year-based jumping on large timelines
 - Virtual scrolling handles 10,000+ photo timelines smoothly
 - Multi-folder selection for cross-directory temporal views
-- Platform-aware date extraction (macOS st_birthtime vs. fallback)
+- Capture dates from EXIF and QuickTime headers, cached per file, with birthtime/mtime fallback
 - Zero data loss: preserves original file organization
 
 ---
@@ -402,29 +351,27 @@ frontend/
        }
    ```
 
-3. **Undo History with File Restoration**
-   - Maintains in-memory history stack (max 20 operations)
-   - Records both trash location (for deleted files) and moved_to location (for relocations)
-   - Reverses operations by moving files back from trash or move destination
-   - Updates database to mark decisions as "not made"
+3. **Server-Side Undo History**
+   - Every decision row stores where the file went (`dest_path` in TRASH or the move target)
+     plus its inode and size, so undo can tell the moved file apart from a later same-named file
+   - The client only sends a decision id; all paths come from the database and are re-validated
+   - Undo never overwrites: 409 if the original place is taken, 410 if the moved file is gone or different
+   - `GET /api/keurer/history` returns the last 20 undoable decisions, so the stack survives a reload
    
    ```javascript
-   keurerHistory = [];
-   
    async function keurerUndo() {
-       if (keurerHistory.length === 0) return;
-       
-       const last = keurerHistory.pop();
-       const response = await fetch(`/api/keurer/undo`, {
-           method: 'POST',
-           headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ last_decision: last })
-       });
-       
-       if (response.ok) {
-           // File restored, show next unrated file
-           keurerLoadFiles();
-           showToast('Undo', `${last.file} restored`, 'success');
+       const entry = keurerHistory[keurerHistory.length - 1];
+       try {
+           const data = await fetchJSON(`${API_BASE}/api/keurer/undo`, {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ id: entry.id }),  // never a path
+           });
+           keurerApplyStats(data.stats);  // counters and streak straight from the server
+       } catch (e) {
+           // 404/409/410: this step cannot be undone (any more); show why
+           if ([404, 409, 410].includes(e.status)) keurerDropHistory(entry.id);
+           toastFetchError('Undo mislukt', e);  // no toast when the vault banner says it already
        }
    }
    ```
@@ -432,7 +379,8 @@ frontend/
 4. **API Endpoints**
    - `GET /api/keurer/files`: Returns unrated files from selected folder (excludes already-decided)
    - `POST /api/keurer/decide`: Records decision (keep/delete/move), performs file operation
-   - `POST /api/keurer/undo`: Reverses last decision, restores file
+   - `POST /api/keurer/undo`: Reverses one decision by id, restores the file without overwriting
+   - `GET /api/keurer/history`: The last 20 decisions that can still be undone
    - `GET /api/keurer/stats`: Calculates and returns streak information
 
 **Technical Achievements:**
@@ -593,7 +541,7 @@ frontend/
 
 **Technical Achievements:**
 - Lazy loading prevents memory bloat with large collections
-- Thumbnail caching with mtime validation reduces regeneration
+- Thumbnails decoded small (JPEG draft) then turned upright; cached under path, size, mtime and inode; placeholders never stored
 - Format-agnostic viewer supports RAW, HEIF, and legacy formats
 - Responsive layout using CSS Flexbox
 
@@ -619,32 +567,21 @@ frontend/
    )
    ```
 
-2. **Weighted Sampling Algorithm**
-   - Probability of selection proportional to rating
-   - Higher-rated files appear more frequently
-   - Statistical distribution: ELO-based weighting
+2. **Weighted Sampling Without Replacement (Efraimidis-Spirakis)**
+   - Every photo and video below the show's folder is a candidate (no "first 500 files" cut-off)
+   - Each file appears at most once; a higher rating makes it likely to come earlier
+   - Weight = rating^1.5; the walk only lists names, a file is stat'ed once it is picked
    
    ```python
-   def weighted_sample(files: List[Dict], k: int) -> List[Dict]:
-       """Sample files based on ELO rating weights"""
-       if not files:
-           return []
-       
-       k = min(k, len(files))
-       
-       # Calculate weights: (rating - min_rating) + 1 to avoid zero weights
-       ratings = [f.get('rating', 1000) for f in files]
-       min_rating = min(ratings)
-       
-       weights = [r - min_rating + 1 for r in ratings]
-       total_weight = sum(weights)
-       
-       # Random.choices: sampling with replacement, probability-weighted
-       probabilities = [w / total_weight for w in weights]
-       
-       sampled = random.choices(files, weights=probabilities, k=k)
-       return sampled
+   def weighted_order(paths, ratings, k=None):
+       """Weighted random sample WITHOUT replacement: key = random() ** (1 / weight),
+       the k largest keys win, in that order."""
+       k = len(paths) if k is None else min(k, len(paths))
+       keyed = ((random.random() ** (1.0 / show_weight(ratings.get(p, 1000))), p) for p in paths)
+       return [p for _, p in heapq.nlargest(k, keyed)]
    ```
+   - Folder show: the whole folder in weighted order (at most 2000 files); Feeling Lucky: 50
+     files drawn the same way from the whole library. Audio is never part of a show.
 
 3. **Slideshow Control**
    - Auto-advance with configurable interval (default 3s)
@@ -655,7 +592,7 @@ frontend/
 **Technical Achievements:**
 - ELO rating system incentivizes engagement with favorites
 - Probability-weighted random selection improves UX compared to uniform randomness
-- Efficient sampling using Python's random.choices()
+- No repeats and no missing photos: sampling without replacement in O(n log k) with heapq
 
 ---
 
@@ -668,7 +605,8 @@ frontend/
 1. **Local LLM Integration**
    - Connects to Ollama (local LLM server) for privacy
    - Supports streaming responses for real-time feedback
-   - Model-agnostic (supports phi3.5, llama2, mistral, etc.)
+   - Model chosen in the UI from the models Ollama has installed (default `qwen2.5:3b`), stored in `app_settings`
+   - Every failure (Ollama down, model missing, timeout, error halfway) ends the stream with a coded Dutch error
    
    ```python
    async def stream_ollama(ollama_messages: list, model: str) -> AsyncGenerator[str, None]:
@@ -713,6 +651,10 @@ frontend/
 
 3. **Action Triggering**
    - Chat can emit `<<ACTION>>` tags on last response line
+   - The frontend treats the model as untrusted: its text is rendered with `textContent`, and a
+     tag runs only if the action is on an allowlist with typed arguments. `open_file` only opens
+     a file the server lists in its folder; `open_folder` only a folder from the server's tree.
+     Folder and artist names enter the prompt as a sanitized JSON list, marked as data.
    - Actions include:
      - Open folder in viewer
      - Show photos from specific date
@@ -759,74 +701,65 @@ frontend/
 - macOS extended attributes
 - File permissions
 
-**Solution:** Use atomic `os.replace()` exclusively:
+**Second issue:** a plain `os.rename()`/`os.replace()` silently overwrites a file that already has the target name.
+
+**Solution:** every move in the app goes through one helper, `file_ops.move_no_overwrite()`:
 
 ```python
-def safe_rename(src: Path, dst: Path, allow_cross_device: bool = False) -> None:
+def move_no_overwrite(src: Path, dst: Path, rename_on_conflict: bool = True,
+                      suffix_prefix: str = "DUP") -> Path:
     """
-    MANDATORY: Safe file rename using os.replace() ONLY.
-    
-    Preserves ALL metadata:
-    - Modified time (mtime)
-    - Created time (ctime)
-    - EXIF/IPTC tags
-    - Extended attributes
+    MANDATORY: the only way the app moves an archive file.
+    One atomic, exclusive rename on the same volume: the file keeps its inode,
+    so mtime, birthtime, EXIF, extended attributes and Finder locks all stay.
+    Never replaces an existing file: a clash becomes name_DUP_001.ext.
     """
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        # Primary: os.replace() is atomic and metadata-preserving
-        os.replace(str(src), str(dst))
-    except OSError as e:
-        if e.errno == 18:  # EXDEV - Cross-device link
-            if not allow_cross_device:
-                raise CrossDeviceError(
-                    f"Cannot move across devices (different volumes): {src} → {dst}\n"
-                    f"Metadata cannot be preserved in cross-device moves."
-                )
-            else:
-                # Unsafe fallback only if explicitly enabled
-                import shutil
-                shutil.move(str(src), str(dst))
-        else:
-            raise FileOperationError(f"Failed to move file: {e}")
+    with ARCHIVE_LOCK:  # all moves in the app are serialised
+        ...  # refuse symlinks, folders, the app's own cache/database and cross-volume moves
+        candidate, counter = dst, 0
+        while True:
+            try:
+                # macOS: renamex_np(src, dst, RENAME_EXCL); elsewhere os.link + unlink
+                _exclusive_rename(src, candidate)  # EEXIST instead of overwriting
+                return candidate
+            except OSError as e:
+                if e.errno != errno.EEXIST or not rename_on_conflict:
+                    raise
+                counter += 1
+                candidate = conflict_name(dst, counter, suffix_prefix)
 ```
 
 **Key Benefits:**
-- Single atomic operation (no intermediate state)
+- Single atomic operation (no intermediate state, no half-moved files)
 - All metadata preserved on same volume
-- Prevents half-moved files if process crashes
-- Explicitly detects and rejects unsafe cross-device moves
+- Even two moves racing for the same name cannot clobber each other
+- Cross-device moves are refused with a clear error; there is no copy + delete fallback
+- Protected-folder checks (`is_inside`) compare folders by device + inode, so another spelling
+  such as `.DATAVAULT_CACHE` on a case-insensitive volume cannot slip past them
 
 ---
 
 #### 3.2 Hash Caching with Validity Tracking
 
-**Problem:** Computing SHA-256 for all files on every scan is slow. Naive caching ignores file changes.
+**Problem:** Hashing every file on every scan is slow. Naive caching (size + mtime) misses a file
+edited in place whose mtime was put back, and a cache without an algorithm tag mixes hash types.
 
-**Solution:** Cache with stat-based invalidation:
+**Solution:** Cache with identity-based invalidation, read and written once per scan:
 
 ```python
-def compute_hash(file_path: Path, db: Database) -> str:
-    """Compute hash with cache validation by size/mtime"""
-    stat = file_path.stat()
-    size = stat.st_size
-    mtime = stat.st_mtime
-    
-    # Try cache: valid only if size and mtime unchanged
-    cached_hash = db.get_cached_hash(file_path, size, mtime)
-    if cached_hash:
-        return cached_hash  # Cache hit: no re-hashing needed
-    
-    # Cache miss: compute hash with 8KB chunks (memory efficient)
-    sha256 = hashlib.sha256()
-    with open(file_path, 'rb') as f:
-        while chunk := f.read(8192):
-            sha256.update(chunk)
-    
-    hash_hex = sha256.hexdigest()
-    db.store_hash(file_path, size, mtime, hash_hex)
-    return hash_hex
+def _fingerprint(st: os.stat_result):
+    """What must be unchanged for a cached hash to be trusted."""
+    return (st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+cache = db.get_cached_hashes(folder_path, HASH_ALGO)  # {path: (fingerprint, hash)}, algo must match
+hit = cache.get(str(path))
+if hit and hit[0] == _fingerprint(st):
+    digest = hit[1]                       # cache hit: no re-hashing needed
+else:
+    digest = hash_file_xxh3(path)         # 1 MB chunks
+    new_entries.append((str(path), _fingerprint(st), digest))
+...
+db.store_hashes(new_entries, HASH_ALGO)   # executemany in one transaction
 ```
 
 **Performance Impact:**
@@ -889,108 +822,91 @@ const data = await _prefetchCache[`/api/spotify/stats?year=all`];
 
 ---
 
-#### 3.4 Progress Tracking for Long-Running Operations
+#### 3.4 Background Jobs for Long-Running Operations
 
-**Problem:** Large vault scans take minutes. Users get no feedback, fearing application hung.
+**Problem:** A duplicate scan of ~100k files took over a minute inside one HTTP request. The whole
+server stood still (the route was `async def`), progress and cancel could not answer, a reload lost
+everything, and an unplugged disk turned into a half result.
 
-**Solution:** Persistent progress state with async updates:
+**Solution:** A small job manager (`backend/jobs.py`) with a row per job in SQLite (migration 8):
 
 ```python
-# progress.py
-class ScanProgress:
-    def __init__(self, status='idle', phase=''):
-        self.status = status
-        self.phase = phase
-        self.total_files = 0
-        self.processed_files = 0
-        self.duplicates_found = 0
-        self.started_at = datetime.now()
-        self.completed_at = None
-    
-    def to_dict(self):
-        elapsed = (self.completed_at or datetime.now()) - self.started_at
-        return {
-            'status': self.status,
-            'phase': self.phase,
-            'total_files': self.total_files,
-            'processed_files': self.processed_files,
-            'duplicates_found': self.duplicates_found,
-            'progress_percent': round(100 * self.processed_files / max(1, self.total_files)),
-            'elapsed_seconds': elapsed.total_seconds()
-        }
-
-_scan_progress = None
-
-def set_scan_progress(progress: ScanProgress):
-    global _scan_progress
-    _scan_progress = progress
-
-def update_scan_progress(**kwargs):
-    global _scan_progress
-    if _scan_progress:
-        for key, value in kwargs.items():
-            setattr(_scan_progress, key, value)
+# queued -> running -> done | failed | cancelled
+#                   -> paused             (user; resume continues it)
+#                   -> waiting_for_vault  (disk unplugged; continues by itself)
+#                   -> interrupted        (server stopped; resume continues it)
+def run(ctx: JobContext):                       # a job type's handler
+    ctx.progress(0, None, "Bestanden zoeken...")  # memory only; written at most once per second
+    ...
+    ctx.check()                                 # raises JobStopped on cancel, pause or shutdown
+    ctx.save_checkpoint({...})                  # what a resumed run may skip
+    return result                               # stored zlib-compressed in job_results
 ```
 
-Frontend polls `/api/raw_duplicates/progress`:
+- One worker thread per running job and at most one job of a type at a time (others are queued);
+  starting the same job twice returns the first.
+- If the handler fails, or finishes, while `VAULT_ROOT` is gone, the job goes to `waiting_for_vault`,
+  polls, and runs again from its checkpoint (hashes and thumbnails already made are skipped through
+  their caches). A job is only `done` when it finished with the vault present, and a run that hit a
+  read error while the vault was gone is redone even when the disk is back by its end. A final state
+  that could not be saved (the database is on the vault disk) is written once the disk is back.
+- The thumbnail and hashing jobs keep what earlier runs did in their checkpoint (`made_before`,
+  `hashed_before`), so the final summary covers every run of the job. Each job carries `has_result`,
+  so the dock only offers a stored result that has not been pruned.
+- On start-up, jobs left `running`, `queued` or `waiting_for_vault` become `interrupted`; on shutdown
+  the worker stops at its next check and the job is left `interrupted`, ready to resume.
+- The frontend (`jobs.js`) shows a job dock with progress bar, ETA (from a 30 s window of progress
+  samples), and pause/resume/cancel; the duplicates screen follows its scan job and reloads the stored
+  result, leaving out copies moved since.
 
-```javascript
-async function pollProgress() {
-    const response = await fetch('/api/raw_duplicates/progress');
-    const data = await response.json();
-    
-    updateProgressBar(data.progress_percent);
-    updatePhaseText(data.phase);
-    updateFileCount(`${data.processed_files}/${data.total_files}`);
-    
-    if (data.status !== 'scanning') {
-        clearInterval(progressPollInterval);
-    }
-}
+Measured on a synthetic vault of 106,659 tiny files (94,489 media files in RAW), internal SSD:
 
-progressPollInterval = setInterval(pollProgress, 1000);
-```
+| | Phase 1 | Before this step | Now |
+|---|---|---|---|
+| RAW scan, cold | 73.6 s | 6.2 s | 6.2 s |
+| RAW scan, warm (cached hashes) | 13.8 s | 1.6 s | 1.4 s |
+| `/api/health` during the scan | blocked for the whole scan | max 0.115 s | max 0.026 s |
+| Peak RSS during the cold scan | 892 MB (958 MB after) | 497 MB | 174 MB |
 
 ---
 
 #### 3.5 Path Validation & Security Hardening
 
-**Security Risk:** Path traversal attacks (../../etc/passwd) could access files outside vault.
+**Security Risks:** Path traversal (`../../etc/passwd`, a symlink out of the vault), other
+websites driving the local API (wildcard CORS, DNS rebinding, "simple" cross-site POSTs) and the
+app serving or moving its own database.
 
-**Solution:** Explicit path validation before all file operations:
+**Solution:** one path check for every route, and a locked-down HTTP layer.
 
 ```python
-def validate_path_in_vault(path: Path, vault_root: Path) -> bool:
+def resolve_in_vault(user_path, config, allow_internal=False, folder=False) -> Path:
     """
-    Security-critical: Ensure path is inside vault.
-    Prevents directory traversal attacks.
+    Relative input is taken from the vault root; the on-disk (or NFC/NFD) spelling is used;
+    after resolving '..' and symlinks both the entry and its target must be inside VAULT_ROOT;
+    the cache, database and app folder are refused. 403 for anything outside, whether it
+    exists or not (no existence oracle).
     """
-    try:
-        abs_path = path.resolve()  # Resolve symlinks, .. components
-        abs_vault = vault_root.resolve()
-        
-        # is_relative_to: True only if path is under vault_root
-        return abs_path.is_relative_to(abs_vault)
-    except (ValueError, RuntimeError):
-        return False
 
-# Usage: before every file access
 @router.get("/api/file")
-def get_file(file_path: str):
-    path = Path(file_path)
-    
-    if not validate_path_in_vault(path, config.VAULT_ROOT):
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Now safe to access file
-    return FileResponse(path)
+def get_file_endpoint(path: str = Query(...)):
+    file_path = resolve_in_vault(path, config)   # 403 before any existence check
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path=str(file_path))
 ```
 
+HTTP layer: no CORS middleware (the frontend is same-origin), `TrustedHostMiddleware` for
+127.0.0.1/localhost, and a per-process token (`GET /api/session`) that a pure ASGI middleware
+requires in `X-DataVault-Token` on every non-GET/HEAD/OPTIONS request. `frontend/api.js` wraps
+`fetch` to add it and refreshes it once after a server restart.
+
 **Key Security Properties:**
-- Resolves all symlinks before comparison
-- Handles both absolute and relative path inputs
-- Raises exceptions explicitly rather than returning false
-- No string-based path manipulation (uses pathlib)
+- Symlinks are resolved for the containment check, but a file's own name is kept, so a route
+  can still refuse to move a symlink instead of acting on its target
+- Handles both absolute and relative path inputs, and NFC/NFD-encoded names
+- Same 403 for outside paths that exist and that do not
+- Walks over the archive share one exclusion rule (`walk_archive`), by inode instead of by name
+- Cross-site requests cannot change anything: no token, no write
 
 ---
 
@@ -1006,18 +922,26 @@ CREATE TABLE keurer_decisions (
     folder TEXT NOT NULL,
     decision TEXT NOT NULL,  -- 'keep', 'delete', or 'move'
     decided_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(path, folder),
-    INDEX idx_keurer_folder ON keurer_decisions(folder),
-    INDEX idx_keurer_date ON keurer_decisions(decided_at)
+    dest_path TEXT,          -- where delete/move put the file (migration 2)
+    dest_ino INTEGER,        -- inode + size of that file, checked before undo (migration 3)
+    dest_size INTEGER
 )
+-- Only 'keep' is unique per path; delete/move rows always stay so their undo is never lost
+CREATE UNIQUE INDEX idx_keurer_keep_path_folder ON keurer_decisions(path, folder) WHERE decision = 'keep';
+CREATE INDEX idx_keurer_folder ON keurer_decisions(folder);
+CREATE INDEX idx_keurer_date ON keurer_decisions(decided_at);
 
--- Hash cache: avoid re-hashing unchanged files
+-- Hash cache: avoid re-hashing unchanged files (migration 6)
 CREATE TABLE file_hashes (
     path TEXT PRIMARY KEY,
     size INTEGER NOT NULL,
     mtime REAL NOT NULL,
-    sha256 TEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    hash TEXT NOT NULL,      -- was 'sha256'; holds the algo's hex digest
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    algo TEXT,               -- 'xxh3_128'; NULL = unknown, never used
+    ino INTEGER,             -- the hash is only trusted while ino, size,
+    mtime_ns INTEGER,        -- mtime_ns and ctime_ns are unchanged
+    ctime_ns INTEGER
 )
 
 -- File ratings: ELO-style scores for weighted sampling
@@ -1028,11 +952,14 @@ CREATE TABLE file_ratings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 
--- Undo tracking: record of file moves for reversals
+-- Undo tracking: one run per duplicates cleanup action (migration 7)
 CREATE TABLE delete_runs (
-    run_id TEXT PRIMARY KEY,
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,  -- order of runs; never clock time
+    run_id TEXT NOT NULL UNIQUE,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    total_files INTEGER DEFAULT 0
+    total_files INTEGER DEFAULT 0,
+    created_at REAL,                        -- UTC epoch seconds, for display
+    folder TEXT                             -- the folder that was cleaned up
 )
 
 CREATE TABLE delete_operations (
@@ -1043,6 +970,38 @@ CREATE TABLE delete_operations (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (run_id) REFERENCES delete_runs(run_id)
 )
+CREATE INDEX idx_delops_run ON delete_operations(run_id);
+
+-- Background jobs (migration 8) and their stored results
+CREATE TABLE jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL, params TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL,
+    processed INTEGER NOT NULL DEFAULT 0, total INTEGER, message TEXT, error TEXT,
+    checkpoint TEXT, summary TEXT,
+    created_at REAL NOT NULL, updated_at REAL NOT NULL, started_at REAL, finished_at REAL
+)
+CREATE INDEX idx_jobs_status ON jobs(status);
+CREATE INDEX idx_jobs_type ON jobs(type, id);
+CREATE TABLE job_results (job_id INTEGER PRIMARY KEY REFERENCES jobs(id), encoding TEXT NOT NULL, data BLOB NOT NULL)
+
+-- Capture dates (migration 9) and UI settings such as the chat model (migration 10)
+CREATE TABLE media_dates (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
+                          taken REAL NOT NULL, source TEXT NOT NULL, updated_at REAL NOT NULL)
+CREATE INDEX idx_media_dates_taken ON media_dates(taken)
+CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at REAL NOT NULL)
+
+-- Media index (migration 11): one row per photo/video/audio file; id survives moves
+CREATE TABLE media (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, folder TEXT NOT NULL,
+                    name TEXT NOT NULL, kind TEXT NOT NULL, ext TEXT NOT NULL, size INTEGER NOT NULL,
+                    mtime_ns INTEGER NOT NULL, inode INTEGER, birthtime REAL, taken REAL, taken_source TEXT,
+                    width INTEGER, height INTEGER, orientation INTEGER, camera_make TEXT, camera_model TEXT,
+                    lens TEXT, lat REAL, lon REAL, altitude REAL, duration REAL, meta_status TEXT,
+                    added_at REAL NOT NULL, indexed_at REAL NOT NULL, seen_at REAL NOT NULL,
+                    missing INTEGER NOT NULL DEFAULT 0)
+-- idx_media_taken, idx_media_folder, idx_media_latlon (partial), idx_media_camera, idx_media_inode,
+-- idx_media_missing (partial)
+CREATE TABLE media_folders (path TEXT PRIMARY KEY, parent TEXT, mtime_ns INTEGER NOT NULL,
+                            last_scanned REAL NOT NULL)
 
 -- Folder visibility settings
 CREATE TABLE show_settings (
@@ -1054,10 +1013,11 @@ CREATE TABLE show_settings (
 
 #### 4.2 Key Design Decisions
 
-1. **UNIQUE(path, folder) in keurer_decisions**
+1. **Unique 'keep' per (path, folder) in keurer_decisions**
    - Allows same file to be rated differently per source folder
-   - Enforces single decision per (file, folder) pair
-   - Prevents duplicate decision records
+   - A new judgement replaces an earlier 'keep' (nothing to undo there)
+   - Delete and move rows are never replaced, so a file's undo record cannot be lost
+   - Schema changes are numbered migrations (`backend/migrations.py`) with an automatic backup first
 
 2. **Indexed Lookups**
    - `idx_keurer_folder`: Fast filtering by source folder (keurer UI)
@@ -1239,8 +1199,8 @@ html[data-theme="light"] {
    
    with ThreadPoolExecutor(max_workers=4) as executor:
        futures = [
-           executor.submit(compute_hash, file_path, db)
-           for file_path in all_files
+           executor.submit(hash_file_xxh3, file_path)
+           for file_path in to_hash  # files that share a size and have no valid cached hash
        ]
        
        for i, future in enumerate(as_completed(futures)):
@@ -1253,14 +1213,11 @@ html[data-theme="light"] {
 
 3. **XXHash for Speed-Critical Paths**
    ```python
-   # Standard duplicate scan: SHA-256 (safe, canonical)
-   def compute_hash(file_path: Path, db: Database) -> str:
-       return hashlib.sha256(...)
-   
-   # Speed-critical (show metadata scan): xxHash3 (10x faster)
-   def compute_hash_xxh3(file_path: Path, db: Database) -> str:
-       hasher = xxhash.xxh3_128()  # 5-10x faster than SHA-256
-       while chunk := f.read(65536):  # 64KB chunks optimal for SSDs
+   # Duplicate scan: xxHash3-128 only proposes candidates (10x faster than SHA-256);
+   # a byte-for-byte compare (files_identical) decides before anything is moved
+   def hash_file_xxh3(file_path: Path) -> str:
+       hasher = xxhash.xxh3_128()
+       while chunk := f.read(1024 * 1024):  # 1 MB chunks
            hasher.update(chunk)
        return hasher.hexdigest()
    ```
@@ -1287,45 +1244,46 @@ async def startup():
 #### 7.2 Operation Atomicity
 
 ```python
-# Scan can be cancelled mid-operation
-@router.post("/api/raw_duplicates/cancel")
-async def cancel_scan():
-    from backend.progress import cancel_scan
-    cancel_scan()
-    return {"status": "cancelled"}
+# A job can be cancelled or paused mid-operation: POST /api/jobs/{id}/cancel | /pause
+# The scanner checks between steps; hashes already computed are flushed to the cache first
+for root, dirnames, filenames in walk_archive(folder_path, config, onerror=record_error):
+    reporter.check()          # raises JobStopped('cancel' | 'pause' | 'shutdown')
 
-# Scanner checks cancellation flag
-def find_duplicates(config, db):
-    for file in vault_files:
-        if is_scan_cancelled():
-            return []  # Clean exit
+# SQLite: one connection per thread, WAL; every call commits or rolls back as a whole
+with self._connect() as conn:
+    conn.executemany("INSERT OR REPLACE INTO file_hashes ...", batch)
 ```
 
 #### 7.3 File Operation Error Handling
 
 ```python
-for dup in duplicates:
-    src_path = Path(dup["raw_path"])
-    
-    if not src_path.exists():
+# _restore_ops (undo of one run, used by /api/duplicates/undo and undo_last): report every problem, lose no record
+for op in operations:
+    if not _paths_allowed(op):  # paths from the DB are re-validated
+        errors.append(f"Refused to restore {op['dst_path']}")
         skipped += 1
-        continue  # File already deleted
+        continue
+    if not _still_there(op):  # file no longer in RAW_DUPLICATES
+        skipped += 1
+        continue
     
     try:
-        dst_path = safe_move_with_structure(src_path, ...)
-        db.record_delete_operation(run_id, src_path, dst_path)
-        moved += 1
-    
+        restored_path = move_no_overwrite(dst_path, src_path, suffix_prefix="RESTORED")
     except CrossDeviceError as e:
-        errors.append(f"Cannot move across volumes: {src_path}")
+        errors.append(f"CRITICAL: Cross-device move blocked for {dst_path}: {e}")
         skipped += 1
-    
+        continue
     except FileOperationError as e:
-        errors.append(f"Move failed: {str(e)}")
+        errors.append(f"Failed to restore {dst_path}: {e}")  # stays recorded for a retry
         skipped += 1
+        continue
+    
+    db.delete_delete_operation(op["id"])  # forget only what was actually restored
+    restored += 1
 
 return {
-    "moved": moved,
+    "run_id": run_id,
+    "restored": restored,
     "skipped": skipped,
     "errors": errors  # Report all issues to user
 }
@@ -1336,12 +1294,12 @@ return {
 ### 8. KEY ENGINEERING ACHIEVEMENTS
 
 1. **Safe File Metadata Preservation**
-   - Atomic operations using os.replace(), not copy-delete
+   - Atomic, exclusive renames (`renamex_np(RENAME_EXCL)`), never copy-delete and never overwrite
    - Cross-device move detection and rejection
    - Maintains EXIF, timestamps, and extended attributes
 
 2. **Efficient Duplicate Detection**
-   - Content-addressed hashing with multi-algorithm support (SHA-256, xxHash3)
+   - Content-addressed xxHash3 hashing with size pre-filter; byte-for-byte compare before any move
    - Hash caching with stat-based invalidation (90%+ hit rates)
    - Concurrent scanning with progress tracking and cancellation
 
@@ -1386,7 +1344,7 @@ return {
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Backend** | FastAPI | RESTful API, routing, middleware |
-| **Backend** | Python 3.8+ | Core business logic |
+| **Backend** | Python 3.12 | Core business logic |
 | **Backend** | SQLite | Local data persistence (hashes, ratings, decisions) |
 | **Backend** | Pillow (PIL) | Image processing, thumbnail generation |
 | **Backend** | ffmpeg | Video frame extraction |
